@@ -394,8 +394,8 @@ func cmdDoctor(args []string, stdout io.Writer) error {
 	if firstErr != nil {
 		return fmt.Errorf("doctor 发现问题（首个：%w）；诊断码见 internal/diag", firstErr)
 	}
-	fmt.Fprintln(stdout, "doctor: 自检通过（M2 范围：Gateway 鉴权/SSR/SSE 与 Core 监督已接通）。")
-	fmt.Fprintln(stdout, "       UI 基线（渲染回归、可访问性）仍待 M4/后续里程碑，不在本次自检内。")
+	fmt.Fprintln(stdout, "doctor: 自检通过（M5 发布口径：Core RPC、Gateway 鉴权/SSR/SSE、插件平台、技能与审计已接通）。")
+	fmt.Fprintln(stdout, "       渲染回归与可访问性基线不在本次自检内（见 docs/release-m5.md 已知限制）。")
 	return nil
 }
 
