@@ -8,44 +8,7 @@
 // 因此本包不 import adapters/plugins/gateway；M1 也保持这条依赖方向。
 package engine
 
-import (
-	"context"
-	"errors"
-)
-
-// ErrNotImplemented 表示该契约在 M0 只冻结形状，实现属于后续里程碑。
-//
-// 它刻意是可判定的哨兵错误：桩启动路径要能把它和真实故障分开。
-var ErrNotImplemented = errors.New("engine: 该实现在 M0 契约冻结阶段尚未落地")
-
-// TurnSpec 是一次轮次的输入装配快照（M1-A 使用；此处冻结字段口径）。
-//
-// 终止条件相关字段全部来自产品声明的 policies（设计 8.6），引擎不内置默认业务上限：
-// 步数与工具调用次数永远不是上限（INV-12），墙钟与 token 上限默认 0 表示不限制。
-type TurnSpec struct {
-	ThreadID       string
-	RunID          string
-	IdempotencyKey string
-	// TurnTimeoutMS / MaxTurnTokens 为 0 表示不限制（02 §5.3 第 5 步）。
-	TurnTimeoutMS   int
-	MaxTurnTokens   int
-	LoopRepeatLimit int
-	LoopAbortLimit  int
-	ParallelTools   int
-}
-
-// RunTurn 是全系统唯一的多轮循环入口（INV-1）。
-//
-// 子智能体（v1.5）复用它，只换 ToolCatalog / PromptSource / SessionStore 与策略插件集合，
-// 不允许出现第二份循环。状态机与终止条件见设计 5.3：
-//
-//	idle → preparing → streaming → tools → finishing → finished
-//
-// 恰好一个终态事件 TurnFinished（INV-9），取值 completed|cancelled|error|interrupted|budget_exceeded。
-func RunTurn(ctx context.Context, spec TurnSpec) error {
-	// M1-A 实现：线程互斥 → 追加用户 entry → 目录快照 → 模型循环 → 工具顺序执行 → 恰好一个终态。
-	return ErrNotImplemented
-}
+import ()
 
 // Site 描述一个钩子点位的调用方。
 type Site struct {

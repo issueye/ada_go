@@ -16,8 +16,11 @@ const (
 type PartType string
 
 const (
-	PartText  PartType = "text"  // {"type":"text","text":"..."}。
-	PartImage PartType = "image" // {"type":"image","mime":"...","data":"<base64>"}。
+	PartText PartType = "text" // {"type":"text","text":"..."}。
+	// PartThinking 是助手消息的思考段（03 §5.5 统一增量里的 thinking.*）。
+	// 08 §8.4 的 text|image 只约束「工具 content」，助手消息可以多一个思考段。
+	PartThinking PartType = "thinking"
+	PartImage    PartType = "image" // {"type":"image","mime":"...","data":"<base64>"}。
 )
 
 // Part 是消息的一个内容部件（08 §8.4）。
@@ -113,4 +116,13 @@ type Usage struct {
 	CacheTokens int64 `json:"cacheTokens"`
 	// CostMicros 是估算成本，微单位（04 usage.cost_micros）；无定价时为 0，只显示 token。
 	CostMicros int64 `json:"costMicros"`
+}
+
+// SkillMeta 是技能元数据（06 §6.7：装配期只注入 name/description，正文由 read_skill 按需读取）。
+type SkillMeta struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Origin 区分插件自带与工作区 .adago/skills（工作区优先，冲突记警告不静默覆盖）。
+	Origin   string `json:"origin"`
+	PluginID string `json:"pluginId,omitempty"`
 }

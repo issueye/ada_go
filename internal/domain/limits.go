@@ -67,4 +67,12 @@ const (
 	LoopRepeatLimit = 3
 	// LoopAbortLimit 是连续重复调用按 error 结束轮次的阈值（02 §5.3：连续 5 次）。
 	LoopAbortLimit = 5
+
+	// ContextReserveTokens 是压缩预留：估算 token 超过 contextWindow-reserve 即触发压缩
+	// （04 §5.7：默认 16k）。
+	ContextReserveTokens = 16384
+	// CompactKeepTokens 是压缩后保留的最近 token 量（04 §5.7：约 20k）。
+	CompactKeepTokens = 20000
+	// ContextHighWaterRatio 是轮次结束后「接近上限即后台预压缩」的比例（04 §5.7：80%）。
+	ContextHighWaterRatio = 80
 )

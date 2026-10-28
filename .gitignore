@@ -1,6 +1,8 @@
 # 构建产物与本地数据
 /bin/
 /out/
+*.exe
+!vendor/**/*.exe
 /dist-cache/
 *.test
 *.log

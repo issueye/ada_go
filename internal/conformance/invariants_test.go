@@ -49,17 +49,23 @@ func TestInvariants(t *testing.T) {
 	// ---------------------------------------------------------------
 	t.Run("INV-1_只有一份多轮循环", func(t *testing.T) {
 		t.Parallel()
-		found := findFuncDecls(t, "RunTurn")
+		found := findFuncDecls(t, "Run")
 		if len(found) != 1 {
-			t.Fatalf("RunTurn 声明必须全仓唯一（INV-1），实得 %d 处: %v", len(found), found)
+			t.Fatalf("多轮循环入口 Run 必须全仓唯一（INV-1），实得 %d 处: %v", len(found), found)
 		}
-		if !strings.HasSuffix(filepath.ToSlash(found[0]), "internal/engine/engine.go") {
-			t.Errorf("唯一的 RunTurn 不在 internal/engine 里: %s", found[0])
+		entry := filepath.ToSlash(found[0])
+		if !strings.Contains(entry, "internal/engine/") {
+			t.Errorf("唯一的多轮循环入口不在 internal/engine 里: %s", found[0])
 		}
-		// 引擎的 M0 状态：契约已冻结、实现是哨兵错误（不是 panic、不是静默成功）。
-		err := engine.RunTurn(t.Context(), engine.TurnSpec{ThreadID: "th_x_1", RunID: "run-1"})
-		if !errors.Is(err, engine.ErrNotImplemented) {
-			t.Errorf("M0 的 RunTurn 必须返回 ErrNotImplemented，实得 %v", err)
+		for _, forbidden := range []string{"internal/adapters", "internal/gateway", "internal/plugins", "cmd/"} {
+			if strings.Contains(entry, forbidden) {
+				t.Errorf("循环入口落在了 forbidden 目录 %s: %s", forbidden, entry)
+			}
+		}
+		// M1-A 起 Run 是真实现：端口不齐时必须失败关闭（INV-2 不允许 nil 端口），
+		// 而不是 panic，也不是静默成功。
+		if got := engine.Run(t.Context(), engine.Deps{}, engine.TurnSpec{ThreadID: "th_x_1", RunID: "run-1"}); got != domain.TerminalError {
+			t.Errorf("端口缺失时 Run 必须返回 error 终态，实得 %q", got)
 		}
 		// 不存在第二份「循环入口」的同义命名。
 		for _, alt := range []string{"RunLoop", "RunAgentLoop", "RunSubTurn", "RunSubagentTurn", "StepLoop"} {

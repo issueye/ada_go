@@ -34,6 +34,11 @@ func checkDependencyDirection(root string) error {
 	}{
 		{"internal/domain", nil, "domain 不 import 任何其它内部包（设计 13）"},
 		{"internal/ports", []string{"internal/domain"}, "ports 只依赖 domain 与标准库（设计 3.3）"},
+		// M1-A 起这些包有真实实现，依赖方向必须继续向下（设计 3.3 的图）。
+		{"internal/toolkit", []string{"internal/domain", "internal/ports"}, "toolkit 实现 ports.ToolCatalog 等端口，不依赖 engine/gateway（设计 3.3）"},
+		{"internal/engine", []string{"internal/domain", "internal/ports"}, "engine 只依赖 ports 与 domain：不知道 moejs、不知道 SQLite、不知道 Gin（设计 3.3）"},
+		{"internal/diag", nil, "diag 是词汇表叶子，不依赖内部层"},
+		{"internal/version", []string{"internal/domain"}, "version 只依赖 domain"},
 	}
 	for _, r := range rules {
 		files, err := goFiles(filepath.Join(root, filepath.FromSlash(r.pkg)))

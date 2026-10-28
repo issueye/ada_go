@@ -53,6 +53,24 @@ M1 期间若领域层不再需要独立常量，可让 `domain` 改为引用 `di
 - 禁止：`internal/**`、`app/**`、`cmd/**` 的非测试 Go 源码（含注释）。
 - 由 `adag verify boundary` 扫描阻断；同一检查还禁止 `internal/` import `official/`、禁止任何 `func RegisterTool|RegisterProvider|RegisterAction|RegisterSlot|...` 形态的平行 Go 注册入口。
 
+### D-7 moejs 上游缺口的实测判定（M1-D 尖刺，`go run ./tools/moejspike`）
+
+对 `v0.1.0-alpha.11` 逐条实测（探针在 `tools/moejspike/`，可随时重跑）。结论：**三项 M1 阻断项里没有一项需要 fork 上游**，但有两项需要 ada-go 自己实现模块。
+
+| 缺口 | 实测结论 | 处置 | 归属 |
+|---|---|---|---|
+| E-1 模块白名单 | 未知 `node:*` 静态与动态 import 都在链接期失败；`fs` 与 `node:fs` 同实例；但**裸名 `events` 也能解析**，且模块是「装完即全量」，无法只装一半 | 白名单落在**宿主 resolver**：ada-go 自己实现 `SetModuleLoader`，裸内置名一律归一到 `node:*` 后再按能力判定；不依赖上游开关 | M1-C/D |
+| E-4 fs 错误码 | **已符合**：`code`/`errno`（负 libuv 值）/`syscall`/`path` 齐全，`err.code === "ENOENT"` 可直接分支；symlink 越界按真实落点 EACCES（Linux 走 `openat2 RESOLVE_BENEATH`），宿主绝对路径不进脚本 | 上游无需改；文档 [12 §6.11.1](12-node-compat.md#6111-现状与待补) 里「E-4 待补」的措辞要更正为「已具备」 | M1-D 文档 |
+| E-4 只读静态裁剪 | **不支持**：只读时写成员仍存在（`writable: true`），调用才抛 `EROFS`（不是 `ERR_ACCESS_DENIED`）；宿主可以用 import 钩子替换成员做到「访问即抛」，但 `node:fs` 模块体一次性读全部成员，任一成员抛错就让整个模块求值失败 | 退一步：宿主裁剪层实现「**调用即抛 `ERR_ACCESS_DENIED`**」，并在 [12 §6.12.1](12-node-compat.md#6121-安装) 把「访问即抛」改成「调用即抛 + 原因」；同时向上游提 issue（要求 binding 成员惰性化） | M1-C/D + 上游 issue |
+| E-5 child_process | 上游**根本没有** `node:child_process`：`spawn`/`exec` 不存在，没有绕过面；宿主用 1 个虚拟模块 + 2 个 NativeFunc 就能装出 `execFile/execFileSync`，实测无 shell（`shell:true` → `ERR_ACCESS_DENIED`）、程序 allowlist、cwd 越界拒绝、`maxBuffer` 夹逼、超时与取消都能杀进程树 | ada-go 自建该模块（**不 fork、不推上游**），矩阵里标 `ada-go 实现` | M1-C/D |
+| E-6 单次读写/目录上限 | 无：20MB 一次读进 64MB 堆成功；`readdir` 10500 条全量返回。上游的拒绝阈值实际等于 Runtime `MemoryLimit`，与堆耦合 | 宿主包装层夹 16MB / 10k，并显式返回 `ERR_FS_FILE_TOO_LARGE`；不改 `MemoryLimit` 语义 | M1-C/D |
+| E-2 定时器 | `unref`/`ref` 与毫秒截断**已符合**；缺每 Runtime 定时器数量上限 | 宿主计数夹 256，超出抛 `ERR_TIMER_LIMIT` | M1-C |
+| E-3 `createRequire` | 无 `node:module`，CJS 的 `require("node:path")` 不可用 | esbuild 侧 CJS 垫片 + 宿主提供受限 `require`；未覆盖前清单能力矩阵里标「不可用」 | M1-D |
+| E-8 `timers/promises` | 模块不存在，且 `signal` 取消静默失效 | v1 **不安装**该模块（矩阵已如此），文档保持「不可用」 | 无 |
+| E-7 Buffer 计入 | 字符串与 Buffer 都计入内存上限（符合）；`TypedArray` 有偏差；正则回溯不可中断、宿主回调 panic 不上抛、`AsyncWork` 关闭竞态各有偏差 | 宿主侧：正则超时用调用预算兜住；panic 由宿主 recover 转 rejected；关闭竞态在宿主状态机里串行化 | M1-C |
+
+对 M1-C 的直接口径：能力位 → 安装动作全部落在 ada-go；`node:fs` 用上游实现 + 宿主包装（上限、错误码归一、成员裁剪）；`node:child_process` 由 ada-go 提供；`http/https/net/tls/dgram/dns/worker_threads/vm/inspector/repl/wasi/async_hooks/perf_hooks/timers-promises/node:module` 一律不装。E-1/E-4/E-5 都不再是「等上游」的阻断项。
+
 ## 2. M0 期间发现的契约缺口
 
 处理原则：**先改设计文档，再改 `spec/`，最后改实现**；未处理前按 Schema/现状执行，不静默发明。
@@ -76,6 +94,11 @@ M1 期间若领域层不再需要独立常量，可让 `domain` 改为引用 `di
 | G-15 | 产品能力位（`capabilities.images`）在 12 端口里没有落点 | 引擎侧暂用 `Params.ImagesAllowed` 表达双门 | M1-E 前定：能力位由 coreapp 注入引擎配置 |
 | G-16 | `evt.interaction.requested` 与 `error` 点位的载荷形状文档未给全 | 事件按 Schema；钩子事件以 JSON 快照透传 | M3（15 钩子真实调用方）前补 |
 
+### D-6 引擎落地期的两项契约细化（M1-A）
+
+- **压缩 entry 的载荷形状**：[04 §5.7](04-sessions-storage.md#57-会话分支与压缩) 只在散文里提到 `first_kept_entry_id`，没给 JSON 形状。M1-A 钉定为：compaction entry 的 `payload` 就是 `CompactSummary` 对象（`goal/done/notDone/files/keyDecisions/risks/markdown/generatedAt`）外加 `firstKeptEntryId` 字段；`TraceFromHead` 用它作为重放起点。要改形状需先回改 04 文档。
+- **循环检测的输入**：`Descriptor.Repeatable` 不进 wire（`spec/proto.json` 的 `ToolDescriptor` 十字段照 [08 §8.4](08-protocol.md#84-工具描述符与回执)），它只在 Core 内存里参与判定（G-3 的当前处置）。若界面或插件要读这个位，必须先补 08 §8.4 再加 Schema。
+
 ## 3. M0 退出状态
 
 | 门禁 | 状态 |
@@ -89,6 +112,15 @@ M1 期间若领域层不再需要独立常量，可让 `domain` 改为引用 `di
 | `adag doctor --fake` | 通过（M0 范围；SQLite/锁/端口检查显式待接入） |
 | 空基座桩启动（`products/skeleton.agent.json`，`plugins: []`） | 通过：34 方法 dispatch、0 工具、0 供应商、带空态提示 |
 | 未写任何具体工具、provider、审批规则与业务页面 | 是（`official/` 尚不存在，基座无兜底） |
+
+## 3b. M1-A 退出状态（引擎落地）
+
+| 门禁 | 状态 |
+|---|---|
+| `go test ./internal/{engine,toolkit,plugins,coreproto,adapters,conformance}` | 全绿；`-race` 下 engine/conformance 亦通过 |
+| INV-1…INV-12 | 已有可执行断言：INV-1（全仓唯一 `Run` 入口 + 目录位置 + 反向别名扫描）、INV-2（缺端口即失败关闭）、INV-3（目录冻结与动态注册只记警告）、INV-4（安全点失败关闭、timeout/unavailable 为拒绝）、INV-5（deny 是回执且轮次继续）、INV-6（seq 单调与工作区序号独立）、INV-7（`ThreadBusy` + 第二轮 `thread_busy`）、INV-8（取消贯穿模型流与交互等待，部分内容保留）、INV-9（错误路径仍恰好一个终态）、INV-10（details/notice 不进模型消息）、INV-11（空目录 → 模型请求里零工具、`Remove` 后能力消失）、INV-12（50 轮不同参数自然完成；相同参数命中 3/5 循环检测；`repeatable` 不计数） |
+| `adag verify boundary` | 通过，且依赖方向规则从 domain/ports 扩到 engine/toolkit/diag/version（engine 只依赖 ports+domain） |
+| 仍缺的生产实现 | `ModelClient`（M1-E provider 桥）、`ScriptHost`（M1-C moejs 宿主）、`SessionStore`/`StateStore`（M1-B SQLite，进行中） |
 
 集成期修掉的两处实现缺陷（都属于 M0 交付物自身，不是设计缺口）：
 
