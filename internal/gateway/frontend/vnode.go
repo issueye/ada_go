@@ -132,12 +132,25 @@ func validate(n Node, depth int, count *int) error {
 		if _, ok := ResolveComponent(n.N); !ok {
 			return fmt.Errorf("frontend: 组件名 %q 不在宿主组件白名单里", n.N)
 		}
+		// 组件 props 走 $defs.componentProps 的安全底线（on*/style/dangerouslySetInnerHTML）；
+		// 各组件的合法键由渲染期逐个解释，Schema 不在这里枚举属性名。
+		for k, v := range n.P {
+			if err := validateComponentPropName(k); err != nil {
+				return err
+			}
+			if s, ok := v.(string); ok {
+				if err := checkString(k, s); err != nil {
+					return err
+				}
+			}
+		}
 	} else if !tags[n.T] {
 		return fmt.Errorf("frontend: 标签 %q 不在白名单里", n.T)
-	}
-	for k, v := range n.P {
-		if err := validateAttribute(n.T, k, v); err != nil {
-			return err
+	} else {
+		for k, v := range n.P {
+			if err := validateAttribute(n.T, k, v); err != nil {
+				return err
+			}
 		}
 	}
 	for _, c := range n.C {
@@ -175,6 +188,21 @@ func validateAttribute(tag, name string, value any) error {
 	}
 	if isURLAttribute(lower) {
 		return validateURL(name, s)
+	}
+	return nil
+}
+
+// validateComponentPropName 是组件 props 的属性名安全底线（$defs.componentProps 的
+// propertyNames 约束）：禁止 on* / style / dangerouslySetInnerHTML。
+func validateComponentPropName(name string) error {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.HasPrefix(lower, "on"):
+		return fmt.Errorf("frontend: 组件属性 %q 是事件处理（7.3：没有事件处理函数）", name)
+	case lower == "style":
+		return fmt.Errorf("frontend: 禁止内联 style（一律走类名，7.3）")
+	case strings.Contains(lower, "dangerouslysetinnerhtml"):
+		return fmt.Errorf("frontend: 禁止 dangerouslySetInnerHTML（1.5.6）")
 	}
 	return nil
 }

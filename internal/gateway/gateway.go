@@ -12,17 +12,20 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/adag/ada-go/internal/coreapp"
 	"github.com/adag/ada-go/internal/gateway/contracts"
+	"github.com/adag/ada-go/internal/gateway/frontend"
 	"github.com/adag/ada-go/internal/gateway/relay"
 	"github.com/adag/ada-go/internal/gateway/security"
 	"github.com/adag/ada-go/internal/gateway/sse"
 	"github.com/adag/ada-go/internal/gateway/supervisor"
 	"github.com/adag/ada-go/internal/gateway/web"
+	"github.com/adag/ada-go/internal/plugins/host"
 )
 
 // Config 是 Gateway 的装配输入。
@@ -56,6 +59,10 @@ type Config struct {
 	// 生命周期也由调用方负责（Gateway.Shutdown 不会关闭它）。测试用于
 	// 在不 spawn Core 的情况下验证鉴权、SSR 与错误页。
 	Supervisor contracts.Supervisor
+	// FrontendScripts 是前端插件（frontend-only）的加载单元（M4，7.5）：
+	// 非空时组合根构建 web.PluginUI 渲染桥，SSR 填充插槽并提供 /ext 页面。
+	// 脚本由上层组合根注入（app/ 层）——internal/ 不 import official/。
+	FrontendScripts []host.Script
 }
 
 // Gateway 持有 HTTP handler 与它管理的 Core 进程。
@@ -86,6 +93,10 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 		return nil, fmt.Errorf("gateway: 需要产品声明")
 	}
 	product, err := coreapp.LoadProduct(cfg.Product)
+	if err != nil {
+		return nil, err
+	}
+	frontendScripts, err := selectFrontendScripts(cfg.FrontendScripts, product)
 	if err != nil {
 		return nil, err
 	}
@@ -139,11 +150,29 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 	// 越界/损坏时回退到第一个工作区。两个入口不会出现工作区不一致。
 	resolveWorkspace := workspaceResolver(workspaces)
 	events := &eventHandler{sup: sup, workspaceFor: resolveWorkspace}
+	// M4 前端插件渲染桥（7.5）：脚本由上层注入；为空时全部插槽保持基座占位。
+	var pluginUI web.PluginUI
+	if len(frontendScripts) > 0 {
+		bridge, err := frontend.NewBridge(frontend.BridgeOptions{
+			Scripts:      frontendScripts,
+			Supervisor:   sup,
+			WorkspaceFor: resolveWorkspace,
+			ProductName:  product.Name,
+		})
+		if err != nil {
+			if ownSup {
+				_ = sup.Shutdown(context.Background())
+			}
+			return nil, fmt.Errorf("gateway: 前端插件装配失败: %w", err)
+		}
+		pluginUI = bridge
+	}
 	webSrv, err := web.New(web.Config{
 		Supervisor: sup, Workspace: cfg.Workspace, Workspaces: workspaces,
 		WorkspaceFor: resolveWorkspace, CookieSecure: cfg.Secure,
 		ProductName: product.Name, Locale: product.Identity.Locale,
 		Events: events, CSRF: mw.CSRFToken, LoginPath: "/login",
+		PluginUI: pluginUI,
 	})
 	if err != nil {
 		if ownSup {
@@ -284,3 +313,33 @@ func randomToken() (string, error) {
 
 // DefaultIdle 是 Gateway 默认的空闲回收时间（与 supervisor 默认一致）。
 const DefaultIdle = 15 * time.Minute
+
+// selectFrontendScripts 按产品声明过滤前端插件：产品声明是「启用哪些插件」的承诺，
+// 前端插件也一样——只渲染产品启用且随包提供的前端插件；未启用的不进渲染桥。
+// 产品声明了前端 id 但脚本缺失时，由 Session 侧的装配校验统一报错（这里不重复）。
+func selectFrontendScripts(scripts []host.Script, product *coreapp.Product) ([]host.Script, error) {
+	if len(scripts) == 0 {
+		return nil, nil
+	}
+	declared := map[string]bool{}
+	for _, id := range product.Plugins {
+		declared[id] = true
+	}
+	ids := make([]string, 0, len(scripts))
+	byID := map[string]host.Script{}
+	for _, s := range scripts {
+		if s.Manifest == nil {
+			return nil, fmt.Errorf("gateway: 前端插件缺少清单")
+		}
+		byID[s.Manifest.ID] = s
+		ids = append(ids, s.Manifest.ID)
+	}
+	sort.Strings(ids)
+	out := make([]host.Script, 0, len(ids))
+	for _, id := range ids {
+		if declared[id] {
+			out = append(out, byID[id])
+		}
+	}
+	return out, nil
+}

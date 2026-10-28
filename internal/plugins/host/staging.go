@@ -160,7 +160,7 @@ type ActionRegistration struct {
 
 // ActionRegistry 是动作注册表。
 type ActionRegistry interface {
-	RegisterAction(reg ActionRegistration) error
+	AddAction(reg ActionRegistration) error
 }
 
 // RouteRegistration 是一条动态路由登记（7.6）。
@@ -182,7 +182,7 @@ type FrontendRegistration struct {
 
 // FrontendRegistry 是前端注册表。
 type FrontendRegistry interface {
-	RegisterFrontend(reg FrontendRegistration) error
+	AddFrontend(reg FrontendRegistration) error
 }
 
 // PluginRegistry 是一个目录共有的「按插件整体摘除」操作（回滚与禁用路径）。
@@ -267,7 +267,7 @@ func (t Targets) commit(c *Contribution, caps *CapabilitySet, hooks func(HookDef
 			undo = append(undo, rollbackAll(pr))
 		}
 		for _, item := range c.Actions {
-			if err := t.Actions.RegisterAction(ActionRegistration{PluginID: c.PluginID, Def: item}); err != nil {
+			if err := t.Actions.AddAction(ActionRegistration{PluginID: c.PluginID, Def: item}); err != nil {
 				return fail(fmt.Errorf("host: 插件 %s 注册动作 %q 失败: %w", c.PluginID, item.Name, err))
 			}
 		}
@@ -311,7 +311,7 @@ func (t Targets) commit(c *Contribution, caps *CapabilitySet, hooks func(HookDef
 		if pr, ok := t.Frontend.(PluginRegistry); ok {
 			undo = append(undo, rollbackAll(pr))
 		}
-		if err := t.Frontend.RegisterFrontend(FrontendRegistration{PluginID: c.PluginID, Contribution: f}); err != nil {
+		if err := t.Frontend.AddFrontend(FrontendRegistration{PluginID: c.PluginID, Contribution: f}); err != nil {
 			return fail(fmt.Errorf("host: 插件 %s 注册前端贡献失败: %w", c.PluginID, err))
 		}
 	}

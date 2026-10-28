@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:11899fe8fbd0e3d0) by official/build.mjs — do not edit
+// generated from index.ts (sha256:bebd8b6d49143937) by official/build.mjs — do not edit
 // tools-plan —— 官方插件：维护当前线程的任务计划（05 §6.3、02 §5.4 的 tools-plan）。
 //
 // 计划是线程级 KV（能力位 state），不是模型上下文：工具只返回一段文本给模型，
@@ -31,8 +31,17 @@
                                                     
  
 
+                     
+               
+                 
+                         
+                   
+                                                     
+ 
+
                     
                                    
+                                       
  
 
 const STATE_KEY = "plan";
@@ -70,6 +79,12 @@ function render(steps            )         {
   const lines = steps.map((s, i) => `${i + 1}. ${mark(s.status)} ${s.step}`);
   const done = steps.filter((s) => s.status === "done").length;
   return `当前计划（${done}/${steps.length} 完成）：\n` + lines.join("\n");
+}
+
+// planView 是给前端（ui-task-plan）的结构化视图：total=0 表示当前没有计划。
+function planView(steps            )                                                     {
+  const done = steps.filter((s) => s.status === "done").length;
+  return { done, total: steps.length, steps };
 }
 
 function requireState(ctx             )              {
@@ -131,6 +146,18 @@ export default function (agent          )       {
         content: [{ type: "text", text: render(steps) }],
         details: { steps },
       };
+    },
+  });
+
+  // 只读动作 plan：给 ui-task-plan 的 thread.tray 卡片取数（7.5 的 action.invoke 桥）。
+  // 返回 { plan }；total=0 表示当前线程没有计划（前端据此不画卡）。
+  agent.registerAction({
+    name: "plan",
+    mode: "read",
+    execute: async (_input     , ctx             ) => {
+      const raw = await requireState(ctx).get            (STATE_KEY);
+      const steps = Array.isArray(raw) ? raw : [];
+      return { plan: planView(steps) };
     },
   });
 }

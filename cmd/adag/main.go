@@ -281,17 +281,7 @@ func instanceID(product, workspace string) string {
 	return product + "::" + filepath.Base(filepath.Clean(workspace))
 }
 
-// cmdPlugin：M3 落地。
-func cmdPlugin(args []string, stdout io.Writer) error {
-	sub := ""
-	if len(args) > 0 {
-		sub = args[0]
-	}
-	if sub == "" {
-		return &usageError{msg: "adag plugin 需要子命令：list | install | reload"}
-	}
-	return notImplemented("plugin "+sub, "M3：完整插件平台（安装、发现、信任、热重载）")
-}
+// cmdPlugin 在 plugin.go：M3 已落地 list / install / reload。
 
 // cmdVerify 跑开发门禁。
 func cmdVerify(args []string, stdout io.Writer) error {

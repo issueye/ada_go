@@ -63,6 +63,9 @@ type Config struct {
 	CSRF func(*http.Request) string
 	// LoginPath 是登录页路径，默认 /login。
 	LoginPath string
+	// PluginUI 是 M4 的前端插件渲染宿主（7.5）；nil 时全部插槽保持基座占位、
+	// /ext 路由 404。组合根用渲染桥实现它，web 不依赖插件宿主的具体实现。
+	PluginUI PluginUI
 }
 
 // Server 是 SSR 前端宿主。它自身不持有 Core 连接或后台协程。
@@ -126,6 +129,11 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /events/{id}", s.handleEvents)
 	mux.HandleFunc("GET /static/app.js", s.handleJS)
 	mux.HandleFunc("GET /static/", s.handleStatic)
+	// M4 插件页面、静态资源与动作桥（7.5、7.6）；PluginUI 缺席时 404。
+	mux.HandleFunc("GET /ext/{id}/static/{name...}", s.handleExtStatic)
+	mux.HandleFunc("GET /ext/{id}/action/{name}", s.handleExtActionRead)
+	mux.HandleFunc("POST /ext/{id}/action/{name}", s.handleExtActionWrite)
+	mux.HandleFunc("GET /ext/{id}/{slug}", s.handleExtPage)
 	mux.HandleFunc("GET /login", s.handleLoginPage)
 	mux.HandleFunc("POST /login", s.handleLoginSubmit)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
@@ -163,6 +171,8 @@ func (s *Server) call(r *http.Request, method string, params any) (json.RawMessa
 // base 填充所有页面共用的外壳字段。
 func (s *Server) base(r *http.Request, title string) baseData {
 	workspace, index := s.resolveWorkspace(r)
+	// M4：插件插槽、样式与脚本由 PluginUI 填充；单槽失败回退基座占位（pluginui.go）。
+	slots, counts := s.pluginSlots(r)
 	return baseData{
 		Title:               title,
 		ProductName:         s.cfg.ProductName,
@@ -174,6 +184,10 @@ func (s *Server) base(r *http.Request, title string) baseData {
 		WorkspaceIndex:      index,
 		Workspaces:          s.workspaceOptions(),
 		ShowWorkspacePicker: len(s.cfg.Workspaces) > 1,
+		Slots:               slots,
+		SlotCounts:          counts,
+		PluginStyles:        s.pluginStyles(),
+		PluginScripts:       s.pluginScripts(),
 	}
 }
 

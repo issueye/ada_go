@@ -7,7 +7,8 @@
     "tools-fs",
     "tools-shell",
     "tools-plan",
-    "policy-default"
+    "policy-default",
+    "ui-task-plan"
   ],
   "capabilities": {
     "skills": false,

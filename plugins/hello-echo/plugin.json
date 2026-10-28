@@ -1,0 +1,12 @@
+{
+  "id": "hello-echo",
+  "name": "Hello Echo",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "第三方示例：一个只读回显工具，用于验证安装、发现、启用持久化与双代热重载。",
+  "trust": "third-party",
+  "backend": {
+    "entry": "index.ts",
+    "capabilities": []
+  }
+}

@@ -52,21 +52,20 @@ func TestVNodeValidator(t *testing.T) {
 		mustNoErr(t, "CheckOutputSize", frontend.CheckOutputSize(raw))
 	})
 
-	t.Run("契约缺口_组件props名受元素属性白名单约束", func(t *testing.T) {
+	t.Run("组件props按Schema安全底线放行", func(t *testing.T) {
 		t.Parallel()
 		// spec/vnode.schema.json 的 $defs.componentProps 只做「安全底线」：
-		// 禁止 on*/style/dangerouslySetInnerHTML，其余键交给各组件的 PropsSchema。
-		// 但 frontend.validate 把元素属性白名单也套在 $C 的 props 上，于是
-		// A.3 里合法的 steps/notes/size 目前会被拒。这里把现状钉死：
-		// 报出的必须正是那个 props 名；M4 落地组件库时必须二选一（放宽 $C props
-		// 校验，或把这些键纳入组件级白名单），届时本用例会失败并要求更新。
+		// 禁止 on*/style/dangerouslySetInnerHTML，其余键交给各组件的渲染期校验。
+		// M4 落地组件库时选择了「放宽 $C props 校验」（二选一之一，见 M0 时的钉死记录）：
+		// 组件业务键（steps/notes/size，A.3 的 <Todo> 用）不再被元素属性白名单拦截。
 		for _, prop := range []string{"steps", "notes", "size"} {
-			n := comp("TodoList", map[string]any{prop: "x"})
-			err := frontend.ValidateNode(n)
-			mustErrContains(t, "$C props "+prop, err, prop)
-			mustErrContains(t, "$C props "+prop+" 的拒绝理由", err, "不在白名单里")
+			mustNoErr(t, "$C props "+prop, frontend.ValidateNode(comp("TodoList", map[string]any{prop: "x"})))
 		}
-		t.Log("缺口：frontend 的 $C props 校验与 vnode.schema.json 的 componentProps 语义不一致")
+		// 安全底线仍然生效：事件处理、内联样式与原始 HTML 注入在 $C 上同样被拒。
+		mustErrContains(t, "$C onClick", frontend.ValidateNode(comp("TodoList", map[string]any{"onClick": "x"})), "事件处理")
+		mustErrContains(t, "$C style", frontend.ValidateNode(comp("TodoList", map[string]any{"style": "color:red"})), "style")
+		mustErrContains(t, "$C dangerouslySetInnerHTML",
+			frontend.ValidateNode(comp("TodoList", map[string]any{"dangerouslySetInnerHTML": map[string]any{}})), "dangerouslySetInnerHTML")
 	})
 
 	t.Run("事件属性被拒", func(t *testing.T) {

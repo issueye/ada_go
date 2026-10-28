@@ -1,0 +1,11 @@
+{
+  "id": "ui-hello-tsx",
+  "name": "Hello TSX",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "M4 前端插件最小示例：一个由 TSX 服务端渲染的 /ext 页面",
+  "trust": "builtin",
+  "frontend": {
+    "pages": [{ "slug": "hello", "template": "hello.tsx", "title": "Hello TSX" }]
+  }
+}

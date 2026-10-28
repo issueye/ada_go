@@ -1,0 +1,13 @@
+{
+  "id": "provider-anthropic-messages",
+  "name": "Anthropic Messages 供应商",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "Anthropic Messages API 流式适配器（message_start/content_block_delta/message_stop → 归一化增量）",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts",
+    "capabilities": ["net.sse"],
+    "secrets": ["anthropic_api_key"]
+  }
+}

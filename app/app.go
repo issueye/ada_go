@@ -39,6 +39,10 @@ type Deps struct {
 	Scripts []host.Script
 	// BaseURL 是 OpenAI 兼容端点的覆盖（M1 的 provider 插件读取它）。
 	BaseURL string
+	// FrontendIDs 列出「产品声明里允许出现、但不在本侧装配」的插件 id（M4 前端插件）。
+	// 它们由 Gateway 的渲染桥装配；本侧装配对它们容忍缺席（产品承诺由 Gateway 侧
+	// 用同一份 FrontendScripts 校验），避免前端插件进不了产品声明。
+	FrontendIDs map[string]bool
 }
 
 // Assembly 是一次装配的结果。
@@ -52,8 +56,20 @@ type Assembly struct {
 	Hooks *plugins.HookChain
 	// Providers 是 provider 插件桥成的 ModelClient 目录（可能为空）。
 	Providers *provider.Registry
+	// Actions 是前端动作目录（pluginID → name → ActionDef，M4 的 action.invoke 数据面）。
+	Actions *actionRegistry
+	// FrontendDecls 记录产品声明里被 Gateway 侧装配的前端插件 id（本侧不装配）。
+	FrontendDecls []string
 	// executor 是 tool 调用的路由（toolkit.Invoker）。
 	executor *toolInvoker
+}
+
+// ActionDef 返回某插件的一个界面动作定义（action.invoke 用）。
+func (a *Assembly) ActionDef(pluginID, name string) (host.ActionDef, bool) {
+	if a == nil || a.Actions == nil {
+		return host.ActionDef{}, false
+	}
+	return a.Actions.Lookup(pluginID, name)
 }
 
 // Load 从产品声明文件装配（官方插件来自嵌入包）。
@@ -75,12 +91,40 @@ func Load(ctx context.Context, productPath string, deps Deps) (*Assembly, error)
 // 这是「官方插件只经由组合根进入基座」的唯一入口：cmd/ 与 internal/ 都不 import
 // official/（设计 01 §3.3、11 §13）。
 func LoadOfficial(ctx context.Context, productPath string, deps Deps) (*Assembly, error) {
-	scripts, err := official.Scripts()
+	scripts, err := OfficialScripts()
 	if err != nil {
 		return nil, err
 	}
 	deps.Scripts = scripts
 	return Load(ctx, productPath, deps)
+}
+
+// OfficialScripts 返回嵌入官方包的全部插件脚本（按 id 排序）。
+//
+// M3 会话热重载需要在 Open 时冻结这份 base，之后每次重载都以它为合并基准；
+// internal/ 不得 import official/，所以经由组合根转手（01 §3.3）。
+func OfficialScripts() ([]host.Script, error) {
+	return official.Scripts()
+}
+
+// AssembleWithExtras 在产品声明的插件之外追加第三方插件脚本（M3 插件平台的装配入口）。
+//
+//   - base 为 nil 时取嵌入官方包；否则原样使用（测试注入替身）。
+//   - extras 是 discovery 层产出的第三方脚本；启用状态由调用方按 plugin_meta 过滤，
+//     官方同 id 的冲突也由调用方剥掉（官方不可被磁盘同名包覆盖，6.9）。
+//   - disabled 列出本次不装配的产品插件 id（plugin_meta.enabled=false）。禁用唯一
+//     策略插件且目录里仍有写/执行工具时，Runtime.Check 拒绝（plugin.setEnabled 门禁）。
+//
+// 与 Assemble 共用同一条装配路径：清单校验、能力授予、贡献结算与门禁判定完全一致。
+func AssembleWithExtras(ctx context.Context, p *coreapp.Product, base, extras []host.Script, disabled map[string]bool, deps Deps) (*Assembly, error) {
+	if len(base) == 0 {
+		b, err := OfficialScripts()
+		if err != nil {
+			return nil, err
+		}
+		base = b
+	}
+	return assembleSet(ctx, p, base, extras, disabled, deps)
 }
 
 // Assemble 把产品声明与插件集合结算成运行期目录（06 §6.5 的两阶段在 M3 落地；
@@ -89,23 +133,55 @@ func LoadOfficial(ctx context.Context, productPath string, deps Deps) (*Assembly
 // 缺失插件是装配错误而不是静默跳过：产品声明就是「启用这些插件」的承诺，
 // 少一个就等于承诺没兑现（1.5.5 禁用即能力消失的反向）。
 func Assemble(ctx context.Context, p *coreapp.Product, scripts []host.Script, deps Deps) (*Assembly, error) {
+	return assembleSet(ctx, p, scripts, nil, nil, deps)
+}
+
+// assembleSet 是 Assemble / AssembleWithExtras 的共用实现：
+// 先按产品声明挑选（disabled 的容忍缺席），再按 id 排序追加第三方。
+func assembleSet(ctx context.Context, p *coreapp.Product, base, extras []host.Script, disabled map[string]bool, deps Deps) (*Assembly, error) {
 	if p == nil {
 		return nil, errors.New("app: Assemble 需要非空产品声明")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	byID := make(map[string]host.Script, len(scripts))
-	for _, s := range scripts {
+	byID := make(map[string]host.Script, len(base)+len(extras))
+	baseIDs := make(map[string]bool, len(base))
+	productIDs := make(map[string]bool, len(p.Plugins))
+	for _, id := range p.Plugins {
+		productIDs[id] = true
+	}
+	// extras 只补缺：官方/产品 id 不允许被磁盘同名包覆盖（6.9）。
+	for _, s := range extras {
+		if s.Manifest == nil {
+			return nil, errors.New("app: 第三方插件缺少清单")
+		}
+		id := s.Manifest.ID
+		if _, dup := byID[id]; !dup && !productIDs[id] {
+			byID[id] = s
+		}
+	}
+	for _, s := range base {
 		if s.Manifest == nil {
 			return nil, errors.New("app: 插件缺少清单")
 		}
 		byID[s.Manifest.ID] = s
+		baseIDs[s.Manifest.ID] = true
 	}
 
 	picked := make([]host.Script, 0, len(p.Plugins))
 	var missing []string
+	frontendDecls := make([]string, 0)
 	for _, id := range p.Plugins {
+		if disabled[id] {
+			// 用户已禁用（plugin_meta.enabled=false）：本次装配容忍缺席。
+			continue
+		}
+		if deps.FrontendIDs[id] {
+			// M4 前端插件：由 Gateway 渲染桥装配，本侧容忍缺席并记录声明。
+			frontendDecls = append(frontendDecls, id)
+			continue
+		}
 		s, ok := byID[id]
 		if !ok {
 			missing = append(missing, id)
@@ -122,13 +198,31 @@ func Assemble(ctx context.Context, p *coreapp.Product, scripts []host.Script, de
 		return nil, fmt.Errorf("app: 产品 %s 声明的插件没有随包提供：%s（可用：%s）",
 			p.ID, strings.Join(missing, ", "), strings.Join(have, ", "))
 	}
+	// 第三方按 id 排序追加：与官方同一条装配路径，顺序确定保证回放确定性（6.5）。
+	extraIDs := make([]string, 0, len(extras))
+	for _, s := range extras {
+		id := s.Manifest.ID
+		if productIDs[id] || baseIDs[id] {
+			continue // 与随包插件同 id 的第三方已被官方覆盖，不重复装配（6.9）
+		}
+		if _, ok := byID[id]; ok {
+			extraIDs = append(extraIDs, id)
+		}
+	}
+	sort.Strings(extraIDs)
+	for _, id := range extraIDs {
+		picked = append(picked, byID[id])
+	}
 
 	tools := toolkit.NewCatalog()
 	hooks := plugins.NewHookChain()
 	providers := provider.New(deps.BaseURL)
 	providers.HostContext = deps.Context
+	actions := newActionRegistry()
+	frontend := newFrontendRegistry()
 	invoker := &toolInvoker{plugins: map[string]*host.Instance{}, base: deps.Context}
-	asm := &Assembly{Product: p, Tools: tools, Hooks: hooks, Providers: providers, executor: invoker}
+	asm := &Assembly{Product: p, Tools: tools, Hooks: hooks, Providers: providers,
+		Actions: actions, FrontendDecls: frontendDecls, executor: invoker}
 
 	for _, script := range picked {
 		caps, err := host.NewCapabilitySet(script.Manifest, deps.Context.Workspace, deps.HostEnv, deps.Secrets)
@@ -140,7 +234,8 @@ func Assemble(ctx context.Context, p *coreapp.Product, scripts []host.Script, de
 		hc.PluginID = script.Manifest.ID
 		hc.Settings = deps.Settings[script.Manifest.ID]
 		inst, err := host.Load(ctx, script, caps, hc, host.Options{
-			Targets: host.Targets{Tools: tools, Hooks: hooks, Providers: providers},
+			Targets: host.Targets{Tools: tools, Hooks: hooks, Providers: providers,
+				Actions: actions, Frontend: frontend},
 		})
 		if err != nil {
 			_ = asm.Close(context.Background())
@@ -261,4 +356,10 @@ func isPolicyPlugin(m *plugins.Manifest) bool {
 		}
 	}
 	return false
+}
+
+// FrontendScripts 返回嵌入官方包的前端插件脚本（M4，frontend-only）。
+// Gateway 的渲染桥用它们做 TSX→VNode→HTML；Session 只用 id 集合。
+func FrontendScripts() ([]host.Script, error) {
+	return official.FrontendScripts()
 }

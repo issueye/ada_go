@@ -156,6 +156,9 @@ func (s *Server) register() error {
 		"provider.list":          s.handleProviderList,
 		"tool.list":              s.handleToolList,
 		"plugin.list":            s.handlePluginList,
+		"plugin.reload":          s.handlePluginReload,
+		"plugin.setEnabled":      s.handlePluginSetEnabled,
+		"action.invoke":          s.handleActionInvoke,
 		"usage.get":              s.handleUsageGet,
 	}
 	for name, h := range reg {
@@ -772,12 +775,100 @@ func (s *Server) handleToolList(ctx context.Context, _ json.RawMessage) (any, er
 	return map[string]any{"tools": out}, nil
 }
 
-func (s *Server) handlePluginList(context.Context, json.RawMessage) (any, error) {
-	out := []proto.PluginSummary{}
-	for _, inst := range s.sess.Assembly().Plugins {
-		out = append(out, pluginSummary(inst))
+// handlePluginList 列出随包 + 第三方插件（M3）。
+// 第三方行带 enabled/status/fingerprint/source(workspace|global)；includeDisabled
+// 缺省 true（协议默认值），显式传 false 时跳过被用户禁用的插件。
+func (s *Server) handlePluginList(ctx context.Context, raw json.RawMessage) (any, error) {
+	var p struct {
+		IncludeDisabled *bool `json:"includeDisabled"`
+	}
+	_ = decode(raw, &p)
+	views := s.sess.PluginViews(ctx)
+	out := make([]proto.PluginSummary, 0, len(views))
+	for _, v := range views {
+		if v.Status == "disabled" && p.IncludeDisabled != nil && !*p.IncludeDisabled {
+			continue
+		}
+		out = append(out, pluginViewJSON(v))
 	}
 	return map[string]any{"plugins": out}, nil
+}
+
+// handlePluginReload 重载一个或全部插件（双代原子替换；在途调用用旧代，6.9）。
+func (s *Server) handlePluginReload(ctx context.Context, raw json.RawMessage) (any, error) {
+	var p struct {
+		PluginID string `json:"pluginId"`
+	}
+	if err := decode(raw, &p); err != nil {
+		return nil, invalid("plugin.reload: " + err.Error())
+	}
+	views, err := s.sess.ReloadPlugins(ctx, strings.TrimSpace(p.PluginID))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	out := make([]proto.PluginSummary, 0, len(views))
+	for _, v := range views {
+		out = append(out, pluginViewJSON(v))
+	}
+	return map[string]any{"plugins": out}, nil
+}
+
+// handlePluginSetEnabled 启用/禁用插件并热重载；持久化到 plugin_meta，
+// 重启后仍生效。禁用唯一策略插件且存在写/执行工具时拒绝（plugin_denied）。
+func (s *Server) handlePluginSetEnabled(ctx context.Context, raw json.RawMessage) (any, error) {
+	var p struct {
+		PluginID string `json:"pluginId"`
+		Enabled  *bool  `json:"enabled"`
+	}
+	if err := decode(raw, &p); err != nil {
+		return nil, invalid("plugin.setEnabled: " + err.Error())
+	}
+	if strings.TrimSpace(p.PluginID) == "" || p.Enabled == nil {
+		return nil, invalid("plugin.setEnabled: 需要 pluginId 与 enabled")
+	}
+	view, err := s.sess.SetPluginEnabled(ctx, p.PluginID, *p.Enabled)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return map[string]any{"plugin": pluginViewJSON(view)}, nil
+}
+
+// ---- action（M4：前端动作 → 插件后端动作）----
+
+// handleActionInvoke 实现 action.invoke：ActionEnvelope 进，{ok, result|error} 出。
+// 超时/崩溃/拒绝等插件侧失败按协议收敛成 ok=false + 人话错误（不是 RPC 异常），
+// 让界面可以就地显示；参数缺失才是 invalid_params。
+func (s *Server) handleActionInvoke(ctx context.Context, raw json.RawMessage) (any, error) {
+	var p proto.ActionEnvelope
+	if err := decode(raw, &p); err != nil {
+		return nil, invalid("action.invoke: " + err.Error())
+	}
+	if p.PluginID == "" || p.Action == "" {
+		return nil, invalid("action.invoke: 需要 pluginId 与 action")
+	}
+	input := json.RawMessage("{}")
+	if len(p.Input) > 0 {
+		enc, err := json.Marshal(p.Input)
+		if err != nil {
+			return nil, invalid("action.invoke: input 无法编码: " + err.Error())
+		}
+		input = enc
+	}
+	out, err := s.sess.CallAction(ctx, p.PluginID, p.Action, input, p.ThreadID)
+	if err != nil {
+		var de *domain.Error
+		if errors.As(err, &de) {
+			return map[string]any{"ok": false, "error": de.Detail}, nil
+		}
+		return map[string]any{"ok": false, "error": err.Error()}, nil
+	}
+	var result any
+	if len(out) > 0 {
+		if err := json.Unmarshal(out, &result); err != nil {
+			return map[string]any{"ok": false, "error": "动作结果不是合法 JSON: " + err.Error()}, nil
+		}
+	}
+	return map[string]any{"ok": true, "result": result}, nil
 }
 
 // ---- usage ----
@@ -1173,6 +1264,19 @@ func pluginSummary(inst interface {
 		Enabled: sum.Enabled, Status: sum.Status,
 		Fingerprint: sum.Fingerprint, LastError: sum.LastError,
 		Contributions: map[string]any{"tools": sum.Tools, "hooks": sum.Hooks, "slots": sum.Slots},
+	}
+}
+
+// pluginViewJSON 把 cli.PluginView 编成 plugin.list 的行。
+//
+// pluginViewJSON 把 cli.PluginView 编成 plugin.list 的行。
+// Source 已进协议（spec PluginSummary.source，M3 安装/发现）。
+func pluginViewJSON(v cli.PluginView) proto.PluginSummary {
+	return proto.PluginSummary{
+		ID: v.ID, Name: v.Name, Version: v.Version, APIVersion: v.APIVersion,
+		Trust: v.Trust, Enabled: v.Enabled, Status: v.Status,
+		Fingerprint: v.Fingerprint, LastError: v.LastError, Source: v.Source,
+		Contributions: map[string]any{"tools": v.Tools, "hooks": v.Hooks},
 	}
 }
 

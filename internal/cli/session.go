@@ -7,6 +7,8 @@ package cli
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +31,8 @@ import (
 	"github.com/adag/ada-go/internal/devfake"
 	"github.com/adag/ada-go/internal/domain"
 	"github.com/adag/ada-go/internal/engine"
+	"github.com/adag/ada-go/internal/plugins"
+	"github.com/adag/ada-go/internal/plugins/discovery"
 	"github.com/adag/ada-go/internal/plugins/host"
 	"github.com/adag/ada-go/internal/plugins/provider"
 	"github.com/adag/ada-go/internal/ports"
@@ -52,6 +57,9 @@ type Config struct {
 	Interactive bool
 	// Scripts 是官方插件包（由 cmd 注入）。
 	Scripts []host.Script
+	// FrontendScripts 是前端插件（M4）：产品声明允许它们缺席本侧装配，
+	// 真实渲染在 Gateway 侧；Session 只用它们的 id 集合。
+	FrontendScripts []host.Script
 	// Settings 是按插件 id 的设置。
 	Settings map[string]map[string]any
 	// ModelClient 覆盖模型（测试注入）；nil 时按 Fake/provider 选择。
@@ -82,6 +90,21 @@ type Session struct {
 	model    ports.ModelClient
 	modelErr error
 	secrets  map[string]string
+
+	// M3 插件平台：随包插件 base（Open 时冻结，热重载的合并基准）、产品声明、
+	// 装配期宿主依赖（app.Deps 原样复用）、第三方发现快照与失败记录。
+	// baseScripts/cfg 在 Open 之后只读；discovered/failedPlugins 变更持 s.mu。
+	baseScripts []host.Script
+	product     *coreapp.Product
+	appDeps     app.Deps
+	// hostBase 是装配期宿主上下文模板（CallAction 用）；frontendScripts/IDs 是
+	// M4 前端插件的脚本与「产品声明允许缺席」集合。
+	hostBase        host.Context
+	frontendScripts []host.Script
+	frontendIDs     map[string]bool
+	discovered      []discovery.Plugin
+	failedPlugins   map[string]string
+	reloadMu        sync.Mutex // 串行化热重载（plugin.reload / plugin.setEnabled）
 
 	mu           sync.Mutex
 	threadID     string
@@ -199,29 +222,45 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 		HTTP:      httpBridge,
 	}
 	hc.State = s.stateOp
-	deps := app.Deps{
-		Context:  hc,
-		Secrets:  func(name string) bool { _, ok := s.secret(name); return ok },
-		Settings: cfg.Settings,
-		BaseURL:  cfg.BaseURL,
+	s.hostBase = hc
+	// M4 前端插件：产品声明里允许出现、但由 Gateway 渲染桥装配的 id 集合。
+	frontend, ferr := sessionFrontendScripts(cfg)
+	if ferr != nil {
+		httpBridge.Close()
+		return cleanup(ferr)
 	}
-	var asm *app.Assembly
-	if len(cfg.Scripts) == 0 {
-		// 默认走嵌入的官方插件包；组合根是唯一知道 official/ 的包。
-		asm, err = app.LoadOfficial(ctx, cfg.Product, deps)
-	} else {
-		p, perr := coreapp.LoadProduct(cfg.Product)
-		if perr != nil {
-			httpBridge.Close()
-			return cleanup(perr)
+	s.frontendScripts = frontend
+	s.frontendIDs = map[string]bool{}
+	for _, sc := range frontend {
+		if sc.Manifest != nil {
+			s.frontendIDs[sc.Manifest.ID] = true
 		}
-		asm, err = app.Assemble(ctx, p, cfg.Scripts, deps)
 	}
+	s.appDeps = app.Deps{
+		Context:     hc,
+		Secrets:     func(name string) bool { _, ok := s.secret(name); return ok },
+		Settings:    cfg.Settings,
+		BaseURL:     cfg.BaseURL,
+		FrontendIDs: s.frontendIDs,
+	}
+	// 随包插件 base：测试注入优先，否则嵌入官方包（经组合根转手，internal 不碰 official/）。
+	base, err := sessionBaseScripts(cfg)
 	if err != nil {
 		httpBridge.Close()
 		return cleanup(err)
 	}
-	s.asm = asm
+	s.baseScripts = base
+	product, err := coreapp.LoadProduct(cfg.Product)
+	if err != nil {
+		httpBridge.Close()
+		return cleanup(err)
+	}
+	s.product = product
+	asm, err := s.assembleInitial(ctx)
+	if err != nil {
+		httpBridge.Close()
+		return cleanup(err)
+	}
 
 	s.emitter = coreproto.NewEmitter(clock)
 	broker, err := coreproto.NewBroker(coreproto.BrokerConfig{
@@ -235,36 +274,17 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 		return cleanup(err)
 	}
 	s.broker = broker
-	s.executor, err = toolkit.NewExecutor(toolkit.ExecutorConfig{
-		Catalog:   asm.Tools,
-		Invoker:   asm.ToolInvoker(),
-		Clock:     clock,
-		HasPolicy: asm.Runtime.PolicyPluginActive,
-	})
-	if err != nil {
-		return cleanup(err)
-	}
 
-	// 模型选择：测试覆盖 > --fake > provider 插件。
-	switch {
-	case cfg.ModelClient != nil:
-		s.model = cfg.ModelClient
-	case cfg.Fake:
-		s.model = devfake.New()
-	case asm.ProviderCount() > 0:
-		s.model = provider.NewRetry(asm.Providers)
-	default:
-		s.modelErr = errors.New("没有可用的 provider：启用 provider 插件或使用 --fake")
-	}
-
+	// 引擎依赖里与装配无关的部分先固定；目录/模型相关子集由 installAssembly 填充
+	//（热重载只重建后者，broker/emitter/store 全部复用）。
 	s.deps = engine.Deps{
-		Clock: clock, IDs: ids, Events: s.emitter, Session: store, Model: s.model,
-		Tools: asm.Tools, Interactions: broker, Hooks: asm.Hooks,
-		Runner:    s.executor,
-		Compactor: &engine.ModelCompactor{Model: s.model, Clock: clock, IDs: ids},
-		RunStore:  runStore{st: store, model: s.ModelRefFor},
-		Steer:     s,
-		HasPolicy: func() bool { return asm.Runtime.PolicyPluginActive },
+		Clock: clock, IDs: ids, Events: s.emitter, Session: store,
+		Interactions: broker,
+		RunStore:     runStore{st: store, model: s.ModelRefFor},
+		Steer:        s,
+	}
+	if err := s.installAssembly(asm); err != nil {
+		return cleanup(err)
 	}
 
 	if cfg.EventsPath != "" {
@@ -287,6 +307,10 @@ func (s *Session) Close(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	s.mu.Lock()
+	asm := s.asm
+	s.asm = nil
+	s.mu.Unlock()
 	for _, fn := range s.unsub {
 		fn()
 	}
@@ -303,11 +327,10 @@ func (s *Session) Close(ctx context.Context) error {
 		}
 		s.events = nil
 	}
-	if s.asm != nil {
-		if err := s.asm.Close(ctx); err != nil {
+	if asm != nil {
+		if err := asm.Close(ctx); err != nil {
 			errs = append(errs, err)
 		}
-		s.asm = nil
 	}
 	if s.store != nil {
 		if err := s.store.Close(ctx); err != nil {
@@ -358,8 +381,11 @@ func (s *Session) ReadLine() (string, error) {
 
 // Run 跑一轮对话并返回终态。
 func (s *Session) Run(ctx context.Context, prompt string) (domain.TerminalReason, error) {
-	if s.modelErr != nil {
-		return domain.TerminalError, s.modelErr
+	s.mu.Lock()
+	modelErr := s.modelErr
+	s.mu.Unlock()
+	if modelErr != nil {
+		return domain.TerminalError, modelErr
 	}
 	if strings.TrimSpace(prompt) == "" {
 		return domain.TerminalError, errors.New("cli: 输入为空")
@@ -414,11 +440,16 @@ func (s *Session) runInThread(ctx context.Context, threadID, runID, prompt strin
 	if ready != nil {
 		close(ready)
 	}
-	if s.modelErr != nil {
-		return domain.TerminalError, s.modelErr
+	// deps/modelErr 会被热重载在锁内替换：轮次开始时取一次快照，
+	// 整轮固定用同一份目录与模型（双代语义的在途侧）。
+	s.mu.Lock()
+	deps, modelErr := s.deps, s.modelErr
+	s.mu.Unlock()
+	if modelErr != nil {
+		return domain.TerminalError, modelErr
 	}
 	runCtx := withThread(ctx, threadID)
-	return engine.Run(runCtx, s.deps, s.newTurnSpec(threadID, runID, prompt)), nil
+	return engine.Run(runCtx, deps, s.newTurnSpec(threadID, runID, prompt)), nil
 }
 
 // newTurnSpec 把产品策略与当前模型合成引擎输入。
@@ -560,10 +591,19 @@ func (s *Session) ModelRef() ports.ModelRef { return s.modelRef() }
 func (s *Session) ModelError() error { return s.modelErr }
 
 // Product 返回已加载的产品声明。
-func (s *Session) Product() *coreapp.Product { return s.asm.Product }
+func (s *Session) Product() *coreapp.Product {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.product
+}
 
 // Assembly 返回装配结果（插件、工具、provider 目录）。
-func (s *Session) Assembly() *app.Assembly { return s.asm }
+// 热重载会在锁内整体替换这份结果；拿到的指针对应的目录已冻结，可安全只读。
+func (s *Session) Assembly() *app.Assembly {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.asm
+}
 
 // Store 返回工作区存储句柄（Core RPC 的线程/entry 查询复用它）。
 func (s *Session) Store() *sqlite.Store { return s.store }
@@ -618,6 +658,42 @@ func (s *Session) HasUI(ctx context.Context, threadID string) bool {
 	return s.broker.HasUI(ctx, threadID)
 }
 
+// ActionDef 返回某插件的界面动作定义（M4 action.invoke 数据面）。
+func (s *Session) ActionDef(pluginID, action string) (host.ActionDef, bool) {
+	s.mu.Lock()
+	asm := s.asm
+	s.mu.Unlock()
+	return asm.ActionDef(pluginID, action)
+}
+
+// CallAction 执行一次前端动作（读/写都走这里；写动作的确认文案在清单里，
+// CSRF/Origin 由 Gateway 中间件负责）。input 是 JSON 对象原文。
+func (s *Session) CallAction(ctx context.Context, pluginID, action string, input json.RawMessage, threadID string) (json.RawMessage, error) {
+	s.mu.Lock()
+	asm := s.asm
+	base := s.hostBase
+	s.mu.Unlock()
+	if asm == nil {
+		return nil, domain.NewError(domain.CodeCoreUnavailable, "插件装配尚未就绪")
+	}
+	def, ok := asm.ActionDef(pluginID, action)
+	if !ok {
+		return nil, domain.NewError(domain.CodePluginDenied,
+			"插件 "+pluginID+" 没有界面动作 "+action)
+	}
+	inst, ok := asm.Plugin(pluginID)
+	if !ok {
+		return nil, domain.NewError(domain.CodePluginDenied,
+			"插件 "+pluginID+" 未加载")
+	}
+	hc := base
+	hc.PluginID = pluginID
+	hc.ThreadID = threadID
+	hc.Signal = ctx
+	hc.Now = time.Now().UTC()
+	return inst.CallAction(ctx, def.Handler, input, hc)
+}
+
 // Policies 返回当前生效的运行参数（workspace.updatePolicy 覆盖优先，否则用产品声明）。
 func (s *Session) Policies() coreapp.Policies {
 	s.mu.Lock()
@@ -629,8 +705,8 @@ func (s *Session) policiesLocked() coreapp.Policies {
 	if s.policy != nil {
 		return *s.policy
 	}
-	if s.asm != nil && s.asm.Product != nil {
-		return s.asm.Product.Policies
+	if s.product != nil {
+		return s.product.Policies
 	}
 	return coreapp.Policies{}
 }
@@ -690,7 +766,11 @@ func (s *Session) UpdatePolicies(up PolicyUpdate) (coreapp.Policies, error) {
 // ResolveModel 在装配好的 provider 目录里解析 provider/model，并补齐能力位。
 // 返回 false 表示 provider 或 model 未在 asm.Providers 中声明。
 func (s *Session) ResolveModel(providerID, modelID string) (ports.ModelRef, bool) {
-	if providerID == "" || modelID == "" || s.asm == nil || s.asm.Providers == nil {
+	if providerID == "" || modelID == "" {
+		return ports.ModelRef{}, false
+	}
+	asm := s.Assembly()
+	if asm == nil || asm.Providers == nil {
 		return ports.ModelRef{}, false
 	}
 	for _, id := range s.asm.Providers.Providers() {
@@ -775,6 +855,9 @@ func (s *Session) modelRef() ports.ModelRef { return s.ModelRefFor("") }
 
 // defaultModelRef 是没有任何覆盖时的模型选择（--fake > provider 默认）。
 func (s *Session) defaultModelRef() ports.ModelRef {
+	s.mu.Lock()
+	asm := s.asm
+	s.mu.Unlock()
 	if s.cfg.Fake || s.cfg.ModelClient != nil {
 		return ports.ModelRef{ProviderID: "fake", ModelID: "fake-1", ContextWindow: 128000, SupportsTools: true}
 	}
@@ -789,12 +872,16 @@ func (s *Session) defaultModelRef() ports.ModelRef {
 	if ref, ok := s.ResolveModel(providerID, modelID); ok {
 		return ref
 	}
+	toolCount := 0
+	if asm != nil {
+		toolCount = len(asm.Tools.List(context.Background()))
+	}
 	ref := ports.ModelRef{
 		ProviderID: providerID, ModelID: modelID,
-		ContextWindow: 128000, SupportsTools: len(s.asm.Tools.List(context.Background())) > 0,
+		ContextWindow: 128000, SupportsTools: toolCount > 0,
 	}
-	if s.asm != nil && s.asm.Providers != nil {
-		ids := s.asm.Providers.Providers()
+	if asm != nil && asm.Providers != nil {
+		ids := asm.Providers.Providers()
 		if len(ids) == 1 {
 			// 产品可能直接写插件 id；桥支持这种写法，但能力仍来自唯一 provider。
 			ref.ProviderID = ids[0]
@@ -998,6 +1085,655 @@ func (s *Session) secret(name string) (string, bool) {
 		return v, true
 	}
 	return "", false
+}
+
+// ---------------------------------------------------------------------------
+// M3 插件平台：发现、启用持久化与双代热重载（06 §6.5、06 §6.9）
+// ---------------------------------------------------------------------------
+
+// reloadDrainTimeout 是热重载等待在途轮次结束的上限；超过后仍会切换
+// （在途调用可能拿到已关闭的旧代并失败，不再无限等待）。
+const reloadDrainTimeout = 30 * time.Second
+
+// sessionBaseScripts 决定随包插件的来源：测试注入优先，否则用嵌入官方包。
+// internal 不得 import official/——经组合根转手（app.OfficialScripts）。
+func sessionBaseScripts(cfg Config) ([]host.Script, error) {
+	if len(cfg.Scripts) > 0 {
+		return cfg.Scripts, nil
+	}
+	return app.OfficialScripts()
+}
+
+// sessionFrontendScripts 返回前端插件脚本：测试注入优先，否则经组合根取嵌入包。
+// Session 只用 id 集合（产品声明允许缺席的集合）；真实渲染在 Gateway 侧。
+func sessionFrontendScripts(cfg Config) ([]host.Script, error) {
+	if cfg.FrontendScripts != nil {
+		return cfg.FrontendScripts, nil
+	}
+	return app.FrontendScripts()
+}
+
+// installAssembly 把装配结果接进会话：工具执行器、模型选择与引擎依赖里
+// 可重建的子集（目录/钩子/模型/Runner/Compactor/HasPolicy）。Open 与热重载共用。
+// 旧装配在新目录接入后关闭（双代：替换瞬间之后的新调用走新代，旧代在途调用
+// 已由 reloadAssembly 的排空等待覆盖）。
+func (s *Session) installAssembly(asm *app.Assembly) error {
+	exec, err := toolkit.NewExecutor(toolkit.ExecutorConfig{
+		Catalog:   asm.Tools,
+		Invoker:   asm.ToolInvoker(),
+		Clock:     s.clock,
+		HasPolicy: asm.Runtime.PolicyPluginActive,
+	})
+	if err != nil {
+		return fmt.Errorf("cli: 建工具执行器失败: %w", err)
+	}
+	model, modelErr := s.pickModel(asm)
+	s.mu.Lock()
+	old := s.asm
+	s.asm = asm
+	s.executor = exec
+	s.model, s.modelErr = model, modelErr
+	s.deps.Tools = asm.Tools
+	s.deps.Hooks = asm.Hooks
+	s.deps.Model = model
+	s.deps.Runner = exec
+	s.deps.Compactor = &engine.ModelCompactor{Model: model, Clock: s.clock, IDs: s.ids}
+	s.deps.HasPolicy = func() bool { return asm.Runtime.PolicyPluginActive }
+	s.mu.Unlock()
+	if old != nil && old != asm {
+		_ = old.Close(context.Background())
+	}
+	return nil
+}
+
+// pickModel 是装配后的模型选择：测试覆盖 > --fake > provider 插件（与 M1 相同优先级）。
+// 第二个返回值非 nil 表示当前装配没有可用模型（没有 provider 且未用 --fake）。
+func (s *Session) pickModel(asm *app.Assembly) (ports.ModelClient, error) {
+	switch {
+	case s.cfg.ModelClient != nil:
+		return s.cfg.ModelClient, nil
+	case s.cfg.Fake:
+		return devfake.New(), nil
+	case asm.ProviderCount() > 0:
+		return provider.NewRetry(asm.Providers), nil
+	default:
+		return nil, errors.New("没有可用的 provider：启用 provider 插件或使用 --fake")
+	}
+}
+
+// assembleInitial 是 Open 的装配路径：随包 base + 启用的第三方。
+//
+// 这里没有旧代可回退：单个第三方插件装配失败时把它隔离（记 plugin_meta.last_error、
+// 状态 failed），其余插件照常装配——Core 不因一个坏插件起不来（6.5「其他插件不受影响」），
+// 也不会降级成空基座（随包 base 仍在）。归因不到第三方时让 Open 失败（诚实报错）。
+func (s *Session) assembleInitial(ctx context.Context) (*app.Assembly, error) {
+	discovered, warnings := s.discoverThirdParty()
+	s.logWarnings(warnings)
+	s.mu.Lock()
+	s.discovered = discovered
+	s.failedPlugins = map[string]string{}
+	for _, w := range warnings {
+		if w.PluginID != "" {
+			s.failedPlugins[w.PluginID] = w.String()
+		}
+	}
+	s.mu.Unlock()
+	meta := s.listPluginMeta(ctx)
+	extras, disabled := pluginSelection(discovered, meta, s.baseScripts)
+	asm, err := app.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, s.appDeps)
+	if err == nil {
+		if serr := s.syncPluginMeta(ctx, discovered, meta, nil); serr != nil {
+			return nil, serr
+		}
+		return asm, nil
+	}
+	// 隔离重试：把装配错误归因到一个第三方插件并摘掉，直到成功或归因不出。
+	remaining := append([]discovery.Plugin(nil), discovered...)
+	failures := map[string]string{}
+	for err != nil && len(remaining) > 0 {
+		id := blameThirdParty(err, remaining)
+		if id == "" {
+			return nil, err
+		}
+		failures[id] = err.Error()
+		if s.cfg.Log != nil {
+			s.cfg.Log("warn", "第三方插件装配失败，已隔离: "+failures[id], map[string]any{"pluginId": id})
+		}
+		kept := make([]discovery.Plugin, 0, len(remaining)-1)
+		for _, p := range remaining {
+			if p.ID() != id {
+				kept = append(kept, p)
+			}
+		}
+		remaining = kept
+		extras, disabled = pluginSelection(remaining, meta, s.baseScripts)
+		asm, err = app.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, s.appDeps)
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	s.discovered = remaining
+	s.failedPlugins = failures
+	s.mu.Unlock()
+	if serr := s.syncPluginMeta(ctx, remaining, meta, failures); serr != nil {
+		return nil, serr
+	}
+	return asm, nil
+}
+
+// discoverThirdParty 扫描工作区与全局插件目录，合并成一份第三方快照：
+// 工作区优先、与随包插件同 id 的忽略并记警告（6.1、6.9）。
+func (s *Session) discoverThirdParty() ([]discovery.Plugin, []discovery.Warning) {
+	var warns []discovery.Warning
+	ws, w, err := discovery.LoadDirDetailed(discovery.WorkspaceRoot(s.cfg.Workspace), discovery.SourceWorkspace)
+	if err != nil {
+		warns = append(warns, discovery.Warning{Message: err.Error()})
+	}
+	warns = append(warns, w...)
+	if root, gerr := discovery.GlobalRoot(); gerr == nil {
+		gl, gw, rerr := discovery.LoadDirDetailed(root, discovery.SourceGlobal)
+		if rerr != nil {
+			warns = append(warns, discovery.Warning{Message: rerr.Error()})
+		}
+		warns = append(warns, gw...)
+		merged, mw := discovery.MergeByPriority(ws, gl)
+		ws = merged
+		warns = append(warns, mw...)
+	} else {
+		warns = append(warns, discovery.Warning{Message: gerr.Error()})
+	}
+	baseIDs := map[string]bool{}
+	for _, sc := range s.baseScripts {
+		if sc.Manifest != nil {
+			baseIDs[sc.Manifest.ID] = true
+		}
+	}
+	out := make([]discovery.Plugin, 0, len(ws))
+	for _, p := range ws {
+		if baseIDs[p.ID()] {
+			warns = append(warns, discovery.Warning{
+				PluginID: p.ID(), Dir: p.Dir,
+				Message: "与随包插件同 id，忽略磁盘版本（随包插件不可被同名包覆盖，6.9）",
+			})
+			continue
+		}
+		out = append(out, p)
+	}
+	return out, warns
+}
+
+// logWarnings 把发现警告送进日志通道（未配置日志时丢弃）。
+func (s *Session) logWarnings(warnings []discovery.Warning) {
+	if s.cfg.Log == nil {
+		return
+	}
+	for _, w := range warnings {
+		s.cfg.Log("warn", "插件发现警告: "+w.String(), map[string]any{"pluginId": w.PluginID})
+	}
+}
+
+// listPluginMeta 读取 plugin_meta；读失败按空表处理（启用状态缺省 enabled）。
+func (s *Session) listPluginMeta(ctx context.Context) map[string]sqlite.PluginMetaRecord {
+	out := map[string]sqlite.PluginMetaRecord{}
+	rows, err := s.store.ListPluginMeta(ctx)
+	if err != nil {
+		return out
+	}
+	for _, r := range rows {
+		out[r.ID] = r
+	}
+	return out
+}
+
+// pluginSelection 决定本次装配的第三方与被禁用的随包插件：
+// 第三方按 plugin_meta.enabled 过滤（缺省 enabled），随包插件里 enabled=false 的进 disabled。
+func pluginSelection(discovered []discovery.Plugin, meta map[string]sqlite.PluginMetaRecord, base []host.Script) ([]host.Script, map[string]bool) {
+	extras := make([]host.Script, 0, len(discovered))
+	for _, p := range discovered {
+		if rec, ok := meta[p.ID()]; ok && !rec.Enabled {
+			continue
+		}
+		extras = append(extras, p.Script)
+	}
+	var disabled map[string]bool
+	for _, sc := range base {
+		if sc.Manifest == nil {
+			continue
+		}
+		if rec, ok := meta[sc.Manifest.ID]; ok && !rec.Enabled {
+			if disabled == nil {
+				disabled = map[string]bool{}
+			}
+			disabled[sc.Manifest.ID] = true
+		}
+	}
+	return extras, disabled
+}
+
+// syncPluginMeta 把当前发现的插件写进 plugin_meta（6.9：id+版本+指纹）：
+// 新插件缺省 enabled；已有记录保留用户启用状态；本次装配失败被隔离的插件
+// 记录 last_error，健康的插件清掉旧错误。随包插件同样落一行（否则 setEnabled
+// 会因缺行失败），指纹取嵌入 bundle 的哈希。
+func (s *Session) syncPluginMeta(ctx context.Context, discovered []discovery.Plugin, meta map[string]sqlite.PluginMetaRecord, failures map[string]string) error {
+	for _, sc := range s.baseScripts {
+		if sc.Manifest == nil {
+			continue
+		}
+		id := sc.Manifest.ID
+		enabled, lastErr := true, ""
+		if rec, ok := meta[id]; ok {
+			enabled = rec.Enabled
+			lastErr = rec.LastError
+		}
+		rec := sqlite.PluginMetaRecord{
+			ID: id, Version: sc.Manifest.Version, Enabled: enabled,
+			Fingerprint: fingerprintScript(sc), LastError: lastErr,
+		}
+		if err := s.store.UpsertPluginMeta(ctx, rec); err != nil {
+			return fmt.Errorf("cli: 写随包插件 %s 的元信息失败: %w", id, err)
+		}
+	}
+	for _, p := range discovered {
+		id := p.ID()
+		if id == "" || p.Script.Manifest == nil {
+			continue
+		}
+		enabled := true
+		if rec, ok := meta[id]; ok {
+			enabled = rec.Enabled
+		}
+		lastErr := ""
+		if msg, bad := failures[id]; bad {
+			lastErr = msg
+		}
+		rec := sqlite.PluginMetaRecord{
+			ID: id, Version: p.Script.Manifest.Version, Enabled: enabled,
+			Fingerprint: p.Fingerprint, LastError: lastErr,
+		}
+		if err := s.store.UpsertPluginMeta(ctx, rec); err != nil {
+			return fmt.Errorf("cli: 写插件 %s 的元信息失败: %w", id, err)
+		}
+	}
+	return nil
+}
+
+// blameThirdParty 从装配错误文本里归因到一个第三方插件 id。
+// app/host 的装配错误都带「插件 <id>」片段；按 id 长度降序取最长命中，避免前缀误伤。
+func blameThirdParty(err error, candidates []discovery.Plugin) string {
+	if err == nil {
+		return ""
+	}
+	text := err.Error()
+	best := ""
+	for _, p := range candidates {
+		id := p.ID()
+		if id == "" || !strings.Contains(text, "插件 "+id) {
+			continue
+		}
+		if best == "" || len(id) > len(best) {
+			best = id
+		}
+	}
+	return best
+}
+
+// fingerprintScript 是随包插件的指纹：清单身份 + 入口源码的 sha256 前 16 位
+// （对应「官方包指纹取嵌入 bundle 的哈希」，6.9）。
+func fingerprintScript(sc host.Script) string {
+	h := sha256.New()
+	if sc.Manifest != nil {
+		fmt.Fprintf(h, "%s\x00%s\x00", sc.Manifest.ID, sc.Manifest.Version)
+	}
+	h.Write([]byte(sc.Source))
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// reloadAssembly 重建装配并双代切换（6.9）：
+//
+//	发现第三方（警告即失败） → 按 plugin_meta 过滤 → app.AssembleWithExtras 构建新代
+//	→ 构建失败：保留旧代并返回错误（Core 不降级为空）
+//	→ 构建成功：等待在途轮次结束（上限 30s）→ 锁内替换目录与依赖 → 关闭旧代
+//
+// 随包插件的启停也在这里生效（pluginSelection 把 enabled=false 的随包 id 传给装配）。
+func (s *Session) reloadAssembly(ctx context.Context) error {
+	discovered, warnings := s.discoverThirdParty()
+	if len(warnings) > 0 {
+		msgs := make([]string, 0, len(warnings))
+		for _, w := range warnings {
+			msgs = append(msgs, w.String())
+		}
+		return fmt.Errorf("cli: 第三方插件发现失败，保留旧装配: %s", strings.Join(msgs, "; "))
+	}
+	meta := s.listPluginMeta(ctx)
+	extras, disabled := pluginSelection(discovered, meta, s.baseScripts)
+	newAsm, err := app.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, s.appDeps)
+	if err != nil {
+		return fmt.Errorf("cli: 重建装配失败，保留旧装配: %w", err)
+	}
+	// 等在途轮次结束再切换，避免杀掉在途的工具调用（双代语义）。
+	s.waitTurnsDrained(reloadDrainTimeout)
+	if err := s.installAssembly(newAsm); err != nil {
+		// 新目录没接上：旧装配保持原状；新代运行时关掉，不泄漏。
+		_ = newAsm.Close(context.Background())
+		return err
+	}
+	s.mu.Lock()
+	s.discovered = discovered
+	s.failedPlugins = map[string]string{}
+	s.mu.Unlock()
+	return s.syncPluginMeta(ctx, discovered, meta, nil)
+}
+
+// waitTurnsDrained 等待全部在途轮次结束（turnActive 计数归零）；超时返回 false。
+func (s *Session) waitTurnsDrained(max time.Duration) bool {
+	deadline := time.Now().Add(max)
+	for {
+		s.steerMu.Lock()
+		active := 0
+		for _, n := range s.turnActive {
+			active += n
+		}
+		s.steerMu.Unlock()
+		if active == 0 {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// discoveredSnapshot 返回第三方发现快照的副本。
+func (s *Session) discoveredSnapshot() []discovery.Plugin {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]discovery.Plugin(nil), s.discovered...)
+}
+
+// PluginView 是 plugin.list 的一行：运行时摘要 + 发现层信息。
+type PluginView struct {
+	ID          string
+	Name        string
+	Version     string
+	APIVersion  int
+	Trust       string
+	Enabled     bool
+	Status      string // ready | degraded | disabled | failed
+	Fingerprint string
+	LastError   string
+	// Source 是发现来源：""＝随包（官方）；workspace | global。
+	Source string
+	Tools  []string
+	Hooks  []string
+}
+
+// PluginViews 列出随包 + 第三方插件的当前状态（plugin.list 的数据源）。
+func (s *Session) PluginViews(ctx context.Context) []PluginView {
+	s.mu.Lock()
+	asm := s.asm
+	base := s.baseScripts
+	discovered := append([]discovery.Plugin(nil), s.discovered...)
+	failed := map[string]string{}
+	for id, msg := range s.failedPlugins {
+		failed[id] = msg
+	}
+	s.mu.Unlock()
+
+	meta := s.listPluginMeta(ctx)
+	out := make([]PluginView, 0, len(base)+len(discovered)+len(failed))
+	seen := map[string]bool{}
+	for _, sc := range base {
+		if sc.Manifest == nil {
+			continue
+		}
+		id := sc.Manifest.ID
+		seen[id] = true
+		rec, hasRec := meta[id]
+		out = append(out, pluginViewOf(sc, "", nil, rec, hasRec, asm))
+	}
+	for _, p := range discovered {
+		id := p.ID()
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		rec, hasRec := meta[id]
+		out = append(out, pluginViewOf(p.Script, p.Source, &p, rec, hasRec, asm))
+	}
+	for id, msg := range failed {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		v := PluginView{ID: id, Status: "failed", LastError: msg, Enabled: true,
+			Trust: string(plugins.TrustThirdParty)}
+		if rec, ok := meta[id]; ok {
+			v.Enabled = rec.Enabled
+			v.Version = rec.Version
+		}
+		out = append(out, v)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// pluginViewOf 把一份脚本 + 元信息 + 运行时状态合成一行视图。
+// recOK 为 false 表示 plugin_meta 还没有这一行（缺省 enabled）。
+func pluginViewOf(sc host.Script, source string, p *discovery.Plugin, rec sqlite.PluginMetaRecord, recOK bool, asm *app.Assembly) PluginView {
+	v := PluginView{Source: source}
+	m := sc.Manifest
+	if m == nil {
+		return v
+	}
+	v.ID, v.Name, v.Version = m.ID, m.Name, m.Version
+	v.APIVersion = m.APIVersion
+	v.Trust = string(m.Trust)
+	v.Enabled = !recOK || rec.Enabled
+	if p != nil {
+		v.Fingerprint = p.Fingerprint
+	} else {
+		v.Fingerprint = fingerprintScript(sc)
+	}
+	if recOK {
+		v.LastError = rec.LastError
+	}
+	if !v.Enabled {
+		v.Status = "disabled"
+		return v
+	}
+	if asm != nil {
+		if inst, ok := asm.Plugin(m.ID); ok {
+			sum := inst.Summary()
+			v.Status = sum.Status
+			if sum.LastError != "" {
+				v.LastError = sum.LastError
+			}
+			v.Tools = sum.Tools
+			v.Hooks = sum.Hooks
+			return v
+		}
+	}
+	// 已启用但没有运行时结果：装配失败被隔离（last_error 已记录）或尚未装配。
+	v.Status = "failed"
+	if v.LastError == "" {
+		v.LastError = "已启用但未出现在当前装配中"
+	}
+	return v
+}
+
+// viewFor 返回单个插件视图（setEnabled 的返回值）。
+func (s *Session) viewFor(ctx context.Context, id string) PluginView {
+	for _, v := range s.PluginViews(ctx) {
+		if v.ID == id {
+			return v
+		}
+	}
+	return PluginView{ID: id, Status: "failed", LastError: "插件不在当前视图里"}
+}
+
+// lookupPlugin 找一个插件的脚本、来源与指纹（随包 base 优先，其次第三方快照）。
+func (s *Session) lookupPlugin(id string) (host.Script, string, string, bool) {
+	for _, sc := range s.baseScripts {
+		if sc.Manifest != nil && sc.Manifest.ID == id {
+			return sc, "", fingerprintScript(sc), true
+		}
+	}
+	for _, p := range s.discoveredSnapshot() {
+		if p.ID() == id {
+			return p.Script, p.Source, p.Fingerprint, true
+		}
+	}
+	return host.Script{}, "", "", false
+}
+
+// hasToolPolicyRole 报告清单是否声明了审批策略角色（与 app.isPolicyPlugin 同口径；
+// 这里是 Session 侧的门禁预检，基座仍不解释策略规则，5.4）。
+func hasToolPolicyRole(m *plugins.Manifest) bool {
+	if m == nil || m.Backend == nil {
+		return false
+	}
+	for _, r := range m.Backend.Roles {
+		if r == plugins.RoleToolPolicy {
+			return true
+		}
+	}
+	return false
+}
+
+// hasNonReadToolsExcluding 报告当前目录里是否仍有其它插件贡献的非只读工具。
+func (s *Session) hasNonReadToolsExcluding(ctx context.Context, pluginID string) bool {
+	asm := s.Assembly()
+	if asm == nil {
+		return false
+	}
+	for _, d := range asm.Tools.List(ctx) {
+		if d.PluginID != pluginID && d.Access != domain.AccessRead {
+			return true
+		}
+	}
+	return false
+}
+
+// ReloadPlugins 重载插件（plugin.reload）：pluginId 为空重载全部第三方
+// （整装配重建、双代切换）；指定第三方 id 时走同一条重建路径；指定随包插件时
+// 原地重建其 Runtime（同代，登记表必须与已提交贡献一致）。返回重载后的视图。
+func (s *Session) ReloadPlugins(ctx context.Context, pluginID string) ([]PluginView, error) {
+	pluginID = strings.TrimSpace(pluginID)
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	if pluginID != "" {
+		for _, sc := range s.baseScripts {
+			if sc.Manifest == nil || sc.Manifest.ID != pluginID {
+				continue
+			}
+			asm := s.Assembly()
+			if asm == nil {
+				return nil, errors.New("cli: 会话没有装配结果")
+			}
+			inst, ok := asm.Plugin(pluginID)
+			if !ok {
+				return nil, fmt.Errorf("cli: 插件 %s 当前未装配（可能已被禁用）", pluginID)
+			}
+			if err := inst.Reload(ctx); err != nil {
+				return nil, err
+			}
+			return s.PluginViews(ctx), nil
+		}
+		found := false
+		for _, p := range s.discoveredSnapshot() {
+			if p.ID() == pluginID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("cli: 没有发现插件 %q（先安装到 <workspace>/.adago/plugins/<id> 再重载）", pluginID)
+		}
+	}
+	if err := s.reloadAssembly(ctx); err != nil {
+		return nil, err
+	}
+	return s.PluginViews(ctx), nil
+}
+
+// SetPluginEnabled 启用/禁用插件（plugin.setEnabled）：先落 plugin_meta，再双代重载。
+//
+//   - 第三方禁用后从目录摘除（INV-11：禁用即能力消失），启用后恢复；
+//   - 随包插件禁用后本次装配容忍缺席，但禁用唯一策略插件且目录里仍有写/执行工具时
+//     直接拒绝（失败关闭，5.4）；
+//   - 重载失败时回滚 meta 并返回错误（运行中的旧代保持原样）。
+func (s *Session) SetPluginEnabled(ctx context.Context, pluginID string, enabled bool) (PluginView, error) {
+	pluginID = strings.TrimSpace(pluginID)
+	if pluginID == "" {
+		return PluginView{}, errors.New("cli: 需要 pluginId")
+	}
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	script, _, fp, ok := s.lookupPlugin(pluginID)
+	if !ok {
+		return PluginView{}, fmt.Errorf("cli: 没有发现插件 %q", pluginID)
+	}
+	if !enabled && hasToolPolicyRole(script.Manifest) && s.hasNonReadToolsExcluding(ctx, pluginID) {
+		return PluginView{}, domain.NewError(domain.CodePluginDenied,
+			fmt.Sprintf("插件 %s 是审批策略插件，目录里仍有写/执行工具，禁用会被拒绝（失败关闭，5.4）", pluginID))
+	}
+	meta := s.listPluginMeta(ctx)
+	prev, hadPrev := meta[pluginID]
+	prevEnabled := true
+	if hadPrev {
+		prevEnabled = prev.Enabled
+	}
+	rec := sqlite.PluginMetaRecord{
+		ID: pluginID, Version: manifestVersionOf(script), Enabled: enabled, Fingerprint: fp,
+	}
+	if err := s.store.UpsertPluginMeta(ctx, rec); err != nil {
+		return PluginView{}, err
+	}
+	if err := s.reloadAssembly(ctx); err != nil {
+		// 回滚 meta，与仍在运行的旧代保持一致。
+		rollback := rec
+		rollback.Enabled = prevEnabled
+		rollback.LastError = prev.LastError
+		_ = s.store.UpsertPluginMeta(ctx, rollback)
+		return PluginView{}, err
+	}
+	return s.viewFor(ctx, pluginID), nil
+}
+
+// manifestVersionOf 取清单版本（缺清单时用占位版本，plugin_meta 需要非空行）。
+func manifestVersionOf(sc host.Script) string {
+	if sc.Manifest == nil || sc.Manifest.Version == "" {
+		return "0.0.0"
+	}
+	return sc.Manifest.Version
+}
+
+// ListPluginMetaOffline 用只读连接读取插件启用状态（adag plugin list 用）。
+// 数据库还不存在时返回空表：插件目录可以先安装、后启动。
+func ListPluginMetaOffline(ctx context.Context, workspace, dataDir string) (map[string]sqlite.PluginMetaRecord, error) {
+	abs, dir, err := paths(workspace, dataDir)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(sqlite.StateDBPath(dir)); err != nil {
+		return map[string]sqlite.PluginMetaRecord{}, nil
+	}
+	r, err := sqlite.OpenReadOnly(ctx, sqlite.Config{Workspace: abs, DataDir: dir})
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	rows, err := r.ListPluginMeta(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]sqlite.PluginMetaRecord{}
+	for _, rec := range rows {
+		out[rec.ID] = rec
+	}
+	return out, nil
 }
 
 // interactionStore 把 coreproto 的持久化回调接到 SQLite（04 interactions 表）。

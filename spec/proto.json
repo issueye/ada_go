@@ -329,6 +329,7 @@
         "status": { "type": "string", "enum": ["ready", "degraded", "disabled", "failed"], "description": "degraded=运行时脏待重建；连续 3 次失败自动禁用" },
         "fingerprint": { "type": "string", "description": "文件指纹；第三方指纹变化才重新编译" },
         "lastError": { "type": "string", "description": "最近装配/运行错误，写入 plugin_meta.last_error 并显示到页面" },
+        "source": { "type": "string", "enum": ["workspace", "global"], "description": "第三方插件的安装来源（M3 发现/安装）；随包插件省略" },
         "contributions": {
           "type": "object",
           "additionalProperties": false,

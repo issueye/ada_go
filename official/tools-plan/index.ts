@@ -30,8 +30,17 @@ interface ToolDef {
   execute: (args: any, ctx: ToolContext) => unknown;
 }
 
+interface ActionDef {
+  name: string;
+  label?: string;
+  mode: "read" | "write";
+  confirm?: string;
+  execute: (input: any, ctx: ToolContext) => unknown;
+}
+
 interface AgentAPI {
   registerTool(def: ToolDef): void;
+  registerAction(def: ActionDef): void;
 }
 
 const STATE_KEY = "plan";
@@ -69,6 +78,12 @@ function render(steps: PlanStep[]): string {
   const lines = steps.map((s, i) => `${i + 1}. ${mark(s.status)} ${s.step}`);
   const done = steps.filter((s) => s.status === "done").length;
   return `当前计划（${done}/${steps.length} 完成）：\n` + lines.join("\n");
+}
+
+// planView 是给前端（ui-task-plan）的结构化视图：total=0 表示当前没有计划。
+function planView(steps: PlanStep[]): { done: number; total: number; steps: PlanStep[] } {
+  const done = steps.filter((s) => s.status === "done").length;
+  return { done, total: steps.length, steps };
 }
 
 function requireState(ctx: ToolContext): StateBridge {
@@ -130,6 +145,18 @@ export default function (agent: AgentAPI): void {
         content: [{ type: "text", text: render(steps) }],
         details: { steps },
       };
+    },
+  });
+
+  // 只读动作 plan：给 ui-task-plan 的 thread.tray 卡片取数（7.5 的 action.invoke 桥）。
+  // 返回 { plan }；total=0 表示当前线程没有计划（前端据此不画卡）。
+  agent.registerAction({
+    name: "plan",
+    mode: "read",
+    execute: async (_input: any, ctx: ToolContext) => {
+      const raw = await requireState(ctx).get<PlanStep[]>(STATE_KEY);
+      const steps = Array.isArray(raw) ? raw : [];
+      return { plan: planView(steps) };
     },
   });
 }

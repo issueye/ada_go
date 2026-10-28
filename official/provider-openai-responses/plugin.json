@@ -1,0 +1,13 @@
+{
+  "id": "provider-openai-responses",
+  "name": "OpenAI Responses 供应商",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "OpenAI Responses API 流式适配器（output_text/reasoning_summary/function_call 增量 → 归一化 Delta，终止信号 response.completed）",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts",
+    "capabilities": ["net.sse"],
+    "secrets": ["openai_api_key"]
+  }
+}

@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/adag/ada-go/app"
 	"github.com/adag/ada-go/internal/gateway"
 )
 
@@ -46,6 +47,10 @@ func runGateway(args []string, stdout io.Writer) error {
 
 	accessToken := strings.TrimSpace(os.Getenv("ADAG_GATEWAY_TOKEN"))
 	generated := accessToken == ""
+	frontendScripts, err := app.FrontendScripts()
+	if err != nil {
+		return err
+	}
 	cfg := gateway.Config{
 		Workspaces: workspaces, Product: *product,
 		Provider: *provider, Model: *model, BaseURL: *baseURL,
@@ -53,7 +58,8 @@ func runGateway(args []string, stdout io.Writer) error {
 		Token:     accessToken,
 		CoreToken: strings.TrimSpace(os.Getenv("ADAG_CORE_TOKEN")),
 		MaxCores:  *maxCores, Idle: *idle,
-		Secure: false,
+		Secure:          false,
+		FrontendScripts: frontendScripts,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -17,7 +17,8 @@
 <link rel="stylesheet" href="/static/ui/shell.css">
 <link rel="stylesheet" href="/static/ui/pages.css">
 <link rel="stylesheet" href="/static/app-local.css">
-</head>
+{{range .PluginStyles}}<link rel="stylesheet" href="{{.}}">
+{{end}}</head>
 <body class="ada-body">
 <a class="skip-link" href="#main">跳到主要内容</a>
 {{.Icons}}
@@ -31,12 +32,12 @@
           <span class="ada-brand__badge">SSR</span>
         </span>
       </a>
-      {{slot "sidebar.top" .Slots.SidebarTop 0 ""}}
+      {{slot "sidebar.top" .Slots.SidebarTop .SlotCounts.SidebarTop ""}}
       <nav class="ada-nav" aria-label="主导航">
         <a class="ada-nav__item" href="/"><span class="ada-nav__text">会话</span></a>
         <a class="ada-nav__item" href="/threads"><span class="ada-nav__text">全部会话</span></a>
       </nav>
-      {{slot "sidebar.bottom" .Slots.SidebarBottom 0 ""}}
+      {{slot "sidebar.bottom" .Slots.SidebarBottom .SlotCounts.SidebarBottom ""}}
       <div class="ada-sidebar__foot">
         {{if .ShowWorkspacePicker}}
         <form class="workspace-picker" method="post" action="/workspace">
@@ -63,7 +64,7 @@
         <span class="ada-chip">{{.ProductName}}</span>
       </div>
       <div class="ada-topbar__actions">
-        {{slot "topbar.right" .Slots.TopbarRight 0 ""}}
+        {{slot "topbar.right" .Slots.TopbarRight .SlotCounts.TopbarRight ""}}
       </div>
     </header>
 {{end}}
@@ -71,7 +72,8 @@
 {{define "foot"}}
   </main>
 </div>
-</body>
+{{range .PluginScripts}}<script src="{{.}}" defer></script>
+{{end}}</body>
 </html>
 {{end}}
 

@@ -152,8 +152,29 @@ type baseData struct {
 	// Slots 是 12 个稳定插槽的 SSR 宿主内容。M2 阶段由基座保持为空，
 	// M4 接上插件宿主后由渲染结果填充；模板通过 {{slot ...}} 落位。
 	Slots slotViews
+	// SlotCounts 是每个插槽的贡献者数量（data-contributors）；PluginUI 缺席时全为 0。
+	SlotCounts slotCounts
+	// PluginStyles / PluginScripts 是插件静态资源的 URL（/ext/{id}/static/...）。
+	PluginStyles  []string
+	PluginScripts []string
 	// Icons 是页面级 SVG 雪碧图/图标 HTML（M2 先为空，图标仍在模板内联）。
 	Icons template.HTML
+}
+
+// slotCounts 是 12 个插槽的贡献者计数，字段与 slotViews 一一对应。
+type slotCounts struct {
+	SidebarTop       int
+	SidebarBottom    int
+	TopbarRight      int
+	ChatCorner       int
+	ComposerLeft     int
+	ComposerRight    int
+	ComposerFooter   int
+	ComposerAbove    int
+	ThreadTray       int
+	TranscriptAfter  int
+	ExtensionsList   int
+	DashboardWidgets int
 }
 
 // slotViews 是 12 个插槽的模板字段，字段名与 7.2 表格一一对应。

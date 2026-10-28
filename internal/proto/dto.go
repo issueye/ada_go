@@ -273,15 +273,17 @@ type UsageDelta struct {
 
 // PluginSummary 是插件状态摘要（不含密钥与宿主路径细节）。
 type PluginSummary struct {
-	ID            string         `json:"id"`
-	Name          string         `json:"name"`
-	Version       string         `json:"version"`
-	APIVersion    int            `json:"apiVersion,omitempty"`
-	Trust         string         `json:"trust"`
-	Enabled       bool           `json:"enabled"`
-	Status        string         `json:"status"` // ready | degraded | disabled | failed
-	Fingerprint   string         `json:"fingerprint"`
-	LastError     string         `json:"lastError,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	APIVersion  int    `json:"apiVersion,omitempty"`
+	Trust       string `json:"trust"`
+	Enabled     bool   `json:"enabled"`
+	Status      string `json:"status"` // ready | degraded | disabled | failed
+	Fingerprint string `json:"fingerprint"`
+	LastError   string `json:"lastError,omitempty"`
+	// Source 是第三方插件的来源（workspace|global）；随包插件省略（M3 安装/发现）。
+	Source        string         `json:"source,omitempty"`
 	Contributions map[string]any `json:"contributions,omitempty"`
 }
 
