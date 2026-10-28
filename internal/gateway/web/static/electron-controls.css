@@ -1,0 +1,25 @@
+/* ada-go 桌面壳（Electron）的窗口控制样式（docs/desktop-shell.md）。
+   由 preload 注入 <link> 引用——不内联，遵守 CSP style-src 'self'。
+   浏览器场景没有 .ada-electron-controls 元素，本文件是空操作。 */
+  .ada-topbar { position: relative; z-index: 100; -webkit-app-region: drag; app-region: drag; }
+  .ada-topbar button, .ada-topbar a, .ada-topbar summary, .ada-topbar input,
+  .ada-topbar select, .ada-topbar textarea, .ada-topbar [role="button"],
+  .ada-electron-controls {
+    -webkit-app-region: no-drag; app-region: no-drag;
+  }
+  .ada-electron-controls {
+    display: flex; align-items: center; gap: 2px; margin-left: 6px;
+    padding-left: 8px; border-left: 1px solid var(--ph-line, #3f3f46);
+  }
+  .ada-electron-controls button {
+    width: 30px; height: 30px; display: grid; place-items: center;
+    border: 0; border-radius: 6px; background: transparent;
+    color: var(--ph-muted, #a1a1aa); cursor: pointer; padding: 0;
+  }
+  .ada-electron-controls button:hover {
+    background: var(--ph-hover, rgba(161, 161, 170, 0.16));
+    color: var(--ph-text, #e4e4e7);
+  }
+  .ada-electron-controls button[data-action="close"]:hover {
+    background: #e11d48; color: #fff;
+  }

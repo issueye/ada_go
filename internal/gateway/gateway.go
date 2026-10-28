@@ -196,9 +196,32 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 
 	g := &Gateway{
 		cfg: cfg, product: product, token: accessToken, sup: sup, ownSup: ownSup, web: webSrv,
-		handler: mw.Wrap(root),
+		handler: tokenLoginGate{next: mw.Wrap(root), mw: mw},
 	}
 	return g, nil
+}
+
+// tokenLoginGate 支持「?token= 自动登录」（a_da 桌面壳/托盘的同款语义）：
+// GET 带 token 且匹配 → 下发会话 cookie → 303 到去掉 token 的同路径，
+// 网关令牌不留在地址栏与历史记录；不匹配/缺失则走正常鉴权链。
+type tokenLoginGate struct {
+	next http.Handler
+	mw   *security.Middleware
+}
+
+func (h tokenLoginGate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		if tk := r.URL.Query().Get("token"); tk != "" && h.mw.CheckToken(tk) {
+			h.mw.IssueSession(w, r)
+			u := *r.URL
+			q := u.Query()
+			q.Del("token")
+			u.RawQuery = q.Encode()
+			http.Redirect(w, r, u.RequestURI(), http.StatusSeeOther)
+			return
+		}
+	}
+	h.next.ServeHTTP(w, r)
 }
 
 // Handler 返回可直接挂到 http.Server 的 handler。

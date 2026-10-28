@@ -24,3 +24,9 @@ coverage.*
 Thumbs.db
 
 # 注意：official/*/**/dist/ 是 go:embed 的提交产物，不忽略。
+
+# 桌面壳（Electron）
+desktop/node_modules/
+desktop/bin/
+desktop/products/
+desktop/dist/

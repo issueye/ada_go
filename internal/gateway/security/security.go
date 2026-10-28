@@ -163,6 +163,11 @@ func (m *Middleware) CSRFToken(r *http.Request) string {
 	return ""
 }
 
+// CheckToken 常量时间校验一个访问令牌（桌面壳/托盘的 `?token=` 自动登录用）。
+func (m *Middleware) CheckToken(token string) bool {
+	return m.token != "" && secureEqual(token, m.token)
+}
+
 // IssueSession 下发会话 cookie（v1 单用户：值就是 Token）与随机 CSRF cookie。
 func (m *Middleware) IssueSession(w http.ResponseWriter, _ *http.Request) {
 	http.SetCookie(w, &http.Cookie{

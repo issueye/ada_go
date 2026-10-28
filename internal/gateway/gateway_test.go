@@ -140,3 +140,70 @@ func TestGatewayHandlerCoreErrorPage(t *testing.T) {
 		t.Fatalf("错误页缺少「Core 暂时不可用」；正文片段: %.800s", body)
 	}
 }
+
+// TestGatewayTokenQueryLogin 钉「?token= 自动登录」语义（桌面壳/托盘，docs/desktop-shell.md）：
+// 匹配 → 下发 cookie 并 303 去掉 query；不匹配 → 走正常鉴权链（303 /login）。
+func TestGatewayTokenQueryLogin(t *testing.T) {
+	gw, err := gateway.New(context.Background(), gateway.Config{
+		Workspace: t.TempDir(),
+		Product:   filepath.Join("..", "..", "products", "headless.agent.json"),
+		Token:     "secret-token",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = gw.Shutdown(context.Background()) }()
+	ts := httptest.NewServer(gw.Handler())
+	defer ts.Close()
+
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse // 不跟随 303，直接断言重定向本身。
+	}}
+	resp, err := client.Get(ts.URL + "/?token=secret-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("status = %d，期望 303", resp.StatusCode)
+	}
+	if loc := resp.Header.Get("Location"); strings.Contains(loc, "token=") {
+		t.Fatalf("重定向仍带 token: %s", loc)
+	}
+	var session, csrf *http.Cookie
+	for _, c := range resp.Cookies() {
+		switch c.Name {
+		case "adag_session":
+			session = c
+		case "adag_csrf":
+			csrf = c
+		}
+	}
+	if session == nil || session.Value != "secret-token" || csrf == nil {
+		t.Fatalf("登录 cookie 不完整: session=%v csrf=%v", session, csrf)
+	}
+
+	// 带 cookie 的后续请求应通过鉴权（登录页 200，而不是 303）。
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/login", nil)
+	req.AddCookie(session)
+	resp2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("带会话 cookie 的 /login = %d，期望 200", resp2.StatusCode)
+	}
+
+	// 错误 token：不应发会话 cookie。
+	resp3, err := http.Get(ts.URL + "/?token=wrong")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp3.Body.Close()
+	for _, c := range resp3.Cookies() {
+		if c.Name == "adag_session" {
+			t.Fatal("错误 token 不应下发会话 cookie")
+		}
+	}
+}

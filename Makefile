@@ -123,3 +123,34 @@ release:
 		echo "ERROR: release produced no binaries"; exit 1; \
 	fi
 	@cd $(RELEASE_DIR) && sha256sum adag-* > sha256sums.txt && cat sha256sums.txt
+
+# ── 桌面壳（Electron，迁移自 a_da，MIT）────────────────────────────────
+# 说明：recipe 字符串全 ASCII（mingw32-make 在 Windows 代码页下传中文会破坏引号）。
+#   make desktop      拷贝 adag 二进制 + 产品声明到 desktop/，并以冒烟模式启动一次
+#   make desktop-dev  拷贝后进入交互模式（需要本机 npm install 过 electron）
+#   make desktop-pack 拷贝后 electron-builder --win dir（需要 npm install）
+
+DESKTOP_DIR  := desktop
+DESKTOP_BIN  := $(DESKTOP_DIR)/bin
+DESKTOP_PROD := $(DESKTOP_DIR)/products
+DESKTOP_EXE  := $(DESKTOP_BIN)/adag$(shell go env GOEXE 2>/dev/null || echo .exe)
+
+$(DESKTOP_EXE): FORCE
+	@mkdir -p $(DESKTOP_BIN)
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(DESKTOP_EXE) ./cmd/adag
+
+$(DESKTOP_PROD)/headless.agent.json: FORCE
+	@mkdir -p $(DESKTOP_PROD)
+	cp products/headless.agent.json $(DESKTOP_PROD)/headless.agent.json
+
+.PHONY: desktop desktop-dev desktop-pack
+desktop: $(DESKTOP_EXE) $(DESKTOP_PROD)/headless.agent.json
+	cd $(DESKTOP_DIR) && ADAGO_DESKTOP_SMOKE=1 npx --yes electron@33.2.1 . || echo "(smoke run finished; see %USERPROFILE%/.adago/launcher.log)"
+
+desktop-dev: $(DESKTOP_EXE) $(DESKTOP_PROD)/headless.agent.json
+	cd $(DESKTOP_DIR) && npx --yes electron@33.2.1 .
+
+desktop-pack: $(DESKTOP_EXE) $(DESKTOP_PROD)/headless.agent.json
+	cd $(DESKTOP_DIR) && npm install --no-fund --no-audit && npx electron-builder --win dir
+
+FORCE:

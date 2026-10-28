@@ -33,6 +33,7 @@ ada-go 是本地优先、单二进制、插件优先的 Agent 系统：Gateway �
 | [development-plan.md](development-plan.md) | 实施计划 | M0–M5 任务分解、依赖与关键路径、工作量、质量门禁、发布节奏、交付状态盘点 |
 | [performance.md](performance.md) | §12 附件 | 性能基线：实测数字、采样方法、排查阈值（M5） |
 | [release-m5.md](release-m5.md) | §10 附件 | M5 发布清单：三平台产物、升级/备份/恢复步骤、审计接线、已知限制 |
+| [desktop-shell.md](desktop-shell.md) | 桌面壳 | Electron 壳（迁移自 a_da）：拉起网关、`?token=` 登录、无边框窗口控制、打包与已知限制 |
 | [decisions.md](decisions.md) | 工程决策 | 启动前开放项的钉定取值（模块路径、Go/moejs 基线、a_da commit、真源分层）与契约缺口台账 |
 
 ## 阅读路径

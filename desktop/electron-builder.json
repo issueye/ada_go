@@ -1,0 +1,33 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.adag.desktop",
+  "productName": "ada-go",
+  "copyright": "Copyright © 2026 ada-go",
+  "directories": {
+    "output": "dist",
+    "buildResources": "build"
+  },
+  "files": [
+    "main.cjs",
+    "preload.cjs",
+    "package.json"
+  ],
+  "extraResources": [
+    { "from": "bin", "to": "bin", "filter": ["adag.exe", "adag"] },
+    { "from": "products", "to": "products" }
+  ],
+  "win": {
+    "target": [
+      { "target": "dir", "arch": ["x64"] }
+    ],
+    "executableName": "adag-desktop",
+    "icon": "build/app.ico"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "ada-go"
+  }
+}
