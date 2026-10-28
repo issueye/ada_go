@@ -1,0 +1,23 @@
+{
+  "id": "skeleton",
+  "name": "ada-go Skeleton",
+  "description": "空基座：只证明产品是一份声明，基座无业务兜底。plugins 为空数组时装配不产生任何工具、provider、策略或页面；禁用/缺失即能力消失的反证由这份声明驱动（M0 退出标准）。",
+  "plugins": [],
+  "capabilities": {
+    "skills": false,
+    "images": false,
+    "subagents": false
+  },
+  "identity": {
+    "name": "ada-go",
+    "locale": "zh-CN"
+  },
+  "policies": {
+    "toolTimeoutMs": 120000,
+    "turnTimeoutMs": 0,
+    "maxTurnTokens": 0,
+    "loopRepeatLimit": 3,
+    "loopAbortLimit": 5,
+    "parallelTools": 1
+  }
+}

@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/adag/ada-go/spec/product.schema.json",
+  "title": "ada-go 产品声明 *.agent.json（M0 契约冻结，唯一手写源）",
+  "description": "products/<id>.agent.json 的 JSON Schema（§8.6）。产品只是一份声明：基座源码不出现官方插件 id，启用哪些插件、开哪些功能、跑什么执行参数全部由这份声明决定；adag verify 逐字段查找消费者，找不到消费者就构建失败。校验失败即装配失败。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "plugins"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,63}$",
+      "description": "产品标识，等于文件名 <id>.agent.json；由配置 [agent].product 选择。",
+      "x-consumer": "coreapp: 按配置 agent.product 加载 products/<id>.agent.json；system.hello/workspace.info/evt.ready 上报产品 id"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "产品显示名（如 \"ada-go Coding\"）。",
+      "x-consumer": "gateway/web: 外壳与页面标题中的产品展示名"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "description": "人读的产品定位说明（可选；§8.6 样例未含此字段，skeleton 用它声明「空基座」意图）。",
+      "x-consumer": "adag verify/doctor: 输出产品意图与空基座退出标准核对；不进入装配路径"
+    },
+    "plugins": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/pluginId" },
+      "uniqueItems": true,
+      "description": "随包官方插件的启用清单；第三方插件由发现目录与用户启用状态决定，装配时合并（§8.6 消费者表）。空数组合法：products/skeleton.agent.json 用 plugins: [] 证明「产品只是一份声明、空基座可运行」（§8.6/M0 退出标准）。清单里的官方插件必须存在且 id 匹配，禁用后对应能力必须消失。",
+      "x-consumer": "coreapp: 装配期只加载并提交本清单内的官方插件贡献；gateway/web: 插件列表按启用状态展示；adag verify: 核对每个 id 有对应官方插件"
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["skills", "images", "subagents"],
+      "description": "功能开关容器（§8.6：三个布尔，全部必须有消费者：技能装配、图片输入门、子智能体装配）。",
+      "x-consumer": "coreapp: 按开关裁剪装配路径（技能注入、图片输入、子智能体）；关闭后对应工具与 UI 入口消失",
+      "properties": {
+        "skills": {
+          "type": "boolean",
+          "description": "技能装配开关：扫描 plugins/<id>/skills/ 与工作区 .adago/skills/，注入 name/description 并挂 read_skill（§6.7）。",
+          "x-consumer": "coreapp: 技能装配与系统提示 XML 片段注入；false 时 read_skill 不进工具目录"
+        },
+        "images": {
+          "type": "boolean",
+          "description": "图片输入门：Composer 附件与模型多模态输入（PNG/JPEG/WebP/GIF，单张 ≤8MB、最多 4 张，§7.7.4）。",
+          "x-consumer": "gateway/web: Composer 图片附件入口渲染与否；engine: 多模态消息是否放行"
+        },
+        "subagents": {
+          "type": "boolean",
+          "description": "子智能体装配开关（v1.5；coding 样例为 false——子智能体是 v1.5，tools-subagent 不在 v1 清单）。",
+          "x-consumer": "coreapp: 子智能体装配与 subagent.invoke 链路是否建立"
+        }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "locale"],
+      "description": "界面品牌与语言；不含人格——人格来自 persona-* 插件（§8.6 消费者表）。",
+      "x-consumer": "gateway/web: 品牌与语言的整体来源；adag verify: 核对声明中不混入人格字段",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "界面品牌名（如 \"ada-go\"）。",
+          "x-consumer": "gateway/web: 界面品牌（侧栏品牌区与文案中的产品名）"
+        },
+        "locale": {
+          "type": "string",
+          "pattern": "^[a-zA-Z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+          "description": "界面语言（BCP 47 形如 zh-CN）。",
+          "x-consumer": "gateway/web: 界面语言（文案、日期与数字本地化）"
+        }
+      }
+    },
+    "policies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["toolTimeoutMs", "turnTimeoutMs", "maxTurnTokens", "loopRepeatLimit", "loopAbortLimit", "parallelTools"],
+      "description": "引擎执行参数：并发、单工具超时、可选的墙钟/token 上限、循环检测阈值；不含审批规则——审批属于 policy-* 插件自己的设置（§8.6 消费者表）。",
+      "x-consumer": "engine: 轮次与工具调用的执行参数整体来源；workspace.updatePolicy 可运行时覆盖（§8.2）",
+      "properties": {
+        "toolTimeoutMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "单工具默认预算（毫秒）；ToolDef.timeoutMs 未声明时生效（0=用宿主默认 120000）。",
+          "x-consumer": "engine: 工具调用超时预算；超时记 plugin_timeout（3003）"
+        },
+        "turnTimeoutMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "轮次墙钟上限（毫秒），0=不限制（默认关闭，显式配置才启用，§8.5/2003、附录 B turn_timeout）。步数/工具调用次数不是上限。",
+          "x-consumer": "engine: 轮次墙钟判定；超限按 budget_exceeded（2003）结束"
+        },
+        "maxTurnTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "轮次 token 上限，0=不限制（默认关闭，需要成本上限时显式配置，附录 B max_turn_tokens）。",
+          "x-consumer": "engine: 轮次 token 预算判定；超限按 budget_exceeded（2003）结束"
+        },
+        "loopRepeatLimit": {
+          "type": "integer",
+          "minimum": 2,
+          "description": "连续相同工具调用达到该次数先回错误回执（默认 3；repeatable 轮询类工具不参与循环检测，§6.3）。",
+          "x-consumer": "engine: 循环检测第一档（回错误提示模型改道）"
+        },
+        "loopAbortLimit": {
+          "type": "integer",
+          "minimum": 3,
+          "description": "仍未改道则按 error 结束（默认 5；loop_detected 2005）。宿主校验 loopAbortLimit ≥ loopRepeatLimit（跨字段规则由 coreapp 装配期检查）。",
+          "x-consumer": "engine: 循环检测第二档（终止轮次，错误码 loop_detected）"
+        },
+        "parallelTools": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "一轮内并行执行的工具数（1=顺序执行；>1 仅对 parallelSafe 工具生效，§6.3）。",
+          "x-consumer": "engine: 工具调度并发度"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "pluginId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,63}$",
+      "description": "插件 id 引用，与 manifest 顶层 id 同规则（§6.2）。"
+    }
+  }
+}

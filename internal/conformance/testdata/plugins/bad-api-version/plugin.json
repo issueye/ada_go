@@ -1,0 +1,12 @@
+{
+  "id": "bad-api-version",
+  "name": "主版本不符",
+  "version": "0.1.0",
+  "apiVersion": 2,
+  "description": "负面夹具：apiVersion=2，宿主只支持主版本 1（6.2：主版本不匹配直接拒绝加载）",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts",
+    "capabilities": ["state"]
+  }
+}

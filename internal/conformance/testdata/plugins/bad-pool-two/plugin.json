@@ -1,0 +1,13 @@
+{
+  "id": "bad-pool-two",
+  "name": "请求两个 Runtime",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "负面夹具：backend.pool=2（6.4：v1 固定每插件 1 个 Runtime，声明即装配失败）",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts",
+    "capabilities": ["state"],
+    "pool": 2
+  }
+}

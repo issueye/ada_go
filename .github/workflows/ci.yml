@@ -1,0 +1,136 @@
+# ada-go M0 CI（开发计划 §7.1「每次合并必跑」+ §4.1 M0.1 三平台模板）
+#
+# 矩阵：3 个 OS × 2 种依赖模式 = 6 个组合，两种模式都必须通过（11 §13.1）：
+#   workspace —— 存在 go.work，moejs 以同级目录 ../moejs 检出（固定 tag v0.1.0-alpha.11）；
+#   module    —— GOWORK=off，依赖全部走 go.mod/go.sum 锁定版本，验证发布口径可独立构建。
+#
+# 所有门禁命令都通过 scripts/ci-gate.sh 的具名步骤执行，与本地 `make gate` 完全同源；
+# 目标尚属后续里程碑（conformance=M1、nodecompat=M1-D、cmd/adag=M0.4）时由脚本打印显式 SKIP+原因，
+# 绝不静默通过。
+#
+# 安全口径（开发计划 §6）：
+#   - 本 workflow 不引用任何 secrets；真实 provider 测试用本地密钥，不进公共 CI。
+#   - 最小权限：contents: read；无写权限、无 id-token。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 项目无 cgo（11 §13.2）：驱动、SQLite、moejs 均为纯 Go，显式关闭。
+  CGO_ENABLED: "0"
+  # 显式清空 GOFLAGS，防止 runner 镜像残留 -mod/-tags 之类污染门禁语义。
+  GOFLAGS: ""
+  # 用 setup-go 安装的工具链，不自动下载更新版本（go/go.work 均为 1.26.x，runner 用 1.27.1）。
+  GOTOOLCHAIN: local
+
+jobs:
+  gate:
+    name: gate / ${{ matrix.os }} / ${{ matrix.dep_mode }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # 单腿失败不拖垮其它腿的输出，但整体检查依然红色阻断（不是 continue-on-error）。
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        dep_mode: [workspace, module]
+    env:
+      # ci-gate.sh 依据 DEP_MODE 决定是否 export GOWORK=off（module 模式）。
+      DEP_MODE: ${{ matrix.dep_mode }}
+    steps:
+      - name: Checkout ada-go
+        uses: actions/checkout@v4
+
+      # workspace 模式：moejs 必须检出到 ada-go 的同级目录（go.work 的相对路径 ../moejs）。
+      # tag 固定 v0.1.0-alpha.11，与 go.mod 钉住的版本一致；升级上游需单独 PR（开发计划 §5.3）。
+      - name: Checkout moejs to ../moejs (workspace mode only)
+        if: matrix.dep_mode == 'workspace'
+        uses: actions/checkout@v4
+        with:
+          repository: MoeForge/moejs
+          ref: v0.1.0-alpha.11
+          path: ../moejs
+          fetch-depth: 1
+
+      - name: Set up Go 1.27.1
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.1"
+        # 缓存说明：setup-go@v5 默认启用 GOMODCACHE/GOCACHE 缓存（等价 actions/cache，
+        # key 含 go.sum/go.work.sum 哈希），无需再手工配 actions/cache。
+
+      # ---- 门禁 1：gofmt 必须为空（列出文件即失败）----
+      - name: "gate: gofmt"
+        shell: bash
+        run: bash scripts/ci-gate.sh gofmt
+
+      # ---- 门禁 2：go vet ----
+      - name: "gate: vet"
+        shell: bash
+        run: bash scripts/ci-gate.sh vet
+
+      # ---- 门禁 3：staticcheck ----
+      # 这里先 go install @latest：预热模块缓存并校验可安装性；
+      # 实际执行仍由脚本走 `go run @latest`，确保分析器与 Go 1.27 工具链现编同代
+      # （旧预编译 staticcheck 的 export-data 解码器读不了新 Go 产物，本机已实测）。
+      # 钉版本（@vX.Y.Z、与依赖一起进工具清单）的必要性由 M5 发布加固统一处理。
+      - name: Install staticcheck (honnef.co/go/tools/cmd/staticcheck@latest)
+        shell: bash
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+      - name: "gate: staticcheck"
+        shell: bash
+        run: bash scripts/ci-gate.sh staticcheck
+
+      # ---- 门禁 4：go generate 后工作区必须干净（生成物同 PR，开发计划 §6）----
+      - name: "gate: generate + git diff --exit-code"
+        shell: bash
+        run: bash scripts/ci-gate.sh generate
+
+      # ---- 门禁 5：依赖整理与校验（仅 module 模式；workspace 模式脚本打印显式 SKIP）----
+      - name: "gate: GOWORK=off go mod tidy + verify (module mode)"
+        shell: bash
+        run: bash scripts/ci-gate.sh modtidy
+
+      # ---- 门禁 6：测试 ----
+      # 非 Windows：go test -race ./...。
+      # Windows：-race 依赖 cgo 工具链（11 §13.2 项目无 cgo）；M0 期间已知限制，
+      # 显式分两步跑 `go test ./...`（不是 continue-on-error，失败照样阻断），
+      # M5 发布加固时补 windows race（独立开 CGO 的测试 job 或 WSL）。
+      - name: "gate: test (race, non-Windows)"
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash scripts/ci-gate.sh test
+      - name: "gate: test (Windows, no -race until M5 - known M0 limitation)"
+        if: runner.os == 'Windows'
+        shell: bash
+        run: bash scripts/ci-gate.sh test
+
+      # ---- 门禁 7：不变量测试（包属 M1-A；未落地时脚本显式 SKIP+原因）----
+      - name: "gate: conformance TestInvariants"
+        shell: bash
+        run: bash scripts/ci-gate.sh conformance
+
+      # ---- 门禁 8：Node 双跑（包属 M1-D/M3；守卫逻辑同上，禁止静默通过）----
+      - name: "gate: nodecompat TestNodeCompat"
+        shell: bash
+        run: bash scripts/ci-gate.sh nodecompat
+
+      # ---- 门禁 9：adag verify 全量 + nodecompat + ui + boundary（cmd/adag 属 M0.4）----
+      - name: "gate: verify"
+        shell: bash
+        run: bash scripts/ci-gate.sh verify
+
+      # ---- 门禁 10：adag doctor --fake（skeleton.agent.json 驱动空基座，M0 退出标准）----
+      - name: "gate: doctor"
+        shell: bash
+        run: bash scripts/ci-gate.sh doctor

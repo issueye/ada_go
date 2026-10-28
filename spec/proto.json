@@ -1,0 +1,1666 @@
+{
+  "schemaVersion": 1,
+  "protoVersion": 1,
+  "apiVersion": "1.0.0",
+  "generated": {
+    "goPackage": "internal/proto",
+    "constFile": "methods_gen.go"
+  },
+  "transport": {
+    "encoding": "jsonrpc-2.0",
+    "maxMessageBytes": 2097152,
+    "pingIntervalMs": 15000,
+    "pongTimeoutMs": 30000,
+    "handshakeTimeoutMs": 5000,
+    "eventBuffer": 4096,
+    "snapshotFieldTruncateBytes": 32768,
+    "deltaMergeWindowMs": 40,
+    "deltaMaxLatencyMs": 100
+  },
+  "conventions": {
+    "threadIdFormat": "th_<workspaceHash>_<ulid>",
+    "entryIdFormat": "ulid",
+    "itemKeyPrefixes": ["msg:", "tool:", "interaction:", "notice:", "compaction:"],
+    "eventIdPrefix": "evt.",
+    "timestampFormat": "RFC3339Nano UTC",
+    "notes": [
+      "Gateway 作为 JSON-RPC 客户端、Core 作为服务端；所有 methods 的 direction 均为 gateway->core（8.1）。",
+      "事件是 JSON-RPC notification，无 id，方法名带 evt. 前缀（8.1）。",
+      "线程内事件 seq 单调递增；工作区级事件使用独立 workspaceSeq（8.1）。",
+      "事件总线保留最近 transport.eventBuffer 条用于重连补发；超出则只发 evt.state.snapshot（8.3）。",
+      "客户端发现 seq 不连续时请求 thread.get 全量重同步，不猜测缺失（8.3）。",
+      "Core 断线时 Gateway 对所有在途 RPC 返回 core_unavailable（8.1），各方法 errors 中不再逐一重复列出。",
+      "快照与补丁只发变化字段；单字段超过 transport.snapshotFieldTruncateBytes 时截断并标 truncated，完整内容走 thread.entries 或工具详情（8.3）。",
+      "UI-only 的 notice/details 永不进入模型消息（INV-10）；事件的 entersModelContext 描述其承载数据面是否属于模型上下文。",
+      "拒绝是工具结果（denied 回执），不是 RPC 异常，也不终止轮次（INV-5）。",
+      "JSON-RPC 标准错误码（见顶层 jsonRpcReserved）只用于传输层；业务错误使用 errorCodes 中的 4 位应用码（8.5）。",
+      "字段命名一律 camelCase；时间戳一律 RFC3339Nano UTC；工具目录在装配期冻结，运行期注册只记日志不生效（5.4）。",
+      "待处理交互持久化在 interactions 表，Gateway/Core 重启后可恢复；一次交互恰好解析一次（5.6）。"
+    ]
+  },
+  "jsonRpcReserved": [-32700, -32600, -32601, -32602, -32603],
+  "definitions": {
+    "ItemKey": {
+      "type": "string",
+      "description": "条目的稳定标识（8.3）：msg:<id> / tool:<callId> / interaction:<id> / notice:<id> / compaction:<id>；投影与补丁按 key 定位，排序按 item.at。",
+      "minLength": 4,
+      "maxLength": 128
+    },
+    "Cursor": {
+      "type": "string",
+      "description": "不透明分页游标（基于 entries.seq）；首次调用省略，客户端不得解析其内容。",
+      "maxLength": 256
+    },
+    "MessagePart": {
+      "type": "object",
+      "description": "用户输入/模型消息的内容片段：text 或 image（图片受 capabilities.images 与模型能力位双门）。",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "enum": ["text", "image"] },
+        "text": { "type": "string", "description": "type=text 时的正文" },
+        "mime": { "type": "string", "description": "type=image 时的 MIME（PNG/JPEG/WebP/GIF）" },
+        "data": { "type": "string", "description": "type=image 时的 base64 数据" }
+      },
+      "required": ["type"]
+    },
+    "Thread": {
+      "type": "object",
+      "description": "线程（threads 表投影，04 §5.7）。",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "th_<workspaceHash>_<ulid>，只由 Core 生成" },
+        "workspace": { "type": "string", "description": "规范化后的工作区真实路径" },
+        "title": { "type": "string", "maxLength": 200 },
+        "headEntryId": { "type": "string", "description": "entry id（ULID）；线程唯一指针，分支切换只改它" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "archived": { "type": "boolean", "default": false }
+      },
+      "required": ["id", "workspace", "title", "createdAt", "updatedAt", "archived"]
+    },
+    "ThreadSummary": {
+      "type": "object",
+      "description": "线程列表行（thread.list 用，轻量投影）。",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "headEntryId": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "archived": { "type": "boolean" }
+      },
+      "required": ["id", "title", "updatedAt", "archived"]
+    },
+    "Entry": {
+      "type": "object",
+      "description": "append-only 树形 entry（entries 表投影，04 §5.7）；写入后不可修改。",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "ULID" },
+        "threadId": { "type": "string" },
+        "parentId": { "type": "string", "description": "父 entry id；根 entry 省略" },
+        "seq": { "type": "integer", "minimum": 1, "description": "线程内单调序号，entries(thread_id,seq) 唯一" },
+        "kind": { "type": "string", "enum": ["message", "compaction", "branch_summary", "model_change", "plugin_state", "custom"] },
+        "role": { "type": "string", "enum": ["user", "assistant", "tool", "system"], "description": "kind=message/compaction 相关；省略表示无角色" },
+        "payload": { "type": "object", "additionalProperties": true, "description": "JSON 载荷；kind=tool 结果时符合 ToolResult" },
+        "tokens": { "type": "integer", "minimum": 0, "default": 0 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "threadId", "seq", "kind", "payload", "createdAt"]
+    },
+    "EntryPage": {
+      "type": "object",
+      "description": "历史分页结果（游标制）。",
+      "additionalProperties": false,
+      "properties": {
+        "entries": { "type": "array", "items": { "$ref": "#/definitions/Entry" } },
+        "nextCursor": { "$ref": "#/definitions/Cursor" },
+        "hasMore": { "type": "boolean" }
+      },
+      "required": ["entries", "hasMore"]
+    },
+    "Item": {
+      "type": "object",
+      "description": "线程快照/补丁中的条目（投影单元，8.3）：带稳定 key、开始时间 at 与内容指纹 fingerprint；单字段超 32KB 时截断并标 truncated。",
+      "additionalProperties": false,
+      "properties": {
+        "key": { "$ref": "#/definitions/ItemKey" },
+        "type": { "type": "string", "enum": ["message", "tool", "interaction", "notice", "compaction"] },
+        "at": { "type": "string", "format": "date-time", "description": "开始时间；投影按 at 排序，避免流式顺序抖动（8.3）" },
+        "fingerprint": { "type": "string", "description": "内容哈希，补丁指纹比对用（8.3）" },
+        "truncated": { "type": "boolean", "description": "true=载荷有字段被截断，完整内容用 thread.entries 或工具详情取（8.3）", "default": false },
+        "payload": { "type": "object", "additionalProperties": true, "description": "条目内容；tool 条目结果为 ToolResult，details 只给界面" }
+      },
+      "required": ["key", "type", "at", "fingerprint", "payload"]
+    },
+    "StatePatchOp": {
+      "type": "object",
+      "description": "evt.state.patch 的单条操作（8.3 / 7.4 envelope）。",
+      "additionalProperties": false,
+      "properties": {
+        "op": { "type": "string", "enum": ["upsert", "remove"] },
+        "key": { "$ref": "#/definitions/ItemKey" },
+        "item": { "$ref": "#/definitions/Item", "description": "op=upsert 时必填" },
+        "fingerprint": { "type": "string", "description": "upsert 时新内容指纹；remove 时仅 key" }
+      },
+      "required": ["op", "key"]
+    },
+    "RunState": {
+      "type": "object",
+      "description": "轮次运行状态（runs 表投影 + 8.2 run.status 语义；状态机见 02 §5.3）。",
+      "additionalProperties": false,
+      "properties": {
+        "runId": { "type": "string" },
+        "status": { "type": "string", "enum": ["running", "waiting_input", "finishing", "terminal"], "description": "8.2：running/waiting_input/finishing/terminal" },
+        "terminal": { "type": "string", "enum": ["completed", "cancelled", "error", "interrupted", "budget_exceeded"], "description": "status=terminal 时的终态（02 §5.3）；非终态省略" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "endedAt": { "type": "string", "format": "date-time" },
+        "errorCode": { "type": "integer", "description": "终态为 error 时引用的业务错误码（4 位应用码，8.5）" },
+        "usage": { "$ref": "#/definitions/Usage", "description": "本轮累计用量；未完成时可为已产生部分" }
+      },
+      "required": ["runId", "status", "startedAt"]
+    },
+    "ToolContentPart": {
+      "type": "object",
+      "description": "工具回执 content 片段：给模型的部分（8.4 / 6.3 ToolReturn.content）。",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "enum": ["text", "image"] },
+        "text": { "type": "string", "description": "type=text 时" },
+        "mime": { "type": "string", "description": "type=image 时" },
+        "data": { "type": "string", "description": "type=image 时 base64" }
+      },
+      "required": ["type"]
+    },
+    "ToolDescriptor": {
+      "type": "object",
+      "description": "工具描述符（8.4 原文逐字段）；tool.list 与模型请求共用同一份。",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "小写，首字母字母；形如 read_file（6.3 约束 ^[a-z][a-z0-9_]{1,63}$）", "minLength": 1, "maxLength": 64 },
+        "description": { "type": "string", "description": "给模型的说明" },
+        "parameters": { "type": "object", "additionalProperties": true, "description": "入参 JSON Schema（draft 2020-12 子集）；执行前先校验，失败生成 error 回执" },
+        "access": { "type": "string", "enum": ["read", "write", "exec", "network"], "description": "外部效果声明，供 UI 徽标/审计/策略插件使用；基座不据此放行或拒绝（5.4）" },
+        "timeoutMs": { "type": "integer", "minimum": 0, "description": "单次执行预算；缺省取产品 policies.toolTimeoutMs（默认 120000）" },
+        "parallelSafe": { "type": "boolean", "description": "整批都 parallelSafe 且产品策略允许时才并发，结果按源序回填" },
+        "rollback": { "type": "boolean", "description": "true=执行前把涉及文件纳入检查点" },
+        "terminatesTurn": { "type": "boolean", "description": "true=调用后本轮可自然结束（finish/ask 这类）" },
+        "pluginId": { "type": "string", "description": "贡献该工具的插件 id（如 tools-fs）" }
+      },
+      "required": ["name", "description", "parameters", "access", "timeoutMs", "parallelSafe", "rollback", "terminatesTurn", "pluginId"]
+    },
+    "ToolReceipt": {
+      "type": "object",
+      "description": "回执（8.4 receipt 子对象 / 5.4 Receipt）：状态、耗时、截断、检查点。",
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["ok", "error", "denied", "timeout", "interrupted"] },
+        "startedAt": { "type": "string", "format": "date-time", "description": "界面续走耗时用；未执行（如 denied）时可省略" },
+        "finishedAt": { "type": "string", "format": "date-time" },
+        "durationMs": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean", "default": false, "description": "适配层截断标记（如单条工具输出 50KB/2000 行）" },
+        "checkpoint": { "type": "string", "description": "rollback=true 工具纳入的检查点 id（chk_...）" },
+        "reason": { "type": "string", "description": "denied/timeout 等的对象或原因，如 user" }
+      },
+      "required": ["status", "durationMs"]
+    },
+    "ToolResult": {
+      "type": "object",
+      "description": "工具结果 entry 的 payload（8.4 完整示例）：content 给模型；details 只给界面，永不进模型（INV-10）。",
+      "additionalProperties": false,
+      "properties": {
+        "callId": { "type": "string", "description": "call_... 工具调用 id" },
+        "tool": { "type": "string", "description": "工具名" },
+        "status": { "type": "string", "enum": ["ok", "error", "denied", "timeout", "interrupted"] },
+        "content": { "type": "array", "items": { "$ref": "#/definitions/ToolContentPart" }, "description": "给模型" },
+        "details": { "type": "object", "additionalProperties": true, "description": "只给界面：diff、路径、计数" },
+        "receipt": { "$ref": "#/definitions/ToolReceipt" }
+      },
+      "required": ["callId", "tool", "status", "content", "receipt"]
+    },
+    "Interaction": {
+      "type": "object",
+      "description": "通用用户交互（interactions 表投影，04 §5.7 / 03 §5.6）；持久化、可恢复、恰好解析一次。",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "交互 id；interaction.respond 的 requestId 即此 id" },
+        "threadId": { "type": "string" },
+        "runId": { "type": "string" },
+        "callId": { "type": "string", "description": "由工具调用发起时关联的 callId；省略表示非工具发起" },
+        "pluginId": { "type": "string", "description": "发起交互的插件（如 policy-default、tools-ask）" },
+        "kind": { "type": "string", "enum": ["confirm", "select", "input"] },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "options": { "type": "array", "items": { "type": "string" }, "description": "kind=select 时的选项" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "denied", "cancelled", "timeout", "unavailable"] },
+        "response": { "type": "object", "additionalProperties": true, "description": "首次解析结果快照；重复响应幂等返回它（5.6）" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "resolvedAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time", "description": "截止时间；超时解析为 timeout" }
+      },
+      "required": ["id", "threadId", "runId", "pluginId", "kind", "title", "body", "status", "createdAt"]
+    },
+    "InteractionResponse": {
+      "type": "object",
+      "description": "交互解析结果（interaction.respond 返回值；幂等返回首次结果，5.6）。",
+      "additionalProperties": false,
+      "properties": {
+        "interactionId": { "type": "string" },
+        "threadId": { "type": "string" },
+        "status": { "type": "string", "enum": ["accepted", "denied", "cancelled", "timeout", "unavailable"] },
+        "response": { "type": "object", "additionalProperties": true, "description": "首次解析的值（confirm=布尔、select=选项、input=文本）；重复响应返回同一值" },
+        "resolvedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["interactionId", "threadId", "status", "resolvedAt"]
+    },
+    "ModelRef": {
+      "type": "object",
+      "description": "模型引用：provider id + 模型 id（产品配置只按 id 引用，5.5）。",
+      "additionalProperties": false,
+      "properties": {
+        "providerId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "modelId": { "type": "string", "minLength": 1, "maxLength": 128 }
+      },
+      "required": ["providerId", "modelId"]
+    },
+    "ModelInfo": {
+      "type": "object",
+      "description": "provider 声明的模型能力（5.5 ModelInfo）。",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "产品配置中的模型名" },
+        "displayName": { "type": "string" },
+        "contextWindow": { "type": "integer", "minimum": 1, "description": "token" },
+        "maxOutput": { "type": "integer", "minimum": 1 },
+        "input": { "type": "array", "items": { "type": "string", "enum": ["text", "image"] }, "description": "图片输入受模型能力位+产品 capabilities.images 双门" },
+        "supportsTools": { "type": "boolean" },
+        "supportsThinking": { "type": "boolean" },
+        "pricing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "inputPerMTok": { "type": "number", "minimum": 0 },
+            "outputPerMTok": { "type": "number", "minimum": 0 }
+          },
+          "required": ["inputPerMTok", "outputPerMTok"],
+          "description": "缺价时只显示 token 不显示成本"
+        }
+      },
+      "required": ["id", "contextWindow", "input", "supportsTools"]
+    },
+    "ProviderSummary": {
+      "type": "object",
+      "description": "供应商配置摘要（不含密钥；密钥只按名字取，4.3/5.5）。",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "baseUrl": { "type": "string", "description": "OpenAI 兼容端点等；由产品配置传入" },
+        "configured": { "type": "boolean", "description": "密钥是否已配置；不回显值" },
+        "models": { "type": "array", "items": { "$ref": "#/definitions/ModelInfo" } }
+      },
+      "required": ["id", "name", "configured"]
+    },
+    "Usage": {
+      "type": "object",
+      "description": "用量（usage 表字段聚合，04 §5.7）：每次请求记录 input/output/cache token。",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string" },
+        "model": { "type": "string" },
+        "inputTokens": { "type": "integer", "minimum": 0 },
+        "outputTokens": { "type": "integer", "minimum": 0 },
+        "cacheTokens": { "type": "integer", "minimum": 0 },
+        "costMicros": { "type": "integer", "minimum": 0, "description": "估算成本（微单位）；无价的模型省略，只显示 token" }
+      },
+      "required": ["provider", "model", "inputTokens", "outputTokens", "cacheTokens"]
+    },
+    "PluginSummary": {
+      "type": "object",
+      "description": "插件、版本、状态、错误（plugin_meta + 运行时状态，6.4/6.9）。",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "^[a-z][a-z0-9-]{1,63}$ 且等于目录名（6.2）" },
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "apiVersion": { "type": "integer", "minimum": 1, "description": "主版本不匹配拒绝加载；与本文件 apiVersion 对齐检查" },
+        "trust": { "type": "string", "enum": ["builtin", "verified", "third-party"] },
+        "enabled": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["ready", "degraded", "disabled", "failed"], "description": "degraded=运行时脏待重建；连续 3 次失败自动禁用" },
+        "fingerprint": { "type": "string", "description": "文件指纹；第三方指纹变化才重新编译" },
+        "lastError": { "type": "string", "description": "最近装配/运行错误，写入 plugin_meta.last_error 并显示到页面" },
+        "contributions": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tools": { "type": "integer", "minimum": 0 },
+            "providers": { "type": "integer", "minimum": 0 },
+            "hooks": { "type": "integer", "minimum": 0 },
+            "actions": { "type": "integer", "minimum": 0 },
+            "routes": { "type": "integer", "minimum": 0 },
+            "skills": { "type": "integer", "minimum": 0 },
+            "slots": { "type": "integer", "minimum": 0 }
+          },
+          "description": "装配期结算的贡献计数摘要"
+        }
+      },
+      "required": ["id", "version", "trust", "enabled", "status", "fingerprint"]
+    },
+    "SkillSummary": {
+      "type": "object",
+      "description": "技能元数据（6.7）：装配期只注入 name/description，正文经 skill.read/read_skill 渐进披露。",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "等于目录名，1-64，小写/数字/连字符" },
+        "description": { "type": "string", "maxLength": 1024 },
+        "origin": { "type": "string", "enum": ["workspace", "plugin"], "description": "同名冲突工作区优先，冲突记警告不静默覆盖" },
+        "pluginId": { "type": "string", "description": "origin=plugin 时提供技能的插件 id" }
+      },
+      "required": ["name", "description", "origin"]
+    },
+    "ActionEnvelope": {
+      "type": "object",
+      "description": "前端动作 → 后端动作的调用封套（7.6 动作桥）；动作不是工具，不进模型上下文、不受 tool.beforeCall 约束。",
+      "additionalProperties": false,
+      "properties": {
+        "pluginId": { "type": "string", "description": "提供后端动作的插件（绑定可跨插件指向 backend）" },
+        "action": { "type": "string", "description": "动作名，^[a-z][a-z0-9_]{1,63}$（6.3）" },
+        "threadId": { "type": "string", "description": "动作输入要求 threadId；无线程上下文时省略" },
+        "input": { "type": "object", "additionalProperties": true, "description": "execute(input, ctx) 的输入；结果 JSON 可序列化、最大 1MB" }
+      },
+      "required": ["pluginId", "action"]
+    },
+    "RouteRequest": {
+      "type": "object",
+      "description": "动态路由转发（7.6：/ext/{id}/route/* 原样转给插件 route 处理器；响应 64KB 上限，只允许 JSON/文本）。",
+      "additionalProperties": false,
+      "properties": {
+        "pluginId": { "type": "string" },
+        "method": { "type": "string", "enum": ["GET", "POST"] },
+        "path": { "type": "string", "description": "插件注册的路径（含路径参数解析结果）" },
+        "query": { "type": "object", "additionalProperties": true, "description": "查询串，宿主原样传入" },
+        "headers": { "type": "object", "additionalProperties": true, "description": "headers 子集" },
+        "body": { "type": "string", "maxLength": 262144, "description": "请求体原文（JSON 或文本）" }
+      },
+      "required": ["pluginId", "method", "path"]
+    },
+    "ChangeSet": {
+      "type": "object",
+      "description": "检查点与变更（change.list 行；rollback=true 工具执行前纳入检查点，5.4）。",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "检查点 id，chk_..." },
+        "threadId": { "type": "string" },
+        "runId": { "type": "string" },
+        "itemKey": { "$ref": "#/definitions/ItemKey", "description": "关联的工具条目，回滚卡片用" },
+        "tool": { "type": "string" },
+        "paths": { "type": "array", "items": { "type": "string" }, "description": "纳入检查点的工作区相对路径（同一路径写串行，5.4）" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "threadId", "paths", "createdAt"]
+    },
+    "ProductCapabilities": {
+      "type": "object",
+      "description": "产品能力位（8.6）：技能装配、图片输入门、子智能体装配。",
+      "additionalProperties": false,
+      "properties": {
+        "skills": { "type": "boolean" },
+        "images": { "type": "boolean" },
+        "subagents": { "type": "boolean" }
+      },
+      "required": ["skills", "images", "subagents"]
+    },
+    "ProductPolicy": {
+      "type": "object",
+      "description": "运行参数（8.6 policies）：引擎并发、单工具超时、可选墙钟/token 上限、循环检测阈值；不含审批规则（审批属 policy-* 插件自己的设置）。作为 workspace.updatePolicy 入参时缺省字段保持当前值。",
+      "additionalProperties": false,
+      "properties": {
+        "toolTimeoutMs": { "type": "integer", "minimum": 0, "default": 120000, "description": "单工具默认超时" },
+        "turnTimeoutMs": { "type": "integer", "minimum": 0, "default": 0, "description": "轮次墙钟上限；0=不限制（2003 budget_exceeded 仅在显式配置时触发）" },
+        "maxTurnTokens": { "type": "integer", "minimum": 0, "default": 0, "description": "轮次 token/成本上限；0=不限制" },
+        "loopRepeatLimit": { "type": "integer", "minimum": 1, "default": 3, "description": "连续 N 次相同工具+参数+回执 → loop_detected 错误回执" },
+        "loopAbortLimit": { "type": "integer", "minimum": 1, "default": 5, "description": "连续 N 次 → 按 error 结束" },
+        "parallelTools": { "type": "integer", "minimum": 1, "default": 1, "description": "引擎并发度；仅整批 parallelSafe 时生效" }
+      }
+    },
+    "ProductDeclaration": {
+      "type": "object",
+      "description": "产品声明（8.6 原文形状）；每个字段都必须有消费者，adag verify 逐字段核对。",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "如 coding；空基座 skeleton 只声明最小字段" },
+        "name": { "type": "string" },
+        "plugins": { "type": "array", "items": { "type": "string" }, "description": "随包官方插件启用清单；第三方由发现目录与用户启用状态合并" },
+        "capabilities": { "$ref": "#/definitions/ProductCapabilities" },
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string", "description": "界面品牌名；不含人格" },
+            "locale": { "type": "string", "description": "如 zh-CN" }
+          },
+          "required": ["name", "locale"]
+        },
+        "policies": { "$ref": "#/definitions/ProductPolicy" }
+      },
+      "required": ["id", "name", "plugins", "capabilities", "identity", "policies"]
+    },
+    "WorkspaceInfo": {
+      "type": "object",
+      "description": "工作区信息（workspace.info：路径、产品、配置、数据目录，8.2；身份键规范化见 4.2）。",
+      "additionalProperties": false,
+      "properties": {
+        "instanceId": { "type": "string", "description": "实例 id，product::hash（4.2）" },
+        "path": { "type": "string", "description": "规范化后的真实落点（Abs+EvalSymlinks+大小写折叠）" },
+        "workspaceKey": { "type": "string", "description": "sha256(realPath)[:12]" },
+        "dataDir": { "type": "string", "description": "~/.adago/workspaces/<hash>/，含 state.db 与锁目录" },
+        "product": { "$ref": "#/definitions/ProductDeclaration" },
+        "config": { "type": "object", "additionalProperties": true, "description": "生效运行参数（脱敏，不含密钥）" },
+        "pid": { "type": "integer", "minimum": 1 }
+      },
+      "required": ["instanceId", "path", "workspaceKey", "dataDir", "product"]
+    }
+  },
+  "errorCodes": [
+    { "code": 1001, "name": "workspace_missing", "title": "工作区目录不存在", "retryable": false, "typical": ["spawn 前目录已删除", "拒绝为空气目录拉起 Core（4.2）"], "diagnosticArea": "WS" },
+    { "code": 1002, "name": "core_unavailable", "title": "Core 未就绪/崩溃", "retryable": true, "typical": ["Core 断线后在途 RPC（8.1）", "握手未完成即请求"] , "diagnosticArea": "CORE" },
+    { "code": 1003, "name": "core_busy", "title": "实例正在回收/启动", "retryable": true, "typical": ["LRU 回收中", "starting 状态等待握手（4.2）"], "diagnosticArea": "CORE" },
+    { "code": 1004, "name": "workspace_locked", "title": "另一个 Core 持有工作区锁", "retryable": true, "typical": ["同工作区第二个 Core 启动（带持有者 pid，4.2/5.7）"], "diagnosticArea": "WS" },
+    { "code": 2001, "name": "thread_busy", "title": "线程已有运行中轮次", "retryable": true, "typical": ["turn.start 抢不到线程写锁（5.3 步骤 1）"], "diagnosticArea": "THREAD" },
+    { "code": 2002, "name": "turn_aborted", "title": "用户取消", "retryable": false, "typical": ["turn.cancel / 界面停止按钮", "取消后仍恰好发一次 TurnFinished(cancelled)（5.3/5.6）"], "diagnosticArea": "THREAD" },
+    { "code": 2003, "name": "budget_exceeded", "title": "显式资源配置的上限超限", "retryable": false, "typical": ["仅当产品显式配置了墙钟/token/成本上限（默认 0 不启用；步数不设限）"], "diagnosticArea": "THREAD" },
+    { "code": 2004, "name": "context_overflow", "title": "压缩失败且无法继续", "retryable": false, "typical": ["压缩+裁剪后仍超窗（单条工具结果不可拆，5.7）"], "diagnosticArea": "THREAD" },
+    { "code": 2005, "name": "loop_detected", "title": "连续重复相同的工具调用，模型未改道", "retryable": false, "typical": ["连续 loopRepeatLimit 次得到错误回执提示改方法；连续 loopAbortLimit 次按 error 结束（5.3）"], "diagnosticArea": "THREAD" },
+    { "code": 3001, "name": "tool_not_found", "title": "工具已被禁用", "retryable": false, "typical": ["禁用插件后对应工具从目录消失，基座不补位（INV-11）"], "diagnosticArea": "TOOL" },
+    { "code": 3002, "name": "tool_invalid_args", "title": "Schema 校验失败", "retryable": false, "typical": ["参数先按 JSON Schema 校验再生成 error 回执，让模型自修（5.4）"], "diagnosticArea": "TOOL" },
+    { "code": 3003, "name": "plugin_timeout", "title": "插件调用超时", "retryable": true, "typical": ["钩子默认 200ms、最大 2s（6.4/6.6）"], "diagnosticArea": "PLUGIN" },
+    { "code": 3004, "name": "plugin_crashed", "title": "插件运行时重建", "retryable": true, "typical": ["超内存/panic → Runtime 标脏重建，插件 degraded（6.4）"], "diagnosticArea": "PLUGIN" },
+    { "code": 3005, "name": "plugin_denied", "title": "能力/信任不允许", "retryable": false, "typical": ["第三方禁 exec/控制面钩子（6.6/6.9）", "无 role=tool-policy 插件时写/执行工具 denied: no policy（5.6）"], "diagnosticArea": "PLUGIN" },
+    { "code": 4001, "name": "auth_required", "title": "未登录/cookie 过期", "retryable": false, "typical": ["首次访问未签发会话 cookie（4.3）"], "diagnosticArea": "AUTH" },
+    { "code": 4002, "name": "csrf_invalid", "title": "表单 token 不匹配", "retryable": false, "typical": ["POST 双提交校验失败（4.3）"], "diagnosticArea": "AUTH" },
+    { "code": 4003, "name": "origin_denied", "title": "Origin/Host 校验失败", "retryable": false, "typical": ["DNS rebinding、非白名单 Origin（4.3）"], "diagnosticArea": "AUTH" },
+    { "code": 5001, "name": "provider_error", "title": "模型返回错误", "retryable": true, "typical": ["429/5xx/网络错误且重试 3 次后仍失败（5.5）"], "diagnosticArea": "MODEL" },
+    { "code": 5002, "name": "protocol_error", "title": "适配器流解析失败", "retryable": false, "typical": ["EOF 不等于完成：无终止信号的 EOF 是错误（5.5）"], "diagnosticArea": "MODEL" },
+    { "code": 5003, "name": "storage_busy", "title": "SQLite 写锁等待超时", "retryable": true, "typical": ["busy_timeout=5000、退避重试 3 次后仍 SQLITE_BUSY（5.7）"], "diagnosticArea": "STORE" },
+    { "code": 5004, "name": "storage_corrupt", "title": "WAL/数据库损坏，需要 doctor 或备份恢复", "retryable": false, "typical": ["WAL 恢复失败", "网络盘部署导致 -shm 不可靠（5.7）"], "diagnosticArea": "STORE" }
+  ],
+  "methods": [
+    {
+      "name": "system.hello",
+      "group": "system",
+      "summary": "握手：协商协议版本，回交产品、能力位、插件摘要与工作区信息",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": false,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "protoVersion": { "type": "integer", "minimum": 1, "description": "Gateway 侧 protoVersion；与本文件 protoVersion 不符则握手失败" },
+          "productId": { "type": "string", "description": "Gateway 期望的产品 id（spawn 时选定）" },
+          "gatewayVersion": { "type": "string", "description": "adag 版本号，供日志与兼容诊断" }
+        },
+        "required": ["protoVersion"]
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "protoVersion": { "type": "integer", "minimum": 1 },
+          "apiVersion": { "type": "string", "description": "插件 API 主版本，供版本对齐检查" },
+          "coreVersion": { "type": "string", "description": "Core 构建版本（同一二进制）" },
+          "productId": { "type": "string" },
+          "product": { "$ref": "#/definitions/ProductDeclaration" },
+          "capabilities": { "$ref": "#/definitions/ProductCapabilities" },
+          "plugins": { "type": "array", "items": { "$ref": "#/definitions/PluginSummary" }, "description": "装配结果摘要（8.2：握手携带插件摘要）" },
+          "workspace": { "$ref": "#/definitions/WorkspaceInfo" },
+          "pid": { "type": "integer", "minimum": 1, "description": "Core 进程 pid（4.2 stdout 握手行同源）" },
+          "readyAt": { "type": "string", "format": "date-time", "description": "Core 就绪时刻" }
+        },
+        "required": ["protoVersion", "productId", "capabilities", "plugins", "workspace", "pid", "readyAt"]
+      },
+      "errors": ["invalid_params", "internal_error"]
+    },
+    {
+      "name": "system.ping",
+      "group": "system",
+      "summary": "健康检查",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": false,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "echo": { "type": "string", "maxLength": 64 }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "at": { "type": "string", "format": "date-time" },
+          "pid": { "type": "integer", "minimum": 1 },
+          "echo": { "type": "string" }
+        },
+        "required": ["at"]
+      },
+      "errors": ["internal_error"]
+    },
+    {
+      "name": "system.shutdown",
+      "group": "system",
+      "summary": "优雅退出：刷盘、关运行时，带超时",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": false,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reason": { "type": "string", "description": "退出原因：idle_reap|gateway_exit|manual 等，入审计日志" },
+          "flush": { "type": "boolean", "default": true, "description": "等待写协程清空有界队列并 wal_checkpoint" },
+          "closeRuntimes": { "type": "boolean", "default": true, "description": "关闭全部插件 Runtime 并取消其异步工作（6.4）" },
+          "timeoutMs": { "type": "integer", "minimum": 0, "default": 8000, "description": "Core 侧优雅退出预算；Gateway 10 秒后强杀（4.2）" }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "flushed": { "type": "boolean" },
+          "runtimesClosed": { "type": "integer", "minimum": 0 },
+          "durationMs": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["flushed", "runtimesClosed", "durationMs"]
+      },
+      "errors": ["invalid_params", "storage_busy", "internal_error"]
+    },
+    {
+      "name": "workspace.info",
+      "group": "workspace",
+      "summary": "查询工作区路径、产品、配置与数据目录",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "result": { "$ref": "#/definitions/WorkspaceInfo" },
+      "errors": ["internal_error"]
+    },
+    {
+      "name": "workspace.updatePolicy",
+      "group": "workspace",
+      "summary": "更新运行参数：资源上限、循环检测、当前模型等（审批策略由插件自己管理）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "policies": { "$ref": "#/definitions/ProductPolicy", "description": "缺省字段保持当前值" },
+          "model": { "$ref": "#/definitions/ModelRef", "description": "同时切换默认模型时给出" }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "policies": { "$ref": "#/definitions/ProductPolicy", "description": "更新后的完整生效值" },
+          "model": { "$ref": "#/definitions/ModelRef" }
+        },
+        "required": ["policies"]
+      },
+      "errors": ["invalid_params", "internal_error"]
+    },
+    {
+      "name": "thread.create",
+      "group": "thread",
+      "summary": "创建线程",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": false,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": { "type": "string", "maxLength": 200, "default": "", "description": "缺省为空串，界面显示为\"新会话\"" },
+          "model": { "$ref": "#/definitions/ModelRef", "description": "线程级模型覆盖；缺省用工作区当前模型" }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread": { "$ref": "#/definitions/Thread" }
+        },
+        "required": ["thread"]
+      },
+      "errors": ["invalid_params", "storage_busy"]
+    },
+    {
+      "name": "thread.list",
+      "group": "thread",
+      "summary": "线程列表（分页、归档过滤；只列当前工作区）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 },
+          "cursor": { "$ref": "#/definitions/Cursor" },
+          "archived": { "type": "boolean", "default": false, "description": "false=不含归档；true=只看归档" }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threads": { "type": "array", "items": { "$ref": "#/definitions/ThreadSummary" } },
+          "nextCursor": { "$ref": "#/definitions/Cursor" },
+          "hasMore": { "type": "boolean" }
+        },
+        "required": ["threads", "hasMore"]
+      },
+      "errors": ["invalid_params", "storage_busy"]
+    },
+    {
+      "name": "thread.get",
+      "group": "thread",
+      "summary": "线程快照：items 窗口 + 运行状态（seq 断序时的全量重同步入口）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string", "description": "th_<workspaceHash>_<ulid>；前缀与工作区不符返回 invalid_params" },
+          "itemLimit": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100, "description": "items 窗口大小，取最近 N 条" }
+        },
+        "required": ["threadId"]
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread": { "$ref": "#/definitions/Thread" },
+          "items": { "type": "array", "items": { "$ref": "#/definitions/Item" }, "description": "按 at 排序（8.3）" },
+          "seq": { "type": "integer", "minimum": 0, "description": "当前线程事件序号；补丁基线" },
+          "run": { "$ref": "#/definitions/RunState", "description": "无运行中且无历史轮次时 status 为 terminal 的空壳" },
+          "interactions": { "type": "array", "items": { "$ref": "#/definitions/Interaction" }, "description": "待处理交互" },
+          "hasMore": { "type": "boolean", "description": "窗口外仍有更早 items；配合 thread.entries 回溯" }
+        },
+        "required": ["thread", "items", "seq", "run", "interactions", "hasMore"]
+      },
+      "errors": ["invalid_params", "storage_busy"]
+    },
+    {
+      "name": "thread.entries",
+      "group": "thread",
+      "summary": "历史分页（游标）；截断内容的完整来源",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" },
+          "cursor": { "$ref": "#/definitions/Cursor" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 }
+        },
+        "required": ["threadId"]
+      },
+      "result": { "$ref": "#/definitions/EntryPage" },
+      "errors": ["invalid_params", "storage_busy"]
+    },
+    {
+      "name": "thread.rename",
+      "group": "thread",
+      "summary": "重命名线程",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" },
+          "title": { "type": "string", "minLength": 1, "maxLength": 200 }
+        },
+        "required": ["threadId", "title"]
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread": { "$ref": "#/definitions/Thread" }
+        },
+        "required": ["thread"]
+      },
+      "errors": ["invalid_params", "storage_busy"]
+    },
+    {
+      "name": "thread.archive",
+      "group": "thread",
+      "summary": "归档/恢复线程",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" },
+          "archived": { "type": "boolean", "description": "true=归档，false=恢复" }
+        },
+        "required": ["threadId", "archived"]
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread": { "$ref": "#/definitions/Thread" }
+        },
+        "required": ["thread"]
+      },
+      "errors": ["invalid_params", "thread_busy", "storage_busy"]
+    },
+    {
+      "name": "thread.branch",
+      "group": "thread",
+      "summary": "从某 entry 分支（移动 head 指针，不改写历史）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": false,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" },
+          "entryId": { "type": "string", "description": "分支基点 entry（ULID）；旧分支不删除" },
+          "title": { "type": "string", "maxLength": 200, "description": "缺省沿用原标题" }
+        },
+        "required": ["threadId", "entryId"]
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread": { "$ref": "#/definitions/Thread", "description": "head 移动后的线程；同线程分支只改指针，返回原 thread" }
+        },
+        "required": ["thread"]
+      },
+      "errors": ["invalid_params", "thread_busy", "storage_busy"]
+    },
+    {
+      "name": "thread.delete",
+      "group": "thread",
+      "summary": "删除线程（软删 + 清理任务）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": false,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" }
+        },
+        "required": ["threadId"]
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "deleted": { "type": "boolean" },
+          "cleanupScheduled": { "type": "boolean", "description": "软删后由后台清理任务处理" }
+        },
+        "required": ["deleted", "cleanupScheduled"]
+      },
+      "errors": ["invalid_params", "thread_busy", "storage_busy"]
+    },
+    {
+      "name": "turn.start",
+      "group": "turn",
+      "summary": "开始一轮（幂等键防重复提交；抢线程写锁，busy 返回 thread_busy）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" },
+          "idempotencyKey": { "type": "string", "minLength": 8, "maxLength": 64, "description": "客户端生成（ULID/随机串）；同键重复提交返回首次结果，不启动第二轮（8.2）" },
+          "text": { "type": "string", "maxLength": 65536, "description": "用户消息正文；与 images 至少其一非空" },
+          "images": { "type": "array", "items": { "$ref": "#/definitions/MessagePart" }, "maxItems": 4, "description": "PNG/JPEG/WebP/GIF，单张≤8MB（7.7.4）；受 capabilities.images 与模型能力双门" },
+          "model": { "$ref": "#/definitions/ModelRef", "description": "本轮模型覆盖；缺省用线程/工作区当前模型" }
+        },
+        "required": ["threadId", "idempotencyKey"]
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "runId": { "type": "string" },
+          "duplicate": { "type": "boolean", "description": "true=同 idempotencyKey 的重复提交，返回首次结果" },
+          "seq": { "type": "integer", "minimum": 1, "description": "用户消息 entry 追加后的线程事件序号" }
+        },
+        "required": ["runId", "duplicate"]
+      },
+      "errors": ["invalid_params", "thread_busy", "core_unavailable", "storage_busy", "internal_error"]
+    },
+    {
+      "name": "turn.cancel",
+      "group": "turn",
+      "summary": "取消当前轮（贯穿模型/工具/脚本/命令进程树与等待中的交互）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" },
+          "runId": { "type": "string", "description": "缺省取消该线程当前运行中的轮" }
+        },
+        "required": ["threadId"]
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "run": { "$ref": "#/definitions/RunState", "description": "取消后的运行状态；终态由 TurnFinished(cancelled) 事件确认，部分消息保留" },
+          "noActiveRun": { "type": "boolean", "default": false, "description": "无运行中轮次时为 true，不算错误" }
+        },
+        "required": ["run"]
+      },
+      "errors": ["invalid_params", "core_unavailable"]
+    },
+    {
+      "name": "turn.steer",
+      "group": "turn",
+      "summary": "排队一条中途消息（在固定安全点排空，不靠 abort 打断循环）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": false,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" },
+          "text": { "type": "string", "maxLength": 65536, "description": "与 images 至少其一非空" },
+          "images": { "type": "array", "items": { "$ref": "#/definitions/MessagePart" }, "maxItems": 4 }
+        },
+        "required": ["threadId"]
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "queued": { "type": "boolean" },
+          "position": { "type": "integer", "minimum": 1, "description": "队列中的位置（QueueTray 显示\"已排队 N 条\"）" }
+        },
+        "required": ["queued", "position"]
+      },
+      "errors": ["invalid_params", "core_unavailable"]
+    },
+    {
+      "name": "turn.get",
+      "group": "turn",
+      "summary": "当前轮状态（运行状态 + 排队深度）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" }
+        },
+        "required": ["threadId"]
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "run": { "$ref": "#/definitions/RunState" },
+          "queueLength": { "type": "integer", "minimum": 0, "description": "steering 队列中待排空的消息数" }
+        },
+        "required": ["run", "queueLength"]
+      },
+      "errors": ["invalid_params", "core_unavailable"]
+    },
+    {
+      "name": "interaction.list",
+      "group": "interaction",
+      "summary": "待处理交互（pending 且未过期；重启后可恢复）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string", "description": "缺省返回本工作区全部线程的待处理交互" }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "interactions": { "type": "array", "items": { "$ref": "#/definitions/Interaction" } }
+        },
+        "required": ["interactions"]
+      },
+      "errors": ["invalid_params", "storage_busy"]
+    },
+    {
+      "name": "interaction.respond",
+      "group": "interaction",
+      "summary": "接受/拒绝/取消交互；必须同时匹配 threadId+requestId，重复响应幂等返回首次结果",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string", "description": "与 requestId 联合校验，二者不匹配返回错误且不改状态（5.6）" },
+          "requestId": { "type": "string", "description": "交互 id（Interaction.id）" },
+          "decision": { "type": "string", "enum": ["accept", "deny", "cancel"] },
+          "value": { "type": "object", "additionalProperties": true, "description": "kind=select/input 的回答值（如 {\"option\": \"...\"} 或 {\"text\": \"...\"}）；confirm 省略" }
+        },
+        "required": ["threadId", "requestId", "decision"]
+      },
+      "result": { "$ref": "#/definitions/InteractionResponse" },
+      "errors": ["invalid_params", "storage_busy", "core_unavailable"]
+    },
+    {
+      "name": "model.list",
+      "group": "model",
+      "summary": "可用模型与能力（按 provider 分组）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string", "description": "给出时 current 为该线程生效模型，否则为工作区级" }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "model": { "$ref": "#/definitions/ModelRef" },
+                "info": { "$ref": "#/definitions/ModelInfo" }
+              },
+              "required": ["model", "info"]
+            }
+          },
+          "current": { "$ref": "#/definitions/ModelRef" }
+        },
+        "required": ["models", "current"]
+      },
+      "errors": ["invalid_params"]
+    },
+    {
+      "name": "model.set",
+      "group": "model",
+      "summary": "切换当前模型（工作区级或线程级覆盖）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "model": { "$ref": "#/definitions/ModelRef" },
+          "threadId": { "type": "string", "description": "给出时为线程级覆盖；provider/模型不存在返回 invalid_params（8.5 未定义专用码）" }
+        },
+        "required": ["model"]
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "model": { "$ref": "#/definitions/ModelRef" },
+          "scope": { "type": "string", "enum": ["workspace", "thread"] }
+        },
+        "required": ["model", "scope"]
+      },
+      "errors": ["invalid_params"]
+    },
+    {
+      "name": "provider.list",
+      "group": "provider",
+      "summary": "供应商配置（不含密钥，只显示是否已配置）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "providers": { "type": "array", "items": { "$ref": "#/definitions/ProviderSummary" } }
+        },
+        "required": ["providers"]
+      },
+      "errors": ["internal_error"]
+    },
+    {
+      "name": "tool.list",
+      "group": "tool",
+      "summary": "当前工具目录（与模型请求共用同一份描述符，装配期冻结）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tools": { "type": "array", "items": { "$ref": "#/definitions/ToolDescriptor" } },
+          "frozenAt": { "type": "string", "format": "date-time", "description": "目录冻结时刻（装配期结算，6.5）" }
+        },
+        "required": ["tools"]
+      },
+      "errors": ["internal_error"]
+    },
+    {
+      "name": "plugin.list",
+      "group": "plugin",
+      "summary": "插件、版本、状态、错误",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "includeDisabled": { "type": "boolean", "default": true }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "plugins": { "type": "array", "items": { "$ref": "#/definitions/PluginSummary" } }
+        },
+        "required": ["plugins"]
+      },
+      "errors": ["internal_error"]
+    },
+    {
+      "name": "plugin.reload",
+      "group": "plugin",
+      "summary": "重载一个或全部插件（双代原子替换；在途调用用旧代）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pluginId": { "type": "string", "description": "缺省重载全部" }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "plugins": { "type": "array", "items": { "$ref": "#/definitions/PluginSummary" }, "description": "重载后的最新状态；失败项保留旧代并把错误写入 lastError（6.9）" }
+        },
+        "required": ["plugins"]
+      },
+      "errors": ["invalid_params", "plugin_crashed", "plugin_denied", "internal_error"]
+    },
+    {
+      "name": "plugin.setEnabled",
+      "group": "plugin",
+      "summary": "启用/禁用插件（产品门禁：禁用唯一策略插件且存在写/执行工具时拒绝）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pluginId": { "type": "string" },
+          "enabled": { "type": "boolean" }
+        },
+        "required": ["pluginId", "enabled"]
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "plugin": { "$ref": "#/definitions/PluginSummary" }
+        },
+        "required": ["plugin"]
+      },
+      "errors": ["invalid_params", "plugin_denied", "storage_busy", "internal_error"]
+    },
+    {
+      "name": "skill.list",
+      "group": "skill",
+      "summary": "技能元数据（插件目录与工作区目录合并，同名工作区优先）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "skills": { "type": "array", "items": { "$ref": "#/definitions/SkillSummary" } },
+          "conflicts": { "type": "array", "items": { "type": "string" }, "description": "同名冲突的技能名（记警告，不静默覆盖，6.7）" }
+        },
+        "required": ["skills"]
+      },
+      "errors": ["internal_error"]
+    },
+    {
+      "name": "skill.read",
+      "group": "skill",
+      "summary": "读取 SKILL.md 正文（模型工具 read_skill 走同一实现）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 64, "description": "技能名（等于目录名）" }
+        },
+        "required": ["name"]
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "skill": { "$ref": "#/definitions/SkillSummary" },
+          "content": { "type": "string", "description": "SKILL.md 正文（frontmatter 之后）" },
+          "truncated": { "type": "boolean", "default": false }
+        },
+        "required": ["skill", "content"]
+      },
+      "errors": ["invalid_params", "internal_error"]
+    },
+    {
+      "name": "action.invoke",
+      "group": "action",
+      "summary": "前端动作 → 后端动作（用户点击触发；不进模型、不受 tool.beforeCall 约束）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": false,
+      "requiresReadyInstance": true,
+      "params": { "$ref": "#/definitions/ActionEnvelope" },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ok": { "type": "boolean" },
+          "result": { "type": "object", "additionalProperties": true, "description": "execute(input, ctx) 返回值；JSON 可序列化、最大 1MB；写动作结果不回填页面" },
+          "error": { "type": "string", "description": "ok=false 时的人话错误" }
+        },
+        "required": ["ok"]
+      },
+      "errors": ["invalid_params", "plugin_timeout", "plugin_crashed", "plugin_denied"]
+    },
+    {
+      "name": "route.call",
+      "group": "route",
+      "summary": "动态路由转发（/ext/{id}/route/* 原样转给插件 route 处理器）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": false,
+      "requiresReadyInstance": true,
+      "params": { "$ref": "#/definitions/RouteRequest" },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": { "type": "integer", "minimum": 100, "maximum": 599 },
+          "headers": { "type": "object", "additionalProperties": true, "description": "子集；一律叠加 Cache-Control: no-store（静态资源除外）" },
+          "body": { "type": "string", "maxLength": 65536, "description": "JSON 或文本，64KB 上限" },
+          "truncated": { "type": "boolean", "default": false }
+        },
+        "required": ["status", "body"]
+      },
+      "errors": ["invalid_params", "plugin_timeout", "plugin_crashed"]
+    },
+    {
+      "name": "change.list",
+      "group": "change",
+      "summary": "检查点与变更清单",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string", "description": "缺省列本工作区全部检查点" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 },
+          "cursor": { "$ref": "#/definitions/Cursor" }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "changeSets": { "type": "array", "items": { "$ref": "#/definitions/ChangeSet" } },
+          "nextCursor": { "$ref": "#/definitions/Cursor" },
+          "hasMore": { "type": "boolean" }
+        },
+        "required": ["changeSets", "hasMore"]
+      },
+      "errors": ["invalid_params", "storage_busy"]
+    },
+    {
+      "name": "change.revert",
+      "group": "change",
+      "summary": "回滚卡片/文件/全部；返回恢复/删除/跳过/失效四份清单，不谎报成功",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": false,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" },
+          "scope": { "type": "string", "enum": ["item", "file", "all"] },
+          "checkpointId": { "type": "string", "description": "scope=item/all 时的检查点 id（chk_...）；all=回滚线程内全部检查点" },
+          "path": { "type": "string", "description": "scope=file 时的单文件路径（工作区相对）" }
+        },
+        "required": ["threadId", "scope"]
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "restored": { "type": "array", "items": { "type": "string" }, "description": "已恢复的文件" },
+          "deleted": { "type": "array", "items": { "type": "string" }, "description": "已删除（回滚新增）的文件" },
+          "skipped": { "type": "array", "items": { "type": "string" }, "description": "跳过（用户选择或规则排除）" },
+          "invalidated": { "type": "array", "items": { "type": "string" }, "description": "失效（检查点内容已被后续修改等）" }
+        },
+        "required": ["restored", "deleted", "skipped", "invalidated"]
+      },
+      "errors": ["invalid_params", "storage_busy", "internal_error"]
+    },
+    {
+      "name": "usage.get",
+      "group": "usage",
+      "summary": "线程/工作区用量（token 与成本聚合）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string", "description": "给出时同时返回该线程聚合" },
+          "since": { "type": "string", "format": "date-time", "description": "工作区聚合的时间窗起点；缺省为全量" }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread": { "$ref": "#/definitions/Usage", "description": "threadId 给出时的线程聚合；未给出为 provider/model 均空串的零值" },
+          "workspace": { "$ref": "#/definitions/Usage", "description": "工作区聚合（跨线程）" }
+        },
+        "required": ["thread", "workspace"]
+      },
+      "errors": ["invalid_params", "storage_busy"]
+    },
+    {
+      "name": "debug.state",
+      "group": "debug",
+      "summary": "本机调试快照（默认关闭；关闭时不注册进 dispatch 表，等同 method_not_found）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": true,
+      "requiresReadyInstance": true,
+      "defaultDisabled": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string", "description": "给出时附带该线程投影水位" }
+        }
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "instance": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "pid": { "type": "integer", "minimum": 1 },
+              "status": { "type": "string", "enum": ["starting", "ready", "busy", "reaping", "failed", "stopped"], "description": "Instance.Status（4.2）" },
+              "restarts": { "type": "integer", "minimum": 0, "description": "崩溃重启计数；5 分钟 3 次熔断" },
+              "startedAt": { "type": "string", "format": "date-time" }
+            },
+            "required": ["pid", "status"]
+          },
+          "threads": { "type": "integer", "minimum": 0, "description": "活跃线程数" },
+          "activeRuns": { "type": "integer", "minimum": 0 },
+          "pendingInteractions": { "type": "integer", "minimum": 0 },
+          "queuedWrites": { "type": "integer", "minimum": 0, "description": "单写者协程有界队列的积压（5.7 反压观测）" },
+          "eventBufferRetained": { "type": "integer", "minimum": 0, "description": "事件总线当前保留条数（上限 transport.eventBuffer）" },
+          "plugins": { "type": "array", "items": { "$ref": "#/definitions/PluginSummary" } }
+        },
+        "required": ["instance", "plugins"]
+      },
+      "errors": ["method_not_found", "invalid_params", "internal_error"]
+    }
+  ],
+  "events": [
+    {
+      "name": "evt.ready",
+      "scope": "workspace",
+      "summary": "Core 就绪：产品、工具数、插件数",
+      "replayable": false,
+      "entersModelContext": false,
+      "payload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "productId": { "type": "string" },
+          "protoVersion": { "type": "integer", "minimum": 1 },
+          "pid": { "type": "integer", "minimum": 1 },
+          "toolCount": { "type": "integer", "minimum": 0 },
+          "pluginCount": { "type": "integer", "minimum": 0 },
+          "readyAt": { "type": "string", "format": "date-time" }
+        },
+        "required": ["productId", "toolCount", "pluginCount", "readyAt"]
+      }
+    },
+    {
+      "name": "evt.state.snapshot",
+      "scope": "thread",
+      "summary": "线程全量快照：items 窗口、seq、run、interactions",
+      "replayable": false,
+      "entersModelContext": true,
+      "payload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" },
+          "seq": { "type": "integer", "minimum": 0 },
+          "items": { "type": "array", "items": { "$ref": "#/definitions/Item" }, "description": "按 at 排序（8.3）" },
+          "run": { "$ref": "#/definitions/RunState" },
+          "interactions": { "type": "array", "items": { "$ref": "#/definitions/Interaction" } }
+        },
+        "required": ["threadId", "seq", "items", "run", "interactions"]
+      }
+    },
+    {
+      "name": "evt.state.patch",
+      "scope": "thread",
+      "summary": "增量补丁：baseSeq + upsert/remove ops + 指纹；只发变化字段，超 32KB 截断标 truncated",
+      "replayable": true,
+      "entersModelContext": true,
+      "payload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" },
+          "seq": { "type": "integer", "minimum": 1 },
+          "baseSeq": { "type": "integer", "minimum": 0, "description": "补丁基线；客户端 seq 不连续则请求 thread.get 重同步，不猜测缺失" },
+          "ops": { "type": "array", "items": { "$ref": "#/definitions/StatePatchOp" }, "minItems": 1 },
+          "fingerprint": { "type": "string", "description": "本帧聚合指纹，校验用" }
+        },
+        "required": ["threadId", "seq", "baseSeq", "ops"]
+      }
+    },
+    {
+      "name": "evt.message.delta",
+      "scope": "thread",
+      "summary": "消息增量：消息 id、文本/思考增量、seq（40ms 窗口合并后发送）",
+      "replayable": true,
+      "entersModelContext": true,
+      "payload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" },
+          "messageId": { "type": "string", "description": "消息 id；itemKey 为 msg:<messageId>" },
+          "seq": { "type": "integer", "minimum": 1 },
+          "text": { "type": "string", "default": "", "description": "文本增量；与 thinking 至少其一非空" },
+          "thinking": { "type": "string", "default": "", "description": "思考增量（模型 supportsThinking 时）" }
+        },
+        "required": ["threadId", "messageId", "seq"]
+      }
+    },
+    {
+      "name": "evt.item.updated",
+      "scope": "thread",
+      "summary": "单条 item 结构变化（消息开始/结束、工具卡状态等）",
+      "replayable": true,
+      "entersModelContext": true,
+      "payload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" },
+          "seq": { "type": "integer", "minimum": 1 },
+          "item": { "$ref": "#/definitions/Item", "description": "变化后的完整 item（payload 内 details 只给界面，INV-10）" }
+        },
+        "required": ["threadId", "seq", "item"]
+      }
+    },
+    {
+      "name": "evt.run.status",
+      "scope": "thread",
+      "summary": "轮次状态：running / waiting_input / finishing / terminal；terminal 时恰好一个 TurnFinished",
+      "replayable": true,
+      "entersModelContext": false,
+      "payload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" },
+          "runId": { "type": "string" },
+          "seq": { "type": "integer", "minimum": 1 },
+          "status": {
+            "type": "string",
+            "enum": ["running", "waiting_input", "finishing", "terminal"],
+            "description": "8.2 原文四态；status=terminal 时 terminalResult 取终态之一：completed（自然收束/terminate 工具）| cancelled（用户取消）| error（provider 失败/协议错误/压缩失败/循环）| interrupted（Core 崩溃/重启）| budget_exceeded（仅显式配置了墙钟/token/成本上限时）（02 §5.3）"
+          },
+          "terminalResult": { "type": "string", "enum": ["completed", "cancelled", "error", "interrupted", "budget_exceeded"] },
+          "errorCode": { "type": "integer", "description": "terminalResult=error 时的业务错误码" },
+          "at": { "type": "string", "format": "date-time" }
+        },
+        "required": ["threadId", "runId", "seq", "status", "at"]
+      }
+    },
+    {
+      "name": "evt.interaction.requested",
+      "scope": "thread",
+      "summary": "交互请求：交互 id、类型、标题、正文、选项、截止时间",
+      "replayable": true,
+      "entersModelContext": false,
+      "payload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" },
+          "interactionId": { "type": "string" },
+          "runId": { "type": "string" },
+          "pluginId": { "type": "string" },
+          "kind": { "type": "string", "enum": ["confirm", "select", "input"] },
+          "title": { "type": "string" },
+          "body": { "type": "string" },
+          "options": { "type": "array", "items": { "type": "string" } },
+          "expiresAt": { "type": "string", "format": "date-time", "description": "截止时间；超时解析为 timeout；默认 300s（6.4）" },
+          "seq": { "type": "integer", "minimum": 1 }
+        },
+        "required": ["threadId", "interactionId", "runId", "pluginId", "kind", "title", "body", "seq"]
+      }
+    },
+    {
+      "name": "evt.interaction.resolved",
+      "scope": "thread",
+      "summary": "交互解析：accepted / denied / cancelled / timeout / unavailable；一次交互恰好解析一次",
+      "replayable": true,
+      "entersModelContext": false,
+      "payload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" },
+          "interactionId": { "type": "string" },
+          "result": {
+            "type": "string",
+            "enum": ["accepted", "denied", "cancelled", "timeout", "unavailable"],
+            "description": "INV-4：timeout=超时、unavailable=断线/无 UI；策略插件必须把两者都当作拒绝，基座不替它放行"
+          },
+          "response": { "type": "object", "additionalProperties": true },
+          "resolvedAt": { "type": "string", "format": "date-time" },
+          "seq": { "type": "integer", "minimum": 1 }
+        },
+        "required": ["threadId", "interactionId", "result", "resolvedAt", "seq"]
+      }
+    },
+    {
+      "name": "evt.notice",
+      "scope": "thread",
+      "summary": "只给人的提示（永不进模型，INV-10）",
+      "replayable": true,
+      "entersModelContext": false,
+      "payload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" },
+          "noticeId": { "type": "string", "description": "itemKey 为 notice:<noticeId>" },
+          "seq": { "type": "integer", "minimum": 1 },
+          "level": { "type": "string", "enum": ["info", "warn", "error"] },
+          "text": { "type": "string", "maxLength": 8192, "description": "发生了什么 + 下一步；不显示堆栈（7.8）" },
+          "at": { "type": "string", "format": "date-time" }
+        },
+        "required": ["threadId", "noticeId", "seq", "level", "text", "at"]
+      }
+    },
+    {
+      "name": "evt.usage",
+      "scope": "thread",
+      "summary": "token 与成本增量（turn.after 后发出；不进模型上下文）",
+      "replayable": true,
+      "entersModelContext": false,
+      "payload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "threadId": { "type": "string" },
+          "runId": { "type": "string" },
+          "seq": { "type": "integer", "minimum": 1 },
+          "usage": { "$ref": "#/definitions/Usage", "description": "本次模型请求的增量用量；无价模型不含 costMicros" }
+        },
+        "required": ["threadId", "runId", "seq", "usage"]
+      }
+    },
+    {
+      "name": "evt.plugin.changed",
+      "scope": "workspace",
+      "summary": "插件状态/贡献变化（工作区级；装载 workspaceSeq）",
+      "replayable": true,
+      "entersModelContext": false,
+      "payload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "plugin": { "$ref": "#/definitions/PluginSummary" },
+          "change": { "type": "string", "enum": ["status", "contributions", "reloaded", "enabled", "disabled"], "description": "变化类别；工具目录冻结因此 contributions 变化仅在重载后生效（5.4）" },
+          "workspaceSeq": { "type": "integer", "minimum": 1, "description": "工作区级事件序号（8.1）" }
+        },
+        "required": ["plugin", "change", "workspaceSeq"]
+      }
+    },
+    {
+      "name": "evt.error",
+      "scope": "workspace",
+      "summary": "可恢复错误 + 诊断码（ADG-<AREA>-<NNN>；页面只显示码+人话+下一步）",
+      "replayable": true,
+      "entersModelContext": false,
+      "payload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": { "type": "integer", "minimum": 1000, "maximum": 5999, "description": "errorCodes 中的 4 位应用码" },
+          "name": { "type": "string", "description": "对应 errorCodes[].name" },
+          "message": { "type": "string", "maxLength": 2048, "description": "人话描述，不含堆栈" },
+          "diagnostic": { "type": "string", "description": "诊断码，形如 ADG-MODEL-002（8.5）" },
+          "retryable": { "type": "boolean", "description": "与 errorCodes[].retryable 一致" },
+          "threadId": { "type": "string", "description": "线程相关时给出；工作区级错误省略" },
+          "runId": { "type": "string" },
+          "workspaceSeq": { "type": "integer", "minimum": 1 }
+        },
+        "required": ["code", "name", "message", "diagnostic", "retryable", "workspaceSeq"]
+      }
+    }
+  ]
+}

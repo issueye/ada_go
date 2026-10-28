@@ -1,0 +1,33 @@
+{
+  "id": "coding",
+  "name": "ada-go Coding",
+  "plugins": [
+    "provider-openai-chat",
+    "tools-fs",
+    "tools-shell",
+    "tools-git",
+    "tools-plan",
+    "tools-ask",
+    "tools-skill",
+    "policy-default",
+    "persona-coding",
+    "ui-task-plan"
+  ],
+  "capabilities": {
+    "skills": true,
+    "images": true,
+    "subagents": false
+  },
+  "identity": {
+    "name": "ada-go",
+    "locale": "zh-CN"
+  },
+  "policies": {
+    "toolTimeoutMs": 120000,
+    "turnTimeoutMs": 0,
+    "maxTurnTokens": 0,
+    "loopRepeatLimit": 3,
+    "loopAbortLimit": 5,
+    "parallelTools": 1
+  }
+}

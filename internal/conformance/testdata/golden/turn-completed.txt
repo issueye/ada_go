@@ -1,0 +1,9 @@
+ws#1	evt.ready		{"plugins":0,"product":"skeleton","tools":0}
+t#1	evt.run.status	th_gold_01J0000000000000000000000A	{"status":"running"}
+t#2	evt.message.delta	th_gold_01J0000000000000000000000A	{"delta":"","kind":"text","messageId":"01J-M1"}
+t#3	evt.message.delta	th_gold_01J0000000000000000000000A	{"delta":"计划分三步","kind":"text","messageId":"01J-M1"}
+t#4	evt.item.updated	th_gold_01J0000000000000000000000A	{"key":"tool:call_01J-G1","status":"started","tool":"todo"}
+t#5	evt.item.updated	th_gold_01J0000000000000000000000A	{"key":"tool:call_01J-G1","status":"ok"}
+t#6	evt.notice	th_gold_01J0000000000000000000000A	{"level":"info","text":"已写入 3 项计划"}
+t#7	evt.run.status	th_gold_01J0000000000000000000000A	{"status":"finishing"}
+t#8	evt.run.status	th_gold_01J0000000000000000000000A	{"reason":"completed","status":"terminal"}

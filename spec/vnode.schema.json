@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/adag/ada-go/spec/vnode.schema.json",
+  "title": "ada-go 插件前端 VNode（M0 契约冻结，唯一手写源）",
+  "description": "插件 TSX 在服务端（Gateway Render Runtime）渲染产出的受限 VNode JSON，Go 渲染器把它转成 HTML；所有文本与属性值一律由 Go 侧转义，插件永远拿不到 template.HTML（§7.3）。节点形态共三种：元素 {\"t\":\"<标签>\",\"p\":{...},\"c\":[...]}；宿主组件 {\"t\":\"$C\",\"n\":\"<组件名>\",\"p\":{...},\"c\":[...]}；文本 {\"t\":\"#text\",\"v\":\"<字符串>\"}（文本节点形态为本 Schema 约定：不用裸字符串作子节点，保证子节点数组元素同构、校验确定）。Slot/Page 返回 null 表示该插槽留空，由桥接层处理，不产生 VNode。本 Schema 是结构白名单契约层；Go 渲染器还要再实现（Schema 无法表达的）运行期限制：深度 ≤64、节点总数 ≤2000、单字符串 ≤32KB、序列化总输出 ≤256KB、URL 归一化后再查 javascript: 等 scheme（见 x-limits 与 §9.5）。任何校验失败：该插槽渲染为空并记录错误，不影响页面其余部分；页面显示错误面板（开发模式带堆栈）。",
+  "x-limits": {
+    "maxDepth": 64,
+    "maxNodes": 2000,
+    "maxStringBytes": 32768,
+    "maxOutputBytes": 262144,
+    "note": "JSON Schema 不表达树深度/节点总数/总字节数；由 Go 渲染器在解码时强制（§7.3 校验、§9.5 前端 Render Runtime 行）。单字符串 32KB 在本 Schema 以 maxByteLength 尽力声明，Go 侧以 UTF-8 字节数复核。"
+  },
+  "anyOf": [
+    { "$ref": "#/$defs/node" },
+    { "type": "null" }
+  ],
+  "$defs": {
+    "node": {
+      "description": "任一 VNode 节点：元素、宿主组件或文本。",
+      "anyOf": [
+        { "$ref": "#/$defs/element" },
+        { "$ref": "#/$defs/component" },
+        { "$ref": "#/$defs/text" }
+      ]
+    },
+    "children": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/node" },
+      "description": "子节点数组；元素必须同构为节点对象（文本也必须是 {\"t\":\"#text\",\"v\":...}，不接受裸字符串/数字）。渲染器另查节点总数 ≤2000。"
+    },
+    "element": {
+      "description": "元素节点：t 为保守白名单内的 HTML 标签；禁止 script/iframe/object/embed/link/style/svg 等风险标签（图标一律走 Icon 组件的线性 SVG，插件不得直接产出 svg 节点；<ada-modal>/<ada-select> Web Components 由基座宿主与 Modal/Select 组件内部使用，不在插件标签面上）。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t"],
+      "properties": {
+        "t": {
+          "description": "标签白名单（§7.3）。文档明确点名：div、span、a、form、button、details、summary（§7.3/§7.8 与附录 A 样例）、main、nav（§7.8 语义结构）。其余为按 §7.8「语义结构」与「不能注入原始 HTML」推导的保守通用集合：段落/分隔（p、br、hr）、标题（h1–h6）、列表（ul、ol、li）、文本语义（strong、em、code、pre、small、blockquote）、区块（section）、表单原子（label、input、select、option、optgroup、textarea）、基础表格（table、thead、tbody、tr、th、td、caption，对应 §7.7.6「表格横向滚动」与 ModelTable 场景，不含 col/colgroup 等布局怪癖）。",
+          "enum": ["div", "span", "p", "br", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "strong", "em", "code", "pre", "small", "blockquote", "a", "main", "nav", "section", "form", "details", "summary", "label", "input", "button", "select", "option", "optgroup", "textarea", "table", "thead", "tbody", "tr", "th", "td", "caption"]
+        },
+        "p": { "$ref": "#/$defs/elementProps" },
+        "c": { "$ref": "#/$defs/children" }
+      }
+    },
+    "component": {
+      "description": "宿主组件节点：n 为 Go 侧组件函数名（§7.3 组件清单，全部通用组件、不含业务语义；TodoList 在 TSX 侧导出名为 Todo，VNode JSON 统一用规范名 TodoList）。组件 props 由 Go 组件自己的 PropsSchema 在渲染期校验，本 Schema 只做名称级安全约束。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "n"],
+      "properties": {
+        "t": { "const": "$C" },
+        "n": {
+          "enum": ["Button", "IconButton", "SendButton", "Chip", "TextField", "Select", "Tabs", "Modal", "ConfirmDialog", "Disclosure", "Panel", "UserMessage", "AssistantMessage", "Notice", "EmptyState", "Composer", "ComposerAux", "ModelPicker", "ModelTable", "QueueTray", "Form", "ToolCall", "TodoList", "Icon", "Slot", "InteractionTray", "Markdown"]
+        },
+        "p": { "$ref": "#/$defs/componentProps" },
+        "c": { "$ref": "#/$defs/children" }
+      }
+    },
+    "text": {
+      "description": "文本节点：v 为纯文本，Go 渲染器负责转义（插件永远拿不到 template.HTML，§7.3）。单字符串上限 32KB（UTF-8 字节，Go 侧复核）。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "v"],
+      "properties": {
+        "t": { "const": "#text" },
+        "v": { "type": "string", "maxByteLength": 32768 }
+      }
+    },
+    "elementProps": {
+      "description": "元素属性名白名单（§7.3「属性白名单」；文档未逐一列名，此处按 a_da DOM 约定保守冻结：class + data-*/aria-* + 表单/链接/表格基础属性）。禁止：任何 on* 事件属性（白名单天然排除，且组件 props 另有 not 约束）、style 属性（一律走类名）、dangerouslySetInnerHTML（不能注入原始 HTML）、javascript: URL。属性值类型为字符串时受单字符串 32KB 限制（Go 侧复核）。",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "class": { "type": "string", "maxByteLength": 32768, "description": "类名（ada-* 约定、状态走 data-* 不拼 class）。" },
+        "id": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$", "description": "锚点 id；与基座 DOM id 冲突由宿主在渲染期拒绝。" },
+        "href": { "$ref": "#/$defs/safeUrl", "description": "链接目标；允许相对路径、/路径、#锚点与 http(s)/mailto（§9.3 链接策略，Go 侧归一化后复核）。" },
+        "title": { "type": "string", "maxByteLength": 32768, "description": "原生提示（ModelTable 省略号 + title 场景，§7.7.3）。" },
+        "for": { "type": "string", "description": "label 关联目标。" },
+        "name": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,128}$", "description": "表单控件名。" },
+        "value": { "type": ["string", "number"], "description": "控件值。" },
+        "type": { "type": "string", "enum": ["button", "submit", "reset", "text", "search", "email", "password", "number", "checkbox", "radio", "hidden"], "description": "button/input 的类型；submit 按钮配合原生 form 提交（无 JS 降级，§7.8）。" },
+        "placeholder": { "type": "string", "maxByteLength": 1024 },
+        "required": { "type": "boolean" },
+        "disabled": { "type": "boolean" },
+        "readonly": { "type": "boolean" },
+        "checked": { "type": "boolean" },
+        "open": { "type": "boolean", "description": "details 展开态（展开/收起用 <details>/<summary>，无 JS 也能用，§7.7.5）。" },
+        "min": { "type": ["string", "number"] },
+        "max": { "type": ["string", "number"] },
+        "step": { "type": ["string", "number"] },
+        "minlength": { "type": "integer", "minimum": 0 },
+        "maxlength": { "type": "integer", "minimum": 0 },
+        "cols": { "type": "integer", "minimum": 1 },
+        "rows": { "type": "integer", "minimum": 1 },
+        "action": { "$ref": "#/$defs/safeUrl", "description": "form 提交目标；渐进增强要求真实表单 + 303（§7.8），只允许站内相对路径（Go 侧复核）。" },
+        "method": { "type": "string", "enum": ["get", "post"] },
+        "start": { "type": "integer", "description": "ol 起始编号。" },
+        "scope": { "type": "string", "enum": ["row", "col"], "description": "th 作用域。" },
+        "colspan": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "rowspan": { "type": "integer", "minimum": 1, "maximum": 100 }
+      },
+      "patternProperties": {
+        "^aria-[a-z0-9-]{1,40}$": { "type": ["string", "number"], "description": "无障碍状态（aria-live=\"polite\" 等，§7.8；属性名一律小写规范形）。" },
+        "^data-[a-z0-9][a-z0-9-]{0,63}$": { "type": ["string", "number", "boolean"], "description": "data-* + 宿主 JS 完成交互（状态一律 data-*，如 data-state=\"open\"，§7.3/§7.7.3）。" }
+      }
+    },
+    "componentProps": {
+      "description": "组件 props：各组件的合法键由 Go 组件库的 PropsSchema 在渲染期逐个校验（本 Schema 只守安全底线）。安全底线：属性名禁止 on*（事件处理函数一律拒绝——没有 hooks、没有状态、没有副作用、没有事件处理函数，§7.3）、禁止 style、禁止 dangerouslySetInnerHTML；禁止 javascript: URL 值（Go 侧对值复核）。",
+      "type": "object",
+      "propertyNames": {
+        "allOf": [
+          { "not": { "pattern": "^on" } },
+          { "not": { "pattern": "^style$" } },
+          { "not": { "pattern": "dangerouslySetInnerHTML" } }
+        ]
+      }
+    },
+    "safeUrl": {
+      "type": "string",
+      "allOf": [
+        { "not": { "pattern": "^[Jj]ava[Ss]c[Rr]i[Pp][Tt]:" } },
+        { "not": { "pattern": "^[Dd]ata:" } },
+        { "not": { "pattern": "^[Vv][Bb][Ss][Cc][Rr][Ii][Pp][Tt]:" } }
+      ],
+      "description": "Schema 层挡字面 javascript:/data:/vbscript:；Go 渲染器再实现归一化（去前导空白与控制字符、实体解码、大小写折叠）后的 scheme 检查——§7.3「禁止 javascript: URL」的完整语义由宿主执行。"
+    }
+  }
+}

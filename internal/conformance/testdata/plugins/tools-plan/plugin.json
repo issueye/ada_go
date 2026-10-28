@@ -1,0 +1,12 @@
+{
+  "id": "tools-plan",
+  "name": "任务计划工具",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "维护当前线程的任务计划；随包发布的官方 TS 插件与第三方走同一入口",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts",
+    "capabilities": ["state"]
+  }
+}

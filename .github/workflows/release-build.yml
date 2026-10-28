@@ -1,0 +1,81 @@
+# ada-go 交叉构建（M0 范围：只构建并上传 artifact，不做发布）
+#
+# 明确的范围边界：
+#   - 只做「用 GOWORK=off 交叉构建三平台二进制 + 上传 artifact」。发布候选与安装包
+#     必须以 GOWORK=off 构建，不依赖相邻目录未提交的 moejs 源码（开发计划 §7.1、11 §13.1）。
+#   - 不做：GitHub Release、代码签名（Windows EV 证书 / macOS notarization / Linux 签名）、
+#     安装包（.msi/.dmg/.deb/.rpm）、SBOM 与漏洞扫描、升级通道——全部留到 M5
+#     「运维与打包」工作包补齐（开发计划 §4.6/§10.2）。
+#   - 不引用任何 secrets（当前流程不需要）；permissions 保持 contents: read。
+name: Release Build (cross-compile only)
+
+on:
+  workflow_dispatch:
+  # M5 补发布时再启用 tag 触发，例如：
+  # push:
+  #   tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CGO_ENABLED: "0"   # 无 cgo 依赖（11 §13.2），纯 Go 交叉编译
+  GOFLAGS: ""
+  GOWORK: "off"      # 发布口径：忽略本地/联合 workspace，完全按 go.mod/go.sum 解析
+  GOTOOLCHAIN: local
+
+jobs:
+  build:
+    name: adag-${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 三平台（linux/darwin/windows）；darwin 双架构、windows/linux 先各出 amd64，
+        # 其余架构（linux arm64、windows arm64）到 M5 确定安装包范围时再扩。
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - name: Checkout ada-go
+        uses: actions/checkout@v4
+
+      - name: Set up Go 1.27.1
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.1"
+
+      # 发布依赖可独立解析 + 校验（§10.2：go mod verify 属于发布检查项）。
+      - name: GOWORK=off go mod verify
+        shell: bash
+        run: GOWORK=off go mod verify
+
+      - name: Cross build (GOWORK=off CGO_ENABLED=0)
+        shell: bash
+        run: |
+          set -eu
+          ext=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
+          CGO_ENABLED=0 GOWORK=off GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            go build -trimpath \
+              -ldflags "-X github.com/adag/ada-go/internal/version.Revision=$(git rev-parse --short HEAD) -X github.com/adag/ada-go/internal/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              -o bin/adag-${{ matrix.goos }}-${{ matrix.goarch }}${ext} ./cmd/adag
+          ls -l bin/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: adag-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: bin/adag-*
+          retention-days: 14
+          if-no-files-found: error

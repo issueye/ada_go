@@ -1,0 +1,13 @@
+{
+  "id": "bad-reserved-env",
+  "name": "保留 env 前缀",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "负面夹具：backend.env 里声明 ADAG_ 保留前缀（6.13）",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts",
+    "capabilities": ["state"],
+    "env": ["PATH", "ADAG_STREAM_IDLE"]
+  }
+}

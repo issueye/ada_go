@@ -1,0 +1,539 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/adag/ada-go/spec/manifest.schema.json",
+  "title": "ada-go 插件清单 plugin.json（M0 契约冻结，唯一手写源）",
+  "description": "插件目录内 plugin.json 的 JSON Schema。行为约定：运行期宿主对未知字段忽略并记录（apiVersion 次版本向前兼容），但本 Schema 是 adag verify/CI 与装配期校验的契约冻结源——对已声明字段的类型、枚举、信任规则任何一项校验失败即装配失败（整个插件回滚，其他插件不受影响，§6.5）。因此本 Schema 对所有对象使用 additionalProperties: false，拼错的字段名在门禁期直接暴露，而不是被静默吞掉。官方插件与第三方插件走完全相同的一份清单契约（§6.1/§6.8）。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "version", "apiVersion"],
+  "anyOf": [
+    { "required": ["backend"] },
+    { "required": ["frontend"] }
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,63}$",
+      "description": "插件唯一标识；必须等于所在目录名，不匹配即装配失败。发现路径 <workspace>/.adago/plugins/<id>/ 优先于 ~/.adago/plugins/<id>/，同 id 冲突时工作区覆盖全局并警告；builtin 不能被磁盘同名插件覆盖（§6.1/§6.9）。",
+      "x-consumer": "loader: 与插件目录名比对、发现与去重（工作区覆盖全局）、安装/编译缓存路径与注册表键；builtin 覆盖检查"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "人类可读显示名（如「任务卡片」），无行为语义。",
+      "x-consumer": "gateway/web: 插件列表页、导航与交互卡片上的显示名（工具 id 保留英文并配中文标签的文案约定见 §7.7.4）"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+      "description": "语义化版本（semver）。插件 id + 版本 + 文件指纹写入 plugin_meta；第三方文件指纹变化才重新编译（§6.9）。",
+      "x-consumer": "coreapp: 写 plugin_meta（id+version+fingerprint）、展示与热重载/重编译决策；系统事件 evt.plugin.changed 携带"
+    },
+    "apiVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "契约主版本（宿主当前为 1）。主版本不匹配直接拒绝加载（升级时表现为禁用并提示，不阻止主程序启动，§6.2/§10）；次版本兼容：未知字段由宿主忽略并记录。",
+      "x-consumer": "coreapp: 装配期与宿主支持的 apiVersion 主版本比对，不匹配直接拒绝加载；升级流程据此禁用插件"
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1024,
+      "description": "插件用途说明；可选字段（附录 A 的 tools-plan 样例即未声明）。",
+      "x-consumer": "gateway/web: 插件列表页与第三方插件加载前的能力清单展示（§6.9「加载前在插件页显示能力清单」）"
+    },
+    "trust": {
+      "type": "string",
+      "enum": ["builtin", "verified", "third-party"],
+      "default": "third-party",
+      "description": "信任分级（§6.9）。builtin：预编译 bundle 嵌入二进制，只能启用/禁用，可用控制面钩子与全部能力；verified：Ed25519 签名有效（必须带 sig），可用 exec/net.sse/ui.ask/frontend.script 与控制面之外的受信能力；third-party（默认）：受限，禁止 exec、net.sse、ui.ask、subagent.invoke、frontend.script 与控制面动作等级（replace/abort）。违反信任规则即装配失败。",
+      "x-consumer": "coreapp: 装配期能力授予与钩子动作等级门禁（本 Schema 各 x-trust-rule 条件段的依据）；loader: 签名校验分支；gateway/web: 前端脚本加载判定"
+    },
+    "sig": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{86}==$",
+      "description": "Ed25519 签名（64 字节 base64），覆盖清单 + 文件哈希；trust=verified 时必需（缺失即装配失败），公钥在配置里；签名校验失败按 third-party 处理并在页面提示（§6.9）。",
+      "x-consumer": "loader: 安装/首载时用配置公钥验签（清单+文件哈希），失败降级 third-party 并提示"
+    },
+    "backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "后端贡献声明；不声明 backend 即纯前端插件。官方与第三方都必须提供入口（官方构建期 esbuild 预编译嵌入二进制，第三方安装/加载时编译，运行时同一 moejs 宿主，§6.2）。未知字段由宿主忽略并记录，本 Schema 冻结为 false。",
+      "x-consumer": "coreapp: 决定是否创建后端 moejs Runtime 并执行入口；stdlib: 据其子字段安装受限 Node 兼容层（§6.12）",
+      "properties": {
+        "entry": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._/-]+$",
+          "default": "index.ts",
+          "description": "后端入口模块（相对插件目录），导出 export default function (agent: AgentAPI)。官方构建期编成 dist/index.js 嵌入二进制，运行时与第三方一样交给 moejs（§6.2）。",
+          "x-consumer": "coreapp: moejs 求值的入口模块名（虚拟路径 plugin://<id>/…），取默认导出工厂并 Await 结算"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "enum": ["fs.read", "fs.write", "net.fetch", "net.sse", "exec", "state", "ui.ask", "subagent.invoke"]
+          },
+          "uniqueItems": true,
+          "description": "可安装能力的白名单（§6.2）。没声明的能力不安装：node:fs 需 fs.read/fs.write、node:child_process 需 exec、ctx.fetch 需 net.fetch、ctx.http.sse 需 net.sse、ctx.state 需 state、ctx.ui 需 ui.ask；未安装的模块链接期报 ERR_ACCESS_DENIED，不是运行期空值（§6.12）。信任规则（违反即装配失败，见根 allOf 的 x-trust-rule）：ui.ask/net.sse/exec 仅 builtin|verified；subagent.invoke 仅 builtin。",
+          "x-consumer": "coreapp/stdlib: 装配期构造 stdlib.Config，按能力位安装 node:* 模块与 ctx 成员；engine: 受控调用审计与能力门禁"
+        },
+        "env": {
+          "type": "array",
+          "items": {
+            "allOf": [
+              { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$" },
+              { "not": { "pattern": "^[Aa][Dd][Aa][Gg]_" } }
+            ]
+          },
+          "uniqueItems": true,
+          "description": "环境变量白名单：只有列出的名字出现在 process.env，值在装配期冻结；宿主环境里不存在的名字不注入（undefined），不伪造空串（§6.2）。ADAG_* 是保留前缀，Schema pattern 直接拒绝声明；密钥名同样是保留名——与 backend.secrets 重名时由宿主在装配期拒绝（Schema 无法表达跨字段交集），密钥永远不写入环境变量、只走 ctx.secret（§6.13/§9.4）。",
+          "x-consumer": "stdlib: envAllowlist(manifest.backend.env) 构造 Process.Env；adag verify: 保留名与密钥交集核对"
+        },
+        "roles": {
+          "type": "array",
+          "items": { "enum": ["tool-policy"] },
+          "uniqueItems": true,
+          "description": "插件角色声明；v1 只定义 tool-policy（审批策略角色，如 policy-default）。仅用于产品装配校验与「无策略时失败关闭」，基座不解释具体规则（§6.2）。未启用任何 tool-policy 插件时基座直接拒绝写/执行工具（§9.2）。",
+          "x-consumer": "coreapp: 产品装配校验（tool-policy 存在性）与失败关闭判定；adag verify: 角色消费者核对"
+        },
+        "secrets": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{1,63}$" },
+          "uniqueItems": true,
+          "description": "按名申请的密钥名列表（kebab/下划线小写名）。ctx.secret(name) 只对清单列出的名字返回值，其余返回 null；密钥只存在于 Core 内存与配置（环境变量或 secrets.toml 0600），不进提示词、工具结果、日志、前端 props 与子进程环境（§6.3/§9.4）。",
+          "x-consumer": "coreapp: 装配期按名授予 ctx.secret 并脱敏审计；adag verify: 密钥名与 backend.env 的保留名交集核对"
+        },
+        "hooks": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "钩子声明：点位名 → 该插件在此点位使用的最高动作等级（如 {\"tool.beforeCall\":\"deny\"}）。未声明的点位在调用时被引擎拒绝（§6.2）；声明的等级超出该点位允许集合（§6.6 表）或超出信任授予（replace/abort 仅 builtin，见根 x-trust-rule T2）即装配失败。15 个点位全部有真实调用方；成对点位（turn.before/after 等）由 adag verify 核对调用方存在。",
+          "x-consumer": "engine: 钩子派发前比对——未声明点位直接拒绝；声明等级为运行时上限，超出信任授予在装配期失败",
+          "properties": {
+            "session.start": {
+              "enum": ["observe", "note"],
+              "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
+            },
+            "session.end": {
+              "enum": ["observe", "note"],
+              "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
+            },
+            "thread.created": {
+              "enum": ["observe", "note"],
+              "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
+            },
+            "user.message": {
+              "enum": ["observe", "note"],
+              "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
+            },
+            "turn.before": {
+              "enum": ["observe", "note", "abort"],
+              "description": "abort 仅 builtin（x-trust-rule T2）。",
+              "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
+            },
+            "turn.after": {
+              "enum": ["observe", "note"],
+              "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
+            },
+            "model.beforeRequest": {
+              "enum": ["observe", "note", "replace", "abort"],
+              "description": "replace/abort 仅 builtin（x-trust-rule T2）。",
+              "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
+            },
+            "model.afterResponse": {
+              "enum": ["observe", "note"],
+              "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
+            },
+            "tool.beforeCall": {
+              "enum": ["observe", "note", "deny", "replace", "abort"],
+              "description": "策略主战场（失败方向=关/拒绝）；deny 对第三方开放，replace/abort 仅 builtin（x-trust-rule T2）。事件载荷 { callId, tool, access, input, threadId }（§6.6）。",
+              "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
+            },
+            "tool.afterCall": {
+              "enum": ["observe", "note"],
+              "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
+            },
+            "compaction.before": {
+              "enum": ["observe", "note"],
+              "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
+            },
+            "compaction.after": {
+              "enum": ["observe", "note"],
+              "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
+            },
+            "interaction.requested": {
+              "enum": ["observe", "note"],
+              "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
+            },
+            "plugin.loaded": {
+              "enum": ["observe", "note"],
+              "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
+            },
+            "error": {
+              "enum": ["observe", "note"],
+              "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
+            }
+          }
+        },
+        "pool": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1,
+          "default": 1,
+          "description": "Runtime 池大小，保留给后续版本（§6.4）：v1 固定每插件 1 个 Runtime、绑定专用 goroutine、channel 串行进入；声明 >1 时装配失败。未来开放多实例时每实例独立初始化，共享状态必须走 ctx.state。",
+          "x-consumer": "coreapp: 装配期创建 Runtime 实例数（当前仅 1 合法，>1 拒绝装配）"
+        }
+      }
+    },
+    "frontend": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "前端贡献声明（插槽/页面/导航/仪表盘/动作绑定/静态资源），由 Gateway 的 Render Runtime 与 SSR 宿主消费（§7.2/§7.5）。Render Runtime 不安装任何 Node 兼容层，数据只经 props 与只读动作预取进入。未知字段由宿主忽略并记录，本 Schema 冻结为 false。",
+      "x-consumer": "gateway/web: 插槽注册表、/ext 页面路由、侧栏导航、概览卡片、动作桥入口与资源链接；gateway/render: TSX 模板编译与渲染",
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "items": { "enum": ["backend.read", "frontend.script"] },
+          "uniqueItems": true,
+          "description": "前端能力位（§6.2：前端 capabilities 控制预取、脚本、静态资源等）。backend.read：允许 SSR 渲染时预取只读动作结果注入 props.data.backend；frontend.script：允许加载 scripts 静态 JS，仅 builtin/verified（third-party 声明即装配失败，x-trust-rule T3；§6.9/§7.5）。",
+          "x-consumer": "gateway/render: 决定是否预取只读动作；gateway/web: 决定是否加载 scripts（受信任级别与 CSP script-src 'self' 双重约束）"
+        },
+        "slots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["slot", "template"],
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": ["sidebar.top", "sidebar.bottom", "topbar.right", "chat.corner", "composer.left", "composer.right", "composer.footer", "composer.above", "thread.tray", "transcript.after", "extensions.list", "dashboard.widgets"],
+                "description": "12 个稳定插槽之一（§7.2）；未知插槽名即装配失败。插槽是不可轻易增加的兼容承诺。",
+                "x-consumer": "gateway/web: 插槽注册表按 slot 分组，order 排序后由基座宿主在固定位置渲染"
+              },
+              "template": {
+                "$ref": "#/$defs/templatePath",
+                "description": "TSX 模板（相对插件目录），导出 export function Slot(props)。模板不可编译即装配失败（§6.5 校验项）。",
+                "x-consumer": "gateway/render: 装配期编译该模板并注册 Slot 导出函数，渲染期执行取得 VNode"
+              },
+              "order": {
+                "$ref": "#/$defs/orderValue",
+                "x-consumer": "gateway/web: 同一插槽内的渲染顺序（小者在前，同级按插件 id 稳定排序）"
+              }
+            }
+          },
+          "description": "插槽贡献列表：同一插件可挂多个插槽。",
+          "x-consumer": "gateway/web: 插槽注册表按 slot 分组排序渲染（未贡献的插槽由基座 Slot 组件回退）"
+        },
+        "pages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["slug", "template"],
+            "properties": {
+              "slug": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$",
+                "description": "页面路径段：/ext/{id}/{slug}（§7.5）。",
+                "x-consumer": "gateway/web: 注册 /ext/<插件id>/<slug> 路由并 SSR 该页"
+              },
+              "template": {
+                "$ref": "#/$defs/templatePath",
+                "description": "页面 TSX 模板，导出 export function Page(props)。",
+                "x-consumer": "gateway/render: 编译该模板并在请求时执行 Page(props) 取得 VNode"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120,
+                "x-consumer": "gateway/web: 渲染页面 <title> 与浏览器标签标题"
+              }
+            }
+          },
+          "description": "独立页面贡献；与聊天页共用侧栏外壳，内容最大宽度 1040px（§7.7.6）。",
+          "x-consumer": "gateway/web: 页面路由表与侧栏可达性"
+        },
+        "nav": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "slug"],
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "description": "导航文案（统一文案约定见 §7.7.4；工具 id 保留英文并配中文标签）。",
+                "x-consumer": "gateway/web: 侧栏「插件导航」区渲染条目文字"
+              },
+              "slug": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$",
+                "description": "导航目标：指向本插件 pages 中的 slug（/ext/{id}/{slug}）；目标页不存在即装配失败。",
+                "x-consumer": "gateway/web: 生成链接 /ext/<插件id>/<slug>；adag verify: 与 pages 交叉核对"
+              },
+              "icon": {
+                "type": "string",
+                "pattern": "^[a-z0-9-]{1,63}$",
+                "description": "基座线性 SVG 图标名（stroke 1.75、与 a_da 图标集同源；不用 emoji 当图标，§7.1/§7.7.3）。",
+                "x-consumer": "gateway/web: 侧栏导航条目渲染对应图标"
+              },
+              "order": {
+                "$ref": "#/$defs/orderValue",
+                "x-consumer": "gateway/web: 插件导航区条目排序（小者在前，同级按插件 id 稳定排序）"
+              }
+            }
+          },
+          "description": "侧栏导航项贡献（位于基座「插件导航」区）。",
+          "x-consumer": "gateway/web: 侧栏导航注册表按 order 分组渲染"
+        },
+        "dashboard": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["widget", "template"],
+            "properties": {
+              "widget": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{1,63}$",
+                "description": "概览卡片标识（插件内唯一，§7.5「dashboard：概览页卡片」）。",
+                "x-consumer": "gateway/web: 概览页（/d/{slug}）卡片区的唯一键与 data-* 锚点"
+              },
+              "template": {
+                "$ref": "#/$defs/templatePath",
+                "description": "卡片 TSX 模板。",
+                "x-consumer": "gateway/render: 编译并在概览页请求时执行该模板取得 VNode"
+              },
+              "order": {
+                "$ref": "#/$defs/orderValue",
+                "x-consumer": "gateway/web: 概览页卡片区（dashboard.widgets 插槽）排序"
+              }
+            }
+          },
+          "description": "概览页卡片贡献。",
+          "x-consumer": "gateway/web: dashboard.widgets 插槽注册表分组渲染"
+        },
+        "actions": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[a-z][a-z0-9_]{1,63}$" },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["action", "read", "backend"],
+            "properties": {
+              "action": {
+                "$ref": "#/$defs/actionName",
+                "description": "目标后端动作名（ActionDef.name，§6.3）。",
+                "x-consumer": "coreapp: 动作桥把 POST /ext/{id}/action/{binding} 解析到目标插件的该动作"
+              },
+              "read": {
+                "type": "boolean",
+                "description": "true=读动作：SSR 时预取（最多 16 个、并发 4、单个 300ms、结果缓存 8s），结果进入 props.data.backend.<插件id>.<绑定名>；false=写动作：必须用户点击、走 CSRF+确认、结果不回填页面（303/刷新呈现）（§6.3/§7.5）。",
+                "x-consumer": "gateway/render: 决定 SSR 预取与 props.data.backend 注入；gateway/web: 写动作渲染确认交互"
+              },
+              "backend": {
+                "$ref": "#/$defs/pluginId",
+                "description": "提供该动作的后端插件 id，可指向另一个插件（如 task-plan → tools-plan，§6.2）。目标插件/动作必须存在，跨插件只传 JSON 结果、不共享内存；不存在即装配失败。",
+                "x-consumer": "coreapp: 装配期解析目标插件的动作注册；adag verify: 核对目标存在"
+              },
+              "confirm": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512,
+                "description": "写动作的确认文案（read 动作忽略）。",
+                "x-consumer": "gateway/web: 渲染确认对话框（ConfirmDialog/<ada-modal>）文案"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 5000,
+                "description": "单次动作调用预算；默认 5000（与 ActionDef.timeoutMs 一致，§6.3）。等待 ctx.ui 等宿主长调用时暂停脚本计时（§6.4）。",
+                "x-consumer": "coreapp: 动作调用的超时预算（超时记 plugin_timeout）"
+              }
+            }
+          },
+          "description": "动作绑定：binding 名 → 后端动作。读/写语义与预取见 §7.5；动作不进模型上下文、不受 tool.beforeCall 策略约束，但写动作必须用户点击确认且受能力与 scope 约束（§7.6）。",
+          "x-consumer": "gateway/web: 为每个绑定渲染控件与动作桥入口 POST /ext/{id}/action/{binding}；coreapp: 装配期校验绑定目标存在"
+        },
+        "styles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/assetPath" },
+          "uniqueItems": true,
+          "description": "插件 CSS 外部文件列表（允许外部文件；CSP style-src 'self'，不使用内联样式，§9.3）。链接顺序排在基座层（app.css → tokens.css → components/layout/widgets/shell/pages.css）之后；业务 CSS 只引用 --ph-* 令牌、不写死色值（§7.7.2）。",
+          "x-consumer": "gateway/web: 在页面链接基座样式层之后注入 <link>（带内容哈希、可缓存）"
+        },
+        "scripts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/assetPath" },
+          "uniqueItems": true,
+          "description": "插件 JS 文件列表。默认不加载：需要 frontend.script 能力且 trust 为 builtin/verified（third-party 声明即装配失败，x-trust-rule T3）；同源运行仍是风险点，v1 建议优先 HTMX/表单（§7.5）。受 CSP script-src 'self' 限制、不使用内联脚本（§9.3）。",
+          "x-consumer": "gateway/web: 按能力+信任决定 <script> 加载；CSP 与 no-store 响应头由基座统一施加"
+        },
+        "assets": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._/-]+$",
+          "description": "静态资源目录（相对插件目录，如 \"static\"）。插件包内资源以 plugin://<id>/... 只读访问、对外只在本插件路径下服务（写操作只能落到工作区，§6.12.3）；路径穿越与文件类型在安装期校验（§6.9）。",
+          "x-consumer": "gateway/web: 将该目录挂到插件自有只读静态资源路径（内容哈希缓存，Cache-Control 由基座按类型决定）"
+        }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "description": "插件自己设置项的 JSON Schema（draft 2020-12 子集，形态为普通对象）。基座不解释业务字段：配置按 [plugins.settings.<id>] 原样存储（附录 B：「插件设置由插件自己声明与校验；基座只按名存储」），设置项声明 schema 供基座渲染通用表单；设置不得改变 scope 根、密钥访问或能力授予（§1.5 边界）。",
+      "x-consumer": "gateway/web: 按本 schema 渲染通用设置表单；coreapp: 按名存储与透传给插件；adag verify: 核对设置项不触碰宿主权限面"
+    }
+  },
+  "allOf": [
+    {
+      "x-trust-rule": "T1：trust=verified 必须携带 sig（Ed25519 覆盖清单+文件哈希）。缺失即装配失败。",
+      "if": {
+        "required": ["trust"],
+        "properties": {
+          "trust": {
+            "x-consumer": "coreapp: 信任规则 T1 条件（读取 trust 判定是否需要 sig）",
+            "const": "verified"
+          }
+        }
+      },
+      "then": { "required": ["sig"] }
+    },
+    {
+      "x-trust-rule": "T2：abort/replace 动作等级仅 builtin 信任插件（§6.6：replace 仅 tool.beforeCall/model.beforeRequest、abort 仅 turn.before/model.beforeRequest/tool.beforeCall）。third-party/verified 在对应点位声明 replace/abort 即装配失败；非 builtin 的 tool.beforeCall 最高到 deny。",
+      "if": {
+        "required": ["trust"],
+        "properties": {
+          "trust": {
+            "x-consumer": "coreapp: 信任规则 T2 条件（识别 builtin 分支；trust 缺省视为 third-party，走 else 收敛）",
+            "const": "builtin"
+          }
+        }
+      },
+      "then": true,
+      "else": {
+        "properties": {
+          "backend": {
+            "x-consumer": "coreapp: 信任规则 T2 条件（限定 backend.hooks 动作等级）",
+            "properties": {
+              "hooks": {
+                "x-consumer": "engine: 信任规则 T2 条件（非 builtin 逐点位收敛最高动作等级）",
+                "properties": {
+                  "turn.before": {
+                    "x-consumer": "engine: 信任规则 T2（非 builtin 在 turn.before 至多 observe/note，不能 abort）",
+                    "enum": ["observe", "note"]
+                  },
+                  "model.beforeRequest": {
+                    "x-consumer": "engine: 信任规则 T2（非 builtin 在 model.beforeRequest 至多 observe/note，不能 replace/abort）",
+                    "enum": ["observe", "note"]
+                  },
+                  "tool.beforeCall": {
+                    "x-consumer": "engine: 信任规则 T2（非 builtin 在 tool.beforeCall 至多 deny，不能 replace/abort）",
+                    "enum": ["observe", "note", "deny"]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "x-trust-rule": "T3：third-party（含省略 trust 走默认值）禁止 exec、net.sse、ui.ask、subagent.invoke（§6.2/§6.9「默认禁止 exec」）与前端 frontend.script（§6.9「禁止前端脚本」、§7.5「需要 frontend.script 能力且信任级别为 builtin/verified」）。声明即装配失败。",
+      "if": {
+        "required": ["trust"],
+        "properties": {
+          "trust": {
+            "x-consumer": "coreapp: 信任规则 T3 条件（识别 builtin/verified 分支；trust 缺省视为 third-party，走 else 收敛）",
+            "enum": ["builtin", "verified"]
+          }
+        }
+      },
+      "then": true,
+      "else": {
+        "properties": {
+          "backend": {
+            "x-consumer": "coreapp: 信任规则 T3 条件（收敛 backend.capabilities 可声明集合）",
+            "properties": {
+              "capabilities": {
+                "x-consumer": "stdlib: 信任规则 T3（third-party 的 fs.read/fs.write/net.fetch/state 之外能力不予安装，声明即装配失败）",
+                "items": { "enum": ["fs.read", "fs.write", "net.fetch", "state"] }
+              }
+            }
+          },
+          "frontend": {
+            "x-consumer": "gateway/web: 信任规则 T3 条件（收敛 frontend.capabilities 可声明集合）",
+            "properties": {
+              "capabilities": {
+                "x-consumer": "gateway/web: 信任规则 T3（third-party 禁止 frontend.script，脚本不加载，声明即装配失败）",
+                "items": { "enum": ["backend.read"] }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "x-trust-rule": "T4：subagent.invoke 仅 builtin（供 tools-subagent 使用，§6.2）。verified 声明该能力位即装配失败；exec/net.sse/ui.ask 对 builtin|verified 开放（见 T3 的反面）。",
+      "if": {
+        "required": ["trust"],
+        "properties": {
+          "trust": {
+            "x-consumer": "coreapp: 信任规则 T4 条件（识别 builtin 分支；trust 缺省视为 third-party，走 else 收敛）",
+            "const": "builtin"
+          }
+        }
+      },
+      "then": true,
+      "else": {
+        "properties": {
+          "backend": {
+            "x-consumer": "coreapp: 信任规则 T4 条件（收敛 backend.capabilities 可声明集合）",
+            "properties": {
+              "capabilities": {
+                "x-consumer": "stdlib: 信任规则 T4（非 builtin 不安装 subagent.invoke，声明即装配失败）",
+                "items": { "enum": ["fs.read", "fs.write", "net.fetch", "net.sse", "exec", "state", "ui.ask"] }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "templatePath": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._/-]+\\.tsx?$",
+      "description": "相对插件目录的 TSX/TS 模板路径（不含 ..，宿主另做路径穿越检查）。"
+    },
+    "assetPath": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._/-]+$",
+      "description": "相对插件目录的资源路径（不含 ..，宿主另做路径穿越与文件类型校验，§6.9）。"
+    },
+    "actionName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{1,63}$",
+      "description": "后端动作名，与 ActionDef.name 同规则（§6.3）。"
+    },
+    "pluginId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,63}$",
+      "description": "插件 id 引用，与顶层 id 同规则（§6.2）。"
+    },
+    "orderValue": {
+      "type": "integer",
+      "default": 100,
+      "description": "排序值，小者在前；同级按插件 id 稳定排序保证确定性（§6.5）。"
+    },
+    "safeUrl": {
+      "type": "string",
+      "allOf": [
+        { "not": { "pattern": "^[Jj]ava[Ss]c[Rr]i[Pp][Tt]:" } },
+        { "not": { "pattern": "^[Dd]ata:" } },
+        { "not": { "pattern": "^[Vv][Bb][Ss][Cc][Rr][Ii][Pp][Tt]:" } }
+      ],
+      "description": "URL 值：Schema 层先挡字面 javascript:/data:/vbscript:；宿主 Go 侧再实现归一化检查（去前导空白/控制字符/实体解码后不区分大小写检查协议，与 §9.3 链接只允许 http/https/mailto/相对路径一致）。"
+    }
+  }
+}

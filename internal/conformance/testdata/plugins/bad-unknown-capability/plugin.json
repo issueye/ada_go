@@ -1,0 +1,12 @@
+{
+  "id": "bad-unknown-capability",
+  "name": "未知能力位",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "负面夹具：拼错的能力位 fs.reads（能力白名单是封闭集合，6.2）",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts",
+    "capabilities": ["fs.reads"]
+  }
+}

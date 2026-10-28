@@ -1,0 +1,12 @@
+{
+  "id": "bad-unknown-slot",
+  "name": "未知插槽",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "负面夹具：声明 12 个插槽之外的名字（7.2「插槽宁少勿多」）",
+  "trust": "third-party",
+  "frontend": {
+    "capabilities": ["backend.read"],
+    "slots": [{ "slot": "chat.middle", "template": "slot.tsx", "order": 1 }]
+  }
+}

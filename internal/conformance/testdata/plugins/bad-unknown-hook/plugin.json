@@ -1,0 +1,16 @@
+{
+  "id": "bad-unknown-hook",
+  "name": "未知钩子点位",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "负面夹具：声明 15 个点位之外的 tool.beforeExec（6.6：点位集合封闭）",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts",
+    "capabilities": ["state"],
+    "hooks": {
+      "turn.before": "observe",
+      "tool.beforeExec": "deny"
+    }
+  }
+}
