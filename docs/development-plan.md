@@ -172,6 +172,11 @@ M4 同时依赖 M2 的页面宿主与 M3 的完整装配/信任模型。若 M3 �
 
 ### 4.3 M2：Gateway、SSR 与可用界面（25–35 人日）
 
+> M2 的第一刀是 Core JSON-RPC 传输：`adag core` 已从 self-check 扩展为回环 WebSocket 服务，
+> 覆盖 system/workspace/thread/turn/interaction/model/provider/tool/plugin 的读写面与 evt.* 通知；
+> Gateway 监督与 relay 在这一层之上接入。当前已落地第一版 Gateway 组合根
+> （supervisor / relay / security / SSE / SSR），剩余是断线重连细化、性能基线与 M4 前端插件。
+
 | 工作包 | 内容 | 估算 |
 |---|---|---:|
 | 工作区监督 | 注册表、路径键归一化、spawn/握手、父进程心跳、重启、LRU/空闲回收 | 4–6 |

@@ -92,6 +92,23 @@ type Session struct {
 	in *bufio.Reader
 }
 
+// threadCtxKey 把「本次工具调用属于哪个线程」传给 stateOp。
+// engine 的工具执行使用轮次 ctx，宿主 State 闭包能拿到它；这比 Session 上的
+// 可变 currentThread 更适合 Core 的多线程 RPC。
+type threadCtxKey struct{}
+
+func withThread(ctx context.Context, threadID string) context.Context {
+	return context.WithValue(ctx, threadCtxKey{}, threadID)
+}
+
+func threadFrom(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	id, _ := ctx.Value(threadCtxKey{}).(string)
+	return id
+}
+
 // Open 打开工作区、装配产品并接好引擎端口。
 func Open(ctx context.Context, cfg Config) (*Session, error) {
 	if strings.TrimSpace(cfg.Workspace) == "" {
@@ -334,11 +351,32 @@ func (s *Session) Run(ctx context.Context, prompt string) (domain.TerminalReason
 			return domain.TerminalError, err
 		}
 	}
-	threadID := s.CurrentThread()
 	runID, err := s.ids.NewRunID(ctx)
 	if err != nil {
 		return domain.TerminalError, err
 	}
+	return s.RunInThread(ctx, s.CurrentThread(), runID, prompt)
+}
+
+// RunInThread 在指定线程上跑一轮（不改变 CLI 的当前线程）。
+//
+// Core RPC 用它支持多线程；线程身份经 ctx 传给插件 State，避免并发轮次互相串台。
+func (s *Session) RunInThread(ctx context.Context, threadID, runID, prompt string) (domain.TerminalReason, error) {
+	if s.modelErr != nil {
+		return domain.TerminalError, s.modelErr
+	}
+	if strings.TrimSpace(prompt) == "" {
+		return domain.TerminalError, errors.New("cli: 输入为空")
+	}
+	if threadID == "" || runID == "" {
+		return domain.TerminalError, errors.New("cli: 轮次需要 threadId 与 runId")
+	}
+	runCtx := withThread(ctx, threadID)
+	return engine.Run(runCtx, s.deps, s.newTurnSpec(threadID, runID, prompt)), nil
+}
+
+// newTurnSpec 把产品策略与当前模型合成引擎输入。
+func (s *Session) newTurnSpec(threadID, runID, prompt string) engine.TurnSpec {
 	spec := engine.TurnSpec{
 		ThreadID: threadID,
 		RunID:    runID,
@@ -362,7 +400,75 @@ func (s *Session) Run(ctx context.Context, prompt string) (domain.TerminalReason
 	if spec.ParallelTools <= 0 {
 		spec.ParallelTools = 1
 	}
-	return engine.Run(ctx, s.deps, spec), nil
+	return spec
+}
+
+// NewRunID 生成轮次 id（Core RPC turn.start 用）。
+func (s *Session) NewRunID(ctx context.Context) (string, error) { return s.ids.NewRunID(ctx) }
+
+// ModelRef 返回当前生效模型。
+func (s *Session) ModelRef() ports.ModelRef { return s.modelRef() }
+
+// ModelError 返回模型配置问题（nil 表示可用）。
+func (s *Session) ModelError() error { return s.modelErr }
+
+// Product 返回已加载的产品声明。
+func (s *Session) Product() *coreapp.Product { return s.asm.Product }
+
+// Assembly 返回装配结果（插件、工具、provider 目录）。
+func (s *Session) Assembly() *app.Assembly { return s.asm }
+
+// Store 返回工作区存储句柄（Core RPC 的线程/entry 查询复用它）。
+func (s *Session) Store() *sqlite.Store { return s.store }
+
+// Workspace 返回规范化后的工作区路径。
+func (s *Session) Workspace() string { return s.cfg.Workspace }
+
+// DataDir 返回数据目录。
+func (s *Session) DataDir() string { return s.cfg.DataDir }
+
+// BaseURL 返回 provider 兼容端点覆盖。
+func (s *Session) BaseURL() string { return s.cfg.BaseURL }
+
+// Subscribe 订阅领域事件；返回取消函数。
+func (s *Session) Subscribe(fn func(domain.Event)) func() { return s.emitter.Subscribe(fn) }
+
+// CreateThread 创建线程但不切换 CLI 当前线程。
+func (s *Session) CreateThread(ctx context.Context, title string) (ports.Thread, error) {
+	if strings.TrimSpace(title) == "" {
+		title = "新会话"
+	}
+	return s.store.CreateThread(ctx, s.cfg.Workspace, title)
+}
+
+// GetThread 读取线程。
+func (s *Session) GetThread(ctx context.Context, id string) (ports.Thread, error) {
+	return s.store.GetThread(ctx, id)
+}
+
+// ListThreads 列线程。
+func (s *Session) ListThreads(ctx context.Context, req ports.ListThreadsRequest) (ports.ThreadPage, error) {
+	return s.store.ListThreads(ctx, req)
+}
+
+// EntriesBefore 历史分页。
+func (s *Session) EntriesBefore(ctx context.Context, threadID string, fromSeq, limit int64) (ports.EntriesPage, error) {
+	return s.store.EntriesBefore(ctx, threadID, fromSeq, limit)
+}
+
+// PendingInteractions 列出线程待处理交互。
+func (s *Session) PendingInteractions(ctx context.Context, threadID string) ([]ports.InteractionRequest, error) {
+	return s.broker.ListPending(ctx, threadID)
+}
+
+// RespondInteraction 提交交互响应（幂等由 Broker 保证）。
+func (s *Session) RespondInteraction(ctx context.Context, threadID, requestID string, status domain.InteractionStatus, value string) (ports.InteractionResolution, error) {
+	return s.broker.Respond(ctx, threadID, requestID, status, value)
+}
+
+// HasUI 报告 CLI/Core 当前是否有交互界面。
+func (s *Session) HasUI(ctx context.Context, threadID string) bool {
+	return s.broker.HasUI(ctx, threadID)
 }
 
 // modelRef 由产品/CLI 配置与 provider 声明的能力合成。
@@ -500,7 +606,10 @@ func (s *Session) ask(kind, title, body string, options []string) (domain.Intera
 
 // stateOp 把插件 KV 落到 SQLite，键按线程命名空间（t:<threadID>/<key>）。
 func (s *Session) stateOp(ctx context.Context, op host.StateOp) (json.RawMessage, error) {
-	thread := s.CurrentThread()
+	thread := threadFrom(ctx)
+	if thread == "" {
+		thread = s.CurrentThread()
+	}
 	key := ports.StateKey{PluginID: op.PluginID, Key: "t:" + thread + "/" + op.Key}
 	switch op.Kind {
 	case "get":

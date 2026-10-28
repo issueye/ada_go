@@ -1,0 +1,93 @@
+{{define "head"}}<!doctype html>
+<html lang="{{.Locale}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{{if .RefreshSeconds}}<meta http-equiv="refresh" content="{{.RefreshSeconds}}">{{end}}
+<title>{{.Title}} · {{.ProductName}}</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="shell">
+<header class="topbar">
+  <a class="brand" href="/">{{.ProductName}}</a>
+  <nav class="topnav" aria-label="主导航">
+    <a href="/">会话</a>
+    <a href="/threads">全部会话</a>
+  </nav>
+  <div class="topmeta">
+    {{with .Identity}}<span class="identity">{{.}}</span>{{end}}
+    <a href="{{.LoginPath}}">登录</a>
+  </div>
+</header>
+{{end}}
+
+{{define "foot"}}
+</div>
+</body>
+</html>
+{{end}}
+
+{{define "csrf"}}{{with .CSRF}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}{{end}}
+
+{{define "parts"}}{{range .Parts}}{{if eq .Type "thinking"}}<details class="thinking"><summary>思考过程</summary><div class="part-text">{{.Text}}</div></details>{{else if eq .Type "image"}}<span class="part-image">[图片]</span>{{else}}<div class="part-text">{{.Text}}</div>{{end}}{{end}}{{end}}
+
+{{define "entry"}}
+{{if eq .Kind "user"}}
+<article class="msg msg-user">
+  <div class="msg-body">{{template "parts" .}}</div>
+</article>
+{{else if eq .Kind "assistant"}}
+<article class="msg msg-assistant">
+  <div class="avatar" aria-hidden="true">A</div>
+  <div class="msg-body">{{template "parts" .}}</div>
+</article>
+{{else if eq .Kind "tool"}}
+<article class="tool-card" data-state="{{.Tool.Status}}">
+  <div class="tool-head">
+    <code class="tool-name">{{.Tool.Tool}}</code>
+    <span class="tool-id">{{.Tool.CallID}}</span>
+    <span class="badge">{{.Tool.StatusLabel}}</span>
+    <span class="muted">{{.Tool.DurationMS}} ms</span>
+    {{if .Tool.Truncated}}<span class="badge badge-warn">已截断</span>{{end}}
+  </div>
+  {{with .Tool.Reason}}<p class="muted">原因：{{.}}</p>{{end}}
+  {{with .Tool.Output}}<pre class="tool-output">{{.}}</pre>{{end}}
+  {{with .Tool.Details}}<details class="tool-details"><summary>详情</summary><pre>{{.}}</pre></details>{{end}}
+</article>
+{{else if eq .Kind "notice"}}
+<div class="notice {{if eq .Level "error"}}notice-error{{else if eq .Level "warn"}}notice-warn{{else}}notice-info{{end}}">{{.Text}}</div>
+{{else}}
+<div class="notice notice-info">{{.Text}}</div>
+{{end}}
+{{end}}
+
+{{define "interaction"}}
+<article class="interaction" data-kind="{{.Kind}}">
+  <h3>{{.Title}}</h3>
+  {{with .Body}}<p class="interaction-body">{{.}}</p>{{end}}
+  <form method="post" action="{{.Action}}">
+    {{template "csrf" .}}
+    <input type="hidden" name="kind" value="{{.Kind}}">
+    {{if eq .Kind "select"}}
+    <label class="field">选择
+      <select name="value">{{range .Options}}<option value="{{.}}">{{.}}</option>{{end}}</select>
+    </label>
+    {{else if eq .Kind "input"}}
+    <label class="field">回答
+      <input type="text" name="value" autocomplete="off">
+    </label>
+    {{end}}
+    <div class="actions">
+      {{if eq .Kind "confirm"}}
+      <button type="submit" name="decision" value="deny" class="btn-safe" autofocus>拒绝</button>
+      <button type="submit" name="decision" value="accept" class="btn-primary">接受</button>
+      {{else}}
+      <button type="submit" name="decision" value="accept" class="btn-primary">提交</button>
+      <button type="submit" name="decision" value="deny" class="btn-safe">拒绝</button>
+      {{end}}
+      <button type="submit" name="decision" value="cancel" class="btn-quiet">取消</button>
+    </div>
+  </form>
+</article>
+{{end}}

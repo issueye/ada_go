@@ -12,14 +12,20 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/adag/ada-go/app"
 	"github.com/adag/ada-go/internal/adapters/sqlite"
+	"github.com/adag/ada-go/internal/cli"
 	"github.com/adag/ada-go/internal/coreapp"
 	"github.com/adag/ada-go/internal/coreproto"
+	"github.com/adag/ada-go/internal/corerpc"
 	"github.com/adag/ada-go/internal/diag"
 	"github.com/adag/ada-go/internal/plugins/host"
 	"github.com/adag/ada-go/internal/proto"
@@ -30,9 +36,9 @@ import (
 const usage = `adag —— 本地优先的 Agent 系统（单二进制，两角色）
 
 用法：
-  adag gateway    [--addr 127.0.0.1:52353]      Gateway：HTTP/SSR/SSE（M2 落地）
+  adag gateway    [--addr 127.0.0.1:52353]      Gateway：鉴权 + SSR + SSE（M2）
   adag core       --workspace <dir> [--product <file>] [--self-check]
-                                                Agent Core：每工作区一个进程（M1 落地）
+                                                Agent Core：JSON-RPC over 回环 WebSocket（M2）
   adag chat       [--workspace <dir>] [--fake]  交互式会话（M1）
   adag print      [--workspace <dir>] --prompt <text>
                                                 单轮执行并输出（M1）
@@ -120,26 +126,27 @@ func notImplemented(cmd, milestone string) error {
 		cmd, milestone, entry.Diag.String())
 }
 
-// cmdGateway：M2 落地。这里只声明监听与安全检查的意图，不假装可服务。
+// cmdGateway 启动 M2 的 HTTP 外壳（鉴权、SSR、SSE 与 Core 监督）。
 func cmdGateway(args []string, stdout io.Writer) error {
-	fs := flag.NewFlagSet("gateway", flag.ContinueOnError)
-	addr := fs.String("addr", "127.0.0.1:52353", "监听地址（非回环必须同时给 --token 与 TLS 或 --allow-plaintext）")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	return notImplemented("gateway "+*addr, "M2：Gateway、SSR 与可用界面")
+	return runGateway(args, stdout)
 }
 
-// cmdCore 支持 --self-check：用产品声明驱动真实装配（官方插件包 × 宿主），
-// 验证「声明写什么就装什么；空声明就是空基座」。
+// cmdCore 支持 --self-check（只验证装配与 dispatch 覆盖）与默认的运行模式：
+// 打开工作区、装配插件、监听回环 WebSocket，提供 Core JSON-RPC 服务。
 func cmdCore(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("core", flag.ContinueOnError)
 	workspace := fs.String("workspace", "", "工作区目录（不存在则拒绝拉起，见 4.2）")
-	product := fs.String("product", "products/skeleton.agent.json", "产品声明文件")
+	product := fs.String("product", defaultProductPath(), "产品声明文件")
 	parentPID := fs.Int("parent-pid", 0, "Gateway 父进程 pid（心跳与孤儿防护）")
-	listen := fs.String("listen", "127.0.0.1:0", "只监听回环的临时端口")
+	listen := fs.String("listen", "127.0.0.1:0", "监听地址；非回环必须设置 ADAG_CORE_TOKEN")
 	selfCheck := fs.Bool("self-check", false, "只验证装配与 dispatch 覆盖，不启动循环")
 	baseURL := fs.String("base-url", "", "OpenAI 兼容端点（provider 插件用）")
+	provider := fs.String("provider", "openai", "provider id")
+	model := fs.String("model", "gpt-4o", "模型 id")
+	dataDir := fs.String("data-dir", "", "数据目录（默认 ~/.adago/workspaces/<hash>）")
+	fake := fs.Bool("fake", false, "使用确定性回显模型（不需要密钥）")
+	var allowHosts stringList
+	fs.Var(&allowHosts, "allow-host", "额外出网 host/端口（可重复）")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -152,24 +159,23 @@ func cmdCore(args []string, stdout io.Writer) error {
 	if ws == "" {
 		ws = "."
 	}
-	bridge, berr := host.NewHTTPBridge(host.HTTPBridgeConfig{AllowHosts: []string{"api.openai.com"}})
-	if berr != nil {
-		return berr
-	}
-	defer bridge.Close()
-	hc := host.Context{Workspace: ws, HTTP: bridge}
-	asm, err := app.LoadOfficial(context.Background(), *product, app.Deps{Context: hc, BaseURL: *baseURL})
-	if err != nil {
-		return err
-	}
-	defer func() { _ = asm.Close(context.Background()) }()
-	rt := asm.Runtime
-	server := coreproto.NewServer(p.ID, instanceID(p.ID, *workspace), os.Getpid())
-	if err := server.CheckCoverage(); err != nil {
-		return err
-	}
-
 	if *selfCheck {
+		bridge, berr := host.NewHTTPBridge(host.HTTPBridgeConfig{AllowHosts: []string{"api.openai.com"}})
+		if berr != nil {
+			return berr
+		}
+		defer bridge.Close()
+		hc := host.Context{Workspace: ws, HTTP: bridge}
+		asm, err := app.LoadOfficial(context.Background(), *product, app.Deps{Context: hc, BaseURL: *baseURL})
+		if err != nil {
+			return err
+		}
+		defer func() { _ = asm.Close(context.Background()) }()
+		server := coreproto.NewServer(p.ID, instanceID(p.ID, *workspace), os.Getpid())
+		if err := server.CheckCoverage(); err != nil {
+			return err
+		}
+		rt := asm.Runtime
 		out := map[string]any{
 			"product":           p.ID,
 			"plugins":           len(p.Plugins),
@@ -199,19 +205,75 @@ func cmdCore(args []string, stdout io.Writer) error {
 		return &usageError{msg: "adag core 需要 --parent-pid：Core 必须能发现父进程消失并自行退出（4.2）"}
 	}
 
+	token := strings.TrimSpace(os.Getenv("ADAG_CORE_TOKEN"))
+	ln, err := net.Listen("tcp", *listen)
+	if err != nil {
+		return fmt.Errorf("adag core: 监听 %s 失败: %w", *listen, err)
+	}
+	defer ln.Close()
+	if !listenIsLoopback(ln) && token == "" {
+		return fmt.Errorf("adag core: 非回环监听必须设置 ADAG_CORE_TOKEN（4.3）")
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	serveCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sess, err := cli.Open(serveCtx, cli.Config{
+		Workspace:  *workspace,
+		DataDir:    *dataDir,
+		Product:    *product,
+		Provider:   *provider,
+		Model:      *model,
+		BaseURL:    *baseURL,
+		AllowHosts: allowHosts,
+		Fake:       *fake,
+		In:         strings.NewReader(""),
+		Out:        io.Discard,
+		Err:        os.Stderr,
+	})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sess.Close(context.Background()) }()
+
+	rpc, err := corerpc.New(corerpc.Options{
+		Session: sess, Context: serveCtx, Token: token, OnShutdown: cancel,
+	})
+	if err != nil {
+		return err
+	}
+	defer rpc.Close()
+	if err := rpc.Core().CheckCoverage(); err != nil {
+		return err
+	}
+	go corerpc.WatchParent(serveCtx, *parentPID, cancel)
+
 	// 握手行：Gateway 5 秒内读取（4.2）。token 只走环境变量，不进命令行。
 	handshake := map[string]any{
-		"endpoint":     *listen,
+		"endpoint":     ln.Addr().String(),
 		"pid":          os.Getpid(),
 		"product":      p.ID,
 		"version":      version.String(),
 		"protoVersion": version.ProtocolVersion,
+		"workspace":    abs,
+		"readyAt":      time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	enc := json.NewEncoder(stdout)
 	if err := enc.Encode(handshake); err != nil {
 		return err
 	}
-	return notImplemented("core（运行循环）", "M1：RunTurn、SQLite 会话与插件宿主")
+	return rpc.Serve(serveCtx, ln)
+}
+
+// listenIsLoopback 判断监听地址是否只落在回环上。
+func listenIsLoopback(ln net.Listener) bool {
+	addr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		return false
+	}
+	return addr.IP != nil && addr.IP.IsLoopback()
 }
 
 func instanceID(product, workspace string) string {

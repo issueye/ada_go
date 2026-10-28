@@ -1,0 +1,13 @@
+{{define "login"}}{{template "head" .}}
+<main class="page">
+<section class="panel login-panel">
+  <h1>登录</h1>
+  <p>本机回环访问通常无需登录。若通过其他地址访问，认证由网关外部的安全中间件负责。</p>
+  <form method="post" action="{{.LoginPath}}">
+    {{template "csrf" .}}
+    <button type="submit" class="btn-primary">继续</button>
+  </form>
+  <p class="muted">本页不校验密码，也不会保存任何凭据。</p>
+</section>
+</main>
+{{template "foot" .}}{{end}}

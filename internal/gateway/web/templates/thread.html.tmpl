@@ -1,0 +1,46 @@
+{{define "thread"}}{{template "head" .}}
+<main class="page thread-page">
+<header class="thread-head">
+  <div>
+    <h1>{{if .Thread.Title}}{{.Thread.Title}}{{else}}新会话{{end}}</h1>
+    <p class="muted">
+      <span class="run-badge" data-state="{{.Run.Status}}">{{.Run.Label}}</span>
+      {{if .Run.StartedAt}} · 开始于 {{.Run.StartedAt}}{{end}}
+      {{if .Run.EndedAt}} · 结束于 {{.Run.EndedAt}}{{end}}
+      {{if .Thread.Archived}} · 已归档{{end}}
+    </p>
+  </div>
+  {{if .Run.Active}}
+  <form method="post" action="/thread/{{.Thread.ID}}/cancel">
+    {{template "csrf" .}}
+    <button type="submit" class="btn-danger">停止</button>
+  </form>
+  {{end}}
+</header>
+
+<section class="transcript" aria-live="polite">
+  {{if .Transcript}}
+  {{range .Transcript}}{{template "entry" .}}{{end}}
+  {{else}}
+  <div class="empty-state"><p>还没有消息。发送第一条消息开始会话。</p></div>
+  {{end}}
+</section>
+
+{{if .Interactions}}
+<section class="tray" aria-label="待处理交互">
+  <h2>待答复</h2>
+  {{range .Interactions}}{{template "interaction" .}}{{end}}
+</section>
+{{end}}
+
+<form method="post" action="/thread/{{.Thread.ID}}/turn" class="composer">
+  {{template "csrf" .}}
+  <label class="composer-field" for="turn-text">消息</label>
+  <textarea id="turn-text" name="text" rows="4" maxlength="65536" placeholder="输入消息后点击发送"></textarea>
+  <input type="hidden" name="idempotencyKey" value="{{.TurnKey}}">
+  <div class="composer-actions">
+    <button type="submit" class="btn-primary">发送</button>
+  </div>
+</form>
+</main>
+{{template "foot" .}}{{end}}
