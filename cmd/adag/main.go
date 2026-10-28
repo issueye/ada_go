@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -15,9 +16,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/adag/ada-go/app"
+	"github.com/adag/ada-go/internal/adapters/sqlite"
 	"github.com/adag/ada-go/internal/coreapp"
 	"github.com/adag/ada-go/internal/coreproto"
 	"github.com/adag/ada-go/internal/diag"
+	"github.com/adag/ada-go/internal/plugins/host"
 	"github.com/adag/ada-go/internal/proto"
 	"github.com/adag/ada-go/internal/version"
 	"github.com/adag/ada-go/tools/verify"
@@ -29,13 +33,19 @@ const usage = `adag —— 本地优先的 Agent 系统（单二进制，两角�
   adag gateway    [--addr 127.0.0.1:52353]      Gateway：HTTP/SSR/SSE（M2 落地）
   adag core       --workspace <dir> [--product <file>] [--self-check]
                                                 Agent Core：每工作区一个进程（M1 落地）
+  adag chat       [--workspace <dir>] [--fake]  交互式会话（M1）
+  adag print      [--workspace <dir>] --prompt <text>
+                                                单轮执行并输出（M1）
+  adag threads    [--workspace <dir>]           列出线程（M1）
+  adag events     --thread <id>                 以 JSONL 导出线程事件/entry（M1）
   adag plugin     <list|install|reload>         插件管理（M3 落地）
   adag doctor     [--fake] [--data-dir <dir>]   无模型依赖的启动自检
   adag verify     [检查名...]                    开发门禁：generated dispatch hooks slots
                                                   capabilities manifest vnode products docs
                                                   nodecompat ui boundary
-  adag export     --thread <id>                 只读导出会话（M1-B 落地）
-  adag backup     --to <file>                   在线一致性备份（M1-B 落地）
+  adag export     --thread <id> [--format jsonl|markdown] [--out <file>]
+                                                只读导出会话（M1）
+  adag backup     --to <file>                   在线一致性备份（M1）
   adag version                                  版本与协议信息
 
 里程碑说明见 docs/development-plan.md。`
@@ -77,14 +87,24 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return cmdGateway(rest, stdout)
 	case "core":
 		return cmdCore(rest, stdout)
+	case "chat":
+		return cmdChat(rest, stdout, stderr)
+	case "print":
+		return cmdPrint(rest, stdout)
+	case "threads":
+		return cmdThreads(rest, stdout)
+	case "events":
+		return cmdEvents(rest, stdout)
 	case "plugin":
 		return cmdPlugin(rest, stdout)
 	case "doctor":
 		return cmdDoctor(rest, stdout)
 	case "verify":
 		return cmdVerify(rest, stdout)
-	case "export", "backup":
-		return notImplemented(cmd, "M1-B：SQLite 会话存储与只读 CLI")
+	case "export":
+		return cmdExport(rest, stdout)
+	case "backup":
+		return cmdBackup(rest, stdout)
 	case "version":
 		return cmdVersion(stdout)
 	default:
@@ -110,7 +130,8 @@ func cmdGateway(args []string, stdout io.Writer) error {
 	return notImplemented("gateway "+*addr, "M2：Gateway、SSR 与可用界面")
 }
 
-// cmdCore 支持 --self-check：用产品声明驱动空基座装配，验证「不装任何插件也能启动」。
+// cmdCore 支持 --self-check：用产品声明驱动真实装配（官方插件包 × 宿主），
+// 验证「声明写什么就装什么；空声明就是空基座」。
 func cmdCore(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("core", flag.ContinueOnError)
 	workspace := fs.String("workspace", "", "工作区目录（不存在则拒绝拉起，见 4.2）")
@@ -118,6 +139,7 @@ func cmdCore(args []string, stdout io.Writer) error {
 	parentPID := fs.Int("parent-pid", 0, "Gateway 父进程 pid（心跳与孤儿防护）")
 	listen := fs.String("listen", "127.0.0.1:0", "只监听回环的临时端口")
 	selfCheck := fs.Bool("self-check", false, "只验证装配与 dispatch 覆盖，不启动循环")
+	baseURL := fs.String("base-url", "", "OpenAI 兼容端点（provider 插件用）")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -126,10 +148,22 @@ func cmdCore(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	rt, err := coreapp.Assemble(p)
+	ws := *workspace
+	if ws == "" {
+		ws = "."
+	}
+	bridge, berr := host.NewHTTPBridge(host.HTTPBridgeConfig{AllowHosts: []string{"api.openai.com"}})
+	if berr != nil {
+		return berr
+	}
+	defer bridge.Close()
+	hc := host.Context{Workspace: ws, HTTP: bridge}
+	asm, err := app.LoadOfficial(context.Background(), *product, app.Deps{Context: hc, BaseURL: *baseURL})
 	if err != nil {
 		return err
 	}
+	defer func() { _ = asm.Close(context.Background()) }()
+	rt := asm.Runtime
 	server := coreproto.NewServer(p.ID, instanceID(p.ID, *workspace), os.Getpid())
 	if err := server.CheckCoverage(); err != nil {
 		return err
@@ -216,12 +250,14 @@ func cmdVerify(args []string, stdout io.Writer) error {
 	return nil
 }
 
-// cmdDoctor 是无模型依赖的启动自检（设计 10）。M0 覆盖配置/产品/边界/目录四项，
-// 数据库与网络盘检查在 M1-B/M5 接入；未接到的检查显式说明，而不是默默跳过。
+// cmdDoctor 是无模型依赖的启动自检（设计 10）。
+// 已接：配置/产品/目录、SQLite 完整性与 schema、工作区锁持有者、provider 配置形状；
+// 端口占用留给 M2 Gateway。
 func cmdDoctor(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fake := fs.Bool("fake", false, "不依赖真实模型：用产品声明与空基座做自检")
-	dataDir := fs.String("data-dir", "", "数据目录（默认 ~/.adago）")
+	dataDir := fs.String("data-dir", "", "数据目录（默认按工作区哈希推到 ~/.adago/workspaces/<hash>）")
+	workspace := fs.String("workspace", ".", "工作区目录")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -255,8 +291,15 @@ func cmdDoctor(args []string, stdout io.Writer) error {
 	}
 	dir := *dataDir
 	if dir == "" {
-		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, ".adago")
+		if abs, aerr := filepath.Abs(*workspace); aerr == nil {
+			if defaultDir, derr := sqlite.DefaultDataDir(abs); derr == nil {
+				dir = defaultDir
+			}
+		}
+		if dir == "" {
+			home, _ := os.UserHomeDir()
+			dir = filepath.Join(home, ".adago")
+		}
 	}
 	if err := report("数据目录", checkDataDir(dir)); err != nil && firstErr == nil {
 		firstErr = err
@@ -264,17 +307,33 @@ func cmdDoctor(args []string, stdout io.Writer) error {
 	if *fake {
 		note("provider(fake)", checkFakeProvider())
 	} else {
-		note("provider", "未加 --fake：真实供应商连通性检查属于 M1-E 之后")
+		note("provider", "未加 --fake：真实供应商连通性检查需要密钥；配置形状检查见官方 provider 插件的测试")
 	}
-	note("sqlite", "数据库完整性/WAL/网络盘检查在 M1-B 落地后接入")
-	note("locks", "工作区锁持有者检查在 M1-B 落地后接入")
+	if _, err := os.Stat(sqlite.StateDBPath(dir)); err != nil {
+		note("sqlite", "该数据目录还没有 state.db（工作区尚未被 Core/CLI 启动过）")
+	} else if err := checkSQLite(dir); err != nil {
+		if firstErr == nil {
+			firstErr = err
+		}
+		fmt.Fprintf(stdout, "FAIL  %-16s %v\n", "sqlite", err)
+	} else {
+		fmt.Fprintf(stdout, "OK    %-16s 完整性 / WAL / schema 检查通过\n", "sqlite")
+	}
+	if err := checkLock(*workspace, dir); err != nil {
+		if firstErr == nil {
+			firstErr = err
+		}
+		fmt.Fprintf(stdout, "FAIL  %-16s %v\n", "locks", err)
+	} else {
+		fmt.Fprintf(stdout, "OK    %-16s 锁状态正常（空闲或由运行中的 Core 持有）\n", "locks")
+	}
 	note("ports", "端口占用检查在 M2 Gateway 落地后接入")
 
 	fmt.Fprintln(stdout, "")
 	if firstErr != nil {
 		return fmt.Errorf("doctor 发现问题（首个：%w）；诊断码见 internal/diag", firstErr)
 	}
-	fmt.Fprintln(stdout, "doctor: 自检通过（M0 范围）。真实运行能力随里程碑逐步接入。")
+	fmt.Fprintln(stdout, "doctor: 自检通过（M1 范围）。Gateway 端口与 UI 检查随 M2 接入。")
 	return nil
 }
 

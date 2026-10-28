@@ -164,6 +164,9 @@ M4 同时依赖 M2 的页面宿主与 M3 的完整装配/信任模型。若 M3 �
 - 提供 CLI 对话/print、线程列表、事件导出、fake provider 开关与取消。
 - 打通多轮工具、拒绝、取消、压缩、50 轮长循环、`finish` 终止、插件禁用与 Runtime 崩溃恢复。
 - 建立性能基线：Core 拉起、默认产品装配、provider 桥接、工具调用与事件重放。
+- M1 的可运行声明是 `products/headless.agent.json`（provider + fs/shell/plan + policy）；
+  `coding` 中尚未交付的插件仍留在声明里，缺少时装配失败而不是静默降级。
+  模型/端点用 `--provider/--model/--base-url` 或环境变量指定；`config.toml` 的完整优先级随 M2 接入。
 
 **退出标准**：与 [11 §14 M1](11-structure-roadmap.md#14-里程碑) 一致；另要求 Windows/Unix 的工作区锁与进程树测试都通过。
 

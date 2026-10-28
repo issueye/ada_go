@@ -444,7 +444,7 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 					value = raw
 				}
 				return p.hostAsync(c, "state."+kind, func(ctx context.Context) (any, error) {
-					return hc.State(ctx, StateOp{Kind: kind, Key: key, Value: value})
+					return hc.State(ctx, StateOp{PluginID: p.id, Kind: kind, Key: key, Value: value})
 				}), nil
 			}
 		}
@@ -476,6 +476,17 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 	// ui：capability: ui.ask，只授予 builtin/verified（05 §6.3）。
 	if p.caps.Has(plugins.CapUIAsk) {
 		set("ui", p.uiObject(rt, c, hc))
+	}
+
+	// provider 的 ctx.emit / ctx.http 只在 callProvider 上安装（03 §5.5）：
+	// emit 是归一化增量的唯一出口，http 是 provider 出网的唯一出口。
+	if c.kind == callProvider {
+		if c.onDelta != nil {
+			set("emit", p.emitFunction(rt, c))
+		}
+		if p.caps.Has(plugins.CapNetSSE) && hc.HTTP != nil {
+			set("http", p.httpObject(rt, c, hc))
+		}
 	}
 
 	// fetch：capability: net.fetch。出网只经宿主的 HTTP 桥（03 §5.5）。

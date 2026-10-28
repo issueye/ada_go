@@ -568,6 +568,17 @@ func (p *Instance) classify(runErr error, c *call) error {
 		return domain.WrapError(domain.NewError(domain.CodePluginCrashed,
 			fmt.Sprintf("host: 插件 %s 的运行时内部错误/panic：%s", p.id, internal.Error())), runErr)
 	}
+	// 宿主长调用（ctx.http / ctx.fetch）拒绝时带来的业务错误保持原码，
+	// 不要退化成「脚本抛了 TypeError」——provider 桥要靠 provider_error 决定重试。
+	var de *domain.Error
+	if errors.As(runErr, &de) {
+		return de
+	}
+	// HTTP 状态错误保留 Status/Retry-After，重试包装据此区分 401 与 502。
+	var he *HTTPError
+	if errors.As(runErr, &he) {
+		return he
+	}
 	// 其它：脚本抛出的异常。不标脏（06 §6.4 只有超时/超内存/内部错误/panic 四类弄脏运行时）。
 	if exc, ok := runErr.(*moejs.Exception); ok {
 		return scriptError(exc, p.id, c.kind)
@@ -675,8 +686,19 @@ func (p *Instance) exportError(err error) error {
 }
 
 // valueError 处理 Promise 的 reject 值：它不一定是 Error。
+// 宿主长调用（ctx.http / ctx.fetch）的 reject 值携带原始 Go 错误时，
+// 通过 Exception.Unwrap 取回它，保住错误码与可重试标记。
 func (p *Instance) valueError(v moejs.Value, c *call) error {
-	return fmt.Errorf("host: 插件 %s 的 %s 被 reject：%s", p.id, c.kind, p.valueText(v))
+	if v.IsObject() {
+		if inner := (&moejs.Exception{Value: v}).Unwrap(); inner != nil {
+			return inner
+		}
+	}
+	kind := "unknown"
+	if c != nil {
+		kind = c.kind.String()
+	}
+	return fmt.Errorf("host: 插件 %s 的 %s 被 reject：%s", p.id, kind, p.valueText(v))
 }
 
 // valueText 读出脚本值的可诊断文本（只取脚本自己的字段，不泄露宿主路径）。
@@ -859,8 +881,14 @@ func (b *callBudget) stop() {
 // 期间暂停脚本预算计时（06 §6.4），并解除调用方 deadline（否则 200ms 的钩子预算
 // 会误杀一次 300s 的交互）。
 func (p *Instance) hostAsync(c *call, name string, fn func(ctx context.Context) (any, error)) moejs.Value {
+	return p.hostAsyncTimeout(c, name, defaultHostCallTimeout, fn)
+}
+
+// hostAsyncTimeout 与 hostAsync 相同，但允许调用方给出更长的兜底期限
+// （provider 的 SSE 流是 30 分钟级长任务，不能被 300s 的交互兜底误杀，03 §5.5）。
+func (p *Instance) hostAsyncTimeout(c *call, name string, timeout time.Duration, fn func(ctx context.Context) (any, error)) moejs.Value {
 	promise, settle := p.loop.NewPromise()
-	ctx, release := p.hostContextFor(c)
+	ctx, release := p.hostContextFor(c, timeout)
 	var once sync.Once
 	releaseOnce := func() { once.Do(release) }
 	c.trackCancel(releaseOnce)
@@ -873,6 +901,17 @@ func (p *Instance) hostAsync(c *call, name string, fn func(ctx context.Context) 
 				c.budget.resume()
 			}
 			if err != nil {
+				// 业务错误（HTTP 状态、allowlist、取消）保持原样穿过 Promise，
+				// 让 provider 桥能按错误码决定是否重试（03 §5.5）。
+				var de *domain.Error
+				if errors.As(err, &de) {
+					return moejs.Undefined(), err
+				}
+				// HTTP 状态错误同样原样穿过；重试包装需要 Status/Retry-After。
+				var he *HTTPError
+				if errors.As(err, &he) {
+					return moejs.Undefined(), err
+				}
 				return moejs.Undefined(), rrt.Realm().TypeError("host: %s 失败: %v", name, err)
 			}
 			return rrt.FromGo(v)
@@ -884,13 +923,16 @@ func (p *Instance) hostAsync(c *call, name string, fn func(ctx context.Context) 
 // hostContextFor 派生宿主长调用的 context：
 //   - 保留「显式取消」（轮次取消必须贯穿到桥，INV-8）；
 //   - 不传递调用方 deadline（脚本预算/钩子 200ms 不是宿主长调用的期限，06 §6.4）；
-//   - 自带 defaultHostCallTimeout 兜底，避免桥实现忘记期限时永久挂住。
-func (p *Instance) hostContextFor(c *call) (context.Context, func()) {
+//   - 自带 timeout 兜底，避免桥实现忘记期限时永久挂住。
+func (p *Instance) hostContextFor(c *call, timeout time.Duration) (context.Context, func()) {
+	if timeout <= 0 {
+		timeout = defaultHostCallTimeout
+	}
 	parent := context.Background()
 	if c.signal != nil {
 		parent = c.signal
 	}
-	base, cancel := context.WithTimeout(context.WithoutCancel(parent), defaultHostCallTimeout)
+	base, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
 	stop := make(chan struct{})
 	go func() {
 		select {
@@ -1182,6 +1224,10 @@ func (p *Instance) memoryLimit() int64 {
 
 // ID 返回插件 id。
 func (p *Instance) ID() string { return p.id }
+
+// BaseContext 返回装配期注入的宿主上下文（含该插件的 Settings/Workspace/HTTP/Secret）。
+// 适配器桥用它补齐调用方没有携带的身份字段。
+func (p *Instance) BaseContext() Context { return p.hc }
 
 // Manifest 返回已校验清单。
 func (p *Instance) Manifest() *plugins.Manifest { return p.script.Manifest }

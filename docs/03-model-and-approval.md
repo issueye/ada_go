@@ -53,6 +53,7 @@ interface ProviderRequest {
   messages: Message[];                      // 已转换、已裁剪
   tools: ToolSchema[];
   params: Params;
+  baseUrl?: string;                         // 兼容端点覆盖；空时插件用官方默认地址
 }
 
 interface HttpInit {

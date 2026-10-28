@@ -32,17 +32,12 @@ import (
 // 口径（不放水）：
 //   - 每条不变量都必须对**已存在的代码**做真实断言：端口签名、常量表、事件序号语义、
 //     失败关闭判定、空基座装配、替身的取消/超时行为；
-//   - 依赖 RunTurn / SQLite / moejs 宿主才能验证的行为，明确 t.Skip("M1-…: …尚未落地")，
-//     不用永真断言冒充覆盖；被跳过的项目在下面 GAPS 注释里逐条列出，M1-A 必须回来补。
+//   - 依赖 RunTurn / SQLite / moejs 宿主的行为由各自包的真实用例覆盖（engine/、
+//     adapters/sqlite、plugins/host），这里不重复造第二套引擎夹具，也不留过期 Skip。
 //
-// 现在只能留给 M1 的（用 t.Skip 明说）：
+// 仍留给后续里程碑的只有：
 //
 //	INV-1 的第二半（子智能体复用同一装配变体）        -> M5/v1.5
-//	INV-2 的生产实现一侧（adapters/*、plugins 宿主）  -> M1-A…M1-E
-//	INV-7 的线程写锁互斥行为                          -> M1-A
-//	INV-8 的工具/插件脚本/命令进程树三段贯穿          -> M1-A/C/F
-//	INV-9 的引擎终态恰好一次（含错误路径）            -> M1-A
-//	INV-12 的引擎不因步数收尾 + 循环检测 3/5          -> M1-A
 func TestInvariants(t *testing.T) {
 	t.Parallel()
 
@@ -102,15 +97,22 @@ func TestInvariants(t *testing.T) {
 		mustCount(t, "M0 替身登记数", 7, len(testkit.DoublesForM0))
 		mustCount(t, "待落地替身登记数", 6, len(testkit.PendingDoubles))
 
-		// 生产实现一侧还没有代码。
-		entries, err := os.ReadDir(repoPath(t, "internal"))
-		mustNoErr(t, "ReadDir(internal)", err)
-		have := map[string]bool{}
-		for _, e := range entries {
-			have[e.Name()] = true
-		}
-		if !have["adapters"] {
-			t.Skip("M1-A/M1-B/M1-E: internal/adapters（clock/idgen/sqlite/secret/scope）与 provider 桥的生产实现尚未落地")
+		// 生产实现一侧：每个端口都要有真实实现，不能只有替身（INV-2）。
+		for _, rel := range []string{
+			"internal/adapters/clock.go",
+			"internal/adapters/idgen.go",
+			"internal/adapters/secret.go",
+			"internal/adapters/scope.go",
+			"internal/adapters/sqlite/store.go",
+			"internal/plugins/provider/registry.go",
+			"internal/plugins/host/runtime.go",
+			"internal/coreproto/interactions.go",
+			"internal/toolkit/execute.go",
+			"internal/engine/run.go",
+		} {
+			if _, err := os.Stat(repoPath(t, filepath.FromSlash(rel))); err != nil {
+				t.Errorf("端口 %s 缺少生产实现: %v", rel, err)
+			}
 		}
 	})
 
@@ -284,7 +286,8 @@ func TestInvariants(t *testing.T) {
 		if domain.IsRetryable(domain.CodeThreadBusy) {
 			t.Errorf("thread_busy 不允许基座自动重试（INV-7：不排队重放）")
 		}
-		t.Skip("M1-A: RunTurn 的线程写锁与并发互斥行为尚未落地（02 §5.3 步骤 1）")
+		// 真实互斥由 engine/run_test.go 的 TestThreadBusyRejectsSecondRun 覆盖；
+		// 这里只断言协议事实，不重复造第二套引擎夹具。
 	})
 
 	// ---------------------------------------------------------------
@@ -353,7 +356,7 @@ func TestInvariants(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatalf("取消没有穿透到等待中的交互（INV-8）")
 		}
-		t.Skip("M1-A/M1-C/M1-F: 工具执行、插件脚本（Runtime.Interrupt）与命令进程树的取消尚未落地")
+		// 工具执行/插件脚本/进程树的取消由 engine、host 与 toolkit 的取消用例覆盖（INV-8）。
 	})
 
 	// ---------------------------------------------------------------
@@ -396,7 +399,7 @@ func TestInvariants(t *testing.T) {
 				t.Errorf("原因 %s 不可序列化", r)
 			}
 		}
-		t.Skip("M1-A: RunTurn 的错误注入路径（provider 失败后仍恰好一个终态）尚未落地")
+		// 错误注入路径由 engine 的 TestStreamWithoutFinishIsProtocolError / TestRunCancelKeepsPartial 覆盖。
 	})
 
 	// ---------------------------------------------------------------
@@ -537,7 +540,7 @@ func TestInvariants(t *testing.T) {
 			}
 		}
 		mustCount(t, "模型请求次数", 51, provider.RequestCount())
-		t.Skip("M1-A: 引擎侧「不因步数收尾」与循环检测 3/5 的终止原因 golden 尚未落地")
+		// 引擎侧的 50 轮与 3/5 循环检测由 engine/run_test.go 的两个 golden 用例覆盖（INV-12）。
 	})
 }
 

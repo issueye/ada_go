@@ -1,6 +1,7 @@
 package conformance
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -196,12 +197,19 @@ func TestProductDeclarations(t *testing.T) {
 		t.Parallel()
 		found, err := coreapp.DiscoverProducts(repoPath(t, "products"))
 		mustNoErr(t, "DiscoverProducts", err)
-		if len(found) != 2 {
-			t.Fatalf("products 目录应正好有 2 份声明，实得 %d: %v", len(found), found)
+		if len(found) < 2 {
+			t.Fatalf("products 目录至少要有 coding 与 skeleton 两份声明，实得 %d: %v", len(found), found)
 		}
+		have := map[string]bool{}
 		for _, f := range found {
 			if !strings.HasSuffix(f, ".agent.json") {
 				t.Errorf("发现非声明文件 %s", f)
+			}
+			have[filepath.Base(f)] = true
+		}
+		for _, want := range []string{"coding.agent.json", "skeleton.agent.json"} {
+			if !have[want] {
+				t.Errorf("缺少 %s（设计 8.6 的两份基准声明）", want)
 			}
 		}
 	})

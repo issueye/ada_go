@@ -24,7 +24,9 @@ type InteractionStore interface {
 
 // InteractionRecord 是一次解析结果的最小账目。
 type InteractionRecord struct {
-	RequestID  string
+	RequestID string
+	// ThreadID 是持久化实现定位待处理行的必要键（04 interactions 表按 thread_id + id 解析）。
+	ThreadID   string
 	Status     domain.InteractionStatus
 	Value      string
 	ResolvedAt time.Time
@@ -159,7 +161,9 @@ func (b *Broker) Request(ctx context.Context, req ports.InteractionRequest) (por
 		})
 	}
 
-	wait := time.Until(req.ExpiresAt)
+	// 期限必须和「创建时的时钟」同源：生产环境是真实时钟，测试替身是假时钟。
+	// 用 time.Until 会混入真实墙钟，假时钟一旦固定日期，整个期限判定就变成时间炸弹。
+	wait := req.ExpiresAt.Sub(b.clock.Now())
 	if wait <= 0 {
 		return b.resolve(ctx, p, domain.InteractionTimeout, "", "交互已过期")
 	}
@@ -241,7 +245,10 @@ func (b *Broker) resolve(ctx context.Context, p *pendingInteraction, status doma
 		b.resolved[p.req.ID] = res
 		b.mu.Unlock()
 		if b.store != nil {
-			_ = b.store.Resolve(ctx, p.req.ID, InteractionRecord{RequestID: p.req.ID, Status: status, Value: value, ResolvedAt: res.ResolvedAt})
+			_ = b.store.Resolve(ctx, p.req.ID, InteractionRecord{
+				RequestID: p.req.ID, ThreadID: p.req.ThreadID,
+				Status: status, Value: value, ResolvedAt: res.ResolvedAt,
+			})
 		}
 		b.emit(domain.EvtInteractionResolved, map[string]any{
 			"threadId": p.req.ThreadID, "interactionId": p.req.ID,

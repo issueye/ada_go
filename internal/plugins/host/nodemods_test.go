@@ -687,7 +687,7 @@ export default function (agent) {
 `
 	got := runOnce(t, src, nil, `{}`)
 	var out struct {
-		First, Second, Ascii, Bad, Whole string
+		First, Second, ASCII, Bad, Whole string
 	}
 	if err := json.Unmarshal([]byte(got), &out); err != nil {
 		t.Fatalf("输出不是 JSON: %v (%s)", err, got)
@@ -699,8 +699,8 @@ export default function (agent) {
 	if out.First != "" {
 		t.Fatalf("不完整序列不应提前输出，实际 %q", out.First)
 	}
-	if out.Ascii != "hi" {
-		t.Fatalf("ascii 解码 = %q", out.Ascii)
+	if out.ASCII != "hi" {
+		t.Fatalf("ascii 解码 = %q", out.ASCII)
 	}
 	if out.Bad != "ERR_UNKNOWN_ENCODING" {
 		t.Fatalf("未知编码的错误码 = %q", out.Bad)

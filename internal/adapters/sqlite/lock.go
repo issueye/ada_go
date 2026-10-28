@@ -42,13 +42,13 @@ type WorkspaceLock struct {
 }
 
 // DataDir 返回锁所属的数据目录（Restore 需要它定位 state.db）。
-func (r *WorkspaceLock) DataDir() string { return r.dataDir }
+func (l *WorkspaceLock) DataDir() string { return l.dataDir }
 
 // Path 返回锁文件路径。
-func (r *WorkspaceLock) Path() string { return r.path }
+func (l *WorkspaceLock) Path() string { return l.path }
 
 // PID 返回本进程的持有者 pid。
-func (r *WorkspaceLock) PID() int { return r.pid }
+func (l *WorkspaceLock) PID() int { return l.pid }
 
 // PIDPath 返回持有者信息文件路径（<lockdir>/ws-<hash>.pid）。
 func PIDPath(lockPath string) string { return strings.TrimSuffix(lockPath, ".lock") + ".pid" }

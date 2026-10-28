@@ -138,7 +138,7 @@ type ProviderRegistration struct {
 
 // ProviderRegistry 是 provider 目录。
 type ProviderRegistry interface {
-	RegisterProvider(reg ProviderRegistration) error
+	AddProvider(reg ProviderRegistration) error
 }
 
 // PromptRegistration 是一条系统提示词登记（02 §5.3 装配边界里的插件人格段）。
@@ -230,7 +230,7 @@ func (t Targets) commit(c *Contribution, caps *CapabilitySet, hooks func(HookDef
 		}
 		for _, pv := range c.Providers {
 			reg := ProviderRegistration{PluginID: c.PluginID, Def: pv, Trust: caps.DomainTrust()}
-			if err := t.Providers.RegisterProvider(reg); err != nil {
+			if err := t.Providers.AddProvider(reg); err != nil {
 				return fail(fmt.Errorf("host: 插件 %s 注册 provider %q 失败: %w", c.PluginID, pv.ID, err))
 			}
 		}
@@ -410,6 +410,34 @@ func (p *Instance) toolsOf() []ToolDef {
 		return nil
 	}
 	return append([]ToolDef(nil), c.Tools...)
+}
+
+// ToolRef 按工具名取脚本句柄（toolkit.Invoker 的路由依据）。
+func (p *Instance) ToolRef(name string) (HandlerRef, bool) {
+	c := p.Contribution()
+	if c == nil {
+		return HandlerRef{}, false
+	}
+	for _, t := range c.Tools {
+		if t.Name == name {
+			return t.Handler, true
+		}
+	}
+	return HandlerRef{}, false
+}
+
+// ProviderRef 按 provider id 取脚本句柄（诊断与桥接测试用）。
+func (p *Instance) ProviderRef(providerID string) (HandlerRef, bool) {
+	c := p.Contribution()
+	if c == nil {
+		return HandlerRef{}, false
+	}
+	for _, pv := range c.Providers {
+		if pv.ID == providerID {
+			return pv.Stream, true
+		}
+	}
+	return HandlerRef{}, false
 }
 
 // committedSlots 复制当前登记表（重建时用来核对槽位）。

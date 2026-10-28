@@ -1,0 +1,29 @@
+{
+  "id": "headless",
+  "name": "ada-go Headless",
+  "description": "M1 无头内核的可运行产品：OpenAI Chat provider + 文件/命令/计划工具 + 默认审批策略。CLI 用它跑真实多轮任务；coding 产品中尚未交付的插件不在本清单里。",
+  "plugins": [
+    "provider-openai-chat",
+    "tools-fs",
+    "tools-shell",
+    "tools-plan",
+    "policy-default"
+  ],
+  "capabilities": {
+    "skills": false,
+    "images": true,
+    "subagents": false
+  },
+  "identity": {
+    "name": "ada-go",
+    "locale": "zh-CN"
+  },
+  "policies": {
+    "toolTimeoutMs": 120000,
+    "turnTimeoutMs": 0,
+    "maxTurnTokens": 0,
+    "loopRepeatLimit": 3,
+    "loopAbortLimit": 5,
+    "parallelTools": 1
+  }
+}

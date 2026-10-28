@@ -1,0 +1,13 @@
+{
+  "id": "provider-openai-chat",
+  "name": "OpenAI Chat 供应商",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "OpenAI Chat Completions 流式适配器；OpenAI 兼容端点（DeepSeek、Ollama、Moonshot 等）通过 baseUrl 复用",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts",
+    "capabilities": ["net.sse"],
+    "secrets": ["openai_api_key"]
+  }
+}

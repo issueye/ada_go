@@ -104,15 +104,15 @@ func (r *Reader) CheckIntegrity(ctx context.Context) (string, error) {
 }
 
 // LockPath 返回本工作区的锁文件路径。
-func (r *Store) LockPath() string { return r.lock.Path() }
+func (st *Store) LockPath() string { return st.lock.Path() }
 
 // QueueStats 返回单写者队列的观测快照。
-func (r *Store) QueueStats() QueueStats { return r.w.Stats() }
+func (st *Store) QueueStats() QueueStats { return st.w.Stats() }
 
 // Flush 强制把 usage 合并窗口落库（测试与优雅退出前用；走同一条写队列，不破坏单写者）。
-func (r *Store) Flush(ctx context.Context) error {
-	return r.w.submit(ctx, "usage-flush", func(ctx context.Context, tx *sql.Tx) error {
-		return insertUsageRows(ctx, tx, r.w.takePending(), &r.w.usageRows)
+func (st *Store) Flush(ctx context.Context) error {
+	return st.w.submit(ctx, "usage-flush", func(ctx context.Context, tx *sql.Tx) error {
+		return insertUsageRows(ctx, tx, st.w.takePending(), &st.w.usageRows)
 	})
 }
 

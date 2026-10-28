@@ -167,10 +167,12 @@ type Context struct {
 
 // StateOp 是一次插件 KV 访问。
 type StateOp struct {
-	Kind   string // get | set | delete | list
-	Key    string
-	Value  json.RawMessage
-	Prefix string
+	// PluginID 是发起访问的插件；宿主在调用前补齐，存储层用它做命名空间（04 §5.7）。
+	PluginID string
+	Kind     string // get | set | delete | list
+	Key      string
+	Value    json.RawMessage
+	Prefix   string
 }
 
 // UIRequest 是一次通用用户交互（05 §6.3 UIContext）。

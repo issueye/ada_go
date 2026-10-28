@@ -8,15 +8,20 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/adag/ada-go/internal/coreapp"
+	"github.com/adag/ada-go/internal/domain"
 	"github.com/adag/ada-go/internal/plugins"
 	"github.com/adag/ada-go/internal/plugins/host"
+	"github.com/adag/ada-go/internal/plugins/provider"
 	"github.com/adag/ada-go/internal/toolkit"
+	"github.com/adag/ada-go/official"
 )
 
 // Deps 是装配期注入的宿主依赖。
@@ -32,6 +37,8 @@ type Deps struct {
 	Settings map[string]map[string]any
 	// Scripts 为空时用嵌入的官方插件；测试可以注入替身。
 	Scripts []host.Script
+	// BaseURL 是 OpenAI 兼容端点的覆盖（M1 的 provider 插件读取它）。
+	BaseURL string
 }
 
 // Assembly 是一次装配的结果。
@@ -43,6 +50,10 @@ type Assembly struct {
 	// Tools 与 Hooks 是运行期目录，引擎直接消费。
 	Tools *toolkit.Catalog
 	Hooks *plugins.HookChain
+	// Providers 是 provider 插件桥成的 ModelClient 目录（可能为空）。
+	Providers *provider.Registry
+	// executor 是 tool 调用的路由（toolkit.Invoker）。
+	executor *toolInvoker
 }
 
 // Load 从产品声明文件装配（官方插件来自嵌入包）。
@@ -57,6 +68,19 @@ func Load(ctx context.Context, productPath string, deps Deps) (*Assembly, error)
 		return nil, fmt.Errorf("app: 没有插件包可装配（Deps.Scripts 为空；官方包由调用方注入）")
 	}
 	return Assemble(ctx, p, scripts, deps)
+}
+
+// LoadOfficial 从产品声明文件装配，插件脚本来自嵌入的官方包。
+//
+// 这是「官方插件只经由组合根进入基座」的唯一入口：cmd/ 与 internal/ 都不 import
+// official/（设计 01 §3.3、11 §13）。
+func LoadOfficial(ctx context.Context, productPath string, deps Deps) (*Assembly, error) {
+	scripts, err := official.Scripts()
+	if err != nil {
+		return nil, err
+	}
+	deps.Scripts = scripts
+	return Load(ctx, productPath, deps)
 }
 
 // Assemble 把产品声明与插件集合结算成运行期目录（06 §6.5 的两阶段在 M3 落地；
@@ -101,7 +125,10 @@ func Assemble(ctx context.Context, p *coreapp.Product, scripts []host.Script, de
 
 	tools := toolkit.NewCatalog()
 	hooks := plugins.NewHookChain()
-	asm := &Assembly{Product: p, Tools: tools, Hooks: hooks}
+	providers := provider.New(deps.BaseURL)
+	providers.HostContext = deps.Context
+	invoker := &toolInvoker{plugins: map[string]*host.Instance{}, base: deps.Context}
+	asm := &Assembly{Product: p, Tools: tools, Hooks: hooks, Providers: providers, executor: invoker}
 
 	for _, script := range picked {
 		caps, err := host.NewCapabilitySet(script.Manifest, deps.Context.Workspace, deps.HostEnv, deps.Secrets)
@@ -113,14 +140,24 @@ func Assemble(ctx context.Context, p *coreapp.Product, scripts []host.Script, de
 		hc.PluginID = script.Manifest.ID
 		hc.Settings = deps.Settings[script.Manifest.ID]
 		inst, err := host.Load(ctx, script, caps, hc, host.Options{
-			Targets: host.Targets{Tools: tools, Hooks: hooks},
+			Targets: host.Targets{Tools: tools, Hooks: hooks, Providers: providers},
 		})
 		if err != nil {
 			_ = asm.Close(context.Background())
 			return nil, fmt.Errorf("app: 装配插件 %s 失败: %w", script.Manifest.ID, err)
 		}
 		asm.Plugins = append(asm.Plugins, inst)
+		invoker.plugins[inst.ID()] = inst
+		if err := providers.Bind(inst.ID(), inst); err != nil {
+			_ = asm.Close(context.Background())
+			return nil, err
+		}
+		if c := inst.Contribution(); c != nil && len(c.Providers) > 0 && deps.Context.HTTP == nil {
+			_ = asm.Close(context.Background())
+			return nil, fmt.Errorf("app: 插件 %s 注册了 provider，但装配没有注入 HTTP 桥（失败关闭）", inst.ID())
+		}
 	}
+	tools.Freeze()
 
 	rt := &coreapp.Runtime{
 		Product:       p,
@@ -166,6 +203,49 @@ func (a *Assembly) Plugin(id string) (*host.Instance, bool) {
 		}
 	}
 	return nil, false
+}
+
+// ToolInvoker 返回 toolkit.Executor 需要的插件调用路由。
+func (a *Assembly) ToolInvoker() toolkit.Invoker {
+	if a == nil {
+		return nil
+	}
+	return a.executor
+}
+
+// toolInvoker 按「工具名 → 贡献它的插件实例」路由调用。
+//
+// 工具名在装配期已由 Catalog 去重，因此这里不需要再猜；找不到就是禁用/装配漂移，
+// 返回错误让 Executor 走 error 回执（INV-5）。
+type toolInvoker struct {
+	plugins map[string]*host.Instance
+	base    host.Context
+}
+
+var _ toolkit.Invoker = (*toolInvoker)(nil)
+
+func (t *toolInvoker) Invoke(ctx context.Context, pluginID, tool string, args json.RawMessage) (domain.Result, error) {
+	inst := t.plugins[pluginID]
+	if inst == nil {
+		return domain.Result{}, fmt.Errorf("app: 工具 %s 的插件 %s 未加载", tool, pluginID)
+	}
+	ref, ok := inst.ToolRef(tool)
+	if !ok {
+		return domain.Result{}, fmt.Errorf("app: 插件 %s 没有工具 %s", pluginID, tool)
+	}
+	hc := t.base
+	hc.PluginID = pluginID
+	hc.Signal = ctx
+	hc.Now = time.Now().UTC()
+	return inst.CallTool(ctx, ref, args, hc)
+}
+
+// ProviderCount 返回已绑定的 provider 数（CLI/doctor 诊断用）。
+func (a *Assembly) ProviderCount() int {
+	if a == nil || a.Providers == nil {
+		return 0
+	}
+	return len(a.Providers.Providers())
 }
 
 // isPolicyPlugin 报告插件是不是审批策略角色（清单 backend.roles）。

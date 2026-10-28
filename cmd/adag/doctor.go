@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/adag/ada-go/internal/adapters/sqlite"
 	"github.com/adag/ada-go/internal/coreapp"
 	"github.com/adag/ada-go/internal/engine"
 	"github.com/adag/ada-go/internal/plugins"
@@ -116,7 +120,60 @@ func checkDataDir(dir string) error {
 	return nil
 }
 
-// checkFakeProvider 说明 fake 路径的覆盖边界（不是失败：M0 没有 provider 桥）。
+// checkFakeProvider 说明 fake 路径的覆盖边界。
 func checkFakeProvider() string {
-	return "fake provider 夹具在 internal/conformance/testkit（M0.5）；provider 桥与 RunTurn 属于 M1，本轮只做装配与契约自检"
+	return "fake 模型在 internal/devfake（CLI --fake）；provider 桥由官方 Chat 插件的真实 SSE 测试覆盖"
+}
+
+// checkSQLite 用只读连接检查完整性、schema 版本与 WAL 参数（09 §10 doctor 项）。
+func checkSQLite(dataDir string) error {
+	if err := sqlite.EnsureLocalDataDir(dataDir); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	r, err := sqlite.OpenReadOnly(ctx, sqlite.Config{DataDir: dataDir})
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	if _, err := r.CheckIntegrity(ctx); err != nil {
+		return err
+	}
+	v, err := r.Version(ctx)
+	if err != nil {
+		return err
+	}
+	if v != sqlite.SchemaVersion() {
+		return fmt.Errorf("schema 版本 v%d，本二进制期望 v%d", v, sqlite.SchemaVersion())
+	}
+	p, err := r.Pragmas(ctx)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(p.JournalMode, "wal") {
+		return fmt.Errorf("journal_mode = %s，期望 wal（04 §5.7）", p.JournalMode)
+	}
+	return nil
+}
+
+// checkLock 检查工作区锁：空闲则取一次再释放；被运行中的 Core 持有也算正常。
+func checkLock(workspace, dataDir string) error {
+	abs, err := filepath.Abs(workspace)
+	if err != nil {
+		return err
+	}
+	hash, err := sqlite.WorkspaceHash(abs)
+	if err != nil {
+		return err
+	}
+	lock, err := sqlite.AcquireWorkspaceLock(dataDir, hash)
+	if err == nil {
+		return lock.Release()
+	}
+	var le *sqlite.LockedError
+	if errors.As(err, &le) {
+		return nil // 另一个 Core 正在运行；doctor 只报告，不抢占。
+	}
+	return err
 }
