@@ -66,11 +66,11 @@
 ## 10. 可观测性与运维
 
 - 日志：`slog` JSON；字段统一 `trace_id`（run id）、`thread_id`、`turn`、`seq`、`plugin_id`、`diag`。默认输出到 stderr 与 `~/.adago/logs/`，按天轮转，保留 7 天。
-- 审计：交互请求/响应、工具执行、插件加载/重载/禁用、鉴权失败、配置变更写入 `audit` 表；默认保留 30 天。
+- 审计：交互请求/响应、工具执行、插件加载/重载/禁用、鉴权失败、配置变更写入 `audit` 表；M5 起轮次取消（`turn.cancel`）与检查点回滚（`storage.restore`）也落审计；默认保留 30 天。只读查看：`adag audit list --limit N`（M5，发布步骤见 [release-m5](release-m5.md)）。
 - 指标（可选，回环 + token）：`turns_total`、`turn_duration`、`tokens_total`、`tool_calls_total{status}`、`plugin_calls_total{plugin,status}`、`sse_clients`、`core_restarts`、`provider_latency`。
 - `adag doctor`：检查配置、数据目录权限、端口占用、工作区可写、SQLite 完整性与 `user_version`、工作区锁持有者、`state.db` 是否位于网络盘、插件清单、Provider 配置完整性、Core 能否拉起；输出人话 + 诊断码。
 - `adag verify`（开发门禁）：协议漂移、dispatch 覆盖、工具描述符单源、端口实现、钩子点位调用方、能力位消费者、插槽使用、Node 模块表与偏差、文档链接。
-- 备份：`adag export --thread <id>` 用只读连接导出一致快照为 JSONL/Markdown；`adag backup` 用 `VACUUM INTO` 或 SQLite Online Backup API 生成一致性副本（不直接复制运行中的 `state.db`/`-wal`/`-shm`），再打包插件与配置（不含密钥）。
+- 备份：`adag export --thread <id>` 用只读连接导出一致快照为 JSONL/Markdown；`adag backup` 用 `VACUUM INTO` 或 SQLite Online Backup API 生成一致性副本（不直接复制运行中的 `state.db`/`-wal`/`-shm`），再打包插件与配置（不含密钥）。M5 起检查点备份在数据目录 `changes/<checkpointId>/`（被覆盖文件的内容 + mode + manifest.json），随数据目录一起迁移；升级/恢复的完整步骤见 [release-m5](release-m5.md)。
 - 升级：二进制替换；启动时执行 SQLite migration（事务、幂等）；插件 `apiVersion` 不兼容则禁用并提示，不阻止主程序启动。
 
 ---

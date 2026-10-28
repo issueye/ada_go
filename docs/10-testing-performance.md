@@ -76,6 +76,10 @@ adag doctor --fake                          # 无模型依赖的启动自检
 
 ## 12. 性能目标
 
+> 当前实测数字、采样方法与排查阈值见 [performance.md](performance.md)（M5 采样：
+> gateway startup 39–47ms、first page 42–44ms、fake turn 3ms、core 自检 43–66ms，
+> 全部低于下表目标）。
+
 | 指标 | 目标 |
 |---|---|
 | Gateway 冷启动 | < 200ms（不含 Core） |

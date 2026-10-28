@@ -1,0 +1,11 @@
+{
+  "id": "tools-skill",
+  "name": "技能搜索",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "skill_search：在已装配技能的 name/description 里做子串匹配（薄搜索层；正文走基座 read_skill）",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts"
+  }
+}

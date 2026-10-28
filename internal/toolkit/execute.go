@@ -29,6 +29,7 @@ type Executor struct {
 	redact    func(string) string
 	maxBytes  int
 	maxLines  int
+	ctxMeta   func(ctx context.Context) (threadID, runID string)
 }
 
 // ExecutorConfig 装配 Executor。
@@ -45,6 +46,9 @@ type ExecutorConfig struct {
 	// MaxOutputBytes / MaxOutputLines 为 0 时取默认 50KB / 2000 行。
 	MaxOutputBytes int
 	MaxOutputLines int
+	// CtxMeta 从执行 ctx 取检查点归属（threadId/runId，M5）。nil 表示调用方
+	// 不做检查点持久化（回执仍有 chk_ id，但没有归属账目）。
+	CtxMeta func(ctx context.Context) (threadID, runID string)
 }
 
 // NewExecutor 创建执行器。缺件直接失败，不做「没有时钟就用 time.Now」的隐式兜底（INV-2）。
@@ -77,6 +81,7 @@ func NewExecutor(cfg ExecutorConfig) (*Executor, error) {
 	return &Executor{
 		catalog: cfg.Catalog, invoker: cfg.Invoker, clock: cfg.Clock, changes: changes,
 		hasPolicy: cfg.HasPolicy, redact: redact, maxBytes: maxBytes, maxLines: maxLines,
+		ctxMeta: cfg.CtxMeta,
 	}, nil
 }
 
@@ -110,8 +115,19 @@ func (e *Executor) Execute(ctx context.Context, call domain.ToolCall) domain.Res
 	}
 
 	var checkpoint string
+	var cpMeta CheckpointMeta
 	if d.Rollback {
-		checkpoint = e.changes.NewCheckpoint(call, d)
+		var threadID, runID string
+		if e.ctxMeta != nil {
+			threadID, runID = e.ctxMeta(ctx)
+		}
+		cpMeta = CheckpointMeta{ThreadID: threadID, RunID: runID, CallID: call.CallID, Tool: d.Name}
+		checkpoint = e.changes.NewCheckpoint(call, d, cpMeta)
+	}
+	// 归属随 ctx 传给 Invoker：app 用它填 host.Context（ThreadID/RunID/CallID），
+	// 宿主 fs 写入前回调 Checkpoint 把被覆盖文件并入持久化检查点（M5）。
+	if cpMeta.CallID != "" {
+		ctx = withMeta(ctx, cpMeta)
 	}
 
 	res, err := e.invokeWithBudget(ctx, d, call)

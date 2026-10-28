@@ -250,9 +250,13 @@ func (c *Contribution) Summary(enabled bool, fingerprint, lastError string) plug
 	for _, slot := range c.Frontend.Slots {
 		s.Slots = append(s.Slots, slot.Slot)
 	}
+	for _, skill := range c.Skills {
+		s.Skills = append(s.Skills, skill.Name)
+	}
 	sort.Strings(s.Tools)
 	sort.Strings(s.Hooks)
 	sort.Strings(s.Slots)
+	sort.Strings(s.Skills)
 	return s
 }
 

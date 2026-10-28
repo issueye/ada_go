@@ -35,6 +35,8 @@ type Deps struct {
 	Secrets func(name string) bool
 	// Settings 是按插件 id 的用户设置（[plugins.settings.<id>]，13 §附录 B）。
 	Settings map[string]map[string]any
+	// OnWarning 接收装配期非致命警告（技能解析失败/同名冲突等）；nil 时丢弃。
+	OnWarning func(string)
 	// Scripts 为空时用嵌入的官方插件；测试可以注入替身。
 	Scripts []host.Script
 	// BaseURL 是 OpenAI 兼容端点的覆盖（M1 的 provider 插件读取它）。
@@ -43,6 +45,17 @@ type Deps struct {
 	// 它们由 Gateway 的渲染桥装配；本侧装配对它们容忍缺席（产品承诺由 Gateway 侧
 	// 用同一份 FrontendScripts 校验），避免前端插件进不了产品声明。
 	FrontendIDs map[string]bool
+	// BaseTools 是基座自带的工具（如技能产品能力门控的 read_skill，6.7）。
+	// 它们不是插件贡献：描述符进同一份工具目录（接受同一套校验与审批语义），
+	// 执行路由到调用方给的 Go 函数。名字与插件贡献的工具冲突时装配失败（失败关闭）。
+	BaseTools []BaseTool
+}
+
+// BaseTool 是一个基座工具：描述符 + Go 执行函数。
+type BaseTool struct {
+	Descriptor domain.Descriptor
+	// Invoke 执行一次调用；返回的错误会被 toolkit.Executor 收敛成 error 回执（INV-5）。
+	Invoke func(ctx context.Context, args json.RawMessage) (domain.Result, error)
 }
 
 // Assembly 是一次装配的结果。
@@ -60,8 +73,41 @@ type Assembly struct {
 	Actions *actionRegistry
 	// FrontendDecls 记录产品声明里被 Gateway 侧装配的前端插件 id（本侧不装配）。
 	FrontendDecls []string
+	// skills 是本次装配的技能快照（6.7：插件贡献 + 工作区，同名工作区优先）。
+	// 装配完成后不可变；经 Skills / SkillConflicts / ReadSkill 读取。
+	skills skillTable
 	// executor 是 tool 调用的路由（toolkit.Invoker）。
 	executor *toolInvoker
+}
+
+// Skills 返回本次装配的技能元数据（不含正文；deps.Skills 与 ctx.skills 用它）。
+func (a *Assembly) Skills() []domain.SkillMeta {
+	if a == nil {
+		return nil
+	}
+	return a.skills.metasForPrompt()
+}
+
+// SkillConflicts 返回同名冲突的技能名（工作区优先已生效；调用方负责记警告，6.7）。
+func (a *Assembly) SkillConflicts() []string {
+	if a == nil {
+		return nil
+	}
+	return append([]string(nil), a.skills.conflicts...)
+}
+
+// ReadSkill 读取一个技能的元数据与正文（skill.read RPC 与基座 read_skill 同源）。
+// 第四个返回值为 false 表示技能不存在；正文按 MaxSkillBodyBytes 截断并带标记。
+func (a *Assembly) ReadSkill(name string) (domain.SkillMeta, string, bool, bool) {
+	if a == nil {
+		return domain.SkillMeta{}, "", false, false
+	}
+	meta, ok := a.skills.byName[strings.TrimSpace(name)]
+	if !ok {
+		return domain.SkillMeta{}, "", false, false
+	}
+	content, truncated := truncateSkillBody(a.skills.bodies[strings.TrimSpace(name)])
+	return meta, content, truncated, true
 }
 
 // ActionDef 返回某插件的一个界面动作定义（action.invoke 用）。
@@ -220,7 +266,9 @@ func assembleSet(ctx context.Context, p *coreapp.Product, base, extras []host.Sc
 	providers.HostContext = deps.Context
 	actions := newActionRegistry()
 	frontend := newFrontendRegistry()
-	invoker := &toolInvoker{plugins: map[string]*host.Instance{}, base: deps.Context}
+	prompts := newPromptRegistry()
+	invoker := &toolInvoker{plugins: map[string]*host.Instance{}, base: deps.Context,
+		bases: map[string]BaseTool{}}
 	asm := &Assembly{Product: p, Tools: tools, Hooks: hooks, Providers: providers,
 		Actions: actions, FrontendDecls: frontendDecls, executor: invoker}
 
@@ -235,7 +283,7 @@ func assembleSet(ctx context.Context, p *coreapp.Product, base, extras []host.Sc
 		hc.Settings = deps.Settings[script.Manifest.ID]
 		inst, err := host.Load(ctx, script, caps, hc, host.Options{
 			Targets: host.Targets{Tools: tools, Hooks: hooks, Providers: providers,
-				Actions: actions, Frontend: frontend},
+				Actions: actions, Frontend: frontend, Prompts: prompts},
 		})
 		if err != nil {
 			_ = asm.Close(context.Background())
@@ -252,7 +300,31 @@ func assembleSet(ctx context.Context, p *coreapp.Product, base, extras []host.Sc
 			return nil, fmt.Errorf("app: 插件 %s 注册了 provider，但装配没有注入 HTTP 桥（失败关闭）", inst.ID())
 		}
 	}
+	// 基座自带工具最后登记：与插件贡献同名时装配失败（目录拒绝重复注册，失败关闭）。
+	// 技能门控（6.7）也在这里结算：产品声明 skills=true 且装配里至少有一个技能时，
+	// 基座注册 read_skill（技能表 = 插件贡献 + 工作区 .adago/skills，同名工作区优先）。
+	baseTools := deps.BaseTools
+	skillTable := settleSkills(picked, deps.Context.Workspace, func(msg string) {
+		if deps.OnWarning != nil {
+			deps.OnWarning(msg)
+		}
+	})
+	if p.Capabilities.Skills && !skillTable.empty() {
+		baseTools = append(baseTools, newReadSkillTool(skillTable))
+	}
+	for _, bt := range baseTools {
+		if bt.Invoke == nil {
+			_ = asm.Close(context.Background())
+			return nil, fmt.Errorf("app: 基座工具 %s 缺少执行函数", bt.Descriptor.Name)
+		}
+		if err := tools.Register(bt.Descriptor); err != nil {
+			_ = asm.Close(context.Background())
+			return nil, fmt.Errorf("app: 登记基座工具 %s 失败: %w", bt.Descriptor.Name, err)
+		}
+		invoker.bases[bt.Descriptor.Name] = bt
+	}
 	tools.Freeze()
+	asm.skills = skillTable
 
 	rt := &coreapp.Runtime{
 		Product:       p,
@@ -308,18 +380,24 @@ func (a *Assembly) ToolInvoker() toolkit.Invoker {
 	return a.executor
 }
 
-// toolInvoker 按「工具名 → 贡献它的插件实例」路由调用。
+// toolInvoker 按「工具名 → 贡献它的插件实例」路由调用；基座工具（BaseTools）路由到
+// 装配时注入的 Go 函数。
 //
 // 工具名在装配期已由 Catalog 去重，因此这里不需要再猜；找不到就是禁用/装配漂移，
 // 返回错误让 Executor 走 error 回执（INV-5）。
 type toolInvoker struct {
 	plugins map[string]*host.Instance
 	base    host.Context
+	// bases 是基座工具名 → 执行函数（与插件目录同一份名字空间，装配期已去重）。
+	bases map[string]BaseTool
 }
 
 var _ toolkit.Invoker = (*toolInvoker)(nil)
 
 func (t *toolInvoker) Invoke(ctx context.Context, pluginID, tool string, args json.RawMessage) (domain.Result, error) {
+	if bt, ok := t.bases[tool]; ok {
+		return bt.Invoke(ctx, args)
+	}
 	inst := t.plugins[pluginID]
 	if inst == nil {
 		return domain.Result{}, fmt.Errorf("app: 工具 %s 的插件 %s 未加载", tool, pluginID)
@@ -332,6 +410,11 @@ func (t *toolInvoker) Invoke(ctx context.Context, pluginID, tool string, args js
 	hc.PluginID = pluginID
 	hc.Signal = ctx
 	hc.Now = time.Now().UTC()
+	// 检查点归属（M5）：Executor 把 threadId/runId/callId/tool 放进 ctx，
+	// 这里换入 host.Context；宿主 fs 写入前回调 Checkpoint 用它找检查点。
+	if meta, ok := toolkit.MetaFrom(ctx); ok {
+		hc.ThreadID, hc.RunID, hc.CallID = meta.ThreadID, meta.RunID, meta.CallID
+	}
 	return inst.CallTool(ctx, ref, args, hc)
 }
 

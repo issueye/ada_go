@@ -1,0 +1,12 @@
+{
+  "id": "tools-git",
+  "name": "Git 工具",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "只读的 git 视图：status/diff/log（--no-pager、cwd 收敛在工作区内、30s 超时、输出截断 50KB）",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts",
+    "capabilities": ["fs.read", "exec"]
+  }
+}

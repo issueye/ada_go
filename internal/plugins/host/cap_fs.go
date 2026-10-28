@@ -140,6 +140,12 @@ func throwCodedPath(g *fsGuard, err error) error {
 	return &policyError{Code: codeAccessDenied, Message: err.Error(), Fields: map[string]any{"capability": "fs.read"}}
 }
 
+// checkpointMetaOf 从当前调用上下文取检查点归属（M5）。
+// Tool 由检查点账本（Executor）记录，这里不再重复传。
+func checkpointMetaOf(hc Context) CheckpointMeta {
+	return CheckpointMeta{ThreadID: hc.ThreadID, RunID: hc.RunID, CallID: hc.CallID}
+}
+
 // fsRealPath 是 capsState 上的便捷入口（exec 的 cwd 也要过同一份边界）。
 //
 // 没有 fs 能力时仍要能解析 cwd：用一个只做路径映射的 guard（同一份根与挂载点、
@@ -260,6 +266,11 @@ func (g *fsGuard) wrapLimit(r *engine.Realm, binding *engine.Object, key engine.
 				return moejs.Undefined(), throwCoded(rr, codeFileTooLarge,
 					fmt.Sprintf("%s 的单次写入上限是 %d 字节", name, g.limits.MaxFileBytes),
 					map[string]any{"limit": g.limits.MaxFileBytes})
+			}
+			// 检查点在覆盖之前登记（M5）：node:fs 的 writeFile/appendFile 与 ctx.fs.writeText
+			// 走同一份持久化账目。CallID 为空（钩子/装配期）由回调忽略。
+			if hc := g.st.currentContext(); hc.Checkpoint != nil {
+				hc.Checkpoint(checkpointMetaOf(hc), moejs.Arg(args, 0).String())
 			}
 		case strings.HasPrefix(base, "read") && !isReaddir:
 			if err := g.checkFileSize(moejs.Arg(args, 0).String()); err != nil {
@@ -438,11 +449,13 @@ func ctxFSMember(st *capsState, hc Context) moejs.NativeFunc {
 							fmt.Sprintf("单次写入上限是 %d 字节", guard.limits.MaxFileBytes),
 							map[string]any{"limit": guard.limits.MaxFileBytes})
 					}
+					// 检查点在覆盖之前登记（M5）：备份的是「被覆盖前的内容」。
+					// CallID 为空说明不在 Rollback 工具调用里，回调自己忽略。
+					if hc.Checkpoint != nil {
+						hc.Checkpoint(checkpointMetaOf(hc), virtual)
+					}
 					if err := os.WriteFile(real, []byte(text), 0o644); err != nil {
 						return moejs.Undefined(), err
-					}
-					if hc.Checkpoint != nil {
-						hc.Checkpoint(virtual)
 					}
 					guard.st.audit("fs", "writeText", virtual, len(text), "ok", nil)
 					return rt.FromGo(map[string]any{"bytes": len(text)})

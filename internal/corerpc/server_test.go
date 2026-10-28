@@ -355,6 +355,22 @@ func TestCoreRPCCancel(t *testing.T) {
 	if !strings.Contains(string(ev.Params), `"terminal":"cancelled"`) {
 		t.Fatalf("终态事件 = %s", ev.Params)
 	}
+	// 审计（M5）：turn.cancel 落 audit 表。
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	rows, err := sess.Store().ListAudit(ctx, 100, time.Time{})
+	if err != nil {
+		t.Fatalf("ListAudit: %v", err)
+	}
+	found := false
+	for _, r := range rows {
+		if r.Kind == "turn.cancel" && r.ThreadID == threadID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("turn.cancel 没有落审计: %+v", rows)
+	}
 }
 
 // ---- M2 剩余方法 ----
@@ -761,4 +777,49 @@ func TestThreadGetItemsProjection(t *testing.T) {
 	if len(one) != 1 {
 		t.Fatalf("itemLimit=1 得到 %d 条", len(one))
 	}
+}
+
+// TestCoreRPCChangeListAndRevert 是 change.list / change.revert 的协议面验收（M5）：
+// 参数校验、空账目形状与回滚错误路径。完整的「写文件→checkpoint→revert」领域
+// 链路在 internal/cli 的 changes_test.go（真实工具执行 + 持久化快照）。
+func TestCoreRPCChangeListAndRevert(t *testing.T) {
+	sess := newSession(t, nil)
+	url, _ := startServer(t, sess, "")
+	c := dial(t, url, "")
+
+	// 空账目：changeSets 是空数组而不是 null，hasMore=false。
+	res := c.call(t, "change.list", map[string]any{})
+	var listOut struct {
+		ChangeSets []json.RawMessage `json:"changeSets"`
+		NextCursor string            `json:"nextCursor"`
+		HasMore    bool              `json:"hasMore"`
+	}
+	if err := json.Unmarshal(res, &listOut); err != nil {
+		t.Fatalf("change.list 解码: %v", err)
+	}
+	if listOut.ChangeSets == nil || len(listOut.ChangeSets) != 0 || listOut.HasMore {
+		t.Fatalf("空账目形状不对: %s", string(res))
+	}
+
+	// limit 越界：invalid_params。
+	if resp := c.callError(t, "change.list", map[string]any{"limit": 500}); !strings.Contains(string(resp.Error), "limit") {
+		t.Fatalf("limit=500 应当报 limit 越界: %s", string(resp.Error))
+	}
+	// 游标非法：invalid_params。
+	c.callError(t, "change.list", map[string]any{"cursor": "!!not-base64!!"})
+
+	// change.revert 参数校验。
+	c.callError(t, "change.revert", map[string]any{"scope": "item"})                    // 缺 threadId
+	c.callError(t, "change.revert", map[string]any{"threadId": "th", "scope": "bogus"}) // scope 非法
+	c.callError(t, "change.revert", map[string]any{"threadId": "th", "scope": "item"})  // 缺 checkpointId
+	c.callError(t, "change.revert", map[string]any{"threadId": "th", "scope": "file"})  // 缺 path
+
+	// 未知的检查点/线程：错误而不是成功（不谎报）。
+	c.callError(t, "change.revert", map[string]any{
+		"threadId": "th_missing", "scope": "item", "checkpointId": "chk_missing"})
+	c.callError(t, "change.revert", map[string]any{
+		"threadId": "th_missing", "scope": "file", "path": "/workspace/x.txt"})
+
+	// scope=all 且线程没有检查点：同样报错。
+	c.callError(t, "change.revert", map[string]any{"threadId": "th_missing", "scope": "all"})
 }

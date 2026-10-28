@@ -30,16 +30,21 @@ const Product = "ada-go"
 // Binary 是单二进制命令名（子命令 gateway/core/plugin/doctor/verify/export/backup，01 §3.1）。
 const Binary = "adag"
 
-// 以下变量由 CI 用 ldflags 注入；默认 "dev" 用于本地构建。
+// 以下变量由 CI 用 ldflags 注入；默认值用于本地构建（make release 注入 Version，
+// Revision/BuildTime 由 build/cross 注入）。
 //
 //	CGO_ENABLED=0 go build -trimpath \
-//	  -ldflags "-X github.com/adag/ada-go/internal/version.Revision=$(git rev-parse --short HEAD) \
+//	  -ldflags "-X github.com/adag/ada-go/internal/version.Version=1.0.0-rc.1 \
+//	            -X github.com/adag/ada-go/internal/version.Revision=$(git rev-parse --short HEAD) \
 //	            -X github.com/adag/ada-go/internal/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 //	  ./cmd/adag
 //
 // 发布产物一律 GOWORK=off 构建（development-plan §7.1）；Revision/BuildTime
 // 是 /healthz 与 system.hello 的版本字段真源（01 §4.2、08 §8.2）。
 var (
+	// Version 是发布版本号（semver；M5 RC = 1.0.0-rc.1）。git tag 优先：
+	// make release 用 git describe --tags 覆盖，本地构建落回默认值。
+	Version = "1.0.0-rc.1"
 	// Revision 是 git commit（短哈希）。
 	Revision = "dev"
 	// BuildTime 是 UTC 构建时刻（RFC3339）。
@@ -48,8 +53,8 @@ var (
 
 // String 渲染人类可读的一行版本（doctor/healthz/日志共用）。
 func String() string {
-	return fmt.Sprintf("%s %s (proto=%d, api=%d.%d, rev=%s, built=%s)",
-		Product, Binary, ProtocolVersion, APIVersionMajor, APIVersionMinor, Revision, BuildTime)
+	return fmt.Sprintf("%s %s %s (proto=%d, api=%d.%d, rev=%s, built=%s)",
+		Product, Binary, Version, ProtocolVersion, APIVersionMajor, APIVersionMinor, Revision, BuildTime)
 }
 
 // CheckCompatible 是握手期的协议版本校验（system.hello：版本不匹配即拒）。

@@ -30,7 +30,9 @@ ada-go 是本地优先、单二进制、插件优先的 Agent 系统：Gateway �
 | [11-structure-roadmap.md](11-structure-roadmap.md) | §13–15 | 目录结构、Go workspace、依赖约束、里程碑、风险与开放问题 |
 | [12-node-compat.md](12-node-compat.md) | §6.10–6.14 | moejs 引擎能力、Node 兼容原生库、能力映射、安全边界与兼容性验证 |
 | [13-appendix.md](13-appendix.md) | 附录 A–D | 插件示例、配置示例、与参考实现的差异、术语 |
-| [development-plan.md](development-plan.md) | 实施计划 | M0–M5 任务分解、依赖与关键路径、工作量、质量门禁、发布节奏 |
+| [development-plan.md](development-plan.md) | 实施计划 | M0–M5 任务分解、依赖与关键路径、工作量、质量门禁、发布节奏、交付状态盘点 |
+| [performance.md](performance.md) | §12 附件 | 性能基线：实测数字、采样方法、排查阈值（M5） |
+| [release-m5.md](release-m5.md) | §10 附件 | M5 发布清单：三平台产物、升级/备份/恢复步骤、审计接线、已知限制 |
 | [decisions.md](decisions.md) | 工程决策 | 启动前开放项的钉定取值（模块路径、Go/moejs 基线、a_da commit、真源分层）与契约缺口台账 |
 
 ## 阅读路径

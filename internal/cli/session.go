@@ -91,6 +91,12 @@ type Session struct {
 	modelErr error
 	secrets  map[string]string
 
+	// M5 检查点账目：changes 是工具执行的内存账本（回执 chk_ id、写串行、
+	// 热重载跨代复用）；changeStore 是数据目录 changes/ 下的持久化账目
+	// （文件备份 + manifest，change.list / change.revert 的真源）。
+	changes     *toolkit.ChangeQueue
+	changeStore *changeStore
+
 	// M3 插件平台：随包插件 base（Open 时冻结，热重载的合并基准）、产品声明、
 	// 装配期宿主依赖（app.Deps 原样复用）、第三方发现快照与失败记录。
 	// baseScripts/cfg 在 Open 之后只读；discovered/failedPlugins 变更持 s.mu。
@@ -139,6 +145,9 @@ type PolicyUpdate struct {
 // 可变 currentThread 更适合 Core 的多线程 RPC。
 type threadCtxKey struct{}
 
+// runCtxKey 把轮次 id 带进工具执行 ctx：检查点账目（M5）用它记录归属。
+type runCtxKey struct{}
+
 func withThread(ctx context.Context, threadID string) context.Context {
 	return context.WithValue(ctx, threadCtxKey{}, threadID)
 }
@@ -148,6 +157,18 @@ func threadFrom(ctx context.Context) string {
 		return ""
 	}
 	id, _ := ctx.Value(threadCtxKey{}).(string)
+	return id
+}
+
+func withRun(ctx context.Context, runID string) context.Context {
+	return context.WithValue(ctx, runCtxKey{}, runID)
+}
+
+func runFrom(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	id, _ := ctx.Value(runCtxKey{}).(string)
 	return id
 }
 
@@ -222,6 +243,13 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 		HTTP:      httpBridge,
 	}
 	hc.State = s.stateOp
+	// 给插件的只读技能通道（6.7）：官方的技能搜索工具用它做匹配；
+	// 快照随每次装配更新，调用时读当前值。
+	hc.Skills = s.skillsMetaSnapshot
+	// M5 检查点：宿主 fs 写入前把被覆盖文件备份进持久化账目（changes/）。
+	s.changes = toolkit.NewChangeQueue()
+	s.changeStore = newChangeStore(dataDir)
+	hc.Checkpoint = s.checkpointWrite
 	s.hostBase = hc
 	// M4 前端插件：产品声明里允许出现、但由 Gateway 渲染桥装配的 id 集合。
 	frontend, ferr := sessionFrontendScripts(cfg)
@@ -448,7 +476,7 @@ func (s *Session) runInThread(ctx context.Context, threadID, runID, prompt strin
 	if modelErr != nil {
 		return domain.TerminalError, modelErr
 	}
-	runCtx := withThread(ctx, threadID)
+	runCtx := withRun(withThread(ctx, threadID), runID)
 	return engine.Run(runCtx, deps, s.newTurnSpec(threadID, runID, prompt)), nil
 }
 
@@ -1114,20 +1142,35 @@ func sessionFrontendScripts(cfg Config) ([]host.Script, error) {
 }
 
 // installAssembly 把装配结果接进会话：工具执行器、模型选择与引擎依赖里
-// 可重建的子集（目录/钩子/模型/Runner/Compactor/HasPolicy）。Open 与热重载共用。
+// 可重建的子集（目录/钩子/模型/Runner/Compactor/HasPolicy/Prompts/Skills）。
+// Open 与热重载共用。
 // 旧装配在新目录接入后关闭（双代：替换瞬间之后的新调用走新代，旧代在途调用
 // 已由 reloadAssembly 的排空等待覆盖）。
 func (s *Session) installAssembly(asm *app.Assembly) error {
 	exec, err := toolkit.NewExecutor(toolkit.ExecutorConfig{
-		Catalog:   asm.Tools,
-		Invoker:   asm.ToolInvoker(),
-		Clock:     s.clock,
+		Catalog: asm.Tools,
+		Invoker: asm.ToolInvoker(),
+		Clock:   s.clock,
+		// Changes 跨热重载复用：检查点账本不随装配换代清零（M5）。
+		Changes:   s.changes,
 		HasPolicy: asm.Runtime.PolicyPluginActive,
+		// 检查点归属：threadId/runId 由轮次 ctx 携带（withThread/withRun）。
+		CtxMeta: func(ctx context.Context) (string, string) {
+			return threadFrom(ctx), runFrom(ctx)
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("cli: 建工具执行器失败: %w", err)
 	}
 	model, modelErr := s.pickModel(asm)
+	prompts := assemblyPromptSource{frags: promptFragmentsOf(asm)}
+	var skillSrc engine.SkillSource
+	if s.Product().Capabilities.Skills {
+		skillSrc = sessionSkillSource{s: s}
+	}
+	for _, conflict := range asm.SkillConflicts() {
+		s.logWarn("技能同名冲突，工作区优先: " + conflict)
+	}
 	s.mu.Lock()
 	old := s.asm
 	s.asm = asm
@@ -1139,6 +1182,8 @@ func (s *Session) installAssembly(asm *app.Assembly) error {
 	s.deps.Runner = exec
 	s.deps.Compactor = &engine.ModelCompactor{Model: model, Clock: s.clock, IDs: s.ids}
 	s.deps.HasPolicy = func() bool { return asm.Runtime.PolicyPluginActive }
+	s.deps.Prompts = prompts
+	s.deps.Skills = skillSrc
 	s.mu.Unlock()
 	if old != nil && old != asm {
 		_ = old.Close(context.Background())
@@ -1467,6 +1512,8 @@ type PluginView struct {
 	Source string
 	Tools  []string
 	Hooks  []string
+	// Skills 是随包技能名（6.7 的 contributions.skills 计数来源）。
+	Skills []string
 }
 
 // PluginViews 列出随包 + 第三方插件的当前状态（plugin.list 的数据源）。
@@ -1552,6 +1599,7 @@ func pluginViewOf(sc host.Script, source string, p *discovery.Plugin, rec sqlite
 			}
 			v.Tools = sum.Tools
 			v.Hooks = sum.Hooks
+			v.Skills = sum.Skills
 			return v
 		}
 	}
@@ -1639,6 +1687,8 @@ func (s *Session) ReloadPlugins(ctx context.Context, pluginID string) ([]PluginV
 			if err := inst.Reload(ctx); err != nil {
 				return nil, err
 			}
+			// 审计（09 §10：插件重载）：随包插件原地重建同一代 Runtime。
+			s.audit(ctx, "plugin.reload", "", pluginID, map[string]any{"pluginId": pluginID, "scope": "plugin"})
 			return s.PluginViews(ctx), nil
 		}
 		found := false
@@ -1655,7 +1705,17 @@ func (s *Session) ReloadPlugins(ctx context.Context, pluginID string) ([]PluginV
 	if err := s.reloadAssembly(ctx); err != nil {
 		return nil, err
 	}
+	// 审计（09 §10：插件重载）：pluginId 为空表示整装配重建。
+	s.audit(ctx, "plugin.reload", "", pluginID, map[string]any{"pluginId": pluginID, "scope": scopeOf(pluginID)})
 	return s.PluginViews(ctx), nil
+}
+
+// scopeOf 描述重载范围（审计 detail 用）。
+func scopeOf(pluginID string) string {
+	if pluginID == "" {
+		return "all"
+	}
+	return "plugin"
 }
 
 // SetPluginEnabled 启用/禁用插件（plugin.setEnabled）：先落 plugin_meta，再双代重载。
@@ -1699,6 +1759,8 @@ func (s *Session) SetPluginEnabled(ctx context.Context, pluginID string, enabled
 		_ = s.store.UpsertPluginMeta(ctx, rollback)
 		return PluginView{}, err
 	}
+	// 审计（09 §10：插件禁用/启用）：成功才记，失败路径上面已回滚 meta。
+	s.audit(ctx, "plugin.changed", "", pluginID, map[string]any{"enabled": enabled})
 	return s.viewFor(ctx, pluginID), nil
 }
 

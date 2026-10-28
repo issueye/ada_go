@@ -1,6 +1,6 @@
 // Command adag 是 ada-go 的唯一二进制：一个可执行文件，两种进程角色（设计 3.1）。
 //
-//	subcommands: gateway | core | plugin | doctor | verify | export | backup | version
+//	subcommands: gateway | core | plugin | doctor | verify | export | backup | audit | version
 //
 // M0 只冻结契约，因此除 verify / doctor / core --self-check / version 之外的命令
 // 一律明确失败关闭（打印所属里程碑与非 0 退出码），不假装能用、不静默返回成功。
@@ -53,6 +53,9 @@ const usage = `adag —— 本地优先的 Agent 系统（单二进制，两角�
   adag export     --thread <id> [--format jsonl|markdown] [--out <file>]
                                                 只读导出会话（M1）
   adag backup     --to <file>                   在线一致性备份（M1）
+  adag audit      list [--limit N] [--since <time>]
+                                                只读查看审计（M5：插件启停/重载、
+                                                轮次取消、检查点回滚等）
   adag version                                  版本与协议信息
 
 里程碑说明见 docs/development-plan.md。`
@@ -112,6 +115,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return cmdExport(rest, stdout)
 	case "backup":
 		return cmdBackup(rest, stdout)
+	case "audit":
+		return cmdAudit(rest, stdout)
 	case "version":
 		return cmdVersion(stdout)
 	default:
@@ -396,7 +401,7 @@ func cmdDoctor(args []string, stdout io.Writer) error {
 
 func cmdVersion(stdout io.Writer) error {
 	lines := []string{
-		"adag " + version.String(),
+		"adag " + version.Version + " " + version.String(),
 		"product: " + version.Product + " / binary: " + version.Binary,
 		fmt.Sprintf("plugin API: %d.%d", version.APIVersionMajor, version.APIVersionMinor),
 		fmt.Sprintf("gateway↔core protocol: %d", version.ProtocolVersion),

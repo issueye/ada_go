@@ -158,11 +158,30 @@ type Context struct {
 	HTTP HTTPBridge
 	// Log 写结构化日志；密钥一律脱敏。
 	Log func(level, msg string, fields map[string]any)
-	// Checkpoint 把写入路径并入检查点（回滚用）。
-	Checkpoint func(paths ...string)
+	// Skills 返回当前装配里全部技能的只读元数据（6.7：不含正文，正文走 read_skill）。
+	// 这是基座向插件开放的唯一技能通道（技能搜索类工具用它）；
+	// nil 表示本次装配未启用技能，ctx.skills 不存在。
+	Skills func() []domain.SkillMeta
+	// Checkpoint 把写入路径并入检查点（回滚用，M5）。
+	//
+	// 调用时机是「覆盖写入之前」：回调负责把被覆盖文件的当前内容备份进数据目录
+	// changes/<checkpointId>/（内容 + mode）。meta 携带本笔调用的归属；CallID 为空
+	// 表示本次写入不在 Rollback=true 的工具调用里，回调直接忽略。
+	Checkpoint func(meta CheckpointMeta, paths ...string)
 	// Settings 是该插件自己的设置值（13 §附录 B：[plugins.settings.<id>] 解析后的对象）。
 	// 基座不解释字段，只按插件 id 透传给脚本（ctx.settings）。
 	Settings map[string]any
+}
+
+// CheckpointMeta 是一次检查点登记的归属（M5）。
+//
+// Executor 在工具执行前已知 threadId/runId/tool/callId，经 ctx → app 的 Invoker →
+// host.Context 传到这里；fs 写入回调把它写进检查点 manifest 的账目里。
+type CheckpointMeta struct {
+	ThreadID string
+	RunID    string
+	CallID   string
+	Tool     string
 }
 
 // StateOp 是一次插件 KV 访问。

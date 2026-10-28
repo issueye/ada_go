@@ -8,6 +8,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/adag/ada-go/internal/plugins/host"
@@ -65,6 +66,65 @@ func (r *actionRegistry) Lookup(pluginID, name string) (host.ActionDef, bool) {
 	defer r.mu.RUnlock()
 	def, ok := r.byID[pluginID][name]
 	return def, ok
+}
+
+// promptRegistry 是 host.PromptRegistry 的实现：登记各插件 registerPrompt 的贡献，
+// 供引擎的 PromptSource（安全前言之后的插件人格段）读取。
+type promptRegistry struct {
+	mu    sync.RWMutex
+	byID  map[string][]host.PromptDef
+	order []string
+}
+
+func newPromptRegistry() *promptRegistry {
+	return &promptRegistry{byID: map[string][]host.PromptDef{}}
+}
+
+var _ host.PromptRegistry = (*promptRegistry)(nil)
+var _ host.PluginRegistry = (*promptRegistry)(nil)
+
+func (r *promptRegistry) AddPrompt(reg host.PromptRegistration) error {
+	if reg.PluginID == "" {
+		return fmt.Errorf("app: 提示词登记缺少 pluginId")
+	}
+	if strings.TrimSpace(reg.Def.Content) == "" {
+		return fmt.Errorf("app: 插件 %s 的提示词 %q 内容为空", reg.PluginID, reg.Def.ID)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, dup := r.byID[reg.PluginID]; !dup {
+		r.order = append(r.order, reg.PluginID)
+	}
+	r.byID[reg.PluginID] = append(r.byID[reg.PluginID], reg.Def)
+	return nil
+}
+
+func (r *promptRegistry) RemovePlugin(pluginID string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.byID[pluginID]; !ok {
+		return 0
+	}
+	n := len(r.byID[pluginID])
+	delete(r.byID, pluginID)
+	for i, id := range r.order {
+		if id == pluginID {
+			r.order = append(r.order[:i], r.order[i+1:]...)
+			break
+		}
+	}
+	return n
+}
+
+// Fragments 按登记顺序展开全部提示词片段（引擎侧再按 priority/pluginID 稳定排序）。
+func (r *promptRegistry) Fragments() []host.PromptDef {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]host.PromptDef, 0, 8)
+	for _, id := range r.order {
+		out = append(out, r.byID[id]...)
+	}
+	return out
 }
 
 // frontendRegistry 是 host.FrontendRegistry 的实现：只记录贡献，供诊断与测试。

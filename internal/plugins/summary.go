@@ -15,4 +15,6 @@ type Summary struct {
 	Tools       []string `json:"tools,omitempty"`
 	Hooks       []string `json:"hooks,omitempty"`
 	Slots       []string `json:"slots,omitempty"`
+	// Skills 是插件包内随包技能的名字（6.7：只给名字，不给 description/正文）。
+	Skills []string `json:"skills,omitempty"`
 }

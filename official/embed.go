@@ -31,6 +31,9 @@ import (
 //go:embed */plugin.json */dist/index.js
 var files embed.FS
 
+//go:embed */skills/*/SKILL.md
+var skillFiles embed.FS
+
 //go:embed */*.tsx */static/*
 var frontendFiles embed.FS
 
@@ -120,11 +123,38 @@ func load(id string) (host.Script, error) {
 	if strings.TrimSpace(string(src)) == "" {
 		return host.Script{}, fmt.Errorf("official: %s/dist/index.js 为空", id)
 	}
+	// 随包技能（6.7）：与第三方插件的 discovery.sideFiles 同一形状——
+	// StaticAssets 键 = 相对路径 skills/<name>/SKILL.md，宿主装配期扫描。
+	assets, err := bundledSkills(id)
+	if err != nil {
+		return host.Script{}, err
+	}
 	return host.Script{
-		Manifest:  m,
-		EntryName: host.EntryScheme + "://" + id + "/index.js",
-		Source:    string(src),
+		Manifest:     m,
+		EntryName:    host.EntryScheme + "://" + id + "/index.js",
+		Source:       string(src),
+		StaticAssets: assets,
 	}, nil
+}
+
+// bundledSkills 收集一个官方插件包内 skills/<name>/SKILL.md 的内容。
+func bundledSkills(id string) (map[string][]byte, error) {
+	paths, err := fs.Glob(skillFiles, id+"/skills/*/SKILL.md")
+	if err != nil {
+		return nil, fmt.Errorf("official: 扫描 %s 的随包技能失败: %w", id, err)
+	}
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	out := map[string][]byte{}
+	for _, p := range paths {
+		data, err := skillFiles.ReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("official: 读取 %s 失败: %w", p, err)
+		}
+		out[strings.TrimPrefix(p, id+"/")] = data
+	}
+	return out, nil
 }
 
 // loadFrontend 收集一个前端插件的 TSX 模板与静态资源（7.5）。

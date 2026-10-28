@@ -1,0 +1,11 @@
+{
+  "id": "persona-coding",
+  "name": "编码人格",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "registerPrompt 注入编码助手人格与工程纪律（安全前言之后、按 priority 排序）",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts"
+  }
+}

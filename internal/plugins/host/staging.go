@@ -45,6 +45,17 @@ func newStaging(p *Instance) *Staging {
 		Trust:    p.caps.Trust,
 		Frontend: FrontendContribution{Actions: map[string]plugins.ActionBinding{}},
 	}
+	// 技能发现（6.7）：装配期扫描插件包内 skills/<name>/SKILL.md，只结算
+	// name/description 元数据（正文由装配方收进 read_skill 的数据表，按需披露）。
+	// 单个技能非法跳过并记警告，不中断装配。
+	skills, skillWarns := ScriptSkills(p.script)
+	for _, w := range skillWarns {
+		p.warn(w)
+	}
+	c.Skills = make([]domain.SkillMeta, 0, len(skills))
+	for _, s := range skills {
+		c.Skills = append(c.Skills, s.Meta)
+	}
 	return &Staging{p: p, data: c, keys: map[string]int{}, hookSeq: map[string]int{}}
 }
 
@@ -147,9 +158,10 @@ type PromptRegistration struct {
 	Def      PromptDef
 }
 
-// PromptRegistry 是提示词目录。
+// PromptRegistry 是提示词目录（方法名 Add*：Go 侧目录是宿主契约的消费者，
+// 与 ActionRegistry/FrontendRegistry 同一风格，扩展注册只走 TS AgentAPI）。
 type PromptRegistry interface {
-	RegisterPrompt(reg PromptRegistration) error
+	AddPrompt(reg PromptRegistration) error
 }
 
 // ActionRegistration 是一条界面动作登记（POST /ext/{id}/action/{name}）。
@@ -254,7 +266,7 @@ func (t Targets) commit(c *Contribution, caps *CapabilitySet, hooks func(HookDef
 			undo = append(undo, rollbackAll(pr))
 		}
 		for _, item := range c.Prompts {
-			if err := t.Prompts.RegisterPrompt(PromptRegistration{PluginID: c.PluginID, Def: item}); err != nil {
+			if err := t.Prompts.AddPrompt(PromptRegistration{PluginID: c.PluginID, Def: item}); err != nil {
 				return fail(fmt.Errorf("host: 插件 %s 注册提示词 %q 失败: %w", c.PluginID, item.ID, err))
 			}
 		}

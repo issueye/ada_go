@@ -44,6 +44,34 @@ type Checkpoint struct {
 	Invalidated []string `json:"invalidated,omitempty"`
 }
 
+// CheckpointMeta 是一笔检查点的归属（M5）：Executor 在工具执行前已知，
+// 经 ctx 传给 Invoker，最终落到 host.Context（fs 写入回调要用它找检查点）。
+type CheckpointMeta struct {
+	ThreadID string
+	RunID    string
+	CallID   string
+	Tool     string
+}
+
+// metaCtxKey 携带本笔工具调用的检查点归属（CheckpointMeta）。
+type metaCtxKey struct{}
+
+// withMeta 把检查点归属放进 ctx（Executor 在调用 Invoker 前注入）。
+func withMeta(ctx context.Context, meta CheckpointMeta) context.Context {
+	return context.WithValue(ctx, metaCtxKey{}, meta)
+}
+
+// MetaFrom 取出本笔工具调用的检查点归属；非工具调用路径返回 false。
+// app 的 Invoker 用它填充 host.Context（ThreadID/RunID/CallID），
+// 宿主 fs 写入回调据此把被覆盖文件并入对应的持久化检查点。
+func MetaFrom(ctx context.Context) (CheckpointMeta, bool) {
+	if ctx == nil {
+		return CheckpointMeta{}, false
+	}
+	meta, ok := ctx.Value(metaCtxKey{}).(CheckpointMeta)
+	return meta, ok
+}
+
 // NewChangeQueue 创建变更队列。maxOpen 限制同时驻留的检查点数量（0 表示 256）。
 func NewChangeQueue() *ChangeQueue {
 	return &ChangeQueue{
@@ -92,14 +120,18 @@ func (q *ChangeQueue) lockFor(path string) *sync.Mutex {
 
 // NewCheckpoint 登记一次回滚检查点，返回检查点 id。
 //
-// M1 阶段调用方是 Executor（Rollback=true 的工具）；真正的文件快照与恢复在 M5 接入，
-// 这里先把账本、顺序与「哪些路径属于哪一笔调用」钉住，避免回滚接口事后补造。
-func (q *ChangeQueue) NewCheckpoint(call domain.ToolCall, d domain.Descriptor) string {
+// meta 带 ThreadID/RunID（Executor 从 ctx 取，Session 提供）；Tool/CallID 来自
+// 描述符与调用。文件快照与恢复由 Session 侧的持久化账目（cli.changeStore）完成：
+// 宿主 fs 写入前回调 Checkpoint(meta, path)，把被覆盖文件备份进数据目录 changes/。
+// 内存账本只服务回执与串行；change.list 以磁盘 manifest 为真源（进程重启后仍在）。
+func (q *ChangeQueue) NewCheckpoint(call domain.ToolCall, d domain.Descriptor, meta CheckpointMeta) string {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	id := "chk_" + call.CallID
 	cp := &Checkpoint{
 		ID:        id,
+		ThreadID:  meta.ThreadID,
+		RunID:     meta.RunID,
 		CallID:    call.CallID,
 		Tool:      d.Name,
 		CreatedAt: q.now(),
@@ -108,6 +140,17 @@ func (q *ChangeQueue) NewCheckpoint(call domain.ToolCall, d domain.Descriptor) s
 	q.checkpts[id] = cp
 	q.trimLocked()
 	return id
+}
+
+// Lookup 按检查点 id 查账本（回滚方与快照回调用它补齐归属元数据）。
+func (q *ChangeQueue) Lookup(id string) (Checkpoint, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	cp, ok := q.checkpts[id]
+	if !ok {
+		return Checkpoint{}, false
+	}
+	return *cp, true
 }
 
 // SetCheckpointThread 在轮次 id 已知后补齐归属（Executor 先于引擎知道 runId 之前创建）。

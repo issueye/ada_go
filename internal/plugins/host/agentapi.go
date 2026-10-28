@@ -478,6 +478,23 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 		set("ui", p.uiObject(rt, c, hc))
 	}
 
+	// skills：只读的技能元数据表（6.7）。它不是能力位：只暴露 name/description/origin，
+	// 不授予任何文件或执行权限；宿主调用方（Session）没有提供时该成员不存在。
+	if hc.Skills != nil {
+		set("skills", rt.Function("skills", 0, func(_ *moejs.Realm, _ moejs.Value, _ []moejs.Value) (moejs.Value, error) {
+			metas := hc.Skills()
+			out := make([]map[string]string, 0, len(metas))
+			for _, m := range metas {
+				item := map[string]string{"name": m.Name, "description": m.Description, "origin": m.Origin}
+				if m.PluginID != "" {
+					item["pluginId"] = m.PluginID
+				}
+				out = append(out, item)
+			}
+			return rt.FromGo(out)
+		}))
+	}
+
 	// provider 的 ctx.emit / ctx.http 只在 callProvider 上安装（03 §5.5）：
 	// emit 是归一化增量的唯一出口，http 是 provider 出网的唯一出口。
 	if c.kind == callProvider {

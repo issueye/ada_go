@@ -20,7 +20,16 @@ LDFLAGS       := -X $(VERSION_PKG).Revision=$(REVISION) -X $(VERSION_PKG).BuildT
 
 MOEJS_TAG     ?= v0.1.0-alpha.11
 
-.PHONY: help setup build test race vet lint gen verify doctor gate tidy cross
+# 发布版本号：git tag 优先于 rev（M5）。HEAD 恰在 tag 上用 tag（如 v1.0.0-rc.1），
+# 否则落回短哈希；没有 git 时用 version 包默认值。打 RC tag 后 make release 自动拾取，
+# 本地验证可用 RELEASE_VERSION=v1.0.0-rc.1 覆盖。
+# 注意：recipe 内的字符串保持 ASCII——mingw32-make 在 Windows 上按系统代码页传参，
+# 中文 recipe 字符串会让 sh 的引号配对错乱（注释不受影响）。
+RELEASE_VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo 1.0.0-rc.1)
+RELEASE_DIR     := $(BIN)/release
+RELEASE_LDFLAGS := $(LDFLAGS) -X $(VERSION_PKG).Version=$(RELEASE_VERSION)
+
+.PHONY: help setup build test race vet lint gen verify doctor gate tidy cross release
 
 help:
 	@echo "setup     准备相邻 moejs 检出（校验 tag）+ 下载依赖"
@@ -35,6 +44,7 @@ help:
 	@echo "gate      运行与 CI 完全相同的门禁 scripts/ci-gate.sh"
 	@echo "tidy      GOWORK=off go mod tidy（发布口径，11 §13.1）"
 	@echo "cross     GOWORK=off CGO_ENABLED=0 三平台二进制到 $(BIN)/（无 cgo，可交叉编译）"
+	@echo "release   三平台二进制到 $(RELEASE_DIR)/ + sha256sum 清单（注入 Version，git tag 优先）"
 
 setup:
 	sh scripts/bootstrap-moejs.sh
@@ -86,3 +96,30 @@ cross:
 		echo "building $(BIN)/adag-$$os-$$arch$$ext (GOWORK=off CGO_ENABLED=0)"; \
 		CGO_ENABLED=0 GOWORK=off GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN)/adag-$$os-$$arch$$ext ./cmd/adag; \
 	done
+
+# M5 发布目标（docs/release-m5.md）：三平台二进制 + sha256 清单 + 版本注入。
+#   - 产物命名 adag-<version>-<os>-<arch>[.exe]，Version 注入 git tag（优先）或短哈希；
+#   - 某平台交叉编译失败只告警不阻塞（本机工具链差异；CI release 矩阵是权威口径），
+#     但至少要有一个产物，否则报错——不允许「成功地什么都没发布」。
+#   - sha256sums.txt 与产物同目录，随产物一起上传（升级校验用）。
+release:
+	@mkdir -p $(RELEASE_DIR)
+	@rm -f $(RELEASE_DIR)/adag-* $(RELEASE_DIR)/sha256sums.txt
+	@echo "release version = $(RELEASE_VERSION)"
+	@for t in linux/amd64 darwin/amd64 darwin/arm64 windows/amd64; do \
+		os=$${t%/*}; arch=$${t#*/}; ext=""; \
+		if [ "$$os" = "windows" ]; then ext=".exe"; fi; \
+		name="adag-$(RELEASE_VERSION)-$$os-$$arch$$ext"; \
+		echo "building $(RELEASE_DIR)/$$name (GOWORK=off CGO_ENABLED=0)"; \
+		if CGO_ENABLED=0 GOWORK=off GOOS=$$os GOARCH=$$arch $(GO) build -trimpath \
+			-ldflags "$(RELEASE_LDFLAGS)" -o $(RELEASE_DIR)/$$name ./cmd/adag; then \
+			:; \
+		else \
+			echo "WARN: $$os/$$arch cross-compile failed (non-blocking; CI release matrix is authoritative)"; \
+		fi; \
+	done
+	@files=$$(ls $(RELEASE_DIR)/adag-* 2>/dev/null); \
+	if [ -z "$$files" ]; then \
+		echo "ERROR: release produced no binaries"; exit 1; \
+	fi
+	@cd $(RELEASE_DIR) && sha256sum adag-* > sha256sums.txt && cat sha256sums.txt

@@ -347,12 +347,10 @@ func TestChangeQueueCheckpoints(t *testing.T) {
 	q := toolkit.NewChangeQueue()
 	d := descriptor(domain.AccessWrite)
 	d.Rollback = true
-	id := q.NewCheckpoint(domain.ToolCall{CallID: "c1", Tool: d.Name}, d)
+	id := q.NewCheckpoint(domain.ToolCall{CallID: "c1", Tool: d.Name}, d,
+		toolkit.CheckpointMeta{ThreadID: "th_1", RunID: "run_1", CallID: "c1", Tool: d.Name})
 	if id == "" {
 		t.Fatal("检查点 id 为空")
-	}
-	if err := q.SetCheckpointThread(id, "th_1", "run_1"); err != nil {
-		t.Fatal(err)
 	}
 	if err := q.AddPaths(id, "/b.txt", "/a.txt"); err != nil {
 		t.Fatal(err)

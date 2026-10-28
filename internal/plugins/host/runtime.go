@@ -497,6 +497,16 @@ func (p *Instance) runCall(c *call) {
 	p.cur = c
 	b.begin(func(reason error) { p.interrupt(reason) })
 
+	// 换入本次调用的宿主上下文（caps.go 的约定）：node:fs 写路径的检查点回调
+	// （M5）读 st.currentContext()，没有这一步它只能看到装配期那份上下文。
+	// owner goroutine 串行处理调用，st.hc 不存在并发写。
+	if err := UpdateCallContext(p.rt, c.hc); err != nil {
+		c.reply(outcome{err: err})
+		b.stop()
+		p.cur = nil
+		return
+	}
+
 	var runErr error
 	if p.loop.RunOnLoop(func(rt *mojsRuntime) { p.invoke(rt, c, fn) }) {
 		runErr = p.loop.Run(nil)

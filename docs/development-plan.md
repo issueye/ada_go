@@ -94,6 +94,50 @@ M4 同时依赖 M2 的页面宿主与 M3 的完整装配/信任模型。若 M3 �
 | M5 加固与发布 | 其余 provider、检查点回滚、性能/安全加固、打包、迁移、文档、RC | 25–35 | race + 全量 E2E + 性能 + 升级/备份/恢复 + `doctor` 通过，RC 无阻断问题 |
 | **合计** | — | **148–207** | M2/M3 并行时，日历时间由关键路径决定 |
 
+### 3.1 交付状态盘点（M5 RC，2026-10）
+
+> 本节是 RC 点的如实盘点：逐条对照 M3/M4/M5 退出标准；「已交付」都有测试或门禁
+> 佐证，残余项显式列出，不做「计划即交付」的虚账。
+
+**M3 插件平台 —— 已交付**：
+
+- [x] 沙箱与边界：能力按清单安装、信任分级拒绝（`internal/plugins/host` 全套测试 + `verify boundary`）。
+- [x] 崩溃隔离：插件失败降级 degraded、Runtime 重建、连续失败禁用（06 §6.4，host 测试覆盖）。
+- [x] 官方/第三方同入口：同一条装配路径（`app.assembleSet`，extras 只补缺不覆盖随包 id）。
+- [x] 链接期能力失败：未声明的 Node 模块在链接期失败（nodecompat 双跑）。
+- [x] 热重载双代：在途调用旧代、重载等待排空（`internal/cli/reload_test.go`）。
+- [x] 安装/发现/信任/启用落库：`adag plugin list|install|reload`、plugin_meta 持久化。
+
+**M4 前端插件 —— 已交付**：
+
+- [x] golden HTML 与转义基线：`internal/gateway/frontend/render_test.go`（TestGolden*）。
+- [x] 示例插件真实生效：`ui-task-plan` 插槽与动作链路（`app/ui_pipeline_test.go`）。
+- [x] 无 JS 降级：无 JS 可读可操作（`internal/gateway/web/web_test.go`）。
+- [x] 插件失败隔离：失败插槽为空、页面其余正常（web/pluginui 测试矩阵）。
+- [x] 12 插槽同名同位：`verify slots`（插槽 ↔ 宿主位置双向覆盖）+ `verify ui`（a_da 基线）。
+
+**M5 加固与发布 —— 已交付（RC.1）**：
+
+- [x] 检查点与回滚：写工具执行前持久化检查点（数据目录 `changes/`，内容 + mode +
+  manifest 原子写）；`change.list` / `change.revert`（恢复/删除/跳过/失效四份清单，
+  不谎报成功；回滚只恢复文件、不改会话历史、不终止运行中轮次）。
+- [x] 审计接线：`plugin.changed`（setEnabled）、`plugin.reload`、`turn.cancel`、
+  `storage.restore`（revert）落 `audit` 表；`adag audit list` 只读查看。
+- [x] race：CI Linux 腿 `-race` 全量（Windows 本机无 cgo 降级，见 Makefile 注释——残余）。
+- [x] 全量 E2E：gateway E2E（真实进程/HTTP/Core 子进程）+ corerpc/cli 垂直切片。
+- [x] 性能基线：实测数字与排查阈值见 [performance.md](performance.md)。
+- [x] doctor：`adag doctor`（SQLite 完整性/WAL/schema、锁、端口、provider 形状）。
+- [x] 安装包：`make release` 三平台二进制 + sha256 清单 + 版本注入（git tag 优先）；
+  升级/备份/恢复步骤见 [release-m5.md](release-m5.md)。
+- [x] 文档同步：09（审计/备份）、10（性能指针）、release-m5、performance。
+
+**残余（不阻塞 RC，显式挂账）**：
+
+- 子智能体：按决策保持 **v1.5 预研**，不进 v1.0（决策清单 §7）。
+- 非回环 TLS：未做；非回环监听强制 token，TLS 由反代终止或 v1.1 交付。
+- 插件市场：未做；安装走本地目录/zip，签名与分发在 v1.1+。
+- Windows 本机 race：依赖 cgo 工具链；CI 矩阵补腿后关闭。
+
 ## 4. 分阶段任务分解
 
 ### 4.1 M0：契约冻结与工程骨架（8–12 人日）
