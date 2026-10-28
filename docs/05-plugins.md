@@ -141,6 +141,7 @@ interface ToolContext {
   };
   secret?(name: string): string | null; // 仅在 manifest 声明 secrets 时存在
   ui?: UIContext;                    // capability: ui.ask，仅 builtin/verified
+  settings?: Record<string, unknown>; // 插件自己的设置（[plugins.settings.<id>]，基座不解释）
 }
 
 interface UIContext {
@@ -187,6 +188,7 @@ interface HookContext {
   log(level: "debug" | "info" | "warn" | "error", msg: string, fields?: object): void;
   ui?: UIContext;                    // capability: ui.ask；策略插件在这里询问用户
   state?: { get<T>(key: string): Promise<T | null>; set(key: string, value: unknown): Promise<void>; delete(key: string): Promise<void> };
+  settings?: Record<string, unknown>; // 插件自己的设置（如策略模式），基座不解释
 }
 ```
 

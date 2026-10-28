@@ -1,0 +1,12 @@
+{
+  "id": "tools-plan",
+  "name": "任务计划工具",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "维护当前线程的任务计划（线程级 KV），给界面与模型同一份计划",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts",
+    "capabilities": ["state"]
+  }
+}

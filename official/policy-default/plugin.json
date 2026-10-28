@@ -1,0 +1,25 @@
+{
+  "id": "policy-default",
+  "name": "默认审批策略",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "tool.beforeCall 的默认策略：readonly | ask | auto | full；无 UI 时对写/执行/网络失败关闭",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts",
+    "capabilities": ["ui.ask"],
+    "roles": ["tool-policy"],
+    "hooks": { "tool.beforeCall": "note" }
+  },
+  "settings": {
+    "type": "object",
+    "properties": {
+      "mode": {
+        "type": "string",
+        "enum": ["readonly", "ask", "auto", "full"],
+        "default": "ask"
+      }
+    },
+    "additionalProperties": false
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "tools-fs",
+  "name": "文件工具",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "在工作区内读写文件：读、写、编辑、列目录、搜索（单次输出上限 50KB/2000 行）",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts",
+    "capabilities": ["fs.read", "fs.write"]
+  }
+}
