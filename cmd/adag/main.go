@@ -122,7 +122,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 // notImplemented 把「契约已冻结、实现未落地」说清楚：属于哪个里程碑、下一步做什么。
 func notImplemented(cmd, milestone string) error {
 	entry, _ := diag.For(proto.CodeCoreUnavailable)
-	return fmt.Errorf("adag %s 还没有实现（%s）。\n  诊断码 %s\n  下一步：见 docs/development-plan.md 对应里程碑；当前可用命令：verify、doctor、core --self-check、version",
+	return fmt.Errorf("adag %s 还没有实现（%s）。\n  诊断码 %s\n  下一步：见 docs/development-plan.md 对应里程碑；当前可用命令见 adag help",
 		cmd, milestone, entry.Diag.String())
 }
 
@@ -389,13 +389,13 @@ func cmdDoctor(args []string, stdout io.Writer) error {
 	} else {
 		fmt.Fprintf(stdout, "OK    %-16s 锁状态正常（空闲或由运行中的 Core 持有）\n", "locks")
 	}
-	note("ports", "端口占用检查在 M2 Gateway 落地后接入")
+	note("ports", "adag gateway 启动时会绑定端口并报告失败；独立占用检查随 M2 收尾补齐")
 
 	fmt.Fprintln(stdout, "")
 	if firstErr != nil {
 		return fmt.Errorf("doctor 发现问题（首个：%w）；诊断码见 internal/diag", firstErr)
 	}
-	fmt.Fprintln(stdout, "doctor: 自检通过（M1 范围）。Gateway 端口与 UI 检查随 M2 接入。")
+	fmt.Fprintln(stdout, "doctor: 自检通过。Gateway 端口与 UI 基线按里程碑接入。")
 	return nil
 }
 
