@@ -1,0 +1,47 @@
+{
+  "id": "cp-01-module",
+  "layer": "07-child-process",
+  "runtime": {
+    "fs": "",
+    "buffer": false,
+    "web": true,
+    "memLimitBytes": 0,
+    "disableDynamicCode": false,
+    "bareRuntime": false,
+    "interruptAfterMs": 0,
+    "stopAfterMs": 0,
+    "withMany": false
+  },
+  "decision": "assert",
+  "reason": "",
+  "result": {
+    "codes": {
+      "child_process": null,
+      "workerThreads": null
+    },
+    "effects": {},
+    "order": [],
+    "returns": {
+      "child_process": {
+        "code": null,
+        "message": "No such built-in module: node:child_process",
+        "name": "Error",
+        "state": "absent"
+      },
+      "members": null,
+      "workerThreads": {
+        "code": null,
+        "message": "No such built-in module: node:worker_threads",
+        "name": "Error",
+        "state": "absent"
+      }
+    }
+  },
+  "observe": {
+    "reported": true,
+    "rejections": 2,
+    "runErrContains": "",
+    "loadErrContains": ""
+  },
+  "nodeParity": "deviation: 上游没有 node:child_process——spawn/fork/exec 是「不存在」而不是「可绕过」，execFile 要 ada-go 自建（E-5）"
+}

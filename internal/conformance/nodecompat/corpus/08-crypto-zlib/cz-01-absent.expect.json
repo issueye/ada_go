@@ -1,0 +1,53 @@
+{
+  "id": "cz-01-absent",
+  "layer": "08-crypto-zlib",
+  "runtime": {
+    "fs": "",
+    "buffer": false,
+    "web": true,
+    "memLimitBytes": 0,
+    "disableDynamicCode": false,
+    "bareRuntime": false,
+    "interruptAfterMs": 0,
+    "stopAfterMs": 0,
+    "withMany": false
+  },
+  "decision": "assert",
+  "reason": "",
+  "result": {
+    "codes": {
+      "crypto": null,
+      "zlib": null
+    },
+    "effects": {},
+    "order": [],
+    "returns": {
+      "crypto": {
+        "code": null,
+        "message": "No such built-in module: node:crypto",
+        "name": "Error",
+        "state": "absent"
+      },
+      "globals": {
+        "CompressionStream": "undefined",
+        "DecompressionStream": "undefined",
+        "crypto": "undefined"
+      },
+      "gzipSyncExists": "absent",
+      "subtleType": "absent",
+      "zlib": {
+        "code": null,
+        "message": "No such built-in module: node:zlib",
+        "name": "Error",
+        "state": "absent"
+      }
+    }
+  },
+  "observe": {
+    "reported": true,
+    "rejections": 3,
+    "runErrContains": "",
+    "loadErrContains": ""
+  },
+  "nodeParity": "deviation: 上游没有 node:crypto/node:zlib，也没有全局 crypto/subtle"
+}

@@ -1,0 +1,42 @@
+{
+  "id": "bin-01-buffer",
+  "layer": "04-binary",
+  "runtime": {
+    "fs": "",
+    "buffer": true,
+    "web": true,
+    "memLimitBytes": 0,
+    "disableDynamicCode": false,
+    "bareRuntime": false,
+    "interruptAfterMs": 0,
+    "stopAfterMs": 0,
+    "withMany": false
+  },
+  "decision": "assert",
+  "reason": "",
+  "result": {
+    "codes": {},
+    "effects": {},
+    "order": [],
+    "returns": {
+      "allocUnsafeZeroed": true,
+      "byteLengthCJK": 6,
+      "concat": "ab",
+      "globalSame": true,
+      "hex": "abc",
+      "isBuffer": "true,false",
+      "isUint8": true,
+      "kMaxLength": 2147483647,
+      "latin1": "é",
+      "noBigInt64Read": "undefined",
+      "utf8": "abc"
+    }
+  },
+  "observe": {
+    "reported": true,
+    "rejections": 0,
+    "runErrContains": "",
+    "loadErrContains": ""
+  },
+  "nodeParity": "deviation: allocUnsafe 确实清零（上游无池）；readBigInt64LE 等大整数读写缺失"
+}

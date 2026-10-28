@@ -1,0 +1,48 @@
+{
+  "id": "fs-06-readonly-write",
+  "layer": "05-fs",
+  "runtime": {
+    "fs": "ro",
+    "buffer": true,
+    "web": true,
+    "memLimitBytes": 0,
+    "disableDynamicCode": false,
+    "bareRuntime": false,
+    "interruptAfterMs": 0,
+    "stopAfterMs": 0,
+    "withMany": false
+  },
+  "decision": "assert",
+  "reason": "",
+  "result": {
+    "codes": {
+      "appendFile": "EROFS",
+      "mkdir": "EROFS",
+      "writeFile": "EROFS"
+    },
+    "effects": {
+      "errnoIsNegative": true,
+      "pathIsInput": true,
+      "syscall": "open"
+    },
+    "order": [],
+    "returns": {
+      "descriptor": {
+        "configurable": true,
+        "enumerable": true,
+        "isDataProperty": true,
+        "writable": true
+      },
+      "promisesWriteFileMemberType": "function",
+      "readStillWorks": "hello moejs",
+      "writeFileMemberType": "function"
+    }
+  },
+  "observe": {
+    "reported": true,
+    "rejections": 0,
+    "runErrContains": "",
+    "loadErrContains": ""
+  },
+  "nodeParity": "deviation: 只读时写成员仍存在且可调用，失败码是 EROFS 而不是 ERR_ACCESS_DENIED（E-4 的裁剪退成「调用即抛」）"
+}

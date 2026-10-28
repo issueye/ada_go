@@ -69,6 +69,8 @@ M1 期间若领域层不再需要独立常量，可让 `domain` 改为引用 `di
 | E-8 `timers/promises` | 模块不存在，且 `signal` 取消静默失效 | v1 **不安装**该模块（矩阵已如此），文档保持「不可用」 | 无 |
 | E-7 Buffer 计入 | 字符串与 Buffer 都计入内存上限（符合）；`TypedArray` 有偏差；正则回溯不可中断、宿主回调 panic 不上抛、`AsyncWork` 关闭竞态各有偏差 | 宿主侧：正则超时用调用预算兜住；panic 由宿主 recover 转 rejected；关闭竞态在宿主状态机里串行化 | M1-C |
 
+**M1-D 语料跑完后的补充事实（影响排期，不是措辞问题）**：上游 `node` 包实际只提供 `buffer` 与 `fs`/`fs/promises`；矩阵里 17 个「始终安装/需要 Loop」的模块（`console`、`path`×3、`url`、`querystring`、`string_decoder`、`events`、`util`、`assert`、`crypto`、`zlib`、`stream/web`、`process`、`os`、`module`、`timers`）全部 LINK-FAIL，要 ada-go 自建 virtual module 才能兑现 6.12.2 的承诺。归属已编码进 `node.HostImplementationQueue()`，实现方判定见 `nodecompat/deviations.md`。结论：M1-D 落在估算上限（6–10 人日），且 M1-F 官方工具依赖其中的 `path`/`events`/`util` 三个（provider 依赖 `crypto`）——先做这四个，其余按插件实际需要推进。
+
 对 M1-C 的直接口径：能力位 → 安装动作全部落在 ada-go；`node:fs` 用上游实现 + 宿主包装（上限、错误码归一、成员裁剪）；`node:child_process` 由 ada-go 提供；`http/https/net/tls/dgram/dns/worker_threads/vm/inspector/repl/wasi/async_hooks/perf_hooks/timers-promises/node:module` 一律不装。E-1/E-4/E-5 都不再是「等上游」的阻断项。
 
 ## 2. M0 期间发现的契约缺口

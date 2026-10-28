@@ -1,0 +1,41 @@
+{
+  "id": "fs-02-kind-mismatch",
+  "layer": "05-fs",
+  "runtime": {
+    "fs": "ro",
+    "buffer": true,
+    "web": true,
+    "memLimitBytes": 0,
+    "disableDynamicCode": false,
+    "bareRuntime": false,
+    "interruptAfterMs": 0,
+    "stopAfterMs": 0,
+    "withMany": false
+  },
+  "decision": "assert",
+  "reason": "",
+  "result": {
+    "codes": {
+      "eisdir": "EISDIR",
+      "enotdir": "ENOENT"
+    },
+    "effects": {},
+    "order": [],
+    "returns": {
+      "eisdirCode": "EISDIR",
+      "eisdirErrno": -4068,
+      "eisdirSyscall": "read",
+      "enotdirCode": "ENOENT",
+      "enotdirPath": true,
+      "readdirOnFile": "ENOENT",
+      "statWorks": true
+    }
+  },
+  "observe": {
+    "reported": true,
+    "rejections": 0,
+    "runErrContains": "",
+    "loadErrContains": ""
+  },
+  "nodeParity": "deviation: ENOTDIR 场景上游按「路径不存在优先」给 ENOENT；Node 20 给 ENOTDIR"
+}

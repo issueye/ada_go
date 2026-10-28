@@ -1,0 +1,65 @@
+{
+  "id": "fs-07-members-constants",
+  "layer": "05-fs",
+  "runtime": {
+    "fs": "ro",
+    "buffer": true,
+    "web": true,
+    "memLimitBytes": 0,
+    "disableDynamicCode": false,
+    "bareRuntime": false,
+    "interruptAfterMs": 0,
+    "stopAfterMs": 0,
+    "withMany": false
+  },
+  "decision": "assert",
+  "reason": "",
+  "result": {
+    "codes": {
+      "createReadStreamCall": "ERR_METHOD_NOT_IMPLEMENTED",
+      "openSyncCall": "ERR_METHOD_NOT_IMPLEMENTED"
+    },
+    "effects": {},
+    "order": [],
+    "returns": {
+      "constants": {
+        "F_OK": 0,
+        "O_APPEND": 1024,
+        "O_RDONLY": 0,
+        "O_WRONLY": 1
+      },
+      "createReadStreamType": "function",
+      "extraMembers": [
+        "glob",
+        "globSync",
+        "cp",
+        "cpSync",
+        "access",
+        "exists",
+        "opendir"
+      ],
+      "listedAllPresent": "readFile:function,writeFile:function,appendFile:function,readdir:function,stat:function,lstat:function,mkdir:function,rm:function,rename:function,copyFile:function,realpath:function,readlink:function,existsSync:function",
+      "memberCount": 99,
+      "promisesMemberCount": 32,
+      "statsFile": true,
+      "statsIsBuffered": "number,number,number",
+      "v1ExcludedButPresent": [
+        "watch",
+        "open",
+        "close",
+        "read",
+        "write",
+        "chmod",
+        "chown",
+        "utimes"
+      ]
+    }
+  },
+  "observe": {
+    "reported": true,
+    "rejections": 0,
+    "runErrContains": "",
+    "loadErrContains": ""
+  },
+  "nodeParity": "deviation: fs.constants 恒为 Linux 值（Windows 上 Node 给 libuv 的 Windows 值）；watch/fd/chmod 是抛 ERR_METHOD_NOT_IMPLEMENTED 的占位函数"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "proc-01-process",
+  "layer": "06-process-os",
+  "runtime": { "fs": "", "buffer": false, "web": false, "withMany": false },
+  "decision": "skip-host",
+  "reason": "process 的 argv/env 白名单/cwd 虚拟根/exit 抛 ERR_ACCESS_DENIED/没有 kill-dlopen-umask，全部由 ada-go 宿主 SetGlobal 提供（上游 alpha.11 连全局 process 都没有，见语料 proc-03 与尖刺 case=misc 的 6.12.2/process 行）",
+  "result": {},
+  "observe": {},
+  "nodeParity": "deviation: 上游完全没有 process（全局与 node:process 模块都没有），整行是宿主工作量"
+}

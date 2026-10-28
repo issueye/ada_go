@@ -1,0 +1,52 @@
+{
+  "id": "tim-05-timers-module",
+  "layer": "03-timers",
+  "runtime": {
+    "fs": "",
+    "buffer": false,
+    "web": true,
+    "memLimitBytes": 0,
+    "disableDynamicCode": false,
+    "bareRuntime": false,
+    "interruptAfterMs": 0,
+    "stopAfterMs": 0,
+    "withMany": false
+  },
+  "decision": "assert",
+  "reason": "",
+  "result": {
+    "codes": {
+      "promises": null,
+      "timers": null
+    },
+    "effects": {},
+    "order": [],
+    "returns": {
+      "bareTimers": {
+        "code": null,
+        "message": "Cannot find module 'timers'",
+        "name": "Error",
+        "state": "absent"
+      },
+      "promises": {
+        "code": null,
+        "message": "No such built-in module: node:timers/promises",
+        "name": "Error",
+        "state": "absent"
+      },
+      "timers": {
+        "code": null,
+        "message": "No such built-in module: node:timers",
+        "name": "Error",
+        "state": "absent"
+      }
+    }
+  },
+  "observe": {
+    "reported": true,
+    "rejections": 3,
+    "runErrContains": "",
+    "loadErrContains": ""
+  },
+  "nodeParity": "deviation: Node 有 node:timers 与 node:timers/promises；moejs 两者都没有，定时函数只是 eventloop 的全局（E-8）"
+}

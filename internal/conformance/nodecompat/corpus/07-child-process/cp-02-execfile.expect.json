@@ -1,0 +1,10 @@
+{
+  "id": "cp-02-execfile",
+  "layer": "07-child-process",
+  "runtime": { "fs": "", "buffer": false, "web": false, "withMany": false },
+  "decision": "skip-host",
+  "reason": "等待 M1-C 宿主安装层：node:child_process 由 ada-go 自建（E-5，上游根本没有这个模块）。尖刺已用 1 个虚拟模块 + 2 个 NativeFunc 验证可行——无 shell（shell:true → ERR_ACCESS_DENIED）、程序 allowlist、cwd 越界拒绝、maxBuffer → ERR_CHILD_PROCESS_STDIO_MAXBUFFER、timeout → ETIMEDOUT、取消 → AbortError 且进程树为空；但这些断言要等宿主安装层落地后才能进语料门禁",
+  "result": {},
+  "observe": {},
+  "nodeParity": "same"
+}

@@ -1,0 +1,51 @@
+{
+  "id": "fs-05-promises-callback",
+  "layer": "05-fs",
+  "runtime": {
+    "fs": "rw",
+    "buffer": true,
+    "web": false,
+    "memLimitBytes": 0,
+    "disableDynamicCode": false,
+    "bareRuntime": false,
+    "interruptAfterMs": 0,
+    "stopAfterMs": 0,
+    "withMany": false
+  },
+  "decision": "assert",
+  "reason": "",
+  "result": {
+    "codes": {
+      "missingPromise": "ENOENT"
+    },
+    "effects": {},
+    "order": [
+      "write",
+      "read",
+      "stat",
+      "mkdir",
+      "write-in-dir",
+      "readdir",
+      "rm",
+      "callback"
+    ],
+    "returns": {
+      "callbackFormType": "function",
+      "cbData": "promise-write",
+      "cbErr": "none",
+      "dir": "x.txt",
+      "promisesOnFs": true,
+      "read": "promise-write",
+      "readFileArity": 3,
+      "sizeIsThirteen": true,
+      "writeIsUndefined": true
+    }
+  },
+  "observe": {
+    "reported": true,
+    "rejections": 0,
+    "runErrContains": "",
+    "loadErrContains": ""
+  },
+  "nodeParity": "deviation: 矩阵说不提供回调形式，上游同步/回调/promise 三种都有"
+}

@@ -21,6 +21,62 @@ const (
 	TierNever      Tier = "never"      // 明确不安装
 )
 
+// ProvidedBy 说明一个模块由谁实现（M1-D 尖刺实测：见 internal/conformance/nodecompat/deviations.md）。
+//
+// 事实：mojs v0.1.0-alpha.11 的 node 包只提供 fs 与 buffer。设计 6.12.1 的 stdlib.Config
+// 形状来自 go-quickjs 时期，其余「始终安装」的模块实际都要 ada-go 宿主自建 virtual module。
+// 这不是措辞问题而是工作量归属：标 ProvidedHost 的每一个都是一份实现与一份语料。
+type ProvidedBy string
+
+const (
+	// ProvidedUpstream：上游已提供，宿主只做配置、上限与审计包装。
+	ProvidedUpstream ProvidedBy = "upstream"
+	// ProvidedHost：上游没有该模块，宿主自建（仍按 node: 名字暴露，保持形状兼容）。
+	ProvidedHost ProvidedBy = "host"
+	// ProvidedNotInstalled：v1 不安装（TierNever，或缺口未落地前明确不可用）。
+	ProvidedNotInstalled ProvidedBy = "not-installed"
+)
+
+// hostImplemented 是「上游没有、必须 ada-go 自己写」的模块集合。
+//
+// 依据是语料 proc-*/cz-*/tm-* 的 LINK-FAIL 实测；已提供上游实现的是 buffer 与 fs/fs/promises。
+var hostImplemented = map[string]bool{
+	"console": true, "path": true, "path/posix": true, "path/win32": true,
+	"url": true, "querystring": true, "string_decoder": true, "events": true,
+	"util": true, "assert": true, "crypto": true, "zlib": true,
+	"stream/web": true, "process": true, "os": true, "module": true,
+	"timers": true, "child_process": true,
+}
+
+// upstreamProvided 是上游 node 包确实装出来的模块。
+var upstreamProvided = map[string]bool{"buffer": true, "fs": true, "fs/promises": true}
+
+// ProvidedByOf 判定一个模块条目的实现归属。
+func ProvidedByOf(m Module) ProvidedBy {
+	if m.Tier == TierNever {
+		return ProvidedNotInstalled
+	}
+	if upstreamProvided[m.Name] {
+		return ProvidedUpstream
+	}
+	if hostImplemented[m.Name] || m.Tier == TierCapability {
+		// 受限 IO：fs 系上游有、child_process 没有；child_process 已在 hostImplemented 里。
+		return ProvidedHost
+	}
+	return ProvidedNotInstalled
+}
+
+// HostImplementationQueue 返回必须 ada-go 自己写的模块（M1-D 的交付清单）。
+func HostImplementationQueue() []string {
+	var out []string
+	for _, m := range modules {
+		if ProvidedByOf(m) == ProvidedHost {
+			out = append(out, m.Name)
+		}
+	}
+	return out
+}
+
 // Module 描述一个 node: 模块的安装契约。
 type Module struct {
 	Name string

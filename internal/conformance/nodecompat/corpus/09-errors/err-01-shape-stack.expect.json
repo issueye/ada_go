@@ -1,0 +1,48 @@
+{
+  "id": "err-01-shape-stack",
+  "layer": "09-errors",
+  "runtime": {
+    "fs": "ro",
+    "buffer": true,
+    "web": true,
+    "memLimitBytes": 0,
+    "disableDynamicCode": false,
+    "bareRuntime": false,
+    "interruptAfterMs": 0,
+    "stopAfterMs": 0,
+    "withMany": false
+  },
+  "decision": "assert",
+  "reason": "",
+  "result": {
+    "codes": {
+      "code": "ENOENT"
+    },
+    "effects": {
+      "ownNames": [
+        "code",
+        "errno",
+        "message",
+        "path",
+        "syscall"
+      ]
+    },
+    "order": [],
+    "returns": {
+      "hasCode": true,
+      "hasMessage": true,
+      "hasName": true,
+      "isErrorInstance": true,
+      "stackFrameCount": 4,
+      "stackMentionsHost": false,
+      "stackMentionsVirtual": true
+    }
+  },
+  "observe": {
+    "reported": true,
+    "rejections": 0,
+    "runErrContains": "",
+    "loadErrContains": ""
+  },
+  "nodeParity": "deviation: 栈帧指向虚拟模块名（plugin://…）但没有 source map 映射；Node 给真实文件路径"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "tim-04-limit",
+  "layer": "03-timers",
+  "runtime": { "fs": "", "buffer": false, "web": true, "withMany": false },
+  "decision": "skip-upstream",
+  "reason": "E-2：alpha.11 没有每 Runtime 定时器数量上限，600 个定时器全部排入并全部触发，ERR_TIMER_LIMIT（6.12.4）由上游不产生；256 上限要由 M1-C 宿主计数器实现",
+  "result": {},
+  "observe": {},
+  "nodeParity": "deviation: Node 没有 256 上限也没有 ERR_TIMER_LIMIT；这条为 ada-go 宿主夹逼准备"
+}

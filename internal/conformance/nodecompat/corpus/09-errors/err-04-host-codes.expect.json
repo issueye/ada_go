@@ -1,0 +1,10 @@
+{
+  "id": "err-04-host-codes",
+  "layer": "09-errors",
+  "runtime": { "fs": "ro", "buffer": true, "web": false, "withMany": false },
+  "decision": "skip-host",
+  "reason": "等待 M1-C 宿主安装层：ERR_ACCESS_DENIED（成员裁剪调用即抛）、ERR_TIMER_LIMIT（256 上限）、ERR_FS_FILE_TOO_LARGE（16MB）、ERR_CHILD_PROCESS_STDIO_MAXBUFFER、ERR_NATIVE_ADDON_UNSUPPORTED、JS 层的 ERR_MODULE_NOT_FOUND 全部由宿主产生；上游只给 EROFS/ENOTDIR 这类 libuv 码与 Go 侧 ResolveError",
+  "result": {},
+  "observe": {},
+  "nodeParity": "deviation: ERR_ACCESS_DENIED/ERR_TIMER_LIMIT/ERR_FS_FILE_TOO_LARGE 都是宿主码，上游不产生"
+}

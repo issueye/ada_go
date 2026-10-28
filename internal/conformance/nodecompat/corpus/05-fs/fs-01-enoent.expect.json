@@ -1,0 +1,50 @@
+{
+  "id": "fs-01-enoent",
+  "layer": "05-fs",
+  "runtime": {
+    "fs": "ro",
+    "buffer": true,
+    "web": true,
+    "memLimitBytes": 0,
+    "disableDynamicCode": false,
+    "bareRuntime": false,
+    "interruptAfterMs": 0,
+    "stopAfterMs": 0,
+    "withMany": false
+  },
+  "decision": "assert",
+  "reason": "",
+  "result": {
+    "codes": {
+      "openMissing": "EROFS",
+      "readMissing": "ENOENT",
+      "readdirMissing": "ENOENT",
+      "statMissing": "ENOENT"
+    },
+    "effects": {},
+    "order": [],
+    "returns": {
+      "codeIsENOENT": true,
+      "errnoIsNegativeLibuv": true,
+      "existsSync": false,
+      "hasSyscall": true,
+      "messagePrefix": "ENOENT",
+      "name": "Error",
+      "ownNames": [
+        "code",
+        "errno",
+        "message",
+        "path",
+        "syscall"
+      ],
+      "pathIsInput": true
+    }
+  },
+  "observe": {
+    "reported": true,
+    "rejections": 0,
+    "runErrContains": "",
+    "loadErrContains": ""
+  },
+  "nodeParity": "same"
+}

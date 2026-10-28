@@ -1,0 +1,10 @@
+{
+  "id": "proc-02-os",
+  "layer": "06-process-os",
+  "runtime": { "fs": "", "buffer": false, "web": false, "withMany": false },
+  "decision": "skip-host",
+  "reason": "node:os 由宿主安装（上游没有该模块）：platform/arch/EOL/cpus/tmpdir 的受限面与 hostname/homedir 置空都在 M1-C 落地",
+  "result": {},
+  "observe": {},
+  "nodeParity": "deviation: 上游没有 node:os"
+}

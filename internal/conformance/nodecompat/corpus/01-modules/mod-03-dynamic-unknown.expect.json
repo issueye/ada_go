@@ -1,0 +1,60 @@
+{
+  "id": "mod-03-dynamic-unknown",
+  "layer": "01-modules",
+  "runtime": {
+    "fs": "ro",
+    "buffer": true,
+    "web": true,
+    "memLimitBytes": 0,
+    "disableDynamicCode": false,
+    "bareRuntime": false,
+    "interruptAfterMs": 0,
+    "stopAfterMs": 0,
+    "withMany": false
+  },
+  "decision": "assert",
+  "reason": "",
+  "result": {
+    "codes": {
+      "events": null,
+      "missing": null,
+      "net": null,
+      "vm": null
+    },
+    "effects": {},
+    "order": [],
+    "returns": {
+      "events": {
+        "code": null,
+        "message": "Cannot find module 'events'",
+        "name": "Error",
+        "state": "absent"
+      },
+      "missing": {
+        "code": null,
+        "message": "Cannot find module './mod-03-does-not-exist.mjs'",
+        "name": "Error",
+        "state": "absent"
+      },
+      "net": {
+        "code": null,
+        "message": "No such built-in module: node:net",
+        "name": "Error",
+        "state": "absent"
+      },
+      "vm": {
+        "code": null,
+        "message": "No such built-in module: node:vm",
+        "name": "Error",
+        "state": "absent"
+      }
+    }
+  },
+  "observe": {
+    "reported": true,
+    "rejections": 4,
+    "runErrContains": "",
+    "loadErrContains": ""
+  },
+  "nodeParity": "deviation: Node 20 里 node:vm/node:net/events 都存在；moejs 由宿主 resolver 拒绝，且 rejection 是普通 Error（没有 ERR_MODULE_NOT_FOUND 码）（E-1）"
+}

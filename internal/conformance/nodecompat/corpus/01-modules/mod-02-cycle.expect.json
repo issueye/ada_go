@@ -1,0 +1,34 @@
+{
+  "id": "mod-02-cycle",
+  "layer": "01-modules",
+  "runtime": {
+    "fs": "ro",
+    "buffer": true,
+    "web": true,
+    "memLimitBytes": 0,
+    "disableDynamicCode": false,
+    "bareRuntime": false,
+    "interruptAfterMs": 0,
+    "stopAfterMs": 0,
+    "withMany": false
+  },
+  "decision": "assert",
+  "reason": "",
+  "result": {
+    "codes": {},
+    "effects": {},
+    "order": [],
+    "returns": {
+      "aType": "function",
+      "fromA": "A",
+      "valueB": "B-of-A"
+    }
+  },
+  "observe": {
+    "reported": true,
+    "rejections": 0,
+    "runErrContains": "",
+    "loadErrContains": ""
+  },
+  "nodeParity": "same"
+}

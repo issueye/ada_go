@@ -1,0 +1,50 @@
+{
+  "id": "err-03-abort-shape",
+  "layer": "09-errors",
+  "runtime": {
+    "fs": "ro",
+    "buffer": true,
+    "web": true,
+    "memLimitBytes": 0,
+    "disableDynamicCode": false,
+    "bareRuntime": false,
+    "interruptAfterMs": 0,
+    "stopAfterMs": 0,
+    "withMany": false
+  },
+  "decision": "assert",
+  "reason": "",
+  "result": {
+    "codes": {
+      "abort": null,
+      "timeout": 23
+    },
+    "effects": {},
+    "order": [],
+    "returns": {
+      "aborted": true,
+      "anyComposed": [
+        true,
+        "第二个"
+      ],
+      "reasonMessage": "轮次取消",
+      "throwIfAborted": {
+        "code": null,
+        "isDOM": false,
+        "message": "轮次取消",
+        "name": "Error"
+      },
+      "timeoutReason": {
+        "code": 23,
+        "name": "TimeoutError"
+      }
+    }
+  },
+  "observe": {
+    "reported": true,
+    "rejections": 0,
+    "runErrContains": "",
+    "loadErrContains": ""
+  },
+  "nodeParity": "deviation: 取消错误是 DOMException（name=AbortError），code 与设计写的 ABORT_ERR 不同（6.12.4 要宿主归一化）"
+}

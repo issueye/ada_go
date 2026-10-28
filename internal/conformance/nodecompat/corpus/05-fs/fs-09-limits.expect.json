@@ -1,0 +1,10 @@
+{
+  "id": "fs-09-limits",
+  "layer": "05-fs",
+  "runtime": { "fs": "ro", "buffer": true, "web": false, "memLimitBytes": 67108864, "withMany": true },
+  "decision": "skip-upstream",
+  "reason": "E-6：上游没有单次读写字节与目录条目上限——20MB 一次读进 64MB 堆的 Runtime 成功、readdir 10500 条全量返回；其拒绝阈值实际等于 Runtime 的 MemoryLimit（与堆耦合）。16MB/10k 与 ERR_FS_FILE_TOO_LARGE 由 M1-C 宿主包装层夹",
+  "result": {},
+  "observe": {},
+  "nodeParity": "deviation: Node 无 16MB/10k 上限；上游的拒绝阈值就是 Runtime 的 MemoryLimit，与堆耦合（E-6）"
+}

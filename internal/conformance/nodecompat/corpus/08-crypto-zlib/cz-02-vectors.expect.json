@@ -1,0 +1,10 @@
+{
+  "id": "cz-02-vectors",
+  "layer": "08-crypto-zlib",
+  "runtime": { "fs": "", "buffer": false, "web": false, "withMany": false },
+  "decision": "skip-host",
+  "reason": "等待 M1-C 宿主安装层：node:crypto 与 node:zlib 由 ada-go 用 Go 标准库自建（上游两者都没有）。已知的 sha256(\"abc\") 向量在尖刺 case=misc 的宿主版 createHash 上对上了，但 createHmac/pbkdf2/hkdf/randomInt/timingSafeEqual 与 gzip/deflate 往返、16MB 解压上限都要等宿主模块落地；本条先在 Node 20 侧当宿主实现的验收表",
+  "result": {},
+  "observe": {},
+  "nodeParity": "same"
+}

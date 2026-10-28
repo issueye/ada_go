@@ -1,0 +1,10 @@
+{
+  "id": "tim-06-signal-cancel",
+  "layer": "03-timers",
+  "runtime": { "fs": "", "buffer": false, "web": true, "withMany": false },
+  "decision": "skip-upstream",
+  "reason": "E-8：AbortSignal 传进 setTimeout 的第三个参数被当成附加参数忽略，定时器照旧触发（实测 fired=YES-仍然触发）——静默失效比报错更危险，v1 不安装 timers/promises，长等待的取消由宿主侧期限负责",
+  "result": {},
+  "observe": {},
+  "nodeParity": "deviation: Node 的 setTimeout 不接受 signal（那是 timers/promises 的 API）；moejs 把第三参当附加参数忽略，取消静默失效（E-8）"
+}

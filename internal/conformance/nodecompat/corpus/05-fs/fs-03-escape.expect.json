@@ -1,0 +1,39 @@
+{
+  "id": "fs-03-escape",
+  "layer": "05-fs",
+  "runtime": {
+    "fs": "ro",
+    "buffer": true,
+    "web": true,
+    "memLimitBytes": 0,
+    "disableDynamicCode": false,
+    "bareRuntime": false,
+    "interruptAfterMs": 0,
+    "stopAfterMs": 0,
+    "withMany": false
+  },
+  "decision": "assert",
+  "reason": "",
+  "result": {
+    "codes": {
+      "absolute": "EACCES",
+      "dotdot": "EACCES"
+    },
+    "effects": {},
+    "order": [],
+    "returns": {
+      "absoluteCode": "EACCES",
+      "absoluteSyscall": "open",
+      "dotdotCode": "EACCES",
+      "dotdotPath": true,
+      "realpathInside": true
+    }
+  },
+  "observe": {
+    "reported": true,
+    "rejections": 0,
+    "runErrContains": "",
+    "loadErrContains": ""
+  },
+  "nodeParity": "deviation: Node 20 没有 chroot，越界读会成功；moejs 用 os.Root 检查落点，越界 EACCES（errno 是负 libuv 值）"
+}
