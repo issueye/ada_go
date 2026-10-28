@@ -160,6 +160,9 @@ type Context struct {
 	Log func(level, msg string, fields map[string]any)
 	// Checkpoint 把写入路径并入检查点（回滚用）。
 	Checkpoint func(paths ...string)
+	// Settings 是该插件自己的设置值（13 §附录 B：[plugins.settings.<id>] 解析后的对象）。
+	// 基座不解释字段，只按插件 id 透传给脚本（ctx.settings）。
+	Settings map[string]any
 }
 
 // StateOp 是一次插件 KV 访问。

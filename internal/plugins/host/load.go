@@ -60,7 +60,7 @@ func lookupModuleProvider(name string) (moduleProvider, bool) {
 // 05 §6.3 的 ToolContext 里 fs/exec/fetch 这些成员按能力安装，形状由宿主决定；
 // agentapi.go 负责安装 ctx 的身份字段与 log/state/secret/ui/http（这些只依赖 host.go
 // 里已经定义的桥），能力安装方通过本变量补上自己的成员。未赋值不视为错误。
-var InstallContextMembers func(rt *mojsRuntime, put func(name string, fn moejs.NativeFunc) error, kind callKind, caps *CapabilitySet, hc Context) error
+var InstallContextMembers func(rt *mojsRuntime, put func(name string, v moejs.Value) error, kind callKind, caps *CapabilitySet, hc Context) error
 
 // pluginID 是脚本对应的插件 id（清单优先，其次从入口名推）。
 func (s Script) pluginID() string {

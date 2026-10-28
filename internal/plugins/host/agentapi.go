@@ -406,6 +406,12 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 	}
 	set("now", moejs.String(now.UTC().Format(time.RFC3339)))
 	set("signal", p.signalObject(rt, c, hc))
+	// 插件自己的设置：按 id 透传，基座不解释（13 §附录 B）。
+	if len(hc.Settings) > 0 {
+		if v, err := rt.FromGo(hc.Settings); err == nil {
+			set("settings", v)
+		}
+	}
 
 	set("log", rt.Function("log", 3, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
 		if hc.Log == nil {
@@ -482,8 +488,8 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 	// 能力安装方补成员（ctx.fs / ctx.exec）：caps.go 的 fs guard 与 exec 适配器
 	// 通过 InstallContextMembers 挂进来，agentapi 不重复实现能力细节。
 	if InstallContextMembers != nil {
-		put := func(name string, fn moejs.NativeFunc) error {
-			return obj.SetProp(r, r.KeyFromGoString(name), rt.Function(name, 2, fn))
+		put := func(name string, v moejs.Value) error {
+			return obj.SetProp(r, r.KeyFromGoString(name), v)
 		}
 		if err := InstallContextMembers(rt, put, c.kind, p.caps, hc); err != nil {
 			p.warn(fmt.Sprintf("插件 %s 的 ctx 能力成员安装失败: %v", p.id, err))

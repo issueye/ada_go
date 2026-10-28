@@ -343,8 +343,8 @@ func (g *fsGuard) limitEntries(r *engine.Realm, res moejs.Value, name string) (m
 	return res, nil
 }
 
-// installContextMembers 给 ToolContext 补 fs（05 §6.3：capability: fs.read / fs.write）。
-func installContextMembers(rt *mojsRuntime, put func(name string, fn moejs.NativeFunc) error, kind callKind, caps *CapabilitySet, hc Context) error {
+// installContextMembers 给 ToolContext 补 fs / exec（05 §6.3：按能力安装）。
+func installContextMembers(rt *mojsRuntime, put func(name string, v moejs.Value) error, kind callKind, caps *CapabilitySet, hc Context) error {
 	st, ok := stateFor(rt)
 	if !ok {
 		return nil
@@ -356,12 +356,33 @@ func installContextMembers(rt *mojsRuntime, put func(name string, fn moejs.Nativ
 		}
 	}
 	if caps != nil && (caps.Has(plugins.CapFSRead) || caps.Has(plugins.CapFSWrite)) {
-		keep(put("fs", ctxFSMember(st, hc)))
+		keep(put("fs", ctxFSObject(st, hc)))
 	}
 	if err := addExecContextMember(st, hc, put); err != nil {
 		keep(err)
 	}
 	return firstErr
+}
+
+// ctxFSObject 是 ctx.fs：五个成员（readText/writeText/list/stat/exists）。
+//
+// 每个成员都是「预绑 op」的原生函数，形状与 05 §6.3 的 ToolContext.fs 一致；
+// 未声明能力时整个属性不出现（不是 undefined 占位）。
+func ctxFSObject(st *capsState, hc Context) moejs.Value {
+	r := st.rt.Realm()
+	base := ctxFSMember(st, hc)
+	obj := r.NewObject()
+	for _, op := range []string{"readText", "writeText", "list", "stat", "exists"} {
+		name := op
+		fn := st.rt.Function("fs."+name, 2, func(rr *engine.Realm, this engine.Value, args []engine.Value) (moejs.Value, error) {
+			all := make([]engine.Value, 0, len(args)+1)
+			all = append(all, moejs.String(name))
+			all = append(all, args...)
+			return base(rr, this, all)
+		})
+		_ = obj.SetProp(r, r.KeyFromGoString(name), fn)
+	}
+	return engine.ObjectValue(obj)
 }
 
 // ctxFSMember 是 ctx.fs：readText/writeText/list/stat/exists，全部返回 Promise。

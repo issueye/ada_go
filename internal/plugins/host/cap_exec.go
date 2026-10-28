@@ -518,12 +518,12 @@ func truthyJS(v moejs.Value) (bool, bool) {
 }
 
 // addExecContextMember 给 ToolContext 补 exec（05 §6.3；能力位 exec，仅 verified/builtin）。
-func addExecContextMember(st *capsState, hc Context, put func(string, moejs.NativeFunc) error) error {
+func addExecContextMember(st *capsState, hc Context, put func(string, moejs.Value) error) error {
 	ex := st.ex
 	if ex == nil || !st.caps.Has(plugins.CapExec) {
 		return nil
 	}
-	return put("exec", func(r *engine.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+	return put("exec", st.rt.Function("exec", 3, func(r *engine.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
 		cmd := moejs.Arg(args, 0).String()
 		var argv []string
 		if v := moejs.Arg(args, 1); v.IsObject() {
@@ -574,7 +574,7 @@ func addExecContextMember(st *capsState, hc Context, put func(string, moejs.Nati
 			})
 		}()
 		return promise, nil
-	})
+	}))
 }
 
 // fsRealPath 在 cap_fs.go 里实现（同一份工作区根与虚拟挂载点）；这里声明它需要的

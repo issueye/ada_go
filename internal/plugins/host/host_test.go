@@ -359,3 +359,40 @@ func tempWorkspace(t *testing.T) string {
 	})
 	return dir
 }
+
+// TestSuccessfulCallsDoNotCountAsFailures 钉一个曾经的真 bug：
+// owner 的 collectOutcome 与调用方 roundTrip 抢同一个回执通道，抢输的一方会把
+// 「已经成功的调用」误判成「Promise 未结算」，于是每次成功都累加失败计数，
+// 三次之后插件被自动禁用。这里连打 5 次成功调用，失败计数必须保持 0。
+func TestSuccessfulCallsDoNotCountAsFailures(t *testing.T) {
+	caps := testCaps(t, plugins.TrustThirdParty)
+	src := `
+export default function (agent) {
+  agent.registerTool({ name: "ok", description: "ok", parameters: { type: "object" }, access: "read",
+    execute() { return { content: [{ type: "text", text: "fine" }] }; } });
+}
+`
+	p, err := Load(context.Background(), testScript(t, caps, src), caps, Context{}, Options{Targets: Targets{Tools: &recordingTools{}}})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	defer func() { _ = p.Close(context.Background()) }()
+
+	handler := p.Contribution().Tools[0].Handler
+	for i := 0; i < 5; i++ {
+		res, err := p.CallTool(context.Background(), handler, json.RawMessage(`{}`), Context{})
+		if err != nil {
+			t.Fatalf("第 %d 次调用失败: %v", i+1, err)
+		}
+		if len(res.Content) != 1 || res.Content[0].Text != "fine" {
+			t.Fatalf("第 %d 次内容 = %+v", i+1, res.Content)
+		}
+	}
+	failures, disabled := p.Status()
+	if failures != 0 {
+		t.Fatalf("成功调用累计了 %d 次失败（应保持 0）；warnings=%v", failures, p.Warnings())
+	}
+	if disabled {
+		t.Fatal("插件被误禁用")
+	}
+}

@@ -206,9 +206,13 @@ type call struct {
 	// firstDelta 记录 provider 是否已经收到首个增量（建连窗口 → 空闲窗口）。
 	firstDelta atomic.Bool
 
-	mu        sync.Mutex
-	hostWork  []context.CancelFunc
+	mu       sync.Mutex
+	hostWork []context.CancelFunc
+	// replied 与 out 一起记录「本次调用已经结算」：roundTrip（调用方）与
+	// collectOutcome（owner）都要读到同一个结果，不能靠抢同一个 channel ——
+	// 抢输的一方会把「已成功的调用」误判成 Promise 未结算。
 	replied   bool
+	out       *outcome
 	cancelled atomic.Bool
 	started   time.Time
 }
@@ -234,8 +238,20 @@ func (c *call) reply(o outcome) {
 		return
 	}
 	c.replied = true
+	oc := o
+	c.out = &oc
 	c.mu.Unlock()
 	c.done <- o
+}
+
+// settled 返回已经结算的结果（无论 channel 里的那份有没有被调用方取走）。
+func (c *call) settled() (outcome, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.out == nil {
+		return outcome{}, false
+	}
+	return *c.out, true
 }
 
 // trackCancel 登记一个宿主长调用的释放函数。
@@ -498,6 +514,10 @@ func (p *Instance) runCall(c *call) {
 
 // collectOutcome 取任务写回的结果；loop 在回执之前结束（中断、异常、空转）时给出分类结果。
 func (p *Instance) collectOutcome(c *call, runErr error) outcome {
+	// 先看「已经结算」的副本：调用方可能已经把 channel 里那份取走了。
+	if o, ok := c.settled(); ok {
+		return o
+	}
 	select {
 	case o := <-c.done:
 		return o
