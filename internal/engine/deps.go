@@ -41,6 +41,10 @@ type Deps struct {
 	// RunStore 为 nil 时轮次账目只发事件不落库（CLI/测试路径）。
 	RunStore RunStore
 
+	// Steer 是可选的中途消息来源（steering 队列）。nil 表示不支持 steer：
+	// 引擎在工具批次后的安全点不会排空任何消息。
+	Steer SteeringSource
+
 	// HasPolicy 报告当前装配里是否存在 role=tool-policy 插件（02 §5.4 的失败关闭依据）。
 	// nil 视为「无策略」：安全判定默认关闭。
 	HasPolicy func() bool
@@ -49,6 +53,15 @@ type Deps struct {
 // ToolRunner 执行一次工具调用并返回结构化结果（INV-5：拒绝与错误都是结果）。
 type ToolRunner interface {
 	Execute(ctx context.Context, call domain.ToolCall) domain.Result
+}
+
+// SteeringSource 是消费方定义的中途消息队列端口（不是第 13 个 ports 端口）。
+//
+// 引擎只在固定安全点调用 DrainSteering：每个工具批次执行完、工具结果 entry
+// 已追加之后、下一次模型请求之前。实现方负责把已排空的消息从队列移除；
+// 返回的消息会被引擎作为 user 消息追加进会话。
+type SteeringSource interface {
+	DrainSteering(ctx context.Context, threadID string) []domain.Message
 }
 
 // Validate 断言端口齐备。

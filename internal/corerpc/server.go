@@ -9,16 +9,21 @@ package corerpc
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
+	"github.com/adag/ada-go/internal/adapters/sqlite"
 	"github.com/adag/ada-go/internal/cli"
 	"github.com/adag/ada-go/internal/coreapp"
 	"github.com/adag/ada-go/internal/coreproto"
@@ -127,23 +132,31 @@ func (s *Server) Core() *coreproto.Server { return s.core }
 
 func (s *Server) register() error {
 	reg := map[string]coreproto.Handler{
-		"system.hello":        s.handleHello,
-		"system.ping":         s.handlePing,
-		"system.shutdown":     s.handleShutdown,
-		"workspace.info":      s.handleWorkspaceInfo,
-		"thread.create":       s.handleThreadCreate,
-		"thread.list":         s.handleThreadList,
-		"thread.get":          s.handleThreadGet,
-		"thread.entries":      s.handleThreadEntries,
-		"turn.start":          s.handleTurnStart,
-		"turn.cancel":         s.handleTurnCancel,
-		"turn.get":            s.handleTurnGet,
-		"interaction.list":    s.handleInteractionList,
-		"interaction.respond": s.handleInteractionRespond,
-		"model.list":          s.handleModelList,
-		"provider.list":       s.handleProviderList,
-		"tool.list":           s.handleToolList,
-		"plugin.list":         s.handlePluginList,
+		"system.hello":           s.handleHello,
+		"system.ping":            s.handlePing,
+		"system.shutdown":        s.handleShutdown,
+		"workspace.info":         s.handleWorkspaceInfo,
+		"workspace.updatePolicy": s.handleWorkspaceUpdatePolicy,
+		"thread.create":          s.handleThreadCreate,
+		"thread.list":            s.handleThreadList,
+		"thread.get":             s.handleThreadGet,
+		"thread.entries":         s.handleThreadEntries,
+		"thread.rename":          s.handleThreadRename,
+		"thread.archive":         s.handleThreadArchive,
+		"thread.branch":          s.handleThreadBranch,
+		"thread.delete":          s.handleThreadDelete,
+		"turn.start":             s.handleTurnStart,
+		"turn.cancel":            s.handleTurnCancel,
+		"turn.get":               s.handleTurnGet,
+		"turn.steer":             s.handleTurnSteer,
+		"interaction.list":       s.handleInteractionList,
+		"interaction.respond":    s.handleInteractionRespond,
+		"model.list":             s.handleModelList,
+		"model.set":              s.handleModelSet,
+		"provider.list":          s.handleProviderList,
+		"tool.list":              s.handleToolList,
+		"plugin.list":            s.handlePluginList,
+		"usage.get":              s.handleUsageGet,
 	}
 	for name, h := range reg {
 		if err := s.core.Register(name, h); err != nil {
@@ -226,6 +239,55 @@ func (s *Server) handleWorkspaceInfo(context.Context, json.RawMessage) (any, err
 	return s.workspaceInfo(), nil
 }
 
+func (s *Server) handleWorkspaceUpdatePolicy(_ context.Context, raw json.RawMessage) (any, error) {
+	var p struct {
+		Policies *struct {
+			ToolTimeoutMS   *int `json:"toolTimeoutMs"`
+			TurnTimeoutMS   *int `json:"turnTimeoutMs"`
+			MaxTurnTokens   *int `json:"maxTurnTokens"`
+			LoopRepeatLimit *int `json:"loopRepeatLimit"`
+			LoopAbortLimit  *int `json:"loopAbortLimit"`
+			ParallelTools   *int `json:"parallelTools"`
+		} `json:"policies"`
+		Model *struct {
+			ProviderID string `json:"providerId"`
+			ModelID    string `json:"modelId"`
+		} `json:"model"`
+	}
+	if err := decode(raw, &p); err != nil {
+		return nil, invalid("workspace.updatePolicy: " + err.Error())
+	}
+	var modelRef ports.ModelRef
+	if p.Model != nil {
+		ref, ok := s.sess.ResolveModel(p.Model.ProviderID, p.Model.ModelID)
+		if !ok {
+			return nil, invalid(fmt.Sprintf(
+				"workspace.updatePolicy: provider %q/model %q 未在装配中声明", p.Model.ProviderID, p.Model.ModelID))
+		}
+		modelRef = ref
+	}
+	var up cli.PolicyUpdate
+	if p.Policies != nil {
+		up = cli.PolicyUpdate{
+			ToolTimeoutMS: p.Policies.ToolTimeoutMS, TurnTimeoutMS: p.Policies.TurnTimeoutMS,
+			MaxTurnTokens: p.Policies.MaxTurnTokens, LoopRepeatLimit: p.Policies.LoopRepeatLimit,
+			LoopAbortLimit: p.Policies.LoopAbortLimit, ParallelTools: p.Policies.ParallelTools,
+		}
+	}
+	policies, err := s.sess.UpdatePolicies(up)
+	if err != nil {
+		return nil, invalid("workspace.updatePolicy: " + err.Error())
+	}
+	if p.Model != nil {
+		s.sess.SetWorkspaceModel(modelRef)
+	}
+	cur := s.sess.ModelRef()
+	return map[string]any{
+		"policies": policyJSON(policies),
+		"model":    proto.ModelRef{ProviderID: cur.ProviderID, ModelID: cur.ModelID},
+	}, nil
+}
+
 // ---- thread ----
 
 func (s *Server) handleThreadCreate(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -270,22 +332,36 @@ func (s *Server) handleThreadList(ctx context.Context, raw json.RawMessage) (any
 
 func (s *Server) handleThreadGet(ctx context.Context, raw json.RawMessage) (any, error) {
 	var p struct {
-		ThreadID string `json:"threadId"`
+		ThreadID  string `json:"threadId"`
+		ItemLimit int    `json:"itemLimit"`
 	}
 	if err := decode(raw, &p); err != nil || p.ThreadID == "" {
 		return nil, invalid("thread.get: 需要 threadId")
+	}
+	limit := p.ItemLimit
+	if limit == 0 {
+		limit = 100
+	}
+	if limit < 1 || limit > 500 {
+		return nil, invalid("thread.get: itemLimit 必须在 1..500")
 	}
 	th, err := s.sess.GetThread(ctx, p.ThreadID)
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	page, err := s.sess.EntriesBefore(ctx, p.ThreadID, 0, int64(limit))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	pending := s.pending(ctx, p.ThreadID)
+	items, hasMore := s.items(ctx, page.Items, pending, limit, page.NextCursor != "")
 	return map[string]any{
 		"thread":       threadJSON(th),
-		"items":        []any{},
-		"seq":          0,
+		"items":        items,
+		"seq":          s.sess.LastSeq(p.ThreadID),
 		"run":          s.runState(p.ThreadID),
-		"interactions": interactionsJSON(s.pending(ctx, p.ThreadID)),
-		"hasMore":      false,
+		"interactions": interactionsJSON(pending),
+		"hasMore":      hasMore,
 	}, nil
 }
 
@@ -311,6 +387,108 @@ func (s *Server) handleThreadEntries(ctx context.Context, raw json.RawMessage) (
 		out = append(out, entryJSON(e))
 	}
 	return map[string]any{"entries": out, "nextCursor": page.NextCursor, "hasMore": page.NextCursor != ""}, nil
+}
+
+func (s *Server) handleThreadRename(ctx context.Context, raw json.RawMessage) (any, error) {
+	var p struct {
+		ThreadID string `json:"threadId"`
+		Title    string `json:"title"`
+	}
+	if err := decode(raw, &p); err != nil {
+		return nil, invalid("thread.rename: " + err.Error())
+	}
+	if p.ThreadID == "" {
+		return nil, invalid("thread.rename: 需要 threadId")
+	}
+	if strings.TrimSpace(p.Title) == "" {
+		return nil, invalid("thread.rename: title 不能为空")
+	}
+	if len([]rune(p.Title)) > 200 {
+		return nil, invalid("thread.rename: title 不能超过 200 字符")
+	}
+	if err := s.sess.Store().RenameThread(ctx, p.ThreadID, p.Title); err != nil {
+		return nil, rpcError(err)
+	}
+	th, err := s.sess.GetThread(ctx, p.ThreadID)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return map[string]any{"thread": threadJSON(th)}, nil
+}
+
+func (s *Server) handleThreadArchive(ctx context.Context, raw json.RawMessage) (any, error) {
+	var p struct {
+		ThreadID string `json:"threadId"`
+		Archived *bool  `json:"archived"`
+	}
+	if err := decode(raw, &p); err != nil {
+		return nil, invalid("thread.archive: " + err.Error())
+	}
+	if p.ThreadID == "" || p.Archived == nil {
+		return nil, invalid("thread.archive: 需要 threadId 与 archived")
+	}
+	if err := s.sess.Store().SetArchived(ctx, p.ThreadID, *p.Archived); err != nil {
+		return nil, rpcError(err)
+	}
+	th, err := s.sess.GetThread(ctx, p.ThreadID)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return map[string]any{"thread": threadJSON(th)}, nil
+}
+
+func (s *Server) handleThreadBranch(ctx context.Context, raw json.RawMessage) (any, error) {
+	var p struct {
+		ThreadID string `json:"threadId"`
+		EntryID  string `json:"entryId"`
+		Title    string `json:"title"`
+	}
+	if err := decode(raw, &p); err != nil {
+		return nil, invalid("thread.branch: " + err.Error())
+	}
+	if p.ThreadID == "" || p.EntryID == "" {
+		return nil, invalid("thread.branch: 需要 threadId 与 entryId")
+	}
+	if len([]rune(p.Title)) > 200 {
+		return nil, invalid("thread.branch: title 不能超过 200 字符")
+	}
+	if _, err := s.sess.GetThread(ctx, p.ThreadID); err != nil {
+		return nil, rpcError(err)
+	}
+	entry, err := s.sess.Store().GetEntry(ctx, p.EntryID)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	if entry.ThreadID != p.ThreadID {
+		return nil, invalid("thread.branch: entry 不属于该线程")
+	}
+	if p.Title != "" {
+		if err := s.sess.Store().RenameThread(ctx, p.ThreadID, p.Title); err != nil {
+			return nil, rpcError(err)
+		}
+	}
+	if err := s.sess.Store().MoveHead(ctx, p.ThreadID, p.EntryID); err != nil {
+		return nil, rpcError(err)
+	}
+	th, err := s.sess.GetThread(ctx, p.ThreadID)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return map[string]any{"thread": threadJSON(th)}, nil
+}
+
+func (s *Server) handleThreadDelete(ctx context.Context, raw json.RawMessage) (any, error) {
+	var p struct {
+		ThreadID string `json:"threadId"`
+	}
+	if err := decode(raw, &p); err != nil || p.ThreadID == "" {
+		return nil, invalid("thread.delete: 需要 threadId")
+	}
+	if err := s.sess.Store().DeleteThread(ctx, p.ThreadID); err != nil {
+		return nil, rpcError(err)
+	}
+	s.sess.ForgetThreadModel(p.ThreadID)
+	return map[string]any{"deleted": true, "cleanupScheduled": true}, nil
 }
 
 // ---- turn ----
@@ -362,8 +540,11 @@ func (s *Server) handleTurnStart(ctx context.Context, raw json.RawMessage) (any,
 	s.idem[key] = runID
 	s.mu.Unlock()
 
+	// 等轮次登记完活跃状态再返回 turn.start：紧随其后的 turn.steer 不会被
+	// 误判成「没有运行中轮次」。登记/注销由 RunInThread 成对完成。
+	ready := make(chan struct{})
 	go func() {
-		term, err := s.sess.RunInThread(runCtx, p.ThreadID, runID, p.Text)
+		term, err := s.sess.RunInThreadReady(runCtx, p.ThreadID, runID, p.Text, ready)
 		s.mu.Lock()
 		if cur := s.runs[p.ThreadID]; cur != nil && cur.runID == runID {
 			cur.status = "terminal"
@@ -377,6 +558,7 @@ func (s *Server) handleTurnStart(ctx context.Context, raw json.RawMessage) (any,
 		s.mu.Unlock()
 		cancel()
 	}()
+	<-ready
 	return map[string]any{"runId": runID, "duplicate": false, "seq": 0}, nil
 }
 
@@ -407,7 +589,54 @@ func (s *Server) handleTurnGet(_ context.Context, raw json.RawMessage) (any, err
 	if err := decode(raw, &p); err != nil || p.ThreadID == "" {
 		return nil, invalid("turn.get: 需要 threadId")
 	}
-	return map[string]any{"run": s.runState(p.ThreadID), "queueLength": 0}, nil
+	return map[string]any{
+		"run":         s.runState(p.ThreadID),
+		"queueLength": s.sess.SteeringQueueLength(p.ThreadID),
+	}, nil
+}
+
+// handleTurnSteer 排队一条中途消息（turn.steer）。
+//
+// 只有在 runs 表里存在 running 状态的轮次时才接受；没有运行中轮次返回
+// core_unavailable（1002），与协议 errors: ["invalid_params","core_unavailable"]
+// 对齐。images 在 M2 第一切片暂不支持，非空按 invalid_params 拒绝。
+func (s *Server) handleTurnSteer(_ context.Context, raw json.RawMessage) (any, error) {
+	var p struct {
+		ThreadID string            `json:"threadId"`
+		Text     string            `json:"text"`
+		Images   []json.RawMessage `json:"images"`
+	}
+	if err := decode(raw, &p); err != nil {
+		return nil, invalid("turn.steer: " + err.Error())
+	}
+	if strings.TrimSpace(p.ThreadID) == "" {
+		return nil, invalid("turn.steer: 需要 threadId")
+	}
+	threadID := strings.TrimSpace(p.ThreadID)
+	if len(p.Images) > 0 {
+		return nil, invalid("turn.steer: M2 第一切片暂不支持图片输入")
+	}
+	if strings.TrimSpace(p.Text) == "" {
+		return nil, invalid("turn.steer: text 与 images 至少其一非空")
+	}
+	if utf8.RuneCountInString(p.Text) > 65536 {
+		return nil, invalid("turn.steer: text 不能超过 65536 字符")
+	}
+
+	s.mu.Lock()
+	cur := s.runs[threadID]
+	running := cur != nil && cur.status == "running"
+	s.mu.Unlock()
+	if !running {
+		return nil, rpcError(domain.NewError(domain.CodeCoreUnavailable,
+			"该线程没有运行中轮次，无法排队中途消息"))
+	}
+
+	position, err := s.sess.EnqueueSteering(threadID, p.Text)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return map[string]any{"queued": true, "position": position}, nil
 }
 
 // ---- interaction ----
@@ -449,7 +678,11 @@ func (s *Server) handleInteractionRespond(ctx context.Context, raw json.RawMessa
 
 // ---- model/provider/tool/plugin ----
 
-func (s *Server) handleModelList(context.Context, json.RawMessage) (any, error) {
+func (s *Server) handleModelList(_ context.Context, raw json.RawMessage) (any, error) {
+	var p struct {
+		ThreadID string `json:"threadId"`
+	}
+	_ = decode(raw, &p)
 	asm := s.sess.Assembly()
 	models := []map[string]any{}
 	if asm.Providers != nil {
@@ -463,9 +696,47 @@ func (s *Server) handleModelList(context.Context, json.RawMessage) (any, error) 
 		}
 	}
 	cur := s.sess.ModelRef()
+	if p.ThreadID != "" {
+		cur = s.sess.ModelRefFor(p.ThreadID)
+	}
 	return map[string]any{
 		"models":  models,
 		"current": proto.ModelRef{ProviderID: cur.ProviderID, ModelID: cur.ModelID},
+	}, nil
+}
+
+func (s *Server) handleModelSet(ctx context.Context, raw json.RawMessage) (any, error) {
+	var p struct {
+		Model *struct {
+			ProviderID string `json:"providerId"`
+			ModelID    string `json:"modelId"`
+		} `json:"model"`
+		ThreadID string `json:"threadId"`
+	}
+	if err := decode(raw, &p); err != nil {
+		return nil, invalid("model.set: " + err.Error())
+	}
+	if p.Model == nil || p.Model.ProviderID == "" || p.Model.ModelID == "" {
+		return nil, invalid("model.set: 需要 model.providerId 与 model.modelId")
+	}
+	ref, ok := s.sess.ResolveModel(p.Model.ProviderID, p.Model.ModelID)
+	if !ok {
+		return nil, invalid(fmt.Sprintf(
+			"model.set: provider %q/model %q 未在装配中声明", p.Model.ProviderID, p.Model.ModelID))
+	}
+	scope := "workspace"
+	if p.ThreadID != "" {
+		if _, err := s.sess.GetThread(ctx, p.ThreadID); err != nil {
+			return nil, rpcError(err)
+		}
+		s.sess.SetThreadModel(p.ThreadID, ref)
+		scope = "thread"
+	} else {
+		s.sess.SetWorkspaceModel(ref)
+	}
+	return map[string]any{
+		"model": proto.ModelRef{ProviderID: ref.ProviderID, ModelID: ref.ModelID},
+		"scope": scope,
 	}, nil
 }
 
@@ -509,7 +780,261 @@ func (s *Server) handlePluginList(context.Context, json.RawMessage) (any, error)
 	return map[string]any{"plugins": out}, nil
 }
 
+// ---- usage ----
+
+func (s *Server) handleUsageGet(ctx context.Context, raw json.RawMessage) (any, error) {
+	var p struct {
+		ThreadID string `json:"threadId"`
+		Since    string `json:"since"`
+	}
+	if err := decode(raw, &p); err != nil {
+		return nil, invalid("usage.get: " + err.Error())
+	}
+	var since time.Time
+	if strings.TrimSpace(p.Since) != "" {
+		t, err := time.Parse(time.RFC3339Nano, p.Since)
+		if err != nil {
+			if t, err = time.Parse(time.RFC3339, p.Since); err != nil {
+				return nil, invalid("usage.get: since 必须是 RFC3339 时间")
+			}
+		}
+		since = t
+	}
+	st := s.sess.Store()
+	// usage 走合并窗口；先强制落库，否则刚结束的轮次在聚合里可能还看不到。
+	if err := st.Flush(ctx); err != nil {
+		return nil, rpcError(err)
+	}
+	threadUsage := proto.Usage{}
+	if p.ThreadID != "" {
+		if since.IsZero() {
+			aggs, err := st.UsageByThread(ctx, p.ThreadID)
+			if err != nil {
+				return nil, rpcError(err)
+			}
+			threadUsage = usageFromAggregates(aggs)
+		} else {
+			u, err := s.usageSince(ctx, []string{p.ThreadID}, since)
+			if err != nil {
+				return nil, rpcError(err)
+			}
+			threadUsage = u
+		}
+	}
+	var workspace proto.Usage
+	if since.IsZero() {
+		aggs, err := st.UsageWorkspace(ctx)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		workspace = usageFromAggregates(aggs)
+	} else {
+		ids, err := s.threadIDs(ctx)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		workspace, err = s.usageSince(ctx, ids, since)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+	}
+	return map[string]any{"thread": threadUsage, "workspace": workspace}, nil
+}
+
+// usageSince 用 runs.usage_json + started_at 做时间窗聚合。
+//
+// 04 §5.7 的 usage 表读取端口只提供线程/工作区全量聚合（UsageByThread/UsageWorkspace），
+// 没有 since 参数；runs 表保存了每轮的使用量快照与开始时间，因此时间窗路径从 runs 汇总。
+func (s *Server) usageSince(ctx context.Context, threadIDs []string, since time.Time) (proto.Usage, error) {
+	groups := map[[2]string]*sqlite.UsageAggregate{}
+	for _, tid := range threadIDs {
+		runs, err := s.sess.Store().ListRuns(ctx, tid, 100000)
+		if err != nil {
+			return proto.Usage{}, err
+		}
+		ref := s.sess.ModelRefFor(tid)
+		for _, run := range runs {
+			if run.StartedAt.Before(since) || len(run.UsageJSON) == 0 {
+				continue
+			}
+			var u domain.Usage
+			if err := json.Unmarshal(run.UsageJSON, &u); err != nil || u == (domain.Usage{}) {
+				continue
+			}
+			key := [2]string{ref.ProviderID, ref.ModelID}
+			agg := groups[key]
+			if agg == nil {
+				agg = &sqlite.UsageAggregate{Provider: key[0], Model: key[1]}
+				groups[key] = agg
+			}
+			agg.Input += u.InputTokens
+			agg.Output += u.OutputTokens
+			agg.Cache += u.CacheTokens
+			agg.Cost += u.CostMicros
+		}
+	}
+	out := make([]sqlite.UsageAggregate, 0, len(groups))
+	for _, agg := range groups {
+		out = append(out, *agg)
+	}
+	return usageFromAggregates(out), nil
+}
+
+func (s *Server) threadIDs(ctx context.Context) ([]string, error) {
+	var ids []string
+	cursor := ""
+	for {
+		page, err := s.sess.ListThreads(ctx, ports.ListThreadsRequest{
+			Workspace: s.sess.Workspace(), Limit: 200, Cursor: cursor, IncludeArchived: true,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, th := range page.Items {
+			ids = append(ids, th.ID)
+		}
+		if page.NextCursor == "" {
+			return ids, nil
+		}
+		cursor = page.NextCursor
+	}
+}
+
+func usageFromAggregates(aggs []sqlite.UsageAggregate) proto.Usage {
+	var out proto.Usage
+	providers := map[string]struct{}{}
+	models := map[string]struct{}{}
+	for _, a := range aggs {
+		out.InputTokens += int(a.Input)
+		out.OutputTokens += int(a.Output)
+		out.CacheTokens += int(a.Cache)
+		out.CostMicros += a.Cost
+		providers[a.Provider] = struct{}{}
+		models[a.Model] = struct{}{}
+	}
+	// 单一 provider/model 时带出归属；多组混用时留空，避免把合计伪装成某一组。
+	if len(providers) == 1 {
+		for p := range providers {
+			out.Provider = p
+		}
+	}
+	if len(models) == 1 {
+		for m := range models {
+			out.Model = m
+		}
+	}
+	return out
+}
+
 // ---- helpers ----
+
+// projectedItem 是 item 投影的中间形状；payload 保持 entry 原文。
+type projectedItem struct {
+	key         string
+	typ         string
+	at          time.Time
+	payload     json.RawMessage
+	fingerprint string
+}
+
+// items 把最近一批 entry 与待处理交互投影成 Item（按 at 升序，最多 limit 条）。
+// hasMore 为 true 表示窗口外仍有更早 entry（或交互被窗口截掉）。
+func (s *Server) items(_ context.Context, entries []ports.Entry, pending []ports.InteractionRequest, limit int, entriesHasMore bool) ([]map[string]any, bool) {
+	all := make([]projectedItem, 0, len(entries)+len(pending))
+	for _, e := range entries {
+		if it, ok := projectEntry(e); ok {
+			all = append(all, it)
+		}
+	}
+	for _, r := range pending {
+		if it, ok := projectInteraction(r); ok {
+			all = append(all, it)
+		}
+	}
+	total := len(all)
+	sort.SliceStable(all, func(i, j int) bool { return all[i].at.Before(all[j].at) })
+	if len(all) > limit {
+		all = all[total-limit:]
+	}
+	out := make([]map[string]any, 0, len(all))
+	for _, it := range all {
+		out = append(out, map[string]any{
+			"key": it.key, "type": it.typ,
+			"at":          it.at.UTC().Format(time.RFC3339Nano),
+			"fingerprint": it.fingerprint,
+			"payload":     it.payload,
+		})
+	}
+	return out, entriesHasMore || total > limit
+}
+
+func projectEntry(e ports.Entry) (projectedItem, bool) {
+	payload := e.Payload
+	if len(payload) == 0 || !json.Valid(payload) {
+		payload = json.RawMessage("{}")
+	}
+	var typ, key string
+	switch e.Kind {
+	case domain.EntryMessage:
+		if e.Role == domain.RoleTool {
+			var body struct {
+				CallID string `json:"callId"`
+			}
+			_ = json.Unmarshal(payload, &body)
+			key = "tool:" + body.CallID
+			if body.CallID == "" {
+				key = "tool:" + e.ID
+			}
+			typ = "tool"
+		} else {
+			key = "msg:" + e.ID
+			typ = "message"
+		}
+	case domain.EntryCompaction:
+		key = "compaction:" + e.ID
+		typ = "compaction"
+	default:
+		return projectedItem{}, false
+	}
+	return projectedItem{key: key, typ: typ, at: e.CreatedAt, payload: payload, fingerprint: fingerprintPayload(payload)}, true
+}
+
+func projectInteraction(r ports.InteractionRequest) (projectedItem, bool) {
+	m := map[string]any{
+		"id": r.ID, "threadId": r.ThreadID, "runId": r.RunID,
+		"pluginId": r.PluginID, "kind": string(r.Kind), "title": r.Title,
+		"body": r.Body, "status": string(domain.InteractionPending),
+		"createdAt": r.CreatedAt.UTC().Format(time.RFC3339Nano),
+	}
+	if r.CallID != "" {
+		m["callId"] = r.CallID
+	}
+	if len(r.Options) > 0 {
+		m["options"] = r.Options
+	}
+	if !r.ExpiresAt.IsZero() {
+		m["expiresAt"] = r.ExpiresAt.UTC().Format(time.RFC3339Nano)
+	}
+	payload, err := json.Marshal(m)
+	if err != nil {
+		return projectedItem{}, false
+	}
+	return projectedItem{key: "interaction:" + r.ID, typ: "interaction", at: r.CreatedAt,
+		payload: payload, fingerprint: fingerprintPayload(payload)}, true
+}
+
+func fingerprintPayload(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+func policyJSON(p coreapp.Policies) map[string]any {
+	return map[string]any{
+		"toolTimeoutMs": p.ToolTimeoutMS, "turnTimeoutMs": p.TurnTimeoutMS,
+		"maxTurnTokens": p.MaxTurnTokens, "loopRepeatLimit": p.LoopRepeatLimit,
+		"loopAbortLimit": p.LoopAbortLimit, "parallelTools": p.ParallelTools,
+	}
+}
 
 func (s *Server) pending(ctx context.Context, threadID string) []ports.InteractionRequest {
 	var all []ports.InteractionRequest

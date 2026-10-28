@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -22,8 +23,14 @@ import (
 //go:embed templates/*.html.tmpl
 var templateFS embed.FS
 
-//go:embed static/app.css
-var appCSS []byte
+//go:embed static
+var staticFS embed.FS
+
+//go:embed static/app.js
+var appJS []byte
+
+// staticPrefix 是内嵌静态资源的 URL 前缀。
+const staticPrefix = "/static/"
 
 // maxFormBytes 是 Gateway 表单请求体上限（09 §9.5：请求体 1MB）。
 const maxFormBytes = 1 << 20
@@ -33,8 +40,15 @@ const maxFormBytes = 1 << 20
 type Config struct {
 	// Supervisor 按工作区提供 Core 客户端；SSR 只通过 Core JSON-RPC 取数据。
 	Supervisor contracts.Supervisor
-	// Workspace 是当前页面绑定的工作区（传给 Supervisor.Acquire）。
+	// Workspace 是单工作区默认值（兼容旧调用）；Workspaces 为空时使用它。
 	Workspace string
+	// Workspaces 是可切换的工作区列表；第一个是默认工作区。
+	Workspaces []string
+	// WorkspaceFor 把请求解析成工作区路径；为空时按 adag_workspace cookie
+	// （值是在 Workspaces 中的索引）解析，缺失/越界回退到第一个。
+	WorkspaceFor func(*http.Request) string
+	// CookieSecure 控制工作区选择 cookie 的 Secure 属性。
+	CookieSecure bool
 	// ProductName 是品牌名，默认为 ada-go。
 	ProductName string
 	// Locale 是 <html lang> 的取值，默认 zh-CN。
@@ -72,7 +86,14 @@ func New(cfg Config) (*Server, error) {
 	if cfg.LoginPath == "" {
 		cfg.LoginPath = "/login"
 	}
-	tmpl, err := template.New("web").ParseFS(templateFS, "templates/*.html.tmpl")
+	cfg.Workspaces = normalizeWorkspaceList(cfg.Workspace, cfg.Workspaces)
+	if cfg.Workspace == "" && len(cfg.Workspaces) > 0 {
+		cfg.Workspace = cfg.Workspaces[0]
+	}
+	tmpl, err := template.New("web").Funcs(template.FuncMap{
+		// slot 只接受基座生成的 template.HTML（见 RenderSlot 注释）。
+		"slot": RenderSlot,
+	}).ParseFS(templateFS, "templates/*.html.tmpl")
 	if err != nil {
 		return nil, fmt.Errorf("web: 解析内嵌模板失败: %w", err)
 	}
@@ -96,49 +117,144 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /{$}", s.handleHome)
 	mux.HandleFunc("GET /threads", s.handleThreads)
 	mux.HandleFunc("POST /threads", s.handleCreateThread)
+	mux.HandleFunc("GET /workspace", s.handleWorkspaceGet)
+	mux.HandleFunc("POST /workspace", s.handleWorkspaceSelect)
 	mux.HandleFunc("GET /thread/{id}", s.handleThread)
 	mux.HandleFunc("POST /thread/{id}/turn", s.handleTurn)
 	mux.HandleFunc("POST /thread/{id}/cancel", s.handleCancel)
 	mux.HandleFunc("POST /thread/{id}/interaction/{requestId}", s.handleInteraction)
 	mux.HandleFunc("GET /events/{id}", s.handleEvents)
-	mux.HandleFunc("GET /static/app.css", s.handleCSS)
+	mux.HandleFunc("GET /static/app.js", s.handleJS)
+	mux.HandleFunc("GET /static/", s.handleStatic)
 	mux.HandleFunc("GET /login", s.handleLoginPage)
 	mux.HandleFunc("POST /login", s.handleLoginSubmit)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	return mux
 }
 
-// acquire 取一次 Core 客户端，返回成对的释放函数。
-func (s *Server) acquire(ctx context.Context) (contracts.CoreClient, func(), error) {
-	c, err := s.cfg.Supervisor.Acquire(ctx, s.cfg.Workspace)
+// WorkspaceCookieName 是工作区选择 cookie；值是在 Config.Workspaces 中的索引。
+// 它不是秘密，仅用于选择；服务端始终按配置数组校验。
+const WorkspaceCookieName = "adag_workspace"
+
+// WorkspaceCookieMaxAge 是工作区选择 cookie 的有效期（30 天，单位秒）。
+const WorkspaceCookieMaxAge = 30 * 24 * 60 * 60
+
+// acquire 按当前请求的工作区取一次 Core 客户端，返回成对的释放函数。
+func (s *Server) acquire(ctx context.Context, r *http.Request) (contracts.CoreClient, func(), error) {
+	workspace, _ := s.resolveWorkspace(r)
+	c, err := s.cfg.Supervisor.Acquire(ctx, workspace)
 	if err != nil {
 		return nil, nil, err
 	}
-	release := func() { s.cfg.Supervisor.Release(s.cfg.Workspace) }
+	release := func() { s.cfg.Supervisor.Release(workspace) }
 	return c, release, nil
 }
 
 // call 在单次请求内取客户端并调用一个方法。
-func (s *Server) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	c, release, err := s.acquire(ctx)
+func (s *Server) call(r *http.Request, method string, params any) (json.RawMessage, error) {
+	c, release, err := s.acquire(r.Context(), r)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	return c.Call(ctx, method, params)
+	return c.Call(r.Context(), method, params)
 }
 
 // base 填充所有页面共用的外壳字段。
 func (s *Server) base(r *http.Request, title string) baseData {
+	workspace, index := s.resolveWorkspace(r)
 	return baseData{
-		Title:       title,
-		ProductName: s.cfg.ProductName,
-		Locale:      s.cfg.Locale,
-		Identity:    s.cfg.Identity,
-		LoginPath:   s.cfg.LoginPath,
-		CSRF:        s.csrf(r),
-		Workspace:   s.cfg.Workspace,
+		Title:               title,
+		ProductName:         s.cfg.ProductName,
+		Locale:              s.cfg.Locale,
+		Identity:            s.cfg.Identity,
+		LoginPath:           s.cfg.LoginPath,
+		CSRF:                s.csrf(r),
+		Workspace:           workspace,
+		WorkspaceIndex:      index,
+		Workspaces:          s.workspaceOptions(),
+		ShowWorkspacePicker: len(s.cfg.Workspaces) > 1,
 	}
+}
+
+// normalizeWorkspaceList 合并单/多工作区配置并去重，保持配置顺序。
+func normalizeWorkspaceList(single string, many []string) []string {
+	if len(many) == 0 {
+		if strings.TrimSpace(single) == "" {
+			return nil
+		}
+		return []string{single}
+	}
+	out := make([]string, 0, len(many))
+	seen := make(map[string]struct{}, len(many))
+	for _, workspace := range many {
+		workspace = strings.TrimSpace(workspace)
+		if workspace == "" {
+			continue
+		}
+		if _, ok := seen[workspace]; ok {
+			continue
+		}
+		seen[workspace] = struct{}{}
+		out = append(out, workspace)
+	}
+	return out
+}
+
+// resolveWorkspace 返回当前请求的工作区及索引。
+// 优先使用注入的 WorkspaceFor；否则按 cookie 索引解析；任何异常回退到默认。
+func (s *Server) resolveWorkspace(r *http.Request) (string, int) {
+	list := s.cfg.Workspaces
+	if len(list) == 0 {
+		return s.cfg.Workspace, 0
+	}
+	if s.cfg.WorkspaceFor != nil {
+		if workspace := s.cfg.WorkspaceFor(r); workspace != "" {
+			if i := workspaceIndex(list, workspace); i >= 0 {
+				return list[i], i
+			}
+		}
+	}
+	index := workspaceIndexFromCookie(r, len(list))
+	return list[index], index
+}
+
+func workspaceIndex(list []string, workspace string) int {
+	for i, candidate := range list {
+		if candidate == workspace {
+			return i
+		}
+	}
+	return -1
+}
+
+// workspaceIndexFromCookie 读取 adag_workspace（索引）；缺失或越界返回 0。
+func workspaceIndexFromCookie(r *http.Request, size int) int {
+	if size <= 1 {
+		return 0
+	}
+	c, err := r.Cookie(WorkspaceCookieName)
+	if err != nil {
+		return 0
+	}
+	index, err := strconv.Atoi(strings.TrimSpace(c.Value))
+	if err != nil || index < 0 || index >= size {
+		return 0
+	}
+	return index
+}
+
+// workspaceOptions 生成选择器选项：显示 basename 与完整路径。
+func (s *Server) workspaceOptions() []workspaceOption {
+	options := make([]workspaceOption, 0, len(s.cfg.Workspaces))
+	for i, workspace := range s.cfg.Workspaces {
+		name := filepath.Base(workspace)
+		if name == "" || name == "." || name == string(filepath.Separator) {
+			name = workspace
+		}
+		options = append(options, workspaceOption{Index: i, Name: name, Path: workspace})
+	}
+	return options
 }
 
 func (s *Server) csrf(r *http.Request) string {

@@ -1,5 +1,7 @@
 {{define "threads"}}{{template "head" .}}
-<main class="page">
+<div class="ada-scroll">
+<div class="ada-wrap">
+<div class="page">
 {{if .IsHome}}
 <section class="panel create-panel">
   <h1>新会话</h1>
@@ -36,5 +38,7 @@
   </div>
   {{end}}
 </section>
-</main>
+</div>
+</div>
+</div>
 {{template "foot" .}}{{end}}

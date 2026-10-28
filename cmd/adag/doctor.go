@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,6 +156,37 @@ func checkSQLite(dataDir string) error {
 		return fmt.Errorf("journal_mode = %s，期望 wal（04 §5.7）", p.JournalMode)
 	}
 	return nil
+}
+
+// checkGatewayAddr 检查 Gateway 监听地址当前是否可绑定。
+//
+// 只做「试绑定再立即关闭」：不启动 Gateway、不触碰 Core，也不会留下监听端口。
+// 失败通常意味着已有 Gateway 在运行，或端口被其它进程占用；这里把排查方向
+// 直接写进错误里，doctor 的输出就是排障入口。
+func checkGatewayAddr(addr string) error {
+	if _, _, err := net.SplitHostPort(addr); err != nil {
+		return fmt.Errorf("--gateway-addr %q 不是 host:port 形式（例：127.0.0.1:52353）: %w", addr, err)
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf(
+			"端口 %s 不可绑定：可能已有 adag gateway 在运行，或被其它进程占用。\n"+
+				"  · 先关闭已有 Gateway，或改用 --gateway-addr 指定其它端口\n"+
+				"  · 查占用进程：Windows `netstat -ano | findstr :%s` 后 `tasklist /FI \"PID eq <pid>\"`；"+
+				"macOS/Linux `lsof -i :%s`\n"+
+				"  · 只想验证检查逻辑时可传 127.0.0.1:0（由系统分配空闲端口）\n"+
+				"  底层错误: %v", addr, portOf(addr), portOf(addr), err)
+	}
+	return ln.Close()
+}
+
+// portOf 从 host:port 中取端口，仅用于拼排查命令。
+func portOf(addr string) string {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	return port
 }
 
 // checkLock 检查工作区锁：空闲则取一次再释放；被运行中的 Core 持有也算正常。

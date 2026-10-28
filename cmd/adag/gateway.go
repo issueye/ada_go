@@ -22,7 +22,8 @@ import (
 func runGateway(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("gateway", flag.ContinueOnError)
 	addr := fs.String("addr", "127.0.0.1:52353", "监听地址（M2 第一切片只允许回环）")
-	workspace := fs.String("workspace", ".", "工作区目录")
+	var workspaces stringList
+	fs.Var(&workspaces, "workspace", "工作区目录（可重复；默认 .）")
 	product := fs.String("product", defaultProductPath(), "产品声明文件")
 	dataDir := fs.String("data-dir", "", "Core 数据目录")
 	provider := fs.String("provider", "openai", "provider id")
@@ -36,6 +37,9 @@ func runGateway(args []string, stdout io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if len(workspaces) == 0 {
+		workspaces = stringList{"."}
+	}
 	if err := requireLoopback(*addr); err != nil {
 		return err
 	}
@@ -43,7 +47,7 @@ func runGateway(args []string, stdout io.Writer) error {
 	accessToken := strings.TrimSpace(os.Getenv("ADAG_GATEWAY_TOKEN"))
 	generated := accessToken == ""
 	cfg := gateway.Config{
-		Workspace: *workspace, Product: *product,
+		Workspaces: workspaces, Product: *product,
 		Provider: *provider, Model: *model, BaseURL: *baseURL,
 		DataDir: *dataDir, AllowHosts: allowHosts, Fake: *fake,
 		Token:     accessToken,
@@ -71,11 +75,12 @@ func runGateway(args []string, stdout io.Writer) error {
 	}
 
 	out := map[string]any{
-		"endpoint":  "http://" + ln.Addr().String(),
-		"workspace": gw.Workspace(),
-		"product":   gw.Product().ID,
-		"pid":       os.Getpid(),
-		"readyAt":   time.Now().UTC().Format(time.RFC3339Nano),
+		"endpoint":   "http://" + ln.Addr().String(),
+		"workspace":  gw.Workspace(),
+		"workspaces": gw.Workspaces(),
+		"product":    gw.Product().ID,
+		"pid":        os.Getpid(),
+		"readyAt":    time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if generated {
 		// 首次配对码：只在自动生成时打印一次；用户设置环境变量后不回显。

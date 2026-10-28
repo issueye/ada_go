@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,8 +27,12 @@ import (
 
 // Config 是 Gateway 的装配输入。
 type Config struct {
+	// Workspace 是单工作区兼容字段；Workspaces 为空时使用它。
 	Workspace string
-	Product   string
+	// Workspaces 是 Gateway 管理的全部工作区。New 会归一化（绝对路径、去重），
+	// 至少需要一个；页面可通过 cookie 在这些工作区之间切换。
+	Workspaces []string
+	Product    string
 	// Binary 是 adag 可执行文件（spawn Core 用）；空时 supervisor 取 os.Executable。
 	Binary string
 	// Provider/Model/BaseURL/DataDir/AllowHosts 原样传给 Core。
@@ -47,6 +52,10 @@ type Config struct {
 	Secure bool
 	// AllowedOrigins 是额外允许的跨源 Origin。
 	AllowedOrigins []string
+	// Supervisor 是可选的监督者注入点：非空时跳过真实 Core 进程装配，
+	// 生命周期也由调用方负责（Gateway.Shutdown 不会关闭它）。测试用于
+	// 在不 spawn Core 的情况下验证鉴权、SSR 与错误页。
+	Supervisor contracts.Supervisor
 }
 
 // Gateway 持有 HTTP handler 与它管理的 Core 进程。
@@ -54,21 +63,25 @@ type Gateway struct {
 	cfg     Config
 	product *coreapp.Product
 	token   string
-	sup     *supervisor.Supervisor
+	sup     contracts.Supervisor
+	ownSup  bool
 	web     *web.Server
 	handler http.Handler
 }
 
 // New 装配 Gateway。调用方必须最终调用 Shutdown。
 func New(ctx context.Context, cfg Config) (*Gateway, error) {
-	if strings.TrimSpace(cfg.Workspace) == "" {
-		return nil, fmt.Errorf("gateway: 需要工作区目录")
-	}
-	abs, err := filepath.Abs(cfg.Workspace)
+	workspaces, err := normalizeWorkspaces(cfg.Workspace, cfg.Workspaces)
 	if err != nil {
 		return nil, err
 	}
-	cfg.Workspace = abs
+	cfg.Workspaces = workspaces
+	cfg.Workspace = workspaces[0]
+	if len(workspaces) > 1 && strings.TrimSpace(cfg.DataDir) != "" {
+		// 每个工作区必须有自己的 state.db（Core 单写者 + 工作区锁）。
+		// 多工作区共用 --data-dir 会让两个 Core 同时写同一个 SQLite，直接拒绝。
+		return nil, fmt.Errorf("gateway: 多工作区不能共享 --data-dir；留空让每个 Core 使用各自的默认目录")
+	}
 	if strings.TrimSpace(cfg.Product) == "" {
 		return nil, fmt.Errorf("gateway: 需要产品声明")
 	}
@@ -92,14 +105,23 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 		}
 	}
 
-	sup, err := supervisor.New(supervisor.Options{
-		Binary: cfg.Binary, Product: cfg.Product, Provider: cfg.Provider, Model: cfg.Model,
-		BaseURL: cfg.BaseURL, DataDir: cfg.DataDir, AllowHosts: cfg.AllowHosts, Fake: cfg.Fake,
-		Token: coreToken, MaxCores: cfg.MaxCores, IdleTimeout: cfg.Idle,
-		Dial: relay.Dial,
-	})
-	if err != nil {
-		return nil, err
+	var sup contracts.Supervisor
+	ownSup := false
+	if cfg.Supervisor != nil {
+		// 测试注入：不启动真实 Core，监督者生命周期归调用方。
+		sup = cfg.Supervisor
+	} else {
+		realSup, err := supervisor.New(supervisor.Options{
+			Binary: cfg.Binary, Product: cfg.Product, Provider: cfg.Provider, Model: cfg.Model,
+			BaseURL: cfg.BaseURL, DataDir: cfg.DataDir, AllowHosts: cfg.AllowHosts, Fake: cfg.Fake,
+			Token: coreToken, MaxCores: cfg.MaxCores, IdleTimeout: cfg.Idle,
+			Dial: relay.Dial,
+		})
+		if err != nil {
+			return nil, err
+		}
+		sup = realSup
+		ownSup = true
 	}
 
 	mw, err := security.New(security.Config{
@@ -107,18 +129,26 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 		AllowedOrigins: cfg.AllowedOrigins, LoginPath: "/login",
 	})
 	if err != nil {
-		_ = sup.Shutdown(context.Background())
+		if ownSup {
+			_ = sup.Shutdown(context.Background())
+		}
 		return nil, err
 	}
 
-	events := &eventHandler{sup: sup, workspace: abs}
+	// web 与 SSE 使用同一个解析器：cookie 索引 → 配置里的工作区，
+	// 越界/损坏时回退到第一个工作区。两个入口不会出现工作区不一致。
+	resolveWorkspace := workspaceResolver(workspaces)
+	events := &eventHandler{sup: sup, workspaceFor: resolveWorkspace}
 	webSrv, err := web.New(web.Config{
-		Supervisor: sup, Workspace: abs,
+		Supervisor: sup, Workspace: cfg.Workspace, Workspaces: workspaces,
+		WorkspaceFor: resolveWorkspace, CookieSecure: cfg.Secure,
 		ProductName: product.Name, Locale: product.Identity.Locale,
 		Events: events, CSRF: mw.CSRFToken, LoginPath: "/login",
 	})
 	if err != nil {
-		_ = sup.Shutdown(context.Background())
+		if ownSup {
+			_ = sup.Shutdown(context.Background())
+		}
 		return nil, err
 	}
 
@@ -136,7 +166,7 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 	root.Handle("/", webSrv.Handler())
 
 	g := &Gateway{
-		cfg: cfg, product: product, token: accessToken, sup: sup, web: webSrv,
+		cfg: cfg, product: product, token: accessToken, sup: sup, ownSup: ownSup, web: webSrv,
 		handler: mw.Wrap(root),
 	}
 	return g, nil
@@ -148,8 +178,13 @@ func (g *Gateway) Handler() http.Handler { return g.handler }
 // AccessToken 返回本次 Gateway 的访问令牌（自动生成时用于首次配对展示）。
 func (g *Gateway) AccessToken() string { return g.token }
 
-// Workspace 返回归一化后的工作区路径。
+// Workspace 返回第一个归一化后的工作区路径（单工作区兼容）。
 func (g *Gateway) Workspace() string { return g.cfg.Workspace }
+
+// Workspaces 返回全部归一化后的工作区路径（只读副本）。
+func (g *Gateway) Workspaces() []string {
+	return append([]string(nil), g.cfg.Workspaces...)
+}
 
 // Product 返回已加载的产品声明。
 func (g *Gateway) Product() *coreapp.Product { return g.product }
@@ -162,7 +197,7 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 	if g.web != nil {
 		_ = g.web.Close()
 	}
-	if g.sup != nil {
+	if g.sup != nil && g.ownSup {
 		return g.sup.Shutdown(ctx)
 	}
 	return nil
@@ -172,21 +207,71 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 // 每个连接一个 Hub 意味着断线后 Last-Event-ID 回放只在本次连接内有界；
 // 跨连接重同步由客户端调用 thread.get 完成。
 type eventHandler struct {
-	sup       contracts.Supervisor
-	workspace string
-	opts      sse.Options
+	sup          contracts.Supervisor
+	workspaceFor func(*http.Request) string
+	opts         sse.Options
 }
 
 func (h *eventHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	core, err := h.sup.Acquire(r.Context(), h.workspace)
+	workspace := ""
+	if h.workspaceFor != nil {
+		workspace = h.workspaceFor(r)
+	}
+	core, err := h.sup.Acquire(r.Context(), workspace)
 	if err != nil {
 		http.Error(w, "Core 不可用: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	defer h.sup.Release(h.workspace)
+	defer h.sup.Release(workspace)
 	hub := sse.New(core, h.opts)
 	defer hub.Close()
 	hub.ServeHTTP(w, r)
+}
+
+// normalizeWorkspaces 合并单/多工作区配置：Workspaces 非空时优先；
+// 每个路径取绝对路径，去重并保持顺序；至少保留一个。
+func normalizeWorkspaces(workspace string, workspaces []string) ([]string, error) {
+	raw := workspaces
+	if len(raw) == 0 {
+		raw = []string{workspace}
+	}
+	out := make([]string, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for _, candidate := range raw {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		abs, err := filepath.Abs(candidate)
+		if err != nil {
+			return nil, fmt.Errorf("gateway: 归一化工作区 %q 失败: %w", candidate, err)
+		}
+		if _, ok := seen[abs]; ok {
+			continue
+		}
+		seen[abs] = struct{}{}
+		out = append(out, abs)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("gateway: 需要工作区目录")
+	}
+	return out, nil
+}
+
+// workspaceResolver 把 adag_workspace cookie（配置数组索引）解析成工作区路径。
+// cookie 不是秘密，只用于选择；缺失、非数字或越界都回退到第一个工作区。
+func workspaceResolver(workspaces []string) func(*http.Request) string {
+	return func(r *http.Request) string {
+		if len(workspaces) == 0 {
+			return ""
+		}
+		if c, err := r.Cookie(web.WorkspaceCookieName); err == nil {
+			if n, convErr := strconv.Atoi(strings.TrimSpace(c.Value)); convErr == nil && n >= 0 && n < len(workspaces) {
+				return workspaces[n]
+			}
+		}
+		return workspaces[0]
+	}
 }
 
 func randomToken() (string, error) {

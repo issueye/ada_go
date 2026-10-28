@@ -1,0 +1,118 @@
+/*
+ * 来源：a_da（上游 Rust 项目）
+ * 上游 commit：ae2f8ffe1679ce25c490c7af0a788d6575669fa0
+ * 源文件：design/tokens.css
+ * 源文件 SHA-256：9d6edaedf571ff7ebe49c53ad4832342e87fd6baba75c7c9874580841d1c6d69
+ * 许可：MIT（见同目录 NOTICE-a-da.txt）
+ *
+ * 本文件保留上游原文，仅在最前面追加此来源注释。
+ * 上游维护者变更令牌后，请重新同步并更新上面的 SHA-256。
+ */
+
+/* ─────────────────────────────────────────────────────────────────────────
+   设计令牌 · 唯一真源（single source of truth）
+
+   🔴 这个文件是 a_da 全部颜色令牌的**唯一**定义处。
+   改颜色只改这里，然后重新构建 Tailwind（见下）：
+     bunx tailwindcss@3.4.19 \
+       -c crates/plugin-hub/tailwind.config.cjs \
+       -i crates/plugin-hub/static/input.css \
+       -o crates/plugin-hub/static/app.css --minify
+   产物再同步到 ssr-h/static/app.css（`cargo test` 会校验两份一致）。
+   （2026-10：原先借的是已移除的 React 前端目录里的 tailwind；该目录已移除，改用 bunx。
+   版本号跟产物头里的一行对齐：`/*! tailwindcss v3.4.19 */`。）
+
+   消费方：
+   - crates/plugin-hub  通过 `static/input.css` 的 @import 引入
+   - ssr-h              使用同一份构建产物（app.css）
+
+   规则：
+   - 深浅主题只切 `html.dark`，业务 CSS 里不许写 `dark:` 变体
+   - 组件只引用 `--ph-*`，不许写死十六进制色
+   - 新增令牌请同时补上 dark 值，否则深色模式会退回浏览器默认
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root,
+html.light {
+  /* Black Swan（2026-10-24）：主调取自 assets/logo.png——
+     宣纸暖白 #F6F3EC + 墨黑 #16171A（天鹅主体）。蓝色主色退场。 */
+  --ph-canvas: #f6f3ec;
+  --ph-surface: #fcfaf5;
+  --ph-elevated: #ffffff;
+  --ph-line: #e6e0d4;
+  --ph-line-strong: #d5ccbc;
+  --ph-ink: #16171a;
+  --ph-muted: #54524c;
+  --ph-faint: #6e6a60;
+  --ph-brand: #16171a;
+  --ph-brand-strong: #000000;
+  --ph-brand-soft: #ece5d8;
+  --ph-brand-ink: #16171a;
+  /* 品牌底上的文字/图标：浅色是"黑底米白字"，暗色反过来（见 html.dark）。
+     组件里不要再写死 #fff——否则暗色主按钮会白字压白底。 */
+  --ph-on-brand: #f6f3ec;
+  --ph-subtle: #f0ebe1;
+  --ph-subtle-ink: #54524c;
+  --ph-success-soft: #e7f0e7;
+  --ph-success-ink: #2f6b4a;
+  --ph-warn-soft: #f8eedc;
+  --ph-warn-ink: #8a5a12;
+  --ph-danger-soft: #f8e7e4;
+  --ph-danger-ink: #a3342b;
+  --ph-glass: rgba(246, 243, 236, 0.84);
+  --ph-focus: rgba(22, 23, 26, 0.28);
+  --ph-code-bg: #17181b;
+  --ph-code-ink: #ede8dd;
+  --ph-inline-code-bg: #f0ebe1;
+  --ph-inline-code-ink: #3b3a36;
+  --ph-shadow: 0 1px 2px rgba(22, 23, 26, 0.05),
+    0 12px 32px -24px rgba(22, 23, 26, 0.22);
+  /* 滚动条：宽度进标尺（6px，2 的倍数），颜色三态逐级加深。
+     常规态必须「看得见」——之前用 line-strong 在白底上几乎不可见，
+     占着槽位却像没画，反而不如不占位。 */
+  --ph-scrollbar-size: 6px;
+  /* 用 ink 按比例调透明度：在 canvas(#fafafa) 与 surface(#fff) 上都自然，
+     不用为两种底色各调一个色值。 */
+  --ph-scrollbar: color-mix(in srgb, var(--ph-ink) 22%, transparent);
+  --ph-scrollbar-hover: color-mix(in srgb, var(--ph-ink) 36%, transparent);
+  --ph-scrollbar-active: color-mix(in srgb, var(--ph-ink) 50%, transparent);
+  color-scheme: light;
+}
+
+html.dark {
+  /* 墨纸反转：暖黑画布 + 暖白文字；主按钮反过来是"米白底墨字"。 */
+  --ph-canvas: #121110;
+  --ph-surface: #1a1917;
+  --ph-elevated: #22201d;
+  --ph-line: #2e2b27;
+  --ph-line-strong: #433f38;
+  --ph-ink: #f3efe6;
+  --ph-muted: #b9b2a5;
+  --ph-faint: #928b7e;
+  --ph-brand: #f3efe6;
+  --ph-brand-strong: #ffffff;
+  --ph-brand-soft: rgba(243, 239, 230, 0.12);
+  --ph-brand-ink: #f0e7d6;
+  --ph-on-brand: #16171a;
+  --ph-subtle: #201e1b;
+  --ph-subtle-ink: #b9b2a5;
+  --ph-success-soft: #1b2a22;
+  --ph-success-ink: #8fd3b0;
+  --ph-warn-soft: #2c2418;
+  --ph-warn-ink: #e8c583;
+  --ph-danger-soft: #2e1d1b;
+  --ph-danger-ink: #f0a59c;
+  --ph-glass: rgba(18, 17, 16, 0.82);
+  --ph-focus: rgba(243, 239, 230, 0.3);
+  --ph-code-bg: #0e0d0c;
+  --ph-code-ink: #ede8dd;
+  --ph-inline-code-bg: #26231f;
+  --ph-inline-code-ink: #e6dfd2;
+  --ph-shadow: 0 1px 2px rgba(0, 0, 0, 0.4),
+    0 16px 40px -32px rgba(0, 0, 0, 0.9);
+  --ph-scrollbar-size: 6px;
+  --ph-scrollbar: color-mix(in srgb, var(--ph-ink) 26%, transparent);
+  --ph-scrollbar-hover: color-mix(in srgb, var(--ph-ink) 40%, transparent);
+  --ph-scrollbar-active: color-mix(in srgb, var(--ph-ink) 54%, transparent);
+  color-scheme: dark;
+}

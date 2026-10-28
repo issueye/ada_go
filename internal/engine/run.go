@@ -241,6 +241,10 @@ func (r *run) loop(tools []domain.Descriptor) domain.TerminalReason {
 			r.afterTurn()
 			return TerminalCompleted
 		}
+
+		// 6h. steering 安全点：工具批次已落库、下一次模型请求之前排空中途消息。
+		// 没有工具调用的自然收束不会到达这里，队列留到下一轮（不强行插话）。
+		r.drainSteering()
 	}
 }
 

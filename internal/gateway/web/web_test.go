@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -105,12 +106,14 @@ type fakeSupervisor struct {
 	mu       sync.Mutex
 	acquires int
 	releases int
+	acquired []string
 }
 
 func (f *fakeSupervisor) Acquire(ctx context.Context, workspace string) (contracts.CoreClient, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.acquires++
+	f.acquired = append(f.acquired, workspace)
 	return f.core, nil
 }
 
@@ -125,14 +128,29 @@ func (f *fakeSupervisor) List() []contracts.WorkspaceStatus {
 	return nil
 }
 
+func (f *fakeSupervisor) lastWorkspace() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.acquired) == 0 {
+		return ""
+	}
+	return f.acquired[len(f.acquired)-1]
+}
+
 // ---- 测试工具 ----
 
 func newServer(t *testing.T, core *fakeCore) (*web.Server, *fakeSupervisor) {
 	t.Helper()
+	return newServerWithWorkspaces(t, core, []string{"/tmp/ws"})
+}
+
+func newServerWithWorkspaces(t *testing.T, core *fakeCore, workspaces []string) (*web.Server, *fakeSupervisor) {
+	t.Helper()
 	sup := &fakeSupervisor{core: core}
 	srv, err := web.New(web.Config{
 		Supervisor:  sup,
-		Workspace:   "/tmp/ws",
+		Workspace:   workspaces[0],
+		Workspaces:  workspaces,
 		ProductName: "测试产品",
 		Locale:      "zh-CN",
 		Identity:    "tester",
@@ -147,6 +165,11 @@ func newServer(t *testing.T, core *fakeCore) (*web.Server, *fakeSupervisor) {
 
 func serve(t *testing.T, srv *web.Server, method, target string, form url.Values) *httptest.ResponseRecorder {
 	t.Helper()
+	return serveWithCookies(t, srv, method, target, form)
+}
+
+func serveWithCookies(t *testing.T, srv *web.Server, method, target string, form url.Values, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+	t.Helper()
 	var body *strings.Reader
 	if form != nil {
 		body = strings.NewReader(form.Encode())
@@ -156,6 +179,9 @@ func serve(t *testing.T, srv *web.Server, method, target string, form url.Values
 	req := httptest.NewRequest(method, target, body)
 	if form != nil {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+	for _, c := range cookies {
+		req.AddCookie(c)
 	}
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -195,6 +221,7 @@ const entriesDescending = `{
       "id":"e3","threadId":"th_1","seq":3,"kind":"message","role":"tool",
       "payload":{"callId":"call_1","tool":"read_file","status":"ok",
         "content":[{"type":"text","text":"file body"}],
+        "details":{"path":"/tmp/demo.txt"},
         "receipt":{"status":"ok","durationMs":12,"truncated":true}},
       "createdAt":"2026-10-28T10:00:03Z"
     },
@@ -314,6 +341,45 @@ func TestThreadPageRendersTranscriptToolCardAndTray(t *testing.T) {
 	if got := call.Params["limit"]; got != 100 {
 		t.Fatalf("thread.entries limit = %v, want 100", got)
 	}
+}
+
+func TestThreadPageExposesLiveStreamHooks(t *testing.T) {
+	core := newFakeCore().
+		on("thread.get", threadGetRunning).
+		on("thread.entries", entriesDescending)
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "GET", "/thread/th_1", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /thread/th_1 = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	wantContains(t, body, `data-thread-id="th_1"`)
+	wantContains(t, body, `data-run-status="running"`)
+	wantContains(t, body, `<script src="/static/app.js" defer></script>`)
+	wantContains(t, body, `id="live-stream"`)
+	wantContains(t, body, `id="live-status"`)
+}
+
+func TestStaticAppJSServed(t *testing.T) {
+	srv, _ := newServer(t, newFakeCore())
+
+	rec := serve(t, srv, "GET", "/static/app.js", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/static/app.js = %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/javascript") {
+		t.Fatalf("JS Content-Type = %q", ct)
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("JS X-Content-Type-Options = %q", got)
+	}
+	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "max-age") {
+		t.Fatalf("JS Cache-Control = %q", cc)
+	}
+	body := rec.Body.String()
+	wantContains(t, body, "EventSource")
+	wantContains(t, body, "evt.message.delta")
 }
 
 func TestTurnStartUsesTextAndIdempotencyKey(t *testing.T) {
@@ -501,6 +567,7 @@ func TestTemplateEscapesMessageContent(t *testing.T) {
 	body := rec.Body.String()
 	wantNotContains(t, body, `<script>alert("x")</script>`)
 	wantContains(t, body, "&lt;script&gt;")
+	wantContains(t, body, `data-run-status="terminal"`)
 }
 
 func TestAncillaryRoutes(t *testing.T) {
@@ -536,8 +603,350 @@ func TestAncillaryRoutes(t *testing.T) {
 	}
 }
 
+const emptyThreadList = `{"threads":[],"nextCursor":"","hasMore":false}`
+
+func TestWorkspacePickerOnlyWhenMultiple(t *testing.T) {
+	core := newFakeCore().on("thread.list", emptyThreadList)
+
+	single, _ := newServer(t, core)
+	body := serve(t, single, "GET", "/", nil).Body.String()
+	wantNotContains(t, body, `action="/workspace"`)
+
+	multi, _ := newServerWithWorkspaces(t, core, []string{"/tmp/ws-a", "/tmp/ws-b"})
+	rec := serve(t, multi, "GET", "/", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET / = %d", rec.Code)
+	}
+	body = rec.Body.String()
+	wantContains(t, body, `action="/workspace"`)
+	wantContains(t, body, `name="index"`)
+	wantContains(t, body, "ws-a")
+	wantContains(t, body, "/tmp/ws-a")
+	wantContains(t, body, "ws-b")
+	wantContains(t, body, "/tmp/ws-b")
+	wantContains(t, body, `value="0" selected`)
+}
+
+func TestWorkspaceSelectSetsCookieAndRedirects(t *testing.T) {
+	srv, _ := newServerWithWorkspaces(t, newFakeCore(), []string{"/tmp/ws-a", "/tmp/ws-b"})
+
+	rec := serve(t, srv, "POST", "/workspace", url.Values{"index": {"1"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /workspace = %d, want 303 (body=%s)", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/" {
+		t.Fatalf("Location = %q, want /", loc)
+	}
+
+	var chosen *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == web.WorkspaceCookieName {
+			chosen = c
+		}
+	}
+	if chosen == nil {
+		t.Fatalf("没有设置 %s cookie", web.WorkspaceCookieName)
+	}
+	if chosen.Value != "1" {
+		t.Fatalf("cookie 值 = %q, want 1", chosen.Value)
+	}
+	if chosen.Path != "/" {
+		t.Fatalf("cookie Path = %q, want /", chosen.Path)
+	}
+	if chosen.MaxAge != web.WorkspaceCookieMaxAge {
+		t.Fatalf("cookie MaxAge = %d, want %d", chosen.MaxAge, web.WorkspaceCookieMaxAge)
+	}
+	if chosen.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("cookie SameSite = %v, want Lax", chosen.SameSite)
+	}
+	if chosen.HttpOnly {
+		t.Fatal("工作区选择 cookie 不应为 HttpOnly（选择器需要可读）")
+	}
+
+	// GET 只做 PRG 回首页。
+	rec = serve(t, srv, "GET", "/workspace", nil)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/" {
+		t.Fatalf("GET /workspace = %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
+func TestWorkspaceSelectRejectsInvalidIndex(t *testing.T) {
+	srv, _ := newServerWithWorkspaces(t, newFakeCore(), []string{"/tmp/ws-a", "/tmp/ws-b"})
+
+	for _, raw := range []string{"2", "-1", "abc", ""} {
+		rec := serve(t, srv, "POST", "/workspace", url.Values{"index": {raw}})
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("POST /workspace index=%q = %d, want 400", raw, rec.Code)
+		}
+		for _, c := range rec.Result().Cookies() {
+			if c.Name == web.WorkspaceCookieName {
+				t.Fatalf("非法 index=%q 不应设置工作区 cookie", raw)
+			}
+		}
+	}
+}
+
+func TestAcquireUsesCookieWorkspace(t *testing.T) {
+	workspaces := []string{"/tmp/ws-a", "/tmp/ws-b"}
+
+	cases := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{"索引 1", "1", "/tmp/ws-b"},
+		{"越界", "9", "/tmp/ws-a"},
+		{"负数", "-1", "/tmp/ws-a"},
+		{"非数字", "abc", "/tmp/ws-a"},
+		{"空值", "", "/tmp/ws-a"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			core := newFakeCore().on("thread.list", emptyThreadList)
+			srv, sup := newServerWithWorkspaces(t, core, workspaces)
+			rec := serveWithCookies(t, srv, "GET", "/", nil,
+				&http.Cookie{Name: web.WorkspaceCookieName, Value: tc.value})
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET / = %d", rec.Code)
+			}
+			if got := sup.lastWorkspace(); got != tc.want {
+				t.Fatalf("Acquire 工作区 = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNewRequiresSupervisor(t *testing.T) {
 	if _, err := web.New(web.Config{}); err == nil {
 		t.Fatal("缺少 Supervisor 时 New 应返回错误")
 	}
+}
+
+// 导入的 a_da 基线资产必须能通过内嵌静态服务取到，且带正确的头。
+func TestStaticBaselineAssetsServed(t *testing.T) {
+	srv, _ := newServer(t, newFakeCore())
+
+	cases := []struct {
+		target string
+		want   string
+	}{
+		{"/static/tokens.css", "--ph-canvas"},
+		{"/static/app.css", "--ph-canvas"},
+		{"/static/ui/components.css", ".ada-"},
+		{"/static/ui/layout.css", ""},
+		{"/static/ui/widgets.css", ""},
+		{"/static/ui/shell.css", ".ada-"},
+		{"/static/ui/pages.css", ""},
+		{"/static/app-local.css", ".shell"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.target, func(t *testing.T) {
+			rec := serve(t, srv, "GET", tc.target, nil)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s = %d", tc.target, rec.Code)
+			}
+			if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/css") {
+				t.Fatalf("%s Content-Type = %q", tc.target, ct)
+			}
+			if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+				t.Fatalf("%s X-Content-Type-Options = %q", tc.target, got)
+			}
+			if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "max-age") {
+				t.Fatalf("%s Cache-Control = %q", tc.target, cc)
+			}
+			if tc.want != "" {
+				wantContains(t, rec.Body.String(), tc.want)
+			}
+		})
+	}
+
+	// tokens.css 来自 a_da：必须带来源 commit 与 SHA-256。
+	body := serve(t, srv, "GET", "/static/tokens.css", nil).Body.String()
+	wantContains(t, body, "a_da")
+	wantContains(t, body, "ae2f8ffe1679ce25c490c7af0a788d6575669fa0")
+	wantContains(t, body, "SHA-256")
+}
+
+// 静态服务只暴露 embed FS 内的普通文件，不因 .. 或目录路径泄漏仓库文件。
+func TestStaticRejectsTraversalAndMissing(t *testing.T) {
+	srv, _ := newServer(t, newFakeCore())
+	for _, target := range []string{
+		"/static/",
+		"/static/missing.css",
+		"/static/ui/",
+		"/static/../go.mod",
+		"/static/%2e%2e/go.mod",
+		"/static/ui/../server.go",
+	} {
+		rec := serve(t, srv, "GET", target, nil)
+		if rec.Code == http.StatusOK {
+			t.Fatalf("%s 不应被静态服务命中", target)
+		}
+		wantNotContains(t, rec.Body.String(), "module github.com/adag/ada-go")
+	}
+}
+
+// head 里的样式顺序固定：tokens → a_da 产物 → ui 组件层 → 本地覆盖。
+func TestHeadLoadsBaselineCSSInOrder(t *testing.T) {
+	core := newFakeCore().on("thread.list", emptyThreadList)
+	srv, _ := newServer(t, core)
+	body := serve(t, srv, "GET", "/", nil).Body.String()
+
+	order := []string{
+		`/static/tokens.css`,
+		`/static/app.css`,
+		`/static/ui/components.css`,
+		`/static/ui/layout.css`,
+		`/static/ui/widgets.css`,
+		`/static/ui/shell.css`,
+		`/static/ui/pages.css`,
+		`/static/app-local.css`,
+	}
+	last := -1
+	for _, href := range order {
+		idx := strings.Index(body, href)
+		if idx < 0 {
+			t.Fatalf("head 缺少 %s", href)
+		}
+		if idx < last {
+			t.Fatalf("head 样式顺序错误：%s 出现在前一个之前", href)
+		}
+		last = idx
+	}
+}
+
+// slotNamesInOrder 按文档顺序抽取 data-slot 值（golden 断言用）。
+func slotNamesInOrder(body string) []string {
+	const prefix = `data-slot="`
+	out := []string{}
+	for {
+		index := strings.Index(body, prefix)
+		if index < 0 {
+			return out
+		}
+		body = body[index+len(prefix):]
+		end := strings.Index(body, `"`)
+		if end < 0 {
+			return out
+		}
+		out = append(out, body[:end])
+		body = body[end:]
+	}
+}
+
+// 会话页必须落下全部 12 个插槽宿主点，顺序与模板布局一致。
+func TestThreadPageHostsAllTwelveSlotsInOrder(t *testing.T) {
+	core := newFakeCore().
+		on("thread.get", threadGetRunning).
+		on("thread.entries", entriesDescending)
+	srv, _ := newServerWithWorkspaces(t, core, []string{"/tmp/ws-a", "/tmp/ws-b"})
+
+	rec := serve(t, srv, "GET", "/thread/th_1", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /thread/th_1 = %d", rec.Code)
+	}
+	body := rec.Body.String()
+
+	got := slotNamesInOrder(body)
+	want := []string{
+		"sidebar.top",
+		"sidebar.bottom",
+		"topbar.right",
+		"chat.corner",
+		"transcript.after",
+		"extensions.list",
+		"dashboard.widgets",
+		"composer.above",
+		"thread.tray",
+		"composer.left",
+		"composer.right",
+		"composer.footer",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("data-slot 数量 = %d, want %d：%v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("第 %d 个 data-slot = %q, want %q（全部：%v）", i+1, got[i], want[i], got)
+		}
+	}
+	if strings.Count(body, `class="ada-slot"`) != 12 {
+		t.Fatalf("ada-slot 容器数量 = %d, want 12", strings.Count(body, `class="ada-slot"`))
+	}
+}
+
+// a_da 外壳与 M2 组件的关键 class 必须真的出现在 DOM 里。
+func TestThreadPageUsesAdaShellAndComponentDOM(t *testing.T) {
+	core := newFakeCore().
+		on("thread.get", threadGetRunning).
+		on("thread.entries", entriesDescending)
+	srv, _ := newServerWithWorkspaces(t, core, []string{"/tmp/ws-a", "/tmp/ws-b"})
+
+	body := serve(t, srv, "GET", "/thread/th_1", nil).Body.String()
+
+	for _, class := range []string{
+		`class="ada-shell"`,
+		`class="ada-sidebar"`,
+		`class="ada-side"`,
+		`class="ada-main"`,
+		`class="ada-topbar"`,
+		`class="ada-topbar__actions"`,
+		`class="ada-scroll"`,
+		`class="ada-wrap"`,
+		`class="ada-corner-dock"`,
+		`class="ada-chat-viewport"`,
+		`class="ada-trays"`,
+		`class="ada-composer"`,
+		`class="ada-composer__card"`,
+		`class="ada-composer__group ada-composer__group--left"`,
+		`class="ada-composer__group ada-composer__group--right"`,
+		`class="ada-send"`,
+		`class="ada-aux"`,
+		`class="ada-msg ada-msg--user"`,
+		`class="ada-msg ada-msg--assistant"`,
+		`class="ada-disclosure" data-kind="tool"`,
+		`class="ada-avatar"`,
+	} {
+		wantContains(t, body, class)
+	}
+
+	// 工具卡的展示字段（status / duration / truncated / details）保留。
+	wantContains(t, body, "成功")
+	wantContains(t, body, "12 ms")
+	wantContains(t, body, "已截断")
+	wantContains(t, body, "详情")
+
+	// 无 JS / 实时增强契约仍在。
+	wantContains(t, body, `id="transcript"`)
+	wantContains(t, body, `id="live-stream"`)
+	wantContains(t, body, `id="live-status"`)
+	wantContains(t, body, `data-thread-id="th_1"`)
+	wantContains(t, body, `data-run-status="running"`)
+	wantContains(t, body, `<script src="/static/app.js" defer></script>`)
+	wantContains(t, body, `action="/workspace"`)
+	wantContains(t, body, `name="index"`)
+	wantContains(t, body, `value="0" selected`)
+}
+
+// RenderSlot 是唯一的插槽输出函数：签名固定为 template.HTML，空贡献回退。
+func TestRenderSlotWrapsBodyAndFallsBack(t *testing.T) {
+	// 编译期固定签名：body/fallback 只能是 template.HTML，普通 string 不会通过。
+	var _ func(string, template.HTML, int, template.HTML) template.HTML = web.RenderSlot
+
+	withBody := string(web.RenderSlot("sidebar.top", template.HTML("<b>插件内容</b>"), 2, template.HTML("<i>回退</i>")))
+	wantContains(t, withBody, `class="ada-slot" data-slot="sidebar.top" data-contributors="2"`)
+	wantContains(t, withBody, "<b>插件内容</b>")
+	wantNotContains(t, withBody, "<i>回退</i>")
+
+	fallback := string(web.RenderSlot("composer.left", "", 0, template.HTML("<i>回退</i>")))
+	wantContains(t, fallback, `class="ada-slot" data-slot="composer.left" data-contributors="0"`)
+	wantContains(t, fallback, "<i>回退</i>")
+
+	empty := string(web.RenderSlot("composer.right", "", 0, ""))
+	wantContains(t, empty, `class="ada-slot" data-slot="composer.right" data-contributors="0"`)
+	wantNotContains(t, empty, "回退")
+
+	// 插槽名同样只输出一次且被转义，不会造成属性注入。
+	injected := string(web.RenderSlot(`a"b`, "", 0, ""))
+	wantContains(t, injected, `data-slot="a&#34;b"`)
 }

@@ -2,7 +2,10 @@ package web
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net/http"
+	"path"
+	"strconv"
 	"strings"
 )
 
@@ -19,12 +22,11 @@ func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) renderThreadList(w http.ResponseWriter, r *http.Request, limit int, cursor string, home bool) {
-	ctx := r.Context()
 	params := map[string]any{"limit": limit, "archived": false}
 	if cursor != "" {
 		params["cursor"] = cursor
 	}
-	raw, err := s.call(ctx, "thread.list", params)
+	raw, err := s.call(r, "thread.list", params)
 	if err != nil {
 		s.renderCoreError(w, r, err, listRetryPath(home))
 		return
@@ -63,7 +65,7 @@ func (s *Server) handleCreateThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	title := strings.TrimSpace(r.PostFormValue("title"))
-	raw, err := s.call(r.Context(), "thread.create", map[string]any{"title": title})
+	raw, err := s.call(r, "thread.create", map[string]any{"title": title})
 	if err != nil {
 		s.renderCoreError(w, r, err, "/")
 		return
@@ -90,8 +92,7 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 			"链接里缺少会话 id。请从会话列表重新打开一个会话。", "", "/", "返回会话列表")
 		return
 	}
-	ctx := r.Context()
-	rawGet, err := s.call(ctx, "thread.get", map[string]any{"threadId": id, "itemLimit": 100})
+	rawGet, err := s.call(r, "thread.get", map[string]any{"threadId": id, "itemLimit": 100})
 	if err != nil {
 		s.renderCoreError(w, r, err, threadPath(id))
 		return
@@ -104,7 +105,7 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rawEntries, err := s.call(ctx, "thread.entries", map[string]any{"threadId": id, "limit": 100})
+	rawEntries, err := s.call(r, "thread.entries", map[string]any{"threadId": id, "limit": 100})
 	if err != nil {
 		s.renderCoreError(w, r, err, threadPath(id))
 		return
@@ -162,7 +163,7 @@ func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 		"idempotencyKey": key,
 		"text":           text,
 	}
-	if _, err := s.call(r.Context(), "turn.start", params); err != nil {
+	if _, err := s.call(r, "turn.start", params); err != nil {
 		s.renderCoreError(w, r, err, threadPath(id))
 		return
 	}
@@ -172,7 +173,7 @@ func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 // handleCancel 取消当前轮。
 func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if _, err := s.call(r.Context(), "turn.cancel", map[string]any{"threadId": id}); err != nil {
+	if _, err := s.call(r, "turn.cancel", map[string]any{"threadId": id}); err != nil {
 		s.renderCoreError(w, r, err, threadPath(id))
 		return
 	}
@@ -209,7 +210,7 @@ func (s *Server) handleInteraction(w http.ResponseWriter, r *http.Request) {
 			params["value"] = interactionValue(r.PostFormValue("kind"), value)
 		}
 	}
-	if _, err := s.call(r.Context(), "interaction.respond", params); err != nil {
+	if _, err := s.call(r, "interaction.respond", params); err != nil {
 		s.renderCoreError(w, r, err, threadPath(id))
 		return
 	}
@@ -229,6 +230,42 @@ func interactionValue(kind, value string) any {
 	}
 }
 
+// handleWorkspaceGet 只做 PRG 回首页；GET 不改变选择。
+func (s *Server) handleWorkspaceGet(w http.ResponseWriter, r *http.Request) {
+	redirect(w, "/")
+}
+
+// handleWorkspaceSelect 校验表单 index 并在 cookie 里记住选择，然后 303 回首页。
+// cookie 只是选择提示：值必须在配置数组范围内，越界直接 400，不回写。
+func (s *Server) handleWorkspaceSelect(w http.ResponseWriter, r *http.Request) {
+	if err := s.parseForm(w, r); err != nil {
+		s.renderError(w, r, http.StatusBadRequest, "无法读取表单",
+			"请求体不是有效的表单，可能超过 1MB 上限。请返回后重试。",
+			err.Error(), "/", "返回")
+		return
+	}
+	raw := strings.TrimSpace(r.PostFormValue("index"))
+	index, err := strconv.Atoi(raw)
+	if err != nil || index < 0 || index >= len(s.cfg.Workspaces) {
+		s.renderError(w, r, http.StatusBadRequest, "没有这个工作区",
+			"请求的工作区不在 Gateway 配置中。请返回后从列表中选择。",
+			"index="+raw, "/", "返回")
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     WorkspaceCookieName,
+		Value:    strconv.Itoa(index),
+		Path:     "/",
+		MaxAge:   WorkspaceCookieMaxAge,
+		SameSite: http.SameSiteLaxMode,
+		// 选择器是纯前端便利项，不需要 JS 读取，但保持非 HttpOnly
+		// 以便未来无服务端往返的增强；值本身不含秘密。
+		HttpOnly: false,
+		Secure:   s.cfg.CookieSecure,
+	})
+	redirect(w, "/")
+}
+
 // handleEvents 把 SSE 交给外部注入的 handler；未注入时 404。
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Events == nil {
@@ -238,12 +275,67 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	s.cfg.Events.ServeHTTP(w, r)
 }
 
-// handleCSS 提供内嵌的最小样式表。
-func (s *Server) handleCSS(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+// handleStatic 提供内嵌的静态资源（a_da token/CSS 副本与 app-local.css）。
+// 只服务 embed FS 中真实存在的普通文件：目录、空路径与任何非规范路径
+// （. / .. / 重复斜杠 / 反斜杠）一律 404，因此不存在目录穿越面。
+func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
+	name, ok := staticAssetName(r.URL.Path)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	data, err := fs.ReadFile(staticFS, "static/"+name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", staticContentType(name))
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_, _ = w.Write(appCSS)
+	_, _ = w.Write(data)
+}
+
+// staticAssetName 把 /static/ 之后的路径规范化；只接受规范相对路径。
+func staticAssetName(urlPath string) (string, bool) {
+	name := strings.TrimPrefix(urlPath, staticPrefix)
+	if name == "" || strings.ContainsAny(name, `\`) {
+		return "", false
+	}
+	// 先按 path.Clean 归一：任何 . / .. / 重复或末尾斜杠都会让结果与原名不同。
+	if strings.TrimPrefix(path.Clean("/"+name), "/") != name {
+		return "", false
+	}
+	if !fs.ValidPath(name) {
+		return "", false
+	}
+	return name, true
+}
+
+// staticContentType 按扩展名给出稳定 Content-Type，不依赖系统 mime.types，
+// 保证 /static/app.js 始终是 application/javascript。
+func staticContentType(name string) string {
+	switch strings.ToLower(path.Ext(name)) {
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".js":
+		return "application/javascript; charset=utf-8"
+	case ".txt":
+		return "text/plain; charset=utf-8"
+	case ".json":
+		return "application/json; charset=utf-8"
+	case ".svg":
+		return "image/svg+xml"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+// handleJS 提供内嵌的实时增强脚本（无框架，CSP script-src 'self' 允许）。
+func (s *Server) handleJS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(appJS)
 }
 
 // handleLoginPage 只说明认证由外部中间件负责，不做密码校验。

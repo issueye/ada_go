@@ -1,5 +1,7 @@
 {{define "error"}}{{template "head" .}}
-<main class="page">
+<div class="ada-scroll">
+<div class="ada-wrap">
+<div class="page">
 <section class="panel error-panel">
   <p class="error-status">HTTP {{.Status}}</p>
   <h1>{{.Heading}}</h1>
@@ -10,5 +12,7 @@
     <a class="btn btn-quiet" href="/">返回会话列表</a>
   </p>
 </section>
-</main>
+</div>
+</div>
+</div>
 {{template "foot" .}}{{end}}

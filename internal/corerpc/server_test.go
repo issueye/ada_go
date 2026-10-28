@@ -127,6 +127,25 @@ func (c *rpcClient) readLoop() {
 
 func (c *rpcClient) call(t *testing.T, method string, params any) json.RawMessage {
 	t.Helper()
+	resp := c.roundTrip(t, method, params)
+	if len(resp.Error) > 0 && string(resp.Error) != "null" {
+		t.Fatalf("%s 返回错误: %s", method, resp.Error)
+	}
+	return resp.Result
+}
+
+// callError 断言方法返回错误并返回响应（用于非法参数路径）。
+func (c *rpcClient) callError(t *testing.T, method string, params any) wireResponse {
+	t.Helper()
+	resp := c.roundTrip(t, method, params)
+	if len(resp.Error) == 0 || string(resp.Error) == "null" {
+		t.Fatalf("%s 期望错误，实际成功: %s", method, resp.Result)
+	}
+	return resp
+}
+
+func (c *rpcClient) roundTrip(t *testing.T, method string, params any) wireResponse {
+	t.Helper()
 	c.mu.Lock()
 	c.nextID++
 	id := c.nextID
@@ -141,13 +160,10 @@ func (c *rpcClient) call(t *testing.T, method string, params any) json.RawMessag
 	}
 	select {
 	case resp := <-ch:
-		if len(resp.Error) > 0 && string(resp.Error) != "null" {
-			t.Fatalf("%s 返回错误: %s", method, resp.Error)
-		}
-		return resp.Result
+		return resp
 	case <-time.After(5 * time.Second):
 		t.Fatalf("%s 超时", method)
-		return nil
+		return wireResponse{}
 	}
 }
 
@@ -338,5 +354,411 @@ func TestCoreRPCCancel(t *testing.T) {
 	ev := c.waitEvent(t, "evt.run.status", `"terminal":"cancelled"`)
 	if !strings.Contains(string(ev.Params), `"terminal":"cancelled"`) {
 		t.Fatalf("终态事件 = %s", ev.Params)
+	}
+}
+
+// ---- M2 剩余方法 ----
+
+func createThread(t *testing.T, c *rpcClient, title string) string {
+	t.Helper()
+	raw := c.call(t, "thread.create", map[string]any{"title": title})
+	var out struct {
+		Thread struct {
+			ID string `json:"id"`
+		} `json:"thread"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil || out.Thread.ID == "" {
+		t.Fatalf("thread.create = %s (%v)", raw, err)
+	}
+	return out.Thread.ID
+}
+
+// runTurn 提交一轮并等到 completed 终态（事件流里 terminal 是最后一条）。
+func runTurn(t *testing.T, c *rpcClient, threadID, idem, text string) {
+	t.Helper()
+	raw := c.call(t, "turn.start", map[string]any{
+		"threadId": threadID, "idempotencyKey": idem, "text": text,
+	})
+	var started struct {
+		RunID string `json:"runId"`
+	}
+	if err := json.Unmarshal(raw, &started); err != nil || started.RunID == "" {
+		t.Fatalf("turn.start = %s (%v)", raw, err)
+	}
+	c.waitEvent(t, "evt.run.status", `"terminal":"completed"`)
+}
+
+type threadResult struct {
+	Thread struct {
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		HeadEntryID string `json:"headEntryId"`
+		Archived    bool   `json:"archived"`
+	} `json:"thread"`
+}
+
+func TestThreadLifecycleMethods(t *testing.T) {
+	sess := newSession(t, nil)
+	url, _ := startServer(t, sess, "")
+	c := dial(t, url, "")
+
+	threadID := createThread(t, c, "lifecycle")
+	runTurn(t, c, threadID, "lifecycle-1", "hello")
+
+	var entries struct {
+		Entries []struct {
+			ID  string `json:"id"`
+			Seq int64  `json:"seq"`
+		} `json:"entries"`
+	}
+	raw := c.call(t, "thread.entries", map[string]any{"threadId": threadID})
+	if err := json.Unmarshal(raw, &entries); err != nil || len(entries.Entries) < 2 {
+		t.Fatalf("thread.entries = %s (%v)", raw, err)
+	}
+	firstEntry := entries.Entries[0].ID
+
+	// rename
+	raw = c.call(t, "thread.rename", map[string]any{"threadId": threadID, "title": "renamed"})
+	var renamed threadResult
+	if err := json.Unmarshal(raw, &renamed); err != nil || renamed.Thread.Title != "renamed" {
+		t.Fatalf("thread.rename = %s (%v)", raw, err)
+	}
+	raw = c.call(t, "thread.get", map[string]any{"threadId": threadID})
+	var got threadResult
+	if err := json.Unmarshal(raw, &got); err != nil || got.Thread.Title != "renamed" {
+		t.Fatalf("thread.get after rename = %s (%v)", raw, err)
+	}
+
+	// archive / unarchive，list 与 get 都能看到状态变化
+	raw = c.call(t, "thread.archive", map[string]any{"threadId": threadID, "archived": true})
+	if err := json.Unmarshal(raw, &got); err != nil || !got.Thread.Archived {
+		t.Fatalf("thread.archive(true) = %s (%v)", raw, err)
+	}
+	var list struct {
+		Threads []struct {
+			ID       string `json:"id"`
+			Archived bool   `json:"archived"`
+		} `json:"threads"`
+	}
+	raw = c.call(t, "thread.list", map[string]any{"archived": true})
+	if err := json.Unmarshal(raw, &list); err != nil || !containsThread(list.Threads, threadID) {
+		t.Fatalf("归档后 thread.list(archived=true) = %s", raw)
+	}
+	raw = c.call(t, "thread.list", map[string]any{"archived": false})
+	if err := json.Unmarshal(raw, &list); err != nil || containsThread(list.Threads, threadID) {
+		t.Fatalf("归档后 thread.list(archived=false) = %s", raw)
+	}
+	c.call(t, "thread.archive", map[string]any{"threadId": threadID, "archived": false})
+
+	// branch：head 移到首条 entry
+	raw = c.call(t, "thread.branch", map[string]any{"threadId": threadID, "entryId": firstEntry})
+	if err := json.Unmarshal(raw, &got); err != nil || got.Thread.HeadEntryID != firstEntry {
+		t.Fatalf("thread.branch = %s (%v)", raw, err)
+	}
+
+	// branch 校验 entry 属于线程
+	otherID := createThread(t, c, "other")
+	runTurn(t, c, otherID, "other-0001", "other")
+	var otherEntries struct {
+		Entries []struct {
+			ID string `json:"id"`
+		} `json:"entries"`
+	}
+	raw = c.call(t, "thread.entries", map[string]any{"threadId": otherID})
+	if err := json.Unmarshal(raw, &otherEntries); err != nil || len(otherEntries.Entries) == 0 {
+		t.Fatalf("other thread.entries = %s (%v)", raw, err)
+	}
+	c.callError(t, "thread.branch", map[string]any{"threadId": threadID, "entryId": otherEntries.Entries[0].ID})
+
+	// delete：软删后 archived=true，并在归档列表可见
+	raw = c.call(t, "thread.delete", map[string]any{"threadId": threadID})
+	var deleted struct {
+		Deleted          bool `json:"deleted"`
+		CleanupScheduled bool `json:"cleanupScheduled"`
+	}
+	if err := json.Unmarshal(raw, &deleted); err != nil || !deleted.Deleted || !deleted.CleanupScheduled {
+		t.Fatalf("thread.delete = %s (%v)", raw, err)
+	}
+	raw = c.call(t, "thread.get", map[string]any{"threadId": threadID})
+	if err := json.Unmarshal(raw, &got); err != nil || !got.Thread.Archived {
+		t.Fatalf("删除后 thread.get = %s (%v)", raw, err)
+	}
+	raw = c.call(t, "thread.list", map[string]any{"archived": true})
+	if err := json.Unmarshal(raw, &list); err != nil || !containsThread(list.Threads, threadID) {
+		t.Fatalf("删除后 thread.list(archived=true) = %s", raw)
+	}
+}
+
+func containsThread(threads []struct {
+	ID       string `json:"id"`
+	Archived bool   `json:"archived"`
+}, id string) bool {
+	for _, th := range threads {
+		if th.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func TestWorkspaceUpdatePolicy(t *testing.T) {
+	sess := newSession(t, nil)
+	url, _ := startServer(t, sess, "")
+	c := dial(t, url, "")
+
+	type policy struct {
+		ToolTimeoutMS   int `json:"toolTimeoutMs"`
+		TurnTimeoutMS   int `json:"turnTimeoutMs"`
+		MaxTurnTokens   int `json:"maxTurnTokens"`
+		LoopRepeatLimit int `json:"loopRepeatLimit"`
+		LoopAbortLimit  int `json:"loopAbortLimit"`
+		ParallelTools   int `json:"parallelTools"`
+	}
+	var res struct {
+		Policies policy `json:"policies"`
+	}
+	read := func(params map[string]any) policy {
+		t.Helper()
+		raw := c.call(t, "workspace.updatePolicy", params)
+		if err := json.Unmarshal(raw, &res); err != nil {
+			t.Fatalf("workspace.updatePolicy = %s (%v)", raw, err)
+		}
+		return res.Policies
+	}
+
+	base := read(map[string]any{})
+	if base.LoopRepeatLimit != 3 || base.LoopAbortLimit != 5 || base.ParallelTools != 1 {
+		t.Fatalf("默认策略 = %+v", base)
+	}
+
+	p := read(map[string]any{"policies": map[string]any{"loopRepeatLimit": 2}})
+	if p.LoopRepeatLimit != 2 || p.LoopAbortLimit != 5 {
+		t.Fatalf("合并 loopRepeatLimit 后 = %+v", p)
+	}
+	p = read(map[string]any{"policies": map[string]any{"parallelTools": 4, "toolTimeoutMs": 1000}})
+	if p.LoopRepeatLimit != 2 || p.LoopAbortLimit != 5 || p.ParallelTools != 4 || p.ToolTimeoutMS != 1000 {
+		t.Fatalf("合并 parallelTools/toolTimeoutMs 后 = %+v", p)
+	}
+	p = read(map[string]any{"policies": map[string]any{"turnTimeoutMs": 1234, "maxTurnTokens": 9999}})
+	if p.TurnTimeoutMS != 1234 || p.MaxTurnTokens != 9999 || p.ParallelTools != 4 {
+		t.Fatalf("合并 turnTimeoutMs/maxTurnTokens 后 = %+v", p)
+	}
+
+	for _, bad := range []map[string]any{
+		{"policies": map[string]any{"loopAbortLimit": 2}},  // == loopRepeatLimit
+		{"policies": map[string]any{"loopRepeatLimit": 9}}, // abort(5) <= repeat(9)
+		{"policies": map[string]any{"loopRepeatLimit": 0}},
+		{"policies": map[string]any{"parallelTools": 0}},
+		{"policies": map[string]any{"toolTimeoutMs": -1}},
+	} {
+		c.callError(t, "workspace.updatePolicy", bad)
+	}
+}
+
+func TestModelSetScopes(t *testing.T) {
+	sess := newSession(t, nil)
+	url, _ := startServer(t, sess, "")
+	c := dial(t, url, "")
+
+	var catalog struct {
+		Models []struct {
+			Model struct {
+				ProviderID string `json:"providerId"`
+				ModelID    string `json:"modelId"`
+			} `json:"model"`
+		} `json:"models"`
+	}
+	raw := c.call(t, "model.list", map[string]any{})
+	if err := json.Unmarshal(raw, &catalog); err != nil || len(catalog.Models) < 2 {
+		t.Fatalf("model.list = %s (%v)", raw, err)
+	}
+	wsModel := catalog.Models[0].Model
+	threadModel := catalog.Models[1].Model
+	threadID := createThread(t, c, "model-scope")
+
+	raw = c.call(t, "model.set", map[string]any{
+		"model": map[string]any{"providerId": wsModel.ProviderID, "modelId": wsModel.ModelID},
+	})
+	var set struct {
+		Model struct {
+			ProviderID string `json:"providerId"`
+			ModelID    string `json:"modelId"`
+		} `json:"model"`
+		Scope string `json:"scope"`
+	}
+	if err := json.Unmarshal(raw, &set); err != nil || set.Scope != "workspace" ||
+		set.Model.ProviderID != wsModel.ProviderID || set.Model.ModelID != wsModel.ModelID {
+		t.Fatalf("model.set workspace = %s (%v)", raw, err)
+	}
+
+	raw = c.call(t, "model.set", map[string]any{
+		"model":    map[string]any{"providerId": threadModel.ProviderID, "modelId": threadModel.ModelID},
+		"threadId": threadID,
+	})
+	if err := json.Unmarshal(raw, &set); err != nil || set.Scope != "thread" ||
+		set.Model.ProviderID != threadModel.ProviderID || set.Model.ModelID != threadModel.ModelID {
+		t.Fatalf("model.set thread = %s (%v)", raw, err)
+	}
+
+	var current struct {
+		Current struct {
+			ProviderID string `json:"providerId"`
+			ModelID    string `json:"modelId"`
+		} `json:"current"`
+	}
+	raw = c.call(t, "model.list", map[string]any{"threadId": threadID})
+	if err := json.Unmarshal(raw, &current); err != nil ||
+		current.Current.ProviderID != threadModel.ProviderID || current.Current.ModelID != threadModel.ModelID {
+		t.Fatalf("线程当前模型 = %s (%v)", raw, err)
+	}
+	raw = c.call(t, "model.list", map[string]any{})
+	if err := json.Unmarshal(raw, &current); err != nil ||
+		current.Current.ProviderID != wsModel.ProviderID || current.Current.ModelID != wsModel.ModelID {
+		t.Fatalf("工作区当前模型 = %s (%v)", raw, err)
+	}
+
+	c.callError(t, "model.set", map[string]any{
+		"model": map[string]any{"providerId": "no-such-provider", "modelId": "x"},
+	})
+	c.callError(t, "model.set", map[string]any{
+		"model": map[string]any{"providerId": wsModel.ProviderID, "modelId": "no-such-model"},
+	})
+}
+
+type usageShape struct {
+	Provider     string `json:"provider"`
+	Model        string `json:"model"`
+	InputTokens  int    `json:"inputTokens"`
+	OutputTokens int    `json:"outputTokens"`
+	CacheTokens  int    `json:"cacheTokens"`
+	CostMicros   int64  `json:"costMicros"`
+}
+
+func (u usageShape) total() int { return u.InputTokens + u.OutputTokens + u.CacheTokens }
+
+func TestUsageGetAggregates(t *testing.T) {
+	sess := newSession(t, nil)
+	url, _ := startServer(t, sess, "")
+	c := dial(t, url, "")
+	threadID := createThread(t, c, "usage")
+	runTurn(t, c, threadID, "usage-0001", "hello usage")
+
+	var res struct {
+		Thread    usageShape `json:"thread"`
+		Workspace usageShape `json:"workspace"`
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		raw := c.call(t, "usage.get", map[string]any{"threadId": threadID})
+		if err := json.Unmarshal(raw, &res); err != nil {
+			t.Fatalf("usage.get = %s (%v)", raw, err)
+		}
+		if res.Thread.total() > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("thread 用量仍为零: %s", raw)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if res.Thread.Provider != "fake" || res.Thread.Model != "fake-1" {
+		t.Fatalf("thread 用量归属 = %+v", res.Thread)
+	}
+	if res.Workspace.total() < res.Thread.total() {
+		t.Fatalf("workspace=%+v thread=%+v", res.Workspace, res.Thread)
+	}
+
+	raw := c.call(t, "usage.get", map[string]any{})
+	if err := json.Unmarshal(raw, &res); err != nil {
+		t.Fatalf("usage.get workspace = %s (%v)", raw, err)
+	}
+	if res.Thread != (usageShape{}) {
+		t.Fatalf("未给 threadId 时 thread 应为零值: %+v", res.Thread)
+	}
+	if res.Workspace.total() == 0 {
+		t.Fatalf("workspace 用量为零: %s", raw)
+	}
+}
+
+func TestThreadGetItemsProjection(t *testing.T) {
+	model := testkit.NewFakeProvider(testkit.NewScriptedModel(
+		testkit.ToolTurn("call_1", "read_file", `{"path":"missing.txt"}`),
+		testkit.TextTurn("done"),
+	))
+	sess := newSession(t, model)
+	url, _ := startServer(t, sess, "")
+	c := dial(t, url, "")
+	threadID := createThread(t, c, "items")
+	runTurn(t, c, threadID, "items-0001", "read something")
+
+	type item struct {
+		Key         string          `json:"key"`
+		Type        string          `json:"type"`
+		At          string          `json:"at"`
+		Fingerprint string          `json:"fingerprint"`
+		Payload     json.RawMessage `json:"payload"`
+	}
+	readItems := func(limit int) ([]item, bool) {
+		t.Helper()
+		raw := c.call(t, "thread.get", map[string]any{"threadId": threadID, "itemLimit": limit})
+		var snap struct {
+			Items   []item `json:"items"`
+			Seq     int64  `json:"seq"`
+			HasMore bool   `json:"hasMore"`
+		}
+		if err := json.Unmarshal(raw, &snap); err != nil {
+			t.Fatalf("thread.get = %s (%v)", raw, err)
+		}
+		if snap.Seq <= 0 {
+			t.Fatalf("thread.get seq = %d", snap.Seq)
+		}
+		return snap.Items, snap.HasMore
+	}
+
+	items, hasMore := readItems(100)
+	if len(items) < 4 {
+		t.Fatalf("items = %+v", items)
+	}
+	if hasMore {
+		t.Fatal("全量窗口不应 hasMore")
+	}
+	var sawMsg, sawTool, sawAssistant bool
+	for _, it := range items {
+		if len(it.Fingerprint) != 16 {
+			t.Fatalf("fingerprint = %q", it.Fingerprint)
+		}
+		if it.At == "" || len(it.Payload) == 0 {
+			t.Fatalf("item 缺 at/payload: %+v", it)
+		}
+		switch {
+		case it.Type == "tool" && it.Key == "tool:call_1":
+			sawTool = true
+		case it.Type == "message" && strings.HasPrefix(it.Key, "msg:"):
+			sawMsg = true
+			var body struct {
+				Role string `json:"role"`
+			}
+			_ = json.Unmarshal(it.Payload, &body)
+			if body.Role == "assistant" {
+				sawAssistant = true
+			}
+		default:
+			t.Fatalf("意外的 item: %+v", it)
+		}
+	}
+	if !sawMsg || !sawTool || !sawAssistant {
+		t.Fatalf("缺失条目: msg=%v tool=%v assistant=%v items=%+v", sawMsg, sawTool, sawAssistant, items)
+	}
+
+	limited, limitedMore := readItems(2)
+	if len(limited) != 2 {
+		t.Fatalf("itemLimit=2 得到 %d 条", len(limited))
+	}
+	if !limitedMore {
+		t.Fatal("窗口外仍应有更早 items")
+	}
+	one, _ := readItems(1)
+	if len(one) != 1 {
+		t.Fatalf("itemLimit=1 得到 %d 条", len(one))
 	}
 }

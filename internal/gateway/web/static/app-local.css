@@ -1,0 +1,840 @@
+/*
+ * ada-go SSR 外壳的最小样式表（M2）。
+ *
+ * 只服务无 JS 主流程：颜色走 CSS 变量，浅色/深色各一套；
+ * 不引入 Tailwind 构建链，也不使用内联 style。
+ */
+
+:root {
+  --ph-canvas: #f6f3ec;
+  --ph-surface: #fffdf8;
+  --ph-elevated: #ffffff;
+  --ph-line: #ded8ca;
+  --ph-line-strong: #c6beab;
+  --ph-ink: #16171a;
+  --ph-muted: #5c5a52;
+  --ph-faint: #767268;
+  --ph-brand: #2f5d50;
+  --ph-brand-strong: #23483e;
+  --ph-brand-soft: #e3ede8;
+  --ph-on-brand: #ffffff;
+  --ph-danger-soft: #f7e5e2;
+  --ph-danger-ink: #8c2f22;
+  --ph-warn-soft: #f6edd8;
+  --ph-warn-ink: #72551a;
+  --ph-success-soft: #e3ede8;
+  --ph-success-ink: #2f5d50;
+  --ph-code-bg: #efebe0;
+  --ph-shadow: 0 10px 30px rgba(22, 23, 26, 0.08);
+  --ada-radius: 10px;
+  --ada-radius-sm: 6px;
+  --ada-gap: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ph-canvas: #141413;
+    --ph-surface: #1c1c1a;
+    --ph-elevated: #242422;
+    --ph-line: #33332f;
+    --ph-line-strong: #474741;
+    --ph-ink: #f2efe6;
+    --ph-muted: #b8b3a6;
+    --ph-faint: #999488;
+    --ph-brand: #9ec9b7;
+    --ph-brand-strong: #b9ddce;
+    --ph-brand-soft: #23352f;
+    --ph-on-brand: #10201b;
+    --ph-danger-soft: #3a2420;
+    --ph-danger-ink: #f2b9ad;
+    --ph-warn-soft: #3a3320;
+    --ph-warn-ink: #ead39a;
+    --ph-success-soft: #23352f;
+    --ph-success-ink: #b9ddce;
+    --ph-code-bg: #262622;
+    --ph-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  }
+}
+
+html.dark {
+  --ph-canvas: #141413;
+  --ph-surface: #1c1c1a;
+  --ph-elevated: #242422;
+  --ph-line: #33332f;
+  --ph-line-strong: #474741;
+  --ph-ink: #f2efe6;
+  --ph-muted: #b8b3a6;
+  --ph-faint: #999488;
+  --ph-brand: #9ec9b7;
+  --ph-brand-strong: #b9ddce;
+  --ph-brand-soft: #23352f;
+  --ph-on-brand: #10201b;
+  --ph-danger-soft: #3a2420;
+  --ph-danger-ink: #f2b9ad;
+  --ph-warn-soft: #3a3320;
+  --ph-warn-ink: #ead39a;
+  --ph-success-soft: #23352f;
+  --ph-success-ink: #b9ddce;
+  --ph-code-bg: #262622;
+  --ph-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--ph-canvas);
+  color: var(--ph-ink);
+  font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+a {
+  color: var(--ph-brand);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+a:hover {
+  color: var(--ph-brand-strong);
+}
+
+code,
+pre,
+.tool-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--ada-gap);
+  min-height: 54px;
+  padding: 0 24px;
+  background: var(--ph-surface);
+  border-bottom: 1px solid var(--ph-line);
+}
+
+.brand {
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--ph-ink);
+  text-decoration: none;
+}
+
+.topnav {
+  display: flex;
+  gap: 14px;
+}
+
+.topnav a {
+  color: var(--ph-muted);
+  text-decoration: none;
+}
+
+.topnav a:hover {
+  color: var(--ph-ink);
+}
+
+.topmeta {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ph-muted);
+}
+
+/* ---- 工作区选择（无 JS 表单） ---- */
+
+.workspace-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workspace-picker select {
+  width: auto;
+  max-width: 320px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.workspace-picker button {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.identity {
+  padding: 2px 8px;
+  border: 1px solid var(--ph-line);
+  border-radius: 999px;
+  background: var(--ph-elevated);
+}
+
+.page {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.page > h1 {
+  margin: 8px 0 16px;
+  font-size: 24px;
+}
+
+.panel {
+  margin-bottom: 20px;
+  padding: 20px;
+  background: var(--ph-surface);
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius);
+  box-shadow: var(--ph-shadow);
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.panel h1,
+.panel h2,
+.panel h3 {
+  margin-top: 0;
+}
+
+.create-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--ph-muted);
+  font-size: 12px;
+}
+
+input[type="text"],
+textarea,
+select {
+  width: 100%;
+  padding: 8px 10px;
+  color: var(--ph-ink);
+  background: var(--ph-elevated);
+  border: 1px solid var(--ph-line-strong);
+  border-radius: var(--ada-radius-sm);
+  font: inherit;
+}
+
+input[type="text"]:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--ph-brand);
+  outline-offset: 2px;
+}
+
+.create-form input[type="text"] {
+  min-width: 260px;
+}
+
+button {
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-brand);
+  color: var(--ph-on-brand);
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--ph-brand-strong);
+}
+
+.btn,
+.btn-primary,
+.btn-danger,
+.btn-safe,
+.btn-quiet {
+  display: inline-block;
+  padding: 8px 14px;
+  border-radius: var(--ada-radius-sm);
+  text-decoration: none;
+  text-align: center;
+}
+
+.btn-primary {
+  background: var(--ph-brand);
+  color: var(--ph-on-brand);
+}
+
+.btn-danger {
+  background: var(--ph-danger-soft);
+  color: var(--ph-danger-ink);
+  border-color: var(--ph-danger-ink);
+}
+
+.btn-safe {
+  background: var(--ph-elevated);
+  color: var(--ph-ink);
+  border: 1px solid var(--ph-line-strong);
+}
+
+.btn-safe:hover,
+.btn-quiet:hover {
+  background: var(--ph-code-bg);
+}
+
+.btn-quiet {
+  background: transparent;
+  color: var(--ph-muted);
+  border: 1px solid var(--ph-line);
+}
+
+.muted {
+  color: var(--ph-muted);
+}
+
+.thread-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.thread-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--ph-line);
+}
+
+.thread-row:first-child {
+  border-top: 0;
+}
+
+.thread-link {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.thread-meta {
+  color: var(--ph-faint);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.empty-state {
+  padding: 20px;
+  color: var(--ph-muted);
+  background: var(--ph-code-bg);
+  border-radius: var(--ada-radius-sm);
+  text-align: center;
+}
+
+.pager {
+  margin: 12px 0 0;
+}
+
+.error-panel {
+  border-color: var(--ph-danger-ink);
+}
+
+.error-status {
+  margin: 0;
+  color: var(--ph-danger-ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.error-detail {
+  padding: 10px;
+  background: var(--ph-code-bg);
+  border-radius: var(--ada-radius-sm);
+  color: var(--ph-muted);
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* ---- 会话页 ---- */
+
+.thread-page {
+  padding-bottom: 30px;
+}
+
+.thread-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.thread-head h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+
+.run-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--ph-brand-soft);
+  color: var(--ph-success-ink);
+  font-weight: 600;
+}
+
+.run-badge[data-state="running"],
+.run-badge[data-state="finishing"] {
+  background: var(--ph-warn-soft);
+  color: var(--ph-warn-ink);
+}
+
+.run-badge[data-state="terminal"] {
+  background: var(--ph-code-bg);
+  color: var(--ph-muted);
+}
+
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+/* ---- 实时流（JS 增强，无脚本时 DOM 保持 hidden） ---- */
+
+.live-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.live-stream[hidden],
+.live-status[hidden] {
+  display: none;
+}
+
+.live-thinking {
+  padding-left: 10px;
+  border-left: 2px solid var(--ph-line-strong);
+  color: var(--ph-muted);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.live-status {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-code-bg);
+  color: var(--ph-muted);
+  font-size: 13px;
+}
+
+.live-status[data-level="warn"] {
+  background: var(--ph-warn-soft);
+  color: var(--ph-warn-ink);
+}
+
+.live-status[data-level="error"] {
+  background: var(--ph-danger-soft);
+  color: var(--ph-danger-ink);
+}
+
+.msg {
+  display: flex;
+  gap: 10px;
+  max-width: 100%;
+}
+
+.msg-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.msg-user {
+  justify-content: flex-end;
+}
+
+.msg-user .msg-body {
+  max-width: 82%;
+  padding: 10px 14px;
+  background: var(--ph-brand-soft);
+  border-radius: 14px 14px 4px 14px;
+}
+
+.msg-assistant {
+  align-items: flex-start;
+}
+
+.msg-assistant .msg-body {
+  flex: 1;
+  padding: 10px 14px;
+  background: var(--ph-surface);
+  border: 1px solid var(--ph-line);
+  border-radius: 14px;
+}
+
+.avatar {
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  margin-top: 2px;
+  border-radius: 50%;
+  background: var(--ph-brand);
+  color: var(--ph-on-brand);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.part-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.part-image {
+  color: var(--ph-muted);
+  font-size: 12px;
+}
+
+.thinking {
+  border-left: 2px solid var(--ph-line-strong);
+  padding-left: 10px;
+  color: var(--ph-muted);
+  font-size: 13px;
+}
+
+.thinking summary {
+  cursor: pointer;
+  color: var(--ph-faint);
+}
+
+.tool-card {
+  margin-left: 36px;
+  padding: 8px 12px;
+  background: var(--ph-surface);
+  border: 1px solid var(--ph-line);
+  border-left: 2px solid var(--ph-line-strong);
+  border-radius: var(--ada-radius-sm);
+}
+
+.tool-card[data-state="ok"] {
+  border-left-color: var(--ph-brand);
+}
+
+.tool-card[data-state="error"],
+.tool-card[data-state="denied"],
+.tool-card[data-state="timeout"],
+.tool-card[data-state="interrupted"] {
+  border-left-color: var(--ph-danger-ink);
+}
+
+.tool-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.tool-name {
+  font-weight: 700;
+}
+
+.tool-id {
+  color: var(--ph-faint);
+  overflow-wrap: anywhere;
+}
+
+.badge {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--ph-code-bg);
+  color: var(--ph-muted);
+  font-size: 12px;
+}
+
+.badge-warn {
+  background: var(--ph-warn-soft);
+  color: var(--ph-warn-ink);
+}
+
+.tool-output {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--ph-code-bg);
+  border-radius: var(--ada-radius-sm);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tool-details {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.tool-details pre {
+  max-height: 260px;
+  overflow: auto;
+  padding: 8px;
+  background: var(--ph-code-bg);
+  border-radius: var(--ada-radius-sm);
+}
+
+.notice {
+  padding: 8px 12px;
+  border-radius: var(--ada-radius-sm);
+  font-size: 13px;
+}
+
+.notice-info {
+  background: var(--ph-code-bg);
+  color: var(--ph-muted);
+}
+
+.notice-warn {
+  background: var(--ph-warn-soft);
+  color: var(--ph-warn-ink);
+}
+
+.notice-error {
+  background: var(--ph-danger-soft);
+  color: var(--ph-danger-ink);
+}
+
+/* ---- 交互托盘 ---- */
+
+.tray {
+  margin-bottom: 16px;
+  padding: 14px;
+  background: var(--ph-surface);
+  border: 1px solid var(--ph-line-strong);
+  border-radius: var(--ada-radius);
+}
+
+.tray h2 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.interaction {
+  padding: 12px;
+  border-top: 1px solid var(--ph-line);
+}
+
+.interaction:first-of-type {
+  border-top: 0;
+}
+
+.interaction h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.interaction-body {
+  margin: 0 0 8px;
+  color: var(--ph-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Composer ---- */
+
+.composer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  background: var(--ph-surface);
+  border: 1px solid var(--ph-line-strong);
+  border-radius: var(--ada-radius);
+  box-shadow: var(--ph-shadow);
+}
+
+.composer-field {
+  color: var(--ph-muted);
+  font-size: 12px;
+}
+
+.composer textarea {
+  resize: vertical;
+  min-height: 88px;
+}
+
+.composer-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.login-panel {
+  max-width: 520px;
+  margin: 40px auto;
+}
+
+@media (max-width: 760px) {
+  .topbar {
+    padding: 0 16px;
+    flex-wrap: wrap;
+  }
+
+  .topmeta {
+    margin-left: 0;
+  }
+
+  .page {
+    padding: 16px;
+  }
+
+  .thread-head {
+    flex-direction: column;
+  }
+
+  .msg-user .msg-body {
+    max-width: 92%;
+  }
+
+  .tool-card {
+    margin-left: 0;
+  }
+
+  .create-form {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .create-form input[type="text"] {
+    min-width: 0;
+  }
+}
+
+/* ---- a_da 外壳的本地适配（M2） ----
+   外壳、侧栏、顶栏、Composer 的布局来自 a_da 的 shell/pages/components 层；
+   这里只补三件事：侧栏底部的纵向排列、发送键的清零内边距、以及
+   .ada-scroll 内旧内容页（threads/error/login）的既有间距。 */
+
+.ada-sidebar__foot {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.ada-sidebar .workspace-picker {
+  flex-wrap: wrap;
+}
+
+.ada-sidebar .workspace-picker select {
+  max-width: 100%;
+}
+
+.ada-sidebar__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ph-muted);
+  font-size: 12px;
+}
+
+.ada-sidebar__meta a {
+  color: var(--ph-muted);
+}
+
+/* a_da 的 .ada-send 只定义尺寸；旧的通用 button 规则会塞进内边距。 */
+.ada-send {
+  padding: 0;
+}
+
+/* 旧消息类保留给 app.js 的实时增量（它直接创建 .msg/.avatar/.msg-body）。 */
+.ada-scroll .page {
+  padding-top: 0;
+}
+
+.ada-transcript {
+  min-height: 1px;
+}
+
+/* M2 还没有接侧栏抽屉脚本：窄屏下 a_da 会把 .ada-sidebar 平移出视口，
+   工作区选择器和登录入口就一起消失。这里先把侧栏放回文档流，保证无 JS
+   也能切换工作区/登录；M4 接上 data-sidebar-toggle 后退回抽屉形态。 */
+@media (max-width: 760px) {
+  .ada-body {
+    height: auto;
+    min-height: 100dvh;
+    overflow: auto;
+  }
+
+  .ada-shell {
+    flex-direction: column;
+    height: auto;
+    min-height: 100dvh;
+  }
+
+  .ada-sidebar {
+    position: static;
+    inset: auto;
+    width: 100%;
+    max-height: none;
+    transform: none;
+    box-shadow: none;
+    border-right: 0;
+    border-bottom: 1px solid var(--ph-line);
+  }
+
+  .ada-side,
+  .ada-shell.is-sidebar-collapsed .ada-side {
+    display: flex;
+    width: 100%;
+  }
+
+  .ada-sidebar__foot {
+    margin-top: 0;
+  }
+}

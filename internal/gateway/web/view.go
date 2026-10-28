@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"encoding/json"
+	"html/template"
 	"net/url"
 	"strings"
 	"unicode/utf8"
@@ -137,14 +138,47 @@ type toolPayload struct {
 
 // baseData 是所有页面共用的外壳字段（嵌入后模板按提升字段访问）。
 type baseData struct {
-	Title          string
-	ProductName    string
-	Locale         string
-	Identity       string
-	LoginPath      string
-	CSRF           string
-	Workspace      string
-	RefreshSeconds int
+	Title               string
+	ProductName         string
+	Locale              string
+	Identity            string
+	LoginPath           string
+	CSRF                string
+	Workspace           string
+	WorkspaceIndex      int
+	Workspaces          []workspaceOption
+	ShowWorkspacePicker bool
+	RefreshSeconds      int
+	// Slots 是 12 个稳定插槽的 SSR 宿主内容。M2 阶段由基座保持为空，
+	// M4 接上插件宿主后由渲染结果填充；模板通过 {{slot ...}} 落位。
+	Slots slotViews
+	// Icons 是页面级 SVG 雪碧图/图标 HTML（M2 先为空，图标仍在模板内联）。
+	Icons template.HTML
+}
+
+// slotViews 是 12 个插槽的模板字段，字段名与 7.2 表格一一对应。
+// 所有值都是 template.HTML，只能由基座（或经过 VNode 校验的插件宿主）写入；
+// 插件与消息文本不会被提升为 template.HTML。
+type slotViews struct {
+	SidebarTop       template.HTML
+	SidebarBottom    template.HTML
+	TopbarRight      template.HTML
+	ChatCorner       template.HTML
+	ComposerLeft     template.HTML
+	ComposerRight    template.HTML
+	ComposerFooter   template.HTML
+	ComposerAbove    template.HTML
+	ThreadTray       template.HTML
+	TranscriptAfter  template.HTML
+	ExtensionsList   template.HTML
+	DashboardWidgets template.HTML
+}
+
+// workspaceOption 是工作区选择器的一项。
+type workspaceOption struct {
+	Index int
+	Name  string
+	Path  string
 }
 
 type threadsData struct {

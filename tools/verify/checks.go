@@ -747,11 +747,11 @@ func checkNodeCompat(root string) error {
 
 // checkUI 在 a_da 基线导入后生效：tokens/CSS 副本必须带来源头注释，且不出现硬编码色与奇数尺寸。
 func checkUI(root string) error {
-	staticDir := filepath.Join(root, "web", "static")
+	staticDir := filepath.Join(root, "internal", "gateway", "web", "static")
 	tokens := filepath.Join(staticDir, "tokens.css")
 	raw, err := os.ReadFile(tokens)
 	if err != nil {
-		return fmt.Errorf("web/static/tokens.css 缺失: %w", err)
+		return fmt.Errorf("internal/gateway/web/static/tokens.css 缺失: %w", err)
 	}
 	text := string(raw)
 	if !strings.Contains(text, "a_da") || !strings.Contains(text, "SHA-256") {
@@ -759,12 +759,28 @@ func checkUI(root string) error {
 	}
 	hex := regexp.MustCompile(`#[0-9a-fA-F]{3,8}\b`)
 	badLines := []string{}
+	inComment := false
 	for i, line := range strings.Split(text, "\n") {
-		if strings.Contains(line, "--ph-") && strings.HasPrefix(strings.TrimSpace(line), "--") {
+		trimmed := strings.TrimSpace(line)
+		// 注释文本里允许引用具体颜色（7.7.2 约束的是样式规则）。上游 tokens.css
+		// 的注释会跨行，单靠「以 /* 开头」会漏掉延续行，因此跟踪块注释状态。
+		if inComment {
+			if strings.Contains(trimmed, "*/") {
+				inComment = false
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "/*") {
+			if !strings.Contains(trimmed, "*/") {
+				inComment = true
+			}
+			continue
+		}
+		if strings.Contains(line, "--ph-") && strings.HasPrefix(trimmed, "--") {
 			continue // token 定义处允许写颜色
 		}
-		if hex.MatchString(line) && !strings.HasPrefix(strings.TrimSpace(line), "/*") {
-			badLines = append(badLines, fmt.Sprintf("%d: %s", i+1, strings.TrimSpace(line)))
+		if hex.MatchString(line) {
+			badLines = append(badLines, fmt.Sprintf("%d: %s", i+1, trimmed))
 		}
 	}
 	if len(badLines) > 0 {
@@ -779,7 +795,7 @@ func checkUI(root string) error {
 }
 
 func uiBaselinePending(root string) (bool, string) {
-	if _, err := os.Stat(filepath.Join(root, "web", "static", "tokens.css")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "internal", "gateway", "web", "static", "tokens.css")); err != nil {
 		return true, "a_da UI 基线尚未导入，M2 生效"
 	}
 	return false, ""

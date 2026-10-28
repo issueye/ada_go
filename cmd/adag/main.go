@@ -45,7 +45,8 @@ const usage = `adag —— 本地优先的 Agent 系统（单二进制，两角�
   adag threads    [--workspace <dir>]           列出线程（M1）
   adag events     --thread <id>                 以 JSONL 导出线程事件/entry（M1）
   adag plugin     <list|install|reload>         插件管理（M3 落地）
-  adag doctor     [--fake] [--data-dir <dir>]   无模型依赖的启动自检
+  adag doctor     [--fake] [--data-dir <dir>] [--gateway-addr 127.0.0.1:52353]
+                                                无模型依赖的启动自检（含 Gateway 端口）
   adag verify     [检查名...]                    开发门禁：generated dispatch hooks slots
                                                   capabilities manifest vnode products docs
                                                   nodecompat ui boundary
@@ -313,13 +314,14 @@ func cmdVerify(args []string, stdout io.Writer) error {
 }
 
 // cmdDoctor 是无模型依赖的启动自检（设计 10）。
-// 已接：配置/产品/目录、SQLite 完整性与 schema、工作区锁持有者、provider 配置形状；
-// 端口占用留给 M2 Gateway。
+// 已接：配置/产品/目录、SQLite 完整性与 schema、工作区锁持有者、
+// Gateway 端口可绑定性与 provider 配置形状。
 func cmdDoctor(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fake := fs.Bool("fake", false, "不依赖真实模型：用产品声明与空基座做自检")
 	dataDir := fs.String("data-dir", "", "数据目录（默认按工作区哈希推到 ~/.adago/workspaces/<hash>）")
 	workspace := fs.String("workspace", ".", "工作区目录")
+	gatewayAddr := fs.String("gateway-addr", "127.0.0.1:52353", "检查 Gateway 默认监听地址是否可绑定")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -389,13 +391,16 @@ func cmdDoctor(args []string, stdout io.Writer) error {
 	} else {
 		fmt.Fprintf(stdout, "OK    %-16s 锁状态正常（空闲或由运行中的 Core 持有）\n", "locks")
 	}
-	note("ports", "adag gateway 启动时会绑定端口并报告失败；独立占用检查随 M2 收尾补齐")
+	if err := report("gateway 端口", checkGatewayAddr(*gatewayAddr)); err != nil && firstErr == nil {
+		firstErr = err
+	}
 
 	fmt.Fprintln(stdout, "")
 	if firstErr != nil {
 		return fmt.Errorf("doctor 发现问题（首个：%w）；诊断码见 internal/diag", firstErr)
 	}
-	fmt.Fprintln(stdout, "doctor: 自检通过。Gateway 端口与 UI 基线按里程碑接入。")
+	fmt.Fprintln(stdout, "doctor: 自检通过（M2 范围：Gateway 鉴权/SSR/SSE 与 Core 监督已接通）。")
+	fmt.Fprintln(stdout, "       UI 基线（渲染回归、可访问性）仍待 M4/后续里程碑，不在本次自检内。")
 	return nil
 }
 

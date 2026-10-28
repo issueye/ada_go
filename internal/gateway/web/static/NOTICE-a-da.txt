@@ -1,0 +1,37 @@
+a_da UI 基线资产来源与许可
+==========================
+
+本目录（internal/gateway/web/static）中的以下文件复制自 a_da：
+
+  上游仓库：a_da（Rust 项目）
+  上游 commit：ae2f8ffe1679ce25c490c7af0a788d6575669fa0
+  上游许可：MIT（a_da 的 Cargo.toml 声明 license = "MIT"；
+            上游仓库没有独立的 LICENSE 文件，本文件即为许可说明）
+
+  design/tokens.css
+      → tokens.css（仅在文件头追加来源注释，其余保留原文）
+  crates/agent-web/static/app.css
+      → app.css（Tailwind 3.4.19 产物）
+  crates/agent-web/static/components.css
+      → ui/components.css
+  crates/agent-web/static/layout.css
+      → ui/layout.css
+  crates/agent-web/static/widgets.css
+      → ui/widgets.css
+  crates/agent-web/static/shell.css
+      → ui/shell.css
+  crates/agent-web/static/pages.css
+      → ui/pages.css
+
+上游 NOTICE 中声明的第三方前端资产（沿用上游声明）：
+  - htmx 2.0.4 — MIT — https://htmx.org/
+  - Alpine.js 3.17.5 CSP build — MIT — https://alpinejs.dev/
+  - Tailwind CSS 3.4.19（生成的 app.css）— MIT — https://tailwindcss.com/
+
+说明：
+  - htmx、Alpine 等 JS 运行时本轮没有导入；ada-go 继续使用自带的
+    /static/app.js（无框架 SSE 增强）。
+  - app-local.css 是 ada-go 原有的自绘样式（从 app.css 改名而来），
+    不属于 a_da 资产。
+  - a_da 的品牌 logo（assets/logo.png 等）未导入；tokens.css 中只保留
+    了从该 logo 提炼出的颜色令牌。

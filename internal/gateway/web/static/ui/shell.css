@@ -1,0 +1,1750 @@
+/* 组件库 · 外壳层：正文复制按钮、侧栏、主区、审批/排队浮层。 */
+
+/* 正文代码块的复制按钮（chat.js 注入） */
+.ada-markdown pre {
+  position: relative;
+}
+.ada-markdown pre.has-copy {
+  padding-right: 48px;
+}
+.chat-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--ph-line-strong);
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-surface);
+  color: var(--ph-muted);
+  font-family: inherit;
+  font-size: var(--ada-text-xs);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity var(--ada-transition), background var(--ada-transition);
+}
+.ada-markdown pre:hover .chat-copy,
+.chat-copy:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  /* 触屏没有 hover：复制按钮必须常驻，否则代码块复制等于不存在 */
+  .chat-copy {
+    opacity: 1;
+  }
+}
+.chat-copy:hover {
+  background: var(--ph-subtle);
+  color: var(--ph-ink);
+}
+
+/* ── 外壳 ───────────────────────────────────────────────────────────────── */
+
+.ada-shell {
+  display: flex;
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* 侧栏：展开 264，折叠成 56px 窄轨。
+   折叠**不再**是 display:none —— 收起之后品牌、新建、最近会话、系统页都还在，
+   用户不必为了跳一条会话把侧栏重新拉开。宽度过渡让展开/收起有方向感。 */
+.ada-sidebar {
+  width: 264px;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--ph-subtle);
+  border-right: 1px solid var(--ph-line);
+  overflow: hidden;
+  transition: width var(--ada-transition) ease;
+}
+
+/* 展开态：一条纵向列。只有会话列表伸缩与滚动，其余分区保持自身高度。 */
+.ada-side {
+  width: 264px;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  padding: 10px 12px;
+  height: 100%;
+}
+
+/* 窄轨默认不渲染：display:none 同时让读屏器跳过这一份重复的导航。 */
+.ada-rail {
+  display: none;
+}
+
+.ada-shell.is-sidebar-collapsed .ada-sidebar {
+  width: 56px;
+}
+.ada-shell.is-sidebar-collapsed .ada-side {
+  display: none;
+}
+.ada-shell.is-sidebar-collapsed .ada-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
+  padding: 10px 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ada-sidebar {
+    transition: none;
+  }
+}
+
+/* ── 品牌 ───────────────────────────────────────────────────────────────── */
+
+.ada-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 2px 4px 4px;
+  text-decoration: none;
+}
+.ada-brand__mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: var(--ada-radius-md);
+  background: linear-gradient(135deg, var(--ph-brand), var(--ph-brand-strong));
+  color: #fff;
+}
+/* 产品 LOGO（assets/logo.png 经 /static/logo.png 内嵌提供）：
+   图自带暖米白底与圆角，容器不再铺品牌渐变。 */
+.ada-brand__mark--logo {
+  background: transparent;
+}
+.ada-brand__logo {
+  display: block;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--ada-radius-md);
+  object-fit: cover;
+}
+.ada-brand__name {
+  color: var(--ph-ink);
+  font-size: var(--ada-text-md);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+/* 二级页的品牌位 = 返回会话：文字降一级，悬停回归主色 */
+.ada-brand--back .ada-brand__name {
+  color: var(--ph-muted);
+  font-weight: 600;
+}
+.ada-brand--back:hover .ada-brand__name {
+  color: var(--ph-ink);
+}
+.ada-brand__badge {
+  margin-left: auto;
+  padding: 0 6px;
+  border: 1px solid var(--ph-line-strong);
+  border-radius: var(--ada-radius-sm);
+  color: var(--ph-faint);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+}
+
+/* ── 新会话 ─────────────────────────────────────────────────────────────── */
+/* 描边按钮：侧栏里唯一的填充色要留给"当前会话"。
+   主操作比"我在哪"还响，视线第一落点就会跑到"新建"上。 */
+.ada-new {
+  flex-shrink: 0;
+}
+.ada-new .ada-btn {
+  width: 100%;
+  height: 32px;
+  gap: 6px;
+}
+
+/* ── 工作区切换器 ───────────────────────────────────────────────────────── */
+/* 一行代替原先的"分区标题 + 全路径药丸 + 组头当前徽标"三处表达；
+   完整路径进 title，显示的目录名不再被 ellipsis 从尾部切掉。 */
+.ada-ws-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--ada-radius-md);
+  color: var(--ph-ink);
+  font-size: var(--ada-text-base);
+  font-weight: 600;
+  text-decoration: none;
+  transition: background var(--ada-transition), color var(--ada-transition);
+}
+.ada-ws-switch:hover {
+  background: var(--ph-line);
+}
+.ada-ws-switch > .ada-icon:first-child {
+  color: var(--ph-brand);
+}
+.ada-ws-switch > .ada-icon:last-child {
+  color: var(--ph-faint);
+}
+.ada-ws-switch__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ada-ws-switch__count {
+  flex: 0 0 auto;
+  color: var(--ph-faint);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+  font-weight: 400;
+}
+
+/* ── 搜索 ───────────────────────────────────────────────────────────────── */
+
+.ada-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.ada-search > .ada-icon {
+  position: absolute;
+  left: 9px;
+  color: var(--ph-faint);
+  pointer-events: none;
+}
+.ada-search__input {
+  width: 100%;
+  height: 32px;
+  padding: 0 52px 0 30px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-surface);
+  color: var(--ph-ink);
+  font-family: inherit;
+  font-size: var(--ada-text-sm);
+  outline: none;
+  transition: border-color var(--ada-transition), box-shadow var(--ada-transition);
+}
+.ada-search__input:focus {
+  border-color: var(--ada-focus-border);
+  box-shadow: var(--ada-focus-ring);
+}
+.ada-search__input::placeholder {
+  color: var(--ph-faint);
+}
+.ada-search__kbd {
+  position: absolute;
+  right: 8px;
+  padding: 0 5px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-subtle);
+  color: var(--ph-faint);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+  line-height: 16px;
+  pointer-events: none;
+}
+/* 有输入时收起快捷键提示，让位给结果计数 */
+.ada-search.is-searching .ada-search__kbd {
+  display: none;
+}
+.ada-search__count {
+  position: absolute;
+  right: 8px;
+  color: var(--ph-muted);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+  pointer-events: none;
+}
+.ada-search__count[hidden] {
+  display: none;
+}
+
+/* ── 会话列表 ───────────────────────────────────────────────────────────── */
+/* 侧栏唯一的伸缩 + 滚动区。行高 32：一屏能看见的会话从 9 条涨到 15 条左右。 */
+.ada-thread-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* 会话增删会跨越滚动阈值，预留位置避免标题串位 */
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 0 6px;
+}
+.ada-thread {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  /* min-height 而不是固定高度：内联重命名表单展开时行要能长高 */
+  min-height: 32px;
+  padding: 0 6px 0 8px;
+  border-radius: var(--ada-radius-sm);
+  color: var(--ph-ink);
+  font-size: var(--ada-text-base);
+  transition: background var(--ada-transition), color var(--ada-transition);
+}
+.ada-thread__link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+.ada-thread:hover {
+  background: var(--ph-line);
+}
+/* `hidden` 属性在 UA 样式里只是 `display:none`，会被上面的 `display:flex` 盖掉
+   （搜索过滤靠的就是 `hidden`）。这里显式提升优先级。 */
+.ada-thread[hidden],
+.ada-ws[hidden] {
+  display: none !important;
+}
+.ada-thread.is-active {
+  background: var(--ph-brand-soft);
+  color: var(--ph-brand-ink);
+  font-weight: 600;
+}
+.ada-thread__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 行右侧：运行点 + 「N 分钟前」。列表按最后活动排序，时间是它的口径说明；
+   不占位时也别硬撑宽度——这一列用 nowrap + 10px，长标题仍有 ~10 个字。 */
+.ada-thread__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-width: 0;
+  transition: opacity var(--ada-transition);
+}
+.ada-thread__time {
+  flex: 0 0 auto;
+  color: var(--ph-faint);
+  font-family: inherit;
+  font-size: var(--ada-text-xs);
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ada-thread.is-active .ada-thread__time {
+  color: var(--ph-brand-ink);
+  opacity: 0.72;
+}
+/* 运行中只剩一个点：文案「运行中」不再挤占标题宽度，语义留在 title/aria 里。 */
+.ada-thread__dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--ph-warn-ink);
+}
+/* 行内操作（重命名 / 删除）：悬浮或键盘聚焦时出现，不抢平时的一屏十五行。
+   绝对定位而不是留在流里——留在流里时那 48px 白占着，长标题会被白白截短。 */
+.ada-thread__actions {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 6px;
+  border-radius: var(--ada-radius-sm);
+  background: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--ada-transition);
+}
+.ada-thread:hover .ada-thread__actions,
+.ada-thread:focus-within .ada-thread__actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+/* 操作按钮盖住右侧时间列：悬停时把时间淡出，避免两层文字叠在一起。
+   （组头同口径：`.ada-ws__count` 悬停让位给 +/切换按钮。） */
+.ada-thread:hover .ada-thread__meta,
+.ada-thread:focus-within .ada-thread__meta {
+  opacity: 0;
+}
+@media (hover: none) {
+  /* 触屏没有 hover：重命名/删除常驻（与工作区组头 `.ada-ws__actions` 同口径）。
+     常驻就必然压右端，所以把时间列收起来、给链接让出操作位。 */
+  .ada-thread__actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .ada-thread__meta {
+    display: none;
+  }
+  .ada-thread__link {
+    padding-right: 52px;
+  }
+}
+.ada-thread__rename summary,
+.ada-thread__action {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--ada-radius-sm);
+  background: transparent;
+  color: var(--ph-faint);
+  cursor: pointer;
+  transition: background var(--ada-transition), color var(--ada-transition);
+}
+.ada-thread__rename summary {
+  list-style: none;
+}
+.ada-thread__rename summary::-webkit-details-marker {
+  display: none;
+}
+.ada-thread__rename summary:hover,
+.ada-thread__action:hover {
+  background: var(--ph-subtle);
+  color: var(--ph-ink);
+}
+.ada-thread__action:hover {
+  color: var(--ph-danger-ink);
+}
+/* 内联重命名：在行下方展开（列表本身是滚动容器，弹层会被裁剪，所以不用浮层） */
+.ada-thread__rename-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 0 100%;
+  padding: 4px 2px 6px;
+}
+/* 重命名展开时，按钮层回到**行内**：表单有 38px 高，绝对定位的 28px 容器装不下，
+   会溢出去盖住下一行。回到流里之后行会自然长高（min-height 就是为它留的）。
+   `:has()` 在 Electron/Chrome/Edge/Firefox 的现代版本都支持；万一不支持，
+   只是退回"表单盖住下一行"的旧形态，功能不受影响。 */
+.ada-thread:has(.ada-thread__rename[open]) .ada-thread__actions {
+  position: static;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-left: 4px;
+  background: transparent;
+  opacity: 1;
+  pointer-events: auto;
+}
+.ada-thread:has(.ada-thread__rename[open]) .ada-thread__link,
+.ada-thread:has(.ada-thread__rename[open]) .ada-thread__rename summary {
+  display: none;
+}
+.ada-thread:has(.ada-thread__rename[open]) .ada-thread__rename {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ada-thread__rename-form .ada-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  padding: 2px 8px;
+  font-size: var(--ada-text-sm);
+}
+
+/* 新会话的工作区选择弹窗（原桌面端 WorkspaceSelector 同形：列表 + 当前项打勾）。
+   选中态由原生 radio 的 :checked 驱动——无 JS 也能选；行就是 label，整行可点。 */
+.ada-wspick {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  max-height: 40vh;
+  overflow-y: auto;
+  /* 滚到底不把整页一起带走 */
+  overscroll-behavior: contain;
+}
+/* 模式分段（四档）：空会话页里一档一个提交按钮，当前项选中且禁用。
+   （原「新建会话」弹窗已移除，选择挪到空会话页，见 .ada-newconv__*） */
+.ada-wspick__modes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+.ada-newconv__mode-form {
+  display: grid;
+  min-width: 0;
+}
+.ada-wspick__mode {
+  position: relative;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 4px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+  background: transparent;
+  color: var(--ph-muted);
+  font-family: inherit;
+  font-size: var(--ada-text-sm);
+  cursor: pointer;
+  transition: background var(--ada-transition), border-color var(--ada-transition),
+    color var(--ada-transition);
+}
+.ada-wspick__mode .ada-icon {
+  opacity: 0.85;
+}
+.ada-wspick__mode:hover {
+  background: var(--ph-subtle);
+}
+.ada-wspick__mode.is-current {
+  border-color: var(--ph-brand);
+  background: var(--ph-brand-soft);
+  color: var(--ph-brand-ink);
+  font-weight: 600;
+  cursor: default;
+}
+.ada-wspick__mode.is-current:hover {
+  background: var(--ph-brand-soft);
+}
+.ada-wspick__mode:disabled {
+  opacity: 1;
+}
+.ada-wspick__mode:focus-visible {
+  outline: 2px solid var(--ph-brand);
+  outline-offset: 1px;
+}
+
+/* 空会话页：模式 + 工作区（对齐 原桌面端 的 EmptyConversationView 排布） */
+.ada-empty--newconv {
+  min-height: 52vh;
+}
+.ada-newconv__controls {
+  display: grid;
+  width: min(440px, calc(100vw - 96px));
+  gap: 12px;
+  margin-top: 18px;
+}
+/* 模式分段收窄居中（参考 原桌面端 的空状态排布） */
+.ada-newconv__controls .ada-wspick__modes {
+  width: min(344px, 100%);
+  justify-self: center;
+}
+.ada-newconv__ws-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+/* 工作区这一排是**一个**胶囊控件：左边当前工作区下拉 + 右边「选择工作区」，
+   中间一条细分隔线（对齐 原桌面端 EmptyConversationView 的分组形态）。 */
+.ada-newconv__ws-group {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--ph-line-strong);
+  border-radius: var(--ada-radius-pill);
+  background: var(--ph-surface);
+  transition: border-color var(--ada-transition);
+}
+.ada-newconv__ws-group:hover {
+  border-color: var(--ph-faint);
+}
+.ada-newconv__ws {
+  position: relative;
+  min-width: 0;
+}
+.ada-newconv__ws-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 6px 8px 6px 12px;
+  border: 0;
+  border-radius: var(--ada-radius-pill);
+  background: transparent;
+  color: var(--ph-ink);
+  font-size: var(--ada-text-sm);
+  cursor: pointer;
+  list-style: none;
+}
+.ada-newconv__ws-trigger::-webkit-details-marker {
+  display: none;
+}
+.ada-newconv__ws-trigger:hover {
+  background: var(--ph-subtle);
+}
+.ada-newconv__ws[open] .ada-newconv__ws-trigger {
+  background: var(--ph-subtle);
+}
+.ada-newconv__ws-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 右边一段：品牌色文字按钮，左侧一条分隔线；圆角只保留右半 */
+.ada-newconv__ws-select {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px 6px 10px;
+  border-left: 1px solid var(--ph-line);
+  border-radius: 0 var(--ada-radius-pill) var(--ada-radius-pill) 0;
+  color: var(--ph-brand-ink);
+  font-size: var(--ada-text-sm);
+  text-decoration: none;
+  transition: background var(--ada-transition);
+}
+.ada-newconv__ws-select:hover {
+  background: var(--ph-brand-soft);
+}
+.ada-newconv__ws-trigger:focus-visible,
+.ada-newconv__ws-select:focus-visible {
+  outline: 2px solid var(--ph-brand);
+  outline-offset: 1px;
+}
+.ada-newconv__ws-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 70;
+  width: min(300px, calc(100vw - 48px));
+  padding: 6px;
+  border: 1px solid var(--ph-line-strong);
+  border-radius: var(--ada-radius-lg);
+  background: var(--ph-elevated);
+  box-shadow: var(--ph-shadow);
+  text-align: left;
+}
+.ada-newconv__ws-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--ada-radius-sm);
+  background: transparent;
+  color: var(--ph-muted);
+  font-family: inherit;
+  font-size: var(--ada-text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.ada-newconv__ws-item:hover {
+  background: var(--ph-subtle);
+  color: var(--ph-ink);
+}
+.ada-newconv__ws-item .ada-icon {
+  flex: 0 0 auto;
+  color: var(--ph-brand-ink);
+  opacity: 0;
+}
+.ada-newconv__ws-item.is-current .ada-icon {
+  opacity: 1;
+}
+.ada-newconv__ws-item:disabled {
+  cursor: default;
+  opacity: 1;
+}
+.ada-newconv__ws-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ada-newconv__ws-count {
+  color: var(--ph-faint);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+}
+.ada-newconv__ws-more {
+  display: block;
+  margin-top: 4px;
+  padding: 7px 8px 4px;
+  border-top: 1px solid var(--ph-line);
+  color: var(--ph-brand-ink);
+  font-size: var(--ada-text-xs);
+  text-decoration: none;
+}
+.ada-newconv__ws-empty {
+  margin: 0;
+  padding: 8px;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-xs);
+  line-height: 1.55;
+}
+@media (max-width: 560px) {
+  .ada-newconv__ws-group {
+    max-width: 100%;
+  }
+  .ada-newconv__ws-trigger {
+    max-width: 150px;
+  }
+}
+
+/* ── 工作区目录选择弹窗（htmx 片段，见 partials/workspace_picker.html）─────── */
+.wp-picker__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--ada-radius-sm);
+  background: transparent;
+  color: var(--ph-faint);
+  cursor: pointer;
+}
+.wp-picker__close:hover {
+  background: var(--ph-subtle);
+  color: var(--ph-ink);
+}
+#workspace-picker-body {
+  min-height: 320px;
+}
+.wp-picker {
+  display: grid;
+  gap: 10px;
+}
+.wp-picker__roots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-right: 32px;
+}
+.wp-picker__root {
+  padding: 6px 10px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-pill);
+  background: var(--ph-surface);
+  color: var(--ph-muted);
+  font-family: inherit;
+  font-size: var(--ada-text-xs);
+  cursor: pointer;
+}
+.wp-picker__root:hover {
+  background: var(--ph-subtle);
+  color: var(--ph-ink);
+}
+.wp-picker__root.is-active {
+  border-color: var(--ph-brand);
+  background: var(--ph-brand-soft);
+  color: var(--ph-brand-ink);
+  font-weight: 600;
+}
+.wp-picker__pathbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.wp-picker__up {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--ph-line-strong);
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-surface);
+  color: var(--ph-muted);
+  cursor: pointer;
+}
+.wp-picker__up:hover {
+  background: var(--ph-subtle);
+  color: var(--ph-ink);
+}
+.wp-picker__path {
+  flex: 1;
+  min-width: 160px;
+  overflow: hidden;
+  padding: 6px 10px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-subtle);
+  color: var(--ph-muted);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wp-picker__mkdir {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+.wp-picker__mkdir-input {
+  width: 168px;
+  height: 32px;
+  padding: 4px 8px;
+  font-size: var(--ada-text-xs);
+}
+.wp-picker__list {
+  height: 320px;
+  padding: 4px;
+  overflow: auto;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-surface);
+}
+.wp-picker__entry {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--ada-radius-sm);
+  background: transparent;
+  color: var(--ph-ink);
+  font-family: inherit;
+  font-size: var(--ada-text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.wp-picker__entry:hover {
+  background: var(--ph-subtle);
+}
+.wp-picker__entry .ada-icon {
+  flex: 0 0 auto;
+  color: var(--ph-faint);
+}
+.wp-picker__entry-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wp-picker__entry-hint {
+  color: var(--ph-faint);
+  font-size: var(--ada-text-xs);
+}
+.wp-picker__empty,
+.wp-picker__notice,
+.wp-picker__loading,
+.wp-picker__error {
+  margin: 0;
+  padding: 12px;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-sm);
+  line-height: 1.6;
+  text-align: center;
+}
+.wp-picker__error {
+  color: var(--ph-danger-ink);
+}
+.wp-picker__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.wp-picker__current {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ph-muted);
+  font-size: var(--ada-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wp-picker__current strong {
+  color: var(--ph-ink);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-weight: 500;
+}
+.wp-picker__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+@media (max-width: 560px) {
+  .wp-picker__mkdir {
+    width: 100%;
+  }
+  .wp-picker__mkdir-input {
+    flex: 1;
+    width: auto;
+  }
+  .wp-picker__list {
+    height: 260px;
+  }
+}
+
+
+/* 空态：没有会话 / 没有匹配 */
+.ada-list-empty {
+  margin: 4px 6px;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-sm);
+}.ada-list-empty[hidden] {
+  display: none;
+}
+.ada-list-empty__clear {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ph-brand-ink);
+  font-family: inherit;
+  font-size: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ── 状态点 ─────────────────────────────────────────────────────────────── */
+
+.ada-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+.ada-dot--warn {
+  background: var(--ph-warn-ink);
+  animation: ada-pulse 1.6s ease-in-out infinite;
+}
+.ada-dot--brand {
+  background: var(--ph-brand);
+}
+.ada-dot--success {
+  background: var(--ph-success-ink);
+}
+@keyframes ada-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* ── 系统导航（底部）─────────────────────────────────────────────────────── */
+/* 插件 / 供应商 / 概览是低频设置面，放底部；顶部的位置全部让给会话列表。 */
+.ada-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ada-nav--util {
+  flex-shrink: 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--ph-line);
+}
+.ada-nav__label {
+  padding: 4px 8px 2px;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.ada-nav__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--ada-radius-sm);
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
+  text-decoration: none;
+  transition: background var(--ada-transition), color var(--ada-transition);
+}
+.ada-nav__item > .ada-icon {
+  flex: 0 0 auto;
+  color: var(--ph-faint);
+  transition: color var(--ada-transition);
+}
+.ada-nav__item:hover {
+  background: var(--ph-line);
+  color: var(--ph-ink);
+}
+.ada-nav__item:hover > .ada-icon {
+  color: var(--ph-muted);
+}
+.ada-nav__item.is-active {
+  background: var(--ph-brand-soft);
+  color: var(--ph-brand-ink);
+  font-weight: 600;
+}
+.ada-nav__item.is-active > .ada-icon {
+  color: var(--ph-brand-ink);
+}
+.ada-nav__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ada-nav__item--more {
+  color: var(--ph-faint);
+}
+
+/* ── 侧栏底部 ───────────────────────────────────────────────────────────── */
+
+.ada-sidebar__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-top: auto;
+  padding: 8px 2px 0;
+  border-top: 1px solid var(--ph-line);
+}
+/* 主题切换：两枚图标由 html.light/dark 决定显隐（见 layout.css） */
+.ada-theme {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+}
+.ada-theme__moon,
+.ada-theme__sun {
+  display: grid;
+  place-items: center;
+}
+.ada-gateway {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-sm);
+}
+.ada-gateway__dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--ph-faint);
+}
+.ada-gateway__dot.is-on {
+  background: var(--ph-success-ink);
+}
+.ada-gateway__dot.is-off {
+  background: var(--ph-danger-ink);
+}
+.ada-gateway__addr {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+}
+
+/* ── 折叠窄轨 ───────────────────────────────────────────────────────────── */
+/* 56px 里只放"能立刻用上"的入口：品牌、新建、最近会话、系统页、主题。 */
+
+.ada-rail__mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: var(--ada-radius-md);
+  background: linear-gradient(135deg, var(--ph-brand), var(--ph-brand-strong));
+  color: #fff;
+  text-decoration: none;
+}
+.ada-rail__mark:has(.ada-rail__logo) {
+  background: transparent;
+}
+.ada-rail__logo {
+  display: block;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--ada-radius-sm);
+  object-fit: cover;
+}
+.ada-rail__new {
+  flex: 0 0 auto;
+}
+.ada-rail__btn {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ada-radius-md);
+  background: transparent;
+  color: var(--ph-muted);
+  cursor: pointer;
+  transition: background var(--ada-transition), color var(--ada-transition);
+}
+.ada-rail__btn:hover {
+  background: var(--ph-line);
+  color: var(--ph-ink);
+}
+.ada-rail__btn--primary,
+.ada-rail__btn--primary:hover {
+  background: var(--ph-brand);
+  color: #fff;
+}
+.ada-rail__btn--primary:hover {
+  background: var(--ph-brand-strong);
+}
+.ada-rail__btn.is-active {
+  background: var(--ph-brand-soft);
+  color: var(--ph-brand-ink);
+}
+.ada-rail__sep {
+  width: 20px;
+  height: 1px;
+  flex: 0 0 auto;
+  margin: 2px 0;
+  background: var(--ph-line);
+}
+.ada-rail__spacer {
+  flex: 1 1 auto;
+  min-height: 8px;
+}
+.ada-rail__thumb {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-surface);
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
+  font-weight: 600;
+  text-decoration: none;
+  transition: background var(--ada-transition), border-color var(--ada-transition),
+    color var(--ada-transition);
+}
+.ada-rail__thumb:hover {
+  border-color: var(--ph-line-strong);
+  color: var(--ph-ink);
+}
+.ada-rail__thumb.is-active {
+  border-color: transparent;
+  background: var(--ph-brand-soft);
+  color: var(--ph-brand-ink);
+}
+
+/* 主区 */
+.ada-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: var(--ph-surface);
+}
+.ada-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 54px;
+  flex-shrink: 0;
+  padding: 0 14px 0 20px;
+  border-bottom: 1px solid var(--ph-line);
+  /* 窄屏侧栏是 z-index:60 的全高抽屉（从 y=0 开始）。顶栏必须：
+     ① 有不透明底色，别让抽屉品牌区透上来和标题重叠；
+     ② 高于抽屉/遮罩，菜单按钮与进程管理入口始终可点。
+     Electron 的 preload 会把 z-index 提到 100（还要压过应用弹窗）。 */
+  position: relative;
+  z-index: 80;
+  background: var(--ph-surface);
+}
+.ada-topbar__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ada-topbar__title h1 {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--ada-text-base);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.ada-topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.ada-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* 滚到底不把整页一起带走 */
+  overscroll-behavior: contain;
+  /* 预留滚动条位：流式输出时内容长度反复跨过滚动阈值，
+     不留位会让整块正文左右跳 10px。 */
+  scrollbar-gutter: stable;
+  /* 🔴 不要在这里写 scroll-behavior: smooth：它会把你所有的 scrollTop 赋值
+     （打开会话的初始置底、流式跟随）都变成动画——动画期间内容高度还在变，
+     停在半途就是"打开会话不在底部"。平滑感只在「回到最新」按钮上要，
+     由 chat.js 在点击处显式指定 behavior: 'smooth'。 */
+}
+/* 回到最新：sticky 在滚动容器底部、水平居中（避开右下角的插件悬浮区）。
+   只有向上阅读（不接近底部）时才显示，由 chat.js 切换 `hidden`。 */
+.ada-scroll-bottom {
+  position: sticky;
+  bottom: 14px;
+  z-index: 26;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  margin: 0 auto 10px;
+  padding: 6px 12px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-pill);
+  background: var(--ph-elevated);
+  color: var(--ph-muted);
+  font-family: inherit;
+  font-size: var(--ada-text-sm);
+  box-shadow: var(--ph-shadow);
+  cursor: pointer;
+  transition: background var(--ada-transition), color var(--ada-transition);
+}
+.ada-scroll-bottom:hover {
+  background: var(--ph-surface);
+  color: var(--ph-ink);
+}
+.ada-scroll-bottom[hidden] {
+  display: none;
+}
+.ada-wrap {
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  /* 底部留出插件悬浮区 + 「回到最新」的高度：它们是覆盖层，不占流式布局。 */
+  padding: 18px 28px 52px;
+}
+/* Flash 是浮动 toast，不占主布局空间；位置固定在顶栏下方居中。 */
+.ada-flash {
+  position: fixed;
+  top: 66px;
+  left: 50%;
+  z-index: 90;
+  width: min(560px, calc(100vw - 32px));
+  margin: 0;
+  transform: translateX(-50%);
+  border: 1px solid color-mix(in srgb, var(--ph-line-strong) 55%, transparent);
+  box-shadow:
+    0 18px 42px -18px rgba(15, 23, 42, 0.32),
+    0 4px 14px -8px rgba(15, 23, 42, 0.2);
+  animation: ada-flash-in 180ms ease-out;
+}
+@keyframes ada-flash-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+@media (max-width: 640px) {
+  .ada-flash {
+    top: 60px;
+    width: calc(100vw - 24px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ada-flash {
+    animation: none;
+  }
+}
+.ada-flash__close {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  margin-left: auto;
+  border: 0;
+  border-radius: var(--ada-radius-sm);
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+}
+.ada-flash__close:hover {
+  opacity: 1;
+  background: rgba(24, 24, 27, 0.08);
+}
+/* 浮层（审批 / 排队 / 提问）
+   提问卡（.ada-tray--question）是 absolute 浮在对话流上的——不占布局空间。
+   因此容器**不能自滚动**：overflow 会把浮出去的卡片整个裁掉，
+   长内容由各托盘自己内部滚动（审批参数 / 排队列表）。 */
+.ada-trays {
+  position: relative;
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 8px;
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 0 24px 8px;
+}
+.ada-tray {
+  padding: 12px 14px;
+  border: 1px solid var(--ph-line-strong);
+  border-radius: var(--ada-radius-lg);
+  background: var(--ph-elevated);
+  box-shadow: var(--ph-shadow);
+}
+/* 局部提交的就地反馈（成功/失败都不跳页，见 chat.js 的 data-partial） */
+.ada-partial-feedback {
+  margin-left: 8px;
+  color: var(--ph-success-ink);
+  font-size: var(--ada-text-xs);
+}
+.ada-partial-feedback[data-tone="error"] {
+  color: var(--ph-danger-ink);
+}
+.ada-tray__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ph-ink);
+  font-size: var(--ada-text-sm);
+  font-weight: 600;
+}
+.ada-tray__icon {
+  display: flex;
+  color: var(--ph-warn-ink);
+}
+.ada-tray--queue .ada-tray__icon {
+  color: var(--ph-muted);
+}
+/* 排队列表自己内部滚动：容器不再裁剪（提问卡要浮出容器之外） */
+.ada-tray--queue {
+  max-height: 32vh;
+  overflow-y: auto;
+  /* 滚到底不把整页一起带走 */
+  overscroll-behavior: contain;
+}
+.ada-tray__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ada-tray__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--ph-warn-ink);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+  font-weight: 400;
+}
+.ada-tray__args {
+  max-height: 120px;
+  margin: 8px 0;
+  overflow: auto;
+  /* 滚到底不把整页一起带走 */
+  overscroll-behavior: contain;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-canvas);
+  padding: 8px 10px;
+  color: var(--ph-muted);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-sm);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.ada-tray__empty {
+  color: var(--ph-faint);
+  font-size: var(--ada-text-sm);
+}
+.ada-tray__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.ada-tray__form {
+  display: inline-flex;
+  gap: 8px;
+}
+.ada-tray__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  min-width: 0;
+}
+.ada-tray__order {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-subtle);
+  color: var(--ph-faint);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+}
+.ada-tray__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
+}
+.ada-tray__link {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--ada-radius-sm);
+  background: transparent;
+  color: var(--ph-muted);
+  font-family: inherit;
+  font-size: var(--ada-text-sm);
+  cursor: pointer;
+  transition: background var(--ada-transition), color var(--ada-transition);
+}
+.ada-tray__link:hover {
+  background: var(--ph-subtle);
+  color: var(--ph-ink);
+}
+.ada-tray__link--danger {
+  color: var(--ph-danger-ink);
+}
+.ada-tray__link--danger:hover {
+  background: var(--ph-danger-soft);
+  color: var(--ph-danger-ink);
+}
+
+/* 提问托盘：待答复用品牌色表达（UED 状态表），选项是无 JS 可用的原生表单。
+   浮动形态（原桌面端 提问浮窗同款）：不占布局空间，贴着输入框上方浮在
+   对话流之上——锚是 .ada-trays（position:relative，紧贴 composer 顶部），
+   `bottom: 100%` 让卡片向上生长盖住对话流底部；高度上限内自带滚动。 */
+.ada-tray--question {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: calc(100% + 2px);
+  max-height: min(62vh, 520px);
+  overflow-y: auto;
+  /* 滚到底不把整页一起带走 */
+  overscroll-behavior: contain;
+  border-color: color-mix(in srgb, var(--ph-brand) 35%, var(--ph-line));
+  box-shadow: 0 16px 40px -16px rgba(24, 24, 27, 0.32), var(--ph-shadow);
+}
+.ada-tray--question .ada-tray__icon,
+.ada-tray--question .ada-tray__meta {
+  color: var(--ph-brand-ink);
+}
+.ada-q {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ada-q__item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* 翻页契约靠 JS 置 hidden 隐藏非当前题；display:flex 是作者样式，
+   会压过 UA 的 [hidden] 规则，必须显式声明，否则"隐藏"根本不生效 */
+.ada-q__item[hidden] {
+  display: none;
+}
+.ada-q__prompt {
+  margin: 0;
+  color: var(--ph-ink);
+  font-size: var(--ada-text-sm);
+  line-height: 1.55;
+}
+.ada-q__options {
+  display: grid;
+  gap: 6px;
+}
+.ada-q__option {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+  cursor: pointer;
+  transition: border-color var(--ada-transition), background var(--ada-transition);
+}
+.ada-q__option:hover {
+  background: var(--ph-subtle);
+}
+.ada-q__option:focus-within {
+  border-color: var(--ph-brand);
+}
+.ada-q__option input {
+  flex-shrink: 0;
+  accent-color: var(--ph-brand);
+}
+.ada-q__option-label {
+  color: var(--ph-ink);
+  font-size: var(--ada-text-sm);
+}
+.ada-q__option-desc {
+  color: var(--ph-faint);
+  font-size: var(--ada-text-xs);
+}
+.ada-q__text {
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 1px solid var(--ph-line-strong);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-canvas);
+  color: var(--ph-ink);
+  font-family: inherit;
+  font-size: var(--ada-text-sm);
+  line-height: 1.55;
+  resize: vertical;
+}
+.ada-q__text::placeholder {
+  color: var(--ph-faint);
+}
+/* 翻页条：服务端渲染为 hidden，chat.js 的 data-question-pager 契约激活 */
+.ada-q__pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ada-q__pager[hidden] {
+  display: none;
+}
+.ada-q__pager-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--ph-line-strong);
+  border-radius: var(--ada-radius-md);
+  background: transparent;
+  color: var(--ph-ink);
+  font-family: inherit;
+  font-size: var(--ada-text-sm);
+  cursor: pointer;
+  transition: background var(--ada-transition), color var(--ada-transition),
+    opacity var(--ada-transition);
+}
+.ada-q__pager-btn:hover:not(:disabled) {
+  background: var(--ph-subtle);
+}
+.ada-q__pager-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ada-q__pager-status {
+  color: var(--ph-faint);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+}
+
+/* ── 工作区树（侧栏） ─────────────────────────────────────────────────────
+   当前工作区的会话直接铺开——切换器就是它的表头，所以组头不再重复"当前"；
+   其它工作区各是一个 <details>。操作按钮放在 details 外，折叠时也能新建/切换。 */
+.ada-ws {
+  position: relative;
+  flex-shrink: 0;
+  border-radius: var(--ada-radius-sm);
+}
+.ada-ws__details {
+  border-radius: var(--ada-radius-sm);
+}
+.ada-ws__summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 2px 8px;
+  border-radius: var(--ada-radius-sm);
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: background var(--ada-transition), color var(--ada-transition);
+}
+.ada-ws__summary::-webkit-details-marker {
+  display: none;
+}
+.ada-ws__summary:hover {
+  background: var(--ph-line);
+  color: var(--ph-muted);
+}
+.ada-ws__chevron {
+  flex-shrink: 0;
+  color: var(--ph-faint);
+  transition: transform var(--ada-transition);
+}
+.ada-ws__details[open] .ada-ws__chevron {
+  transform: rotate(90deg);
+}
+.ada-ws__folder {
+  flex-shrink: 0;
+  color: var(--ph-faint);
+}
+.ada-ws__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ada-ws__count {
+  flex-shrink: 0;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: var(--ada-radius-pill);
+  background: var(--ph-line);
+  color: var(--ph-faint);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+  font-weight: 400;
+  line-height: 14px;
+  text-align: center;
+  transition: opacity var(--ada-transition);
+}
+.ada-ws__running {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+/* 「其它工作区」分区行：一条细线 + 一行小字，把当前工作区的会话和别的项目分开。
+   没有它，两种行在视觉上是同一个平面，用户读不出"这是我现在的会话，那是别的项目"。 */
+.ada-ws__section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin: 10px 8px 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--ph-line);
+  color: var(--ph-faint);
+  font-size: var(--ada-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+.ada-ws__section[hidden] {
+  display: none;
+}
+.ada-ws__section-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ada-ws__section-count {
+  flex: 0 0 auto;
+  font-family: var(--mono-font, Consolas, monospace);
+  font-weight: 400;
+  letter-spacing: 0;
+  opacity: 0.8;
+}
+.ada-ws__threads {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 2px 0 4px 10px;
+  padding-left: 8px;
+  /* 只有组内层用导轨：它表达"这些属于上面那组"，不是分区线 */
+  border-left: 1px solid var(--ph-line);
+}
+.ada-ws__empty {
+  margin: 4px 8px;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-sm);
+  font-style: italic;
+}
+/* 组头操作（在此新建 / 切换过去）：悬停时盖住计数徽标——两者抢同一块 22px 的位置。 */
+.ada-ws__actions {
+  position: absolute;
+  /* 只覆盖**组头那一行**。`.ada-ws` 的高度包含展开后的会话列表：用 `top: 0 / bottom: 0`
+     撑满会让按钮层在整组里垂直居中，展开时正好落在会话行右侧（实测：「+」「切换」
+     两个按钮串到了「新会话」那一行上，还盖住它、抢走点击）。
+     26px 与下面 `.ada-ws__summary` 的 `min-height` 同步，改一处必须改另一处。 */
+  top: 0;
+  right: 2px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--ada-transition);
+}
+.ada-ws:hover .ada-ws__actions,
+.ada-ws:focus-within .ada-ws__actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.ada-ws:hover .ada-ws__count,
+.ada-ws:focus-within .ada-ws__count {
+  opacity: 0;
+}
+@media (hover: none) {
+  /* 触摸设备没有 hover：操作按钮常驻，否则"切换工作区"根本点不到 */
+  .ada-ws__actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .ada-ws__count {
+    display: none;
+  }
+}
+.ada-ws__actions form {
+  display: inline-flex;
+  margin: 0;
+}
+.ada-ws__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ada-radius-sm);
+  background: transparent;
+  color: var(--ph-faint);
+  cursor: pointer;
+}
+.ada-ws__action:hover {
+  background: var(--ph-surface);
+  color: var(--ph-ink);
+}
+

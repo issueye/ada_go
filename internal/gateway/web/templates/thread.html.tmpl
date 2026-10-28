@@ -1,46 +1,82 @@
 {{define "thread"}}{{template "head" .}}
-<main class="page thread-page">
-<header class="thread-head">
-  <div>
-    <h1>{{if .Thread.Title}}{{.Thread.Title}}{{else}}新会话{{end}}</h1>
-    <p class="muted">
-      <span class="run-badge" data-state="{{.Run.Status}}">{{.Run.Label}}</span>
-      {{if .Run.StartedAt}} · 开始于 {{.Run.StartedAt}}{{end}}
-      {{if .Run.EndedAt}} · 结束于 {{.Run.EndedAt}}{{end}}
-      {{if .Thread.Archived}} · 已归档{{end}}
-    </p>
+<div class="ada-corner-dock" id="chat-corner" aria-label="会话状态卡">{{slot "chat.corner" .Slots.ChatCorner 0 ""}}</div>
+
+<div class="ada-chat-viewport">
+  <div class="ada-scroll" id="chat-scroll">
+    <div class="ada-wrap">
+      <div class="page thread-page" data-thread-id="{{.Thread.ID}}" data-run-status="{{.Run.Status}}">
+        <header class="thread-head">
+          <div>
+            <h1>{{if .Thread.Title}}{{.Thread.Title}}{{else}}新会话{{end}}</h1>
+            <p class="muted">
+              <span class="run-badge" data-state="{{.Run.Status}}">{{.Run.Label}}</span>
+              {{if .Run.StartedAt}} · 开始于 {{.Run.StartedAt}}{{end}}
+              {{if .Run.EndedAt}} · 结束于 {{.Run.EndedAt}}{{end}}
+              {{if .Thread.Archived}} · 已归档{{end}}
+            </p>
+          </div>
+          {{if .Run.Active}}
+          <form method="post" action="/thread/{{.Thread.ID}}/cancel">
+            {{template "csrf" .}}
+            <button type="submit" class="btn-danger">停止</button>
+          </form>
+          {{end}}
+        </header>
+
+        <section class="transcript ada-transcript" id="transcript" aria-live="polite">
+          {{if .Transcript}}
+          {{range .Transcript}}{{template "entry" .}}{{end}}
+          {{else}}
+          <div class="empty-state"><p>还没有消息。发送第一条消息开始会话。</p></div>
+          {{end}}
+          <div id="live-stream" class="live-stream" aria-live="polite" aria-label="实时输出" hidden></div>
+        </section>
+
+        <div id="live-status" class="live-status" role="status" aria-live="polite" hidden></div>
+      </div>
+    </div>
+    {{slot "transcript.after" .Slots.TranscriptAfter 0 ""}}
+    {{slot "extensions.list" .Slots.ExtensionsList 0 ""}}
+    {{slot "dashboard.widgets" .Slots.DashboardWidgets 0 ""}}
   </div>
-  {{if .Run.Active}}
-  <form method="post" action="/thread/{{.Thread.ID}}/cancel">
-    {{template "csrf" .}}
-    <button type="submit" class="btn-danger">停止</button>
-  </form>
+  <div class="ada-float-dock" id="composer-above" aria-label="插件悬浮区">{{slot "composer.above" .Slots.ComposerAbove 0 ""}}</div>
+</div>
+
+<div class="ada-trays" id="ada-trays" role="region" aria-live="polite" aria-label="待处理事项">
+  {{slot "thread.tray" .Slots.ThreadTray 0 ""}}
+  {{if .Interactions}}
+  <section class="tray ada-tray" aria-label="待处理交互">
+    <h2>待答复</h2>
+    {{range .Interactions}}{{template "interaction" .}}{{end}}
+  </section>
   {{end}}
-</header>
+</div>
 
-<section class="transcript" aria-live="polite">
-  {{if .Transcript}}
-  {{range .Transcript}}{{template "entry" .}}{{end}}
-  {{else}}
-  <div class="empty-state"><p>还没有消息。发送第一条消息开始会话。</p></div>
-  {{end}}
-</section>
-
-{{if .Interactions}}
-<section class="tray" aria-label="待处理交互">
-  <h2>待答复</h2>
-  {{range .Interactions}}{{template "interaction" .}}{{end}}
-</section>
-{{end}}
-
-<form method="post" action="/thread/{{.Thread.ID}}/turn" class="composer">
+<form method="post" action="/thread/{{.Thread.ID}}/turn" class="ada-composer">
   {{template "csrf" .}}
-  <label class="composer-field" for="turn-text">消息</label>
-  <textarea id="turn-text" name="text" rows="4" maxlength="65536" placeholder="输入消息后点击发送"></textarea>
-  <input type="hidden" name="idempotencyKey" value="{{.TurnKey}}">
-  <div class="composer-actions">
-    <button type="submit" class="btn-primary">发送</button>
+  <div class="ada-composer__card">
+    <div class="ada-composer__images" id="composer-images" hidden></div>
+    <textarea id="turn-text" class="ada-composer__input" name="text" rows="2" maxlength="65536" placeholder="输入消息后点击发送" aria-label="消息输入框" required></textarea>
+    <div class="ada-composer__bar">
+      <div class="ada-composer__group ada-composer__group--left">{{slot "composer.left" .Slots.ComposerLeft 0 ""}}</div>
+      <div class="ada-composer__group ada-composer__group--right">
+        {{slot "composer.right" .Slots.ComposerRight 0 ""}}
+        <button type="submit" class="ada-send" aria-label="发送" title="发送">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/></svg>
+        </button>
+      </div>
+    </div>
   </div>
+  <input type="hidden" name="idempotencyKey" value="{{.TurnKey}}">
 </form>
-</main>
+
+<div class="ada-aux">
+  <span class="ada-aux__group">
+    <span class="ada-aux__item">运行状态：{{.Run.Label}}</span>
+    <span class="ada-aux__item">工作区：{{.Workspace}}</span>
+  </span>
+  <span class="ada-aux__plugins">{{slot "composer.footer" .Slots.ComposerFooter 0 ""}}</span>
+</div>
+
+<script src="/static/app.js" defer></script>
 {{template "foot" .}}{{end}}

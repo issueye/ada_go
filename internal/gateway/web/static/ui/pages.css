@@ -1,0 +1,532 @@
+/* 组件库 · 页面层：任务规划面板、插件悬浮区、响应式与零碎修正。 */
+
+/* ── 会话区右上角的插件挂载点（`chat.corner` 插槽） ─────────────────────
+   任务规划这类常驻状态卡不插进正文流：贴着右上角浮在对话流之上。
+   卡片本身由统一插件渲染（见 `plugins/task-plan/`），这里只提供位置。 */
+.ada-corner-dock {
+  position: absolute;
+  top: 62px;
+  right: 20px;
+  z-index: 30;
+}
+.ada-corner-dock:empty {
+  display: none;
+}
+/* 步骤清单（工具行展开区与插件卡片共用；卡片外壳由插件自己负责） */
+.ada-todo__notes {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-canvas);
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
+  line-height: 1.6;
+}
+.ada-todo__notes span {
+  color: var(--ph-ink);
+  font-weight: 600;
+}
+.ada-todo__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 256px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  /* 滚到底不把整页一起带走 */
+  overscroll-behavior: contain;
+  list-style: none;
+}
+.ada-todo__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--ada-radius-md);
+  color: var(--ph-ink);
+  font-size: var(--ada-text-sm);
+  line-height: 1.55;
+}
+.ada-todo__step .ada-icon {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+.ada-todo__step.is-done {
+  color: var(--ph-faint);
+}
+.ada-todo__step.is-done span {
+  text-decoration: line-through;
+  text-decoration-color: var(--ph-line-strong);
+}
+.ada-todo__step.is-done .ada-icon {
+  color: var(--ph-success-ink);
+}
+.ada-todo__step.is-pending .ada-icon {
+  color: var(--ph-faint);
+}
+.ada-todo__step.is-running {
+  border-color: color-mix(in srgb, var(--ph-brand) 22%, transparent);
+  background: var(--ph-brand-soft);
+  color: var(--ph-brand-ink);
+  font-weight: 500;
+}
+.ada-todo__step.is-running .ada-icon {
+  color: var(--ph-brand-ink);
+  animation: ada-pulse 1.6s ease-in-out infinite;
+}
+
+/* ── 插件悬浮区（composer.above 插槽） ─────────────────────────────────────
+   **真正浮在对话区右下角**：绝对定位在 `.ada-chat-viewport` 内，不参与文档流。
+   之前用 sticky 会占一条横向空白（输入框上方平白多出一行），
+   插件内容一出现就把 composer 往下顶。现在滚动区占满高度，芯片盖在正文上。 */
+.ada-chat-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ada-chat-viewport > .ada-scroll {
+  flex: 1;
+  min-height: 0;
+}
+.ada-float-dock {
+  position: absolute;
+  right: 24px;
+  bottom: 10px;
+  z-index: 20;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-end;
+  gap: 10px;
+  max-width: calc(100% - 48px);
+  pointer-events: none;
+}
+.ada-float-dock > * {
+  pointer-events: auto;
+}
+/* 容器始终存在（SSE `parts` 需要一个固定目标 id），
+   没有插件贡献时它不展示。 */
+.ada-float-dock:empty {
+  display: none;
+}
+/* 运行状态：与插件悬浮区同一带、靠左。只有一个旋转弧 + 「运行中」，
+   空闲时为空串（`:empty` 不占位）。容器也是 SSE `parts` 的固定目标。 */
+.ada-run-status-dock {
+  position: absolute;
+  left: 24px;
+  bottom: 10px;
+  z-index: 20;
+  pointer-events: none;
+}
+.ada-run-status-dock:empty {
+  display: none;
+}
+.ada-run-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--ph-warn-ink) 30%, var(--ph-line));
+  border-radius: var(--ada-radius-pill);
+  background: var(--ph-warn-soft);
+  color: var(--ph-warn-ink);
+  font-size: var(--ada-text-xs);
+  line-height: 1;
+  pointer-events: auto;
+}
+.ada-run-status__spin {
+  animation: ada-run-status-spin 1.1s linear infinite;
+}
+@keyframes ada-run-status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ada-run-status__spin {
+    animation: none;
+  }
+}
+/* 插件自带的悬浮卡片外观（插件片段可直接用这套 class） */
+.ada-float {
+  max-width: 340px;
+  padding: 10px 12px;
+  border: 1px solid var(--ph-line-strong);
+  border-radius: var(--ada-radius-lg);
+  background: var(--ph-elevated);
+  box-shadow: var(--ph-shadow);
+  font-size: var(--ada-text-sm);
+  line-height: 1.55;
+  color: var(--ph-muted);
+}
+.ada-float__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  color: var(--ph-ink);
+  font-size: var(--ada-text-sm);
+  font-weight: 600;
+}
+.ada-float__head .ada-icon {
+  color: var(--ph-brand-ink);
+}
+.ada-float__badge {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: var(--ada-radius-pill);
+  background: var(--ph-brand-soft);
+  color: var(--ph-brand-ink);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+  font-weight: 600;
+}
+.ada-float__text {
+  margin: 0;
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
+}
+.ada-float__text b {
+  color: var(--ph-ink);
+  font-weight: 600;
+}
+
+/* ── 响应式 ─────────────────────────────────────────────────────────────── */
+/* 侧栏先收窄，再变抽屉：264 → 236 → 抽屉。断点与 UED §5.1 对齐，
+   中间那档以前是空的，961–1100px 一直按 264 顶着主区。 */
+@media (max-width: 1100px) {
+  .ada-sidebar,
+  .ada-side {
+    width: 236px;
+  }
+}
+@media (max-width: 960px) {
+  .ada-composer {
+    padding: 8px 16px 10px;
+  }
+  .ada-wrap {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .ada-trays {
+    padding: 0 16px 8px;
+  }
+  /* 浮动的提问卡与容器留同款内边距 */
+  .ada-tray--question {
+    left: 16px;
+    right: 16px;
+  }
+}
+/* 桌面端（>760px）侧栏折叠成 56px 窄轨——宽度与形态都在 shell.css 里，
+   这里不能再写 `display:none`，否则一收就把导航能力收没了。 */
+@media (max-width: 760px) {
+  .ada-menu-toggle {
+    display: grid;
+  }
+  /* 抽屉态：整条侧栏浮起，宽度回到 264（236 在手机上读不下会话标题）。 */
+  .ada-sidebar,
+  .ada-side {
+    width: 264px;
+  }
+  /* 从顶栏下方开始：顶栏高 54px 且是不透明 chrome，抽屉若从 y=0 开始，
+     品牌位（二级页是「返回会话」）会被整条盖住，用户找不到返回入口。 */
+  .ada-sidebar {
+    position: fixed;
+    inset: 54px auto 0 0;
+    z-index: 60;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: 0 24px 64px -24px rgba(24, 24, 27, 0.4);
+  }
+  /* 抽屉里不要窄轨：即使折叠状态没被清掉，也要给出完整侧栏 */
+  .ada-shell.is-sidebar-collapsed .ada-sidebar {
+    width: 264px;
+  }
+  .ada-shell.is-sidebar-collapsed .ada-side {
+    display: flex;
+  }
+  .ada-shell.is-sidebar-collapsed .ada-rail {
+    display: none;
+  }
+  .ada-sidebar.is-open {
+    transform: translateX(0);
+  }
+  .ada-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(24, 24, 27, 0.32);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  .ada-backdrop.is-open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+@media (max-width: 680px) {
+  .ada-composer {
+    padding: 8px 12px 10px;
+  }
+  .ada-wrap {
+    padding: 18px 16px 36px;
+  }
+  .ada-topbar {
+    padding: 0 10px;
+  }
+  .ada-aux {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .ada-tray__args {
+    max-height: 90px;
+  }
+  /* 窄屏上浮动提问卡少占一些 */
+  .ada-tray--question {
+    max-height: 52vh;
+  }
+}
+
+/* ── 动效偏好 ───────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .ada-composer__card,
+  .ada-composer__hint,
+  .ada-btn,
+  .ada-disclosure__summary {
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── 动作按钮的真实表单 ───────────────────────────────────────────────────
+   `Button::action` 渲染成 <form>，用 display:contents 让按钮继续参与父级
+   flex 布局（否则输入框辅助区会多出一层块级盒子）。 */
+.ada-action-form {
+  display: contents;
+}
+
+/* 空的托盘占位不参与布局（live 轮询会保留容器做 OOB 目标）。 */
+.ada-trays:empty {
+  display: none;
+}
+
+/* 顶栏 live 区：药丸排成一行。 */
+#topbar-status,
+#topbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 用户消息里"有图但无法预览"时的计数标记（正常情况渲染缩略图，见 components.css）。 */
+.ada-msg__images {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: var(--ada-radius-pill);
+  background: var(--ph-subtle);
+  color: var(--ph-muted);
+  font-size: var(--ada-text-xs);
+  white-space: nowrap;
+}
+
+/* 侧栏会话列表空态。 */
+.ada-thread-list__empty {
+  padding: 10px 10px;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-sm);
+}
+
+/* 不可用的图标按钮（如"附件（规划中）"）：看起来就不能点。 */
+.ada-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── 工作区选择/添加页 ─────────────────────────────────────────────────── */
+.ada-picker-current {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-surface);
+}
+.ada-picker-current__path {
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ph-ink);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-sm);
+}
+.ada-picker {
+  display: grid;
+  grid-template-columns: 270px minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+  align-items: start;
+}
+.ada-picker__side {
+  padding: 12px;
+}
+.ada-picker__section + .ada-picker__section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--ph-line);
+}
+.ada-picker__empty {
+  margin-top: 6px;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-sm);
+}
+.ada-picker__root {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--ada-radius-sm);
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
+  text-decoration: none;
+}
+.ada-picker__root:hover {
+  background: var(--ph-subtle);
+  color: var(--ph-ink);
+}
+.ada-picker__root.is-active {
+  background: var(--ph-brand-soft);
+  color: var(--ph-brand-ink);
+}
+.ada-picker__root-label {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+.ada-picker__root-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ph-faint);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+}
+.ada-picker__recent-form {
+  margin: 0;
+}
+.ada-picker__recent {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--ada-radius-sm);
+  background: transparent;
+  color: var(--ph-muted);
+  font-family: inherit;
+  font-size: var(--ada-text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.ada-picker__recent:hover {
+  background: var(--ph-subtle);
+  color: var(--ph-ink);
+}
+.ada-picker__recent.is-active {
+  background: var(--ph-brand-soft);
+  color: var(--ph-brand-ink);
+}
+.ada-picker__recent-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.ada-picker__recent-meta {
+  flex-shrink: 0;
+  color: var(--ph-faint);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+}
+.ada-picker__main {
+  min-width: 0;
+  padding: 12px;
+  display: flex;
+  max-height: 500px;
+  flex-direction: column;
+}
+.ada-picker__crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ada-picker__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ph-ink);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-sm);
+}
+.ada-picker__mkdir {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ada-picker__mkdir .input {
+  flex: 1;
+  min-width: 0;
+}
+.ada-picker__notice {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-warn-soft);
+  color: var(--ph-warn-ink);
+  font-size: var(--ada-text-sm);
+}
+.ada-picker__body {
+  margin-top: 8px;
+  overflow: auto;
+}
+.ada-picker__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ada-picker__entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px;
+  border-radius: var(--ada-radius-sm);
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
+  text-decoration: none;
+}
+.ada-picker__entry:hover {
+  background: var(--ph-subtle);
+  color: var(--ph-ink);
+}
+@media (max-width: 860px) {
+  .ada-picker {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
