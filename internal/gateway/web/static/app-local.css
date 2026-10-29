@@ -317,44 +317,16 @@ button:hover {
   background: var(--ph-brand-strong);
 }
 
-.btn,
-.btn-primary,
-.btn-danger,
-.btn-safe,
-.btn-quiet {
-  display: inline-block;
-  padding: 8px 14px;
-  border-radius: var(--ada-radius-sm);
-  text-decoration: none;
-  text-align: center;
-}
-
+/* a_da 的 .btn 体系已经定义了布局与尺寸；这里只补暗色主题下的对比度。
+   不要在本地覆盖 display/padding——那会把带图标的按钮挤成两行。 */
 .btn-primary {
-  background: var(--ph-brand);
   color: var(--ph-on-brand);
 }
 
-.btn-danger {
-  background: var(--ph-danger-soft);
-  color: var(--ph-danger-ink);
-  border-color: var(--ph-danger-ink);
-}
-
-.btn-safe {
-  background: var(--ph-elevated);
-  color: var(--ph-ink);
-  border: 1px solid var(--ph-line-strong);
-}
-
-.btn-safe:hover,
-.btn-quiet:hover {
-  background: var(--ph-code-bg);
-}
-
-.btn-quiet {
-  background: transparent;
-  color: var(--ph-muted);
-  border: 1px solid var(--ph-line);
+/* 单色品牌下链接必须可辨认：默认就带下划线（hover 仍保留）。 */
+.link {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .muted {
@@ -623,19 +595,6 @@ button:hover {
 .tool-id {
   color: var(--ph-faint);
   overflow-wrap: anywhere;
-}
-
-.badge {
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--ph-code-bg);
-  color: var(--ph-muted);
-  font-size: 12px;
-}
-
-.badge-warn {
-  background: var(--ph-warn-soft);
-  color: var(--ph-warn-ink);
 }
 
 .tool-output {

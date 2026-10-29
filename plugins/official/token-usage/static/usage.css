@@ -58,7 +58,7 @@
 .tu-card__hint {
   margin: 4px 0 0;
   font-size: var(--ada-text-xs);
-  color: var(--ph-faint);
+  color: var(--ph-muted);
 }
 
 .tu-stats {
@@ -71,7 +71,7 @@
 .tu-stat__label {
   display: block;
   font-size: var(--ada-text-xs);
-  color: var(--ph-faint);
+  color: var(--ph-muted);
 }
 
 .tu-stat__value {
@@ -112,6 +112,6 @@
 .tu-widget__meta {
   margin: 6px 0 0;
   font-size: var(--ada-text-xs);
-  color: var(--ph-faint);
+  color: var(--ph-muted);
   line-height: 1.6;
 }

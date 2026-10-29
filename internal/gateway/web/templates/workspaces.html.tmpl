@@ -22,7 +22,7 @@
         <form method="post" action="/workspaces/select">
           {{template "csrf" .}}
           <input type="hidden" name="path" value="{{.Current}}">
-          <button class="btn btn-primary btn-sm" type="submit">使用此目录</button>
+          <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit">使用此目录</button>
         </form>
         {{else}}
         <span class="badge badge-neutral" title="Gateway 的工作区在启动时固定">非配置工作区</span>
@@ -68,7 +68,7 @@
 
         <section class="card ada-picker__main">
           <div class="ada-picker__crumbs">
-            {{if .ParentHref}}<a class="btn btn-ghost btn-sm" href="{{.ParentHref}}">上一级</a>{{end}}
+            {{if .ParentHref}}<a class="ada-btn ada-btn--ghost ada-btn--sm" href="{{.ParentHref}}">上一级</a>{{end}}
             <span class="ada-picker__path">{{.Current}}</span>
           </div>
 
@@ -76,7 +76,7 @@
             {{template "csrf" .}}
             <input type="hidden" name="parent" value="{{.Current}}">
             <input class="input" name="name" placeholder="新建文件夹名称" required autocomplete="off">
-            <button class="btn btn-secondary btn-sm" type="submit">新建目录</button>
+            <button class="ada-btn ada-btn--secondary ada-btn--sm" type="submit">新建目录</button>
           </form>
 
           {{if .Truncated}}<p class="ada-picker__notice">目录项过多，已省略 {{.Omitted}} 项；可用上方路径直接进入更深的目录。</p>{{end}}

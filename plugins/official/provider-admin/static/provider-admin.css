@@ -61,7 +61,7 @@
 .pa-provider__id {
   font-family: var(--mono-font, Consolas, monospace);
   font-size: var(--ada-text-xs);
-  color: var(--ph-faint);
+  color: var(--ph-muted);
 }
 
 .pa-provider__base {
@@ -107,7 +107,7 @@
 
 .pa-model__meta {
   font-size: var(--ada-text-xs);
-  color: var(--ph-faint);
+  color: var(--ph-muted);
 }
 
 .pa-model__form {
@@ -117,5 +117,5 @@
 .pa-empty {
   margin: 0;
   font-size: var(--ada-text-xs);
-  color: var(--ph-faint);
+  color: var(--ph-muted);
 }

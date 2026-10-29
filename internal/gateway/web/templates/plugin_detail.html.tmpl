@@ -7,7 +7,7 @@
           <h1 class="page-title">{{if .Plugin.Name}}{{.Plugin.Name}}{{else}}{{.Plugin.ID}}{{end}}</h1>
           <p class="page-sub">{{.Plugin.ID}}{{if .Plugin.Version}} · v{{.Plugin.Version}}{{end}}</p>
         </div>
-        <a class="btn btn-secondary btn-sm" href="/extensions">返回插件列表</a>
+        <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/extensions">返回插件列表</a>
       </div>
 
       <div class="card p-4">
@@ -25,35 +25,35 @@
         <dl class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {{if .Plugin.Source}}
           <div>
-            <dt class="text-xs text-faint">来源</dt>
+            <dt class="text-xs text-muted">来源</dt>
             <dd class="mt-1 text-sm text-ink">{{.Plugin.Source}}</dd>
           </div>
           {{end}}
           {{if .Plugin.Frontend}}
           <div>
-            <dt class="text-xs text-faint">页面</dt>
+            <dt class="text-xs text-muted">页面</dt>
             <dd class="mt-1 text-sm text-ink">{{.Plugin.Pages}}</dd>
           </div>
           <div>
-            <dt class="text-xs text-faint">插槽</dt>
+            <dt class="text-xs text-muted">插槽</dt>
             <dd class="mt-1 text-sm text-ink">{{.Plugin.Slots}}</dd>
           </div>
           <div>
-            <dt class="text-xs text-faint">导航</dt>
+            <dt class="text-xs text-muted">导航</dt>
             <dd class="mt-1 text-sm text-ink">{{.Plugin.Nav}}</dd>
           </div>
           {{end}}
           {{if .Plugin.Backend}}
           <div>
-            <dt class="text-xs text-faint">工具</dt>
+            <dt class="text-xs text-muted">工具</dt>
             <dd class="mt-1 text-sm text-ink">{{.Plugin.Tools}}</dd>
           </div>
           <div>
-            <dt class="text-xs text-faint">钩子</dt>
+            <dt class="text-xs text-muted">钩子</dt>
             <dd class="mt-1 text-sm text-ink">{{.Plugin.Hooks}}</dd>
           </div>
           <div>
-            <dt class="text-xs text-faint">技能</dt>
+            <dt class="text-xs text-muted">技能</dt>
             <dd class="mt-1 text-sm text-ink">{{.Plugin.Skills}}</dd>
           </div>
           {{end}}
@@ -67,17 +67,17 @@
           {{if .Plugin.Enabled}}
           <form method="post" action="/extensions/{{.Plugin.ID}}/disable">
             {{template "csrf" .}}
-            <button class="btn btn-secondary btn-sm" type="submit">停用</button>
+            <button class="ada-btn ada-btn--secondary ada-btn--sm" type="submit">停用</button>
           </form>
           {{else}}
           <form method="post" action="/extensions/{{.Plugin.ID}}/enable">
             {{template "csrf" .}}
-            <button class="btn btn-primary btn-sm" type="submit">启用</button>
+            <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit">启用</button>
           </form>
           {{end}}
         {{end}}
         {{if .Plugin.FirstPage}}
-        <a class="btn btn-secondary btn-sm" href="/ext/{{.Plugin.ID}}/{{.Plugin.FirstPage}}">{{icon "i-external" 13}}打开插件页面</a>
+        <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/ext/{{.Plugin.ID}}/{{.Plugin.FirstPage}}">{{icon "i-external" 13}}打开插件页面</a>
         {{end}}
       </div>
     </div>

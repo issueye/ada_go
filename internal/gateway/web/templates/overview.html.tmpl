@@ -7,7 +7,7 @@
           <h1 class="page-title">概览</h1>
           <p class="page-sub">agent 状态、最近会话与插件贡献。</p>
         </div>
-        <a class="btn btn-secondary btn-sm" href="/">去对话</a>
+        <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/">去对话</a>
       </div>
 
       <div id="dashboard-live" hx-get="/partials/dashboard" hx-trigger="every 5s" hx-swap="innerHTML">
@@ -23,7 +23,7 @@
   <div class="card p-4">
     <span class="badge {{if eq .Tone "warn"}}badge-warn{{else if eq .Tone "brand"}}badge-brand{{else}}badge-neutral{{end}}">{{.Label}}</span>
     <p class="mt-3 text-2xl font-semibold tracking-tight text-ink">{{.Value}}</p>
-    <p class="mt-1 text-xs leading-4 text-faint">{{.Hint}}</p>
+    <p class="mt-1 text-xs leading-4 text-muted">{{.Hint}}</p>
   </div>
   {{end}}
 </div>
@@ -45,7 +45,7 @@
           <span class="truncate text-xs font-medium text-ink">{{if .Title}}{{.Title}}{{else}}新会话{{end}}</span>
           {{if .Running}}<span class="badge badge-warn">运行中</span>{{end}}
         </div>
-        <p class="mt-1 truncate text-xs text-faint">{{.Workspace}}</p>
+        <p class="mt-1 truncate text-xs text-muted">{{.Workspace}}</p>
       </div>
     </a>
     {{end}}
