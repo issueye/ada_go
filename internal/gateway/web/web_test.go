@@ -990,6 +990,13 @@ func TestThreadPageUsesAdaShellAndComponentDOM(t *testing.T) {
 	// 工具卡的展示字段（status / duration / truncated / details）保留。
 	wantContains(t, body, "成功")
 	wantContains(t, body, "12 ms")
+
+	// 折叠偏好必须在侧栏 DOM 之前同步应用，否则每次导航都会“展开→收起”闪一下。
+	bootAt := strings.Index(body, "sidebar-boot.js?v=")
+	sidebarAt := strings.Index(body, `class="ada-sidebar"`)
+	if bootAt < 0 || sidebarAt < 0 || bootAt > sidebarAt {
+		t.Fatalf("sidebar-boot.js 必须在 .ada-sidebar 之前加载（boot=%d sidebar=%d）", bootAt, sidebarAt)
+	}
 	wantContains(t, body, "已截断")
 	wantContains(t, body, "详情")
 
