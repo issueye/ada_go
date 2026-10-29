@@ -183,6 +183,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /threads/{id}", s.handleThread)
 	mux.HandleFunc("POST /threads/{id}/send", s.handleTurn)
 	mux.HandleFunc("POST /threads/{id}/abort", s.handleCancel)
+	mux.HandleFunc("POST /threads/{id}/delete", s.handleThreadDelete)
 	mux.HandleFunc("POST /threads/{id}/interaction/{requestId}", s.handleInteraction)
 	// 兼容旧动作路径（M2 的 /turn、/cancel）。
 	mux.HandleFunc("POST /threads/{id}/turn", s.handleTurn)
@@ -277,6 +278,7 @@ func (s *Server) base(r *http.Request, page, title string, threads []threadSumma
 		BrandName:          s.cfg.BrandName,
 		ProductBadge:       badge,
 		CSRF:               csrf,
+		CurrentPath:        r.URL.Path,
 		PluginNav:          pluginNav,
 	})
 	return baseData{

@@ -197,6 +197,8 @@ type sidebarData struct {
 	ProductBadge       string
 	// CSRF 进侧栏表单的隐藏字段（双提交校验；桌面壳的 Origin 可能是 null）。
 	CSRF string
+	// CurrentPath 是当前页面路径：删除会话后回到这里（删的是当前会话则回首页）。
+	CurrentPath string
 	// PluginNav 是前端插件贡献的侧栏导航。
 	PluginNav []pluginNavLink
 }
@@ -286,7 +288,7 @@ func renderSidebar(d sidebarData) template.HTML {
 	}
 	// 会话树
 	b.WriteString(`<div class="ada-thread-list" id="thread-list">`)
-	b.WriteString(renderThreadTree(d.Groups, d.ActiveThreadID))
+	b.WriteString(renderThreadTree(d.Groups, d.ActiveThreadID, d.CSRF, d.CurrentPath))
 	b.WriteString(`</div>`)
 	// 系统导航
 	b.WriteString(`<nav class="ada-nav ada-nav--util" aria-label="系统">`)
@@ -396,7 +398,7 @@ func railLink(active, key, icon, label, href string) string {
 	return fmt.Sprintf(`<a class="%s" href="%s"%s>%s</a>`, cls, esc(href), attr("title", label), iconHTML(icon, 18))
 }
 
-func renderThreadTree(groups []sidebarGroup, activeThreadID string) string {
+func renderThreadTree(groups []sidebarGroup, activeThreadID, csrf, currentPath string) string {
 	if len(groups) == 0 {
 		return `<p class="ada-list-empty">还没有会话</p>`
 	}
@@ -412,7 +414,7 @@ func renderThreadTree(groups []sidebarGroup, activeThreadID string) string {
 		b.WriteString(`<p class="ada-ws__empty">暂无会话</p>`)
 	} else {
 		for _, t := range head.Threads {
-			b.WriteString(renderThreadRow(t, activeThreadID))
+			b.WriteString(renderThreadRow(t, activeThreadID, csrf, currentPath))
 		}
 	}
 	var others []sidebarGroup
@@ -430,7 +432,7 @@ func renderThreadTree(groups []sidebarGroup, activeThreadID string) string {
 			rows.WriteString(`<p class="ada-ws__empty">暂无会话</p>`)
 		} else {
 			for _, t := range g.Threads {
-				rows.WriteString(renderThreadRow(t, activeThreadID))
+				rows.WriteString(renderThreadRow(t, activeThreadID, csrf, currentPath))
 			}
 		}
 		running := ""
@@ -446,7 +448,7 @@ func renderThreadTree(groups []sidebarGroup, activeThreadID string) string {
 	return b.String()
 }
 
-func renderThreadRow(t sidebarThread, activeThreadID string) string {
+func renderThreadRow(t sidebarThread, activeThreadID, csrf, currentPath string) string {
 	active := activeThreadID != "" && t.ID == activeThreadID
 	dot := ""
 	if t.Running {
@@ -457,10 +459,19 @@ func renderThreadRow(t sidebarThread, activeThreadID string) string {
 	if elapsed != "" {
 		timeHTML = fmt.Sprintf(`<span class="ada-thread__time"%s>%s</span>`, attr("title", "最后活动："+elapsed), elapsed)
 	}
+	// 运行中的会话不提供删除：避免删掉仍在一轮里的线程。其余会话在悬停/聚焦时
+	// 显示垃圾桶按钮，提交前由 app.js 的 data-confirm 弹窗确认。
+	actions := ""
+	if !t.Running {
+		actions = fmt.Sprintf(
+			`<div class="ada-thread__actions"><form method="post" action="/threads/%s/delete" data-confirm="删除会话「%s」？删除后无法恢复。"><input type="hidden" name="next" value="%s">%s<button class="ada-thread__action" type="submit" title="删除会话" aria-label="删除会话">%s</button></form></div>`,
+			esc(t.ID), esc(t.Title), esc(currentPath), csrfInput(csrf), iconHTML("i-trash", 14),
+		)
+	}
 	return fmt.Sprintf(
-		`<div class="%s"><a class="ada-thread__link" href="/threads/%s"%s><span class="ada-thread__title">%s</span><span class="ada-thread__meta">%s%s</span></a></div>`,
+		`<div class="%s" data-thread-row="%s"><a class="ada-thread__link" href="/threads/%s"%s><span class="ada-thread__title">%s</span><span class="ada-thread__meta">%s%s</span></a>%s</div>`,
 		classList("ada-thread", boolClass(active, "is-active")),
-		esc(t.ID), attr("title", t.Title), esc(t.Title), dot, timeHTML,
+		esc(t.ID), esc(t.ID), attr("title", t.Title), esc(t.Title), dot, timeHTML, actions,
 	)
 }
 

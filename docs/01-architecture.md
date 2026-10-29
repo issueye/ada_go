@@ -270,6 +270,7 @@ Core 的 WebSocket 使用独立的一次性 token（环境变量传入，不出�
 | POST | `/threads/{id}/messages` | 发消息（表单或 fetch） |
 | GET | `/threads/{id}/stream` | SSE 增量流 |
 | POST | `/threads/{id}/cancel` | 取消当前轮次 |
+| POST | `/threads/{id}/delete` | 删除会话（软删 + 清理；`thread.delete`） |
 | POST | `/interactions/{id}` | 回应用户交互（确认/选择/输入） |
 | GET | `/settings` / `POST /settings` | 供应商、模型、主题与插件设置 |
 | GET | `/plugins` / `POST /plugins/{id}/reload` | 插件列表与重载 |

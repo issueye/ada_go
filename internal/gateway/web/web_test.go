@@ -313,6 +313,9 @@ func TestHomeRendersThreadList(t *testing.T) {
 	wantContains(t, body, "开始一段新的对话")
 	wantContains(t, body, `href="/threads/th_1"`)
 	wantContains(t, body, "ada-thread-list")
+	wantContains(t, body, `action="/threads/th_1/delete"`)
+	wantContains(t, body, "删除会话「第一个会话」")
+	wantContains(t, body, `name="next" value="/"`)
 
 	call, ok := core.lastCall("thread.list")
 	if !ok {
@@ -1112,4 +1115,30 @@ func TestRenderSlotWrapsBodyAndFallsBack(t *testing.T) {
 	// 插槽名同样只输出一次且被转义，不会造成属性注入。
 	injected := string(web.RenderSlot(`a"b`, "", 0, ""))
 	wantContains(t, injected, `data-slot="a&#34;b"`)
+}
+
+func TestThreadDeleteCallsCoreAndRedirects(t *testing.T) {
+	core := newFakeCore().on("thread.delete", `{"deleted":true,"cleanupScheduled":true}`)
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "POST", "/threads/th_1/delete", url.Values{"next": {"/threads/th_2"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("状态 = %d, want 303; body=%s", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); !strings.Contains(loc, "/threads/th_2?notice=") {
+		t.Fatalf("回跳 = %q, want /threads/th_2?notice=…", loc)
+	}
+	call, ok := core.lastCall("thread.delete")
+	if !ok || call.Params["threadId"] != "th_1" {
+		t.Fatalf("thread.delete 参数 = %+v", call.Params)
+	}
+
+	// 删除当前会话：回首页，避免跳到已经不存在的 /threads/{id}。
+	rec = serve(t, srv, "POST", "/threads/th_1/delete", url.Values{"next": {"/threads/th_1"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("状态 = %d, want 303", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, "/?notice=") {
+		t.Fatalf("当前会话回跳 = %q, want /?notice=…", loc)
+	}
 }

@@ -510,6 +510,28 @@ func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 	redirect(w, threadPath(id))
 }
 
+// handleThreadDelete 删除会话（Core 软删 + 清理任务），成功后回到来源页。
+// 删的是当前会话时回首页；next 只接受站内路径。
+func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	next := strings.TrimSpace(r.PostFormValue("next"))
+	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.Contains(next, `\`) {
+		next = safeReturnPath(r)
+	}
+	if next == threadPath(id) || next == "/thread/"+id {
+		next = "/"
+	}
+	if id == "" {
+		redirect(w, flashRedirect(next, "error", "缺少会话 id"))
+		return
+	}
+	if _, err := s.call(r, "thread.delete", map[string]any{"threadId": id}); err != nil {
+		redirect(w, flashRedirect(next, "error", cleanRPCError(err)))
+		return
+	}
+	redirect(w, flashRedirect(next, "notice", "会话已删除"))
+}
+
 // handleCancel 取消当前轮。
 func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

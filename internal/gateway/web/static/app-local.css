@@ -790,3 +790,9 @@ button:hover {
 /* 窄屏由 a_da 的抽屉形态负责（pages.css：.ada-sidebar 固定 + is-open 平移，
    app.js 的 data-sidebar-toggle/遮罩/Esc 已接）。这里不再把侧栏放回文档流，
    否则会出现「侧栏占满一屏、聊天区被挤到下面」的堆叠布局。 */
+
+/* 会话行内操作：删除按钮包在表单里，避免 form 的块级布局把按钮挤出 actions 容器。 */
+.ada-thread__actions form {
+  display: flex;
+  margin: 0;
+}
