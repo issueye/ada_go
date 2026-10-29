@@ -30,6 +30,8 @@ type stubUI struct {
 	assets  map[string][]byte
 	// bindings："<plugin>/<binding>" → 解析结果。
 	bindings map[string]web.ActionBinding
+	// list：PluginLister 的前端插件清单（扩展页用）。
+	list []web.FrontendPluginInfo
 }
 
 func (s *stubUI) Slot(name string, r *http.Request) (template.HTML, int, error) {
@@ -55,6 +57,8 @@ func (s *stubUI) Page(pluginID, slug string, r *http.Request) (template.HTML, er
 
 func (s *stubUI) Styles() []string  { return s.styles }
 func (s *stubUI) Scripts() []string { return s.scripts }
+
+func (s *stubUI) List() []web.FrontendPluginInfo { return s.list }
 
 func (s *stubUI) StaticAsset(pluginID, name string) ([]byte, bool) {
 	data, ok := s.assets[pluginID+"/"+name]

@@ -1,231 +1,275 @@
 /*
- * ada-go SSR 会话页的实时增强（M2）。
+ * 应用外壳交互层（无构建步骤，模板里只挂 data-* 属性）
  *
- * 无框架、无依赖：脚本缺席时页面完全退回 meta refresh 轮询 + 服务端表单，
- * 脚本可用时消费 /events/{threadId} 的 SSE 增量，终态后 reload 让服务端
- * 渲染最终历史与交互托盘。
+ * 覆盖三件事：
+ *  1. 提示条：可关闭，并在一段时间后自动淡出；
+ *  2. 确认弹窗：`form[data-confirm]` / `a[data-confirm]` 统一走**组件库**的纯 DOM 弹窗
+ *     （`ui::ConfirmDialog`；不用原生 `<dialog>`，更不用 `window.confirm`），
+ *     不再散落内联 onsubmit 脚本；
+ *  3. 移动端侧栏抽屉。
+ *
+ * 复制按钮（data-copy）与组件行为在 components.js，这里不重复绑定——
+ * 两份 document 级委托会让每次点击写两次剪贴板。
+ * 主题切换在 theme.js（必须阻塞加载以避免闪白）。
  */
 (function () {
-  "use strict";
+  'use strict';
 
-  // 只有这些状态需要建立实时连接；其余状态（terminal/finishing/空闲）
-  // 交给服务端渲染，finishing 仍由 meta refresh 兜底。
-  var ACTIVE = { running: true, waiting_input: true };
-  var TERMINAL = {
-    completed: true,
-    cancelled: true,
-    error: true,
-    interrupted: true,
-    budget_exceeded: true
-  };
-  var MAX_SILENT_RETRIES = 3;
-
-  var root = document.querySelector("[data-thread-id]");
-  if (!root || typeof window.EventSource !== "function") {
-    return;
+  /* ── 1. 提示条 ───────────────────────────────────────────────────────── */
+  function dismiss(target) {
+    if (!target) return;
+    target.style.transition = 'opacity 160ms ease, transform 160ms ease';
+    target.style.opacity = '0';
+    target.style.transform = 'translateY(-2px)';
+    window.setTimeout(function () {
+      target.remove();
+    }, 180);
   }
 
-  var threadId = root.getAttribute("data-thread-id") || "";
-  var runStatus = (root.getAttribute("data-run-status") || "").toLowerCase();
-  if (!threadId || !ACTIVE[runStatus]) {
-    return;
-  }
-
-  // 脚本正常工作时移除无 JS 的 meta refresh，避免服务端轮询与 SSE 双重刷新；
-  // 脚本缺席时 meta 仍在，页面照常轮询。
-  var refreshMeta = document.querySelector('meta[http-equiv="refresh"]');
-  if (refreshMeta && refreshMeta.parentNode) {
-    refreshMeta.parentNode.removeChild(refreshMeta);
-  }
-
-  var stream = document.getElementById("live-stream");
-  var statusBox = document.getElementById("live-status");
-  var blocks = Object.create(null);
-  var failures = 0;
-  var reloading = false;
-  var source = null;
-
-  function showStatus(text, level) {
-    if (!statusBox) return;
-    statusBox.textContent = text;
-    statusBox.setAttribute("data-level", level || "info");
-    statusBox.hidden = false;
-  }
-
-  function clearStatus() {
-    if (!statusBox) return;
-    statusBox.hidden = true;
-    statusBox.textContent = "";
-    statusBox.removeAttribute("data-level");
-  }
-
-  // reloadOnce 保证一次页面加载最多 reload 一次，避免事件重复导致刷新循环。
-  function reloadOnce() {
-    if (reloading) return;
-    reloading = true;
-    try {
-      if (source) source.close();
-    } catch (e) {
-      /* 忽略关闭失败 */
+  function autoDismissFlashes() {
+    var flashes = document.querySelectorAll('[data-flash]');
+    for (var i = 0; i < flashes.length; i += 1) {
+      (function (flash) {
+        var delay = flash.getAttribute('data-flash') === 'error' ? 9000 : 6000;
+        window.setTimeout(function () {
+          if (flash.isConnected) dismiss(flash);
+        }, delay);
+      })(flashes[i]);
     }
-    window.location.reload();
   }
 
-  function nearBottom() {
-    var doc = document.documentElement;
-    var bottom = window.innerHeight + window.pageYOffset;
-    return bottom >= doc.scrollHeight - 140;
-  }
+  /* ── 2. 共享确认弹窗 ─────────────────────────────────────────────────
+     弹窗本体是组件库的 `ui::ConfirmDialog`（`data-modal="confirm"`）；开合、焦点圈、
+     Esc、遮罩与滚动锁定由 `components.js` 的 `[data-modal]` 控制器统一负责。
+     这里只做三件事：记下待确认动作、写入文案、确认后执行。
+     🔴 **不要退回 window.confirm**：原生对话框不可样式化、会阻塞整页脚本，而且同一个
+     "删除"在聊天页与二级页会变成两种观感（历史 bug）。组件缺失＝模板漏渲染，直接报错。 */
+  var dialog = document.querySelector('[data-confirm-dialog]');
+  var pendingConfirm = null;
 
-  // ensureBlock 为同一 messageId 复用同一个块；text 与 thinking 各占一栏。
-  function ensureBlock(messageId) {
-    var key = messageId || "live";
-    if (blocks[key]) return blocks[key];
-    if (!stream) return null;
-
-    var article = document.createElement("article");
-    article.className = "ada-msg ada-msg--assistant live-msg";
-    article.setAttribute("data-message-id", key);
-
-    var avatar = document.createElement("span");
-    avatar.className = "ada-avatar";
-    avatar.setAttribute("aria-hidden", "true");
-    avatar.textContent = "A";
-
-    var body = document.createElement("div");
-    body.className = "ada-msg__body";
-
-    var thinking = document.createElement("div");
-    thinking.className = "live-thinking";
-    thinking.hidden = true;
-
-    var text = document.createElement("div");
-    text.className = "part-text live-text";
-
-    body.appendChild(thinking);
-    body.appendChild(text);
-    article.appendChild(avatar);
-    article.appendChild(body);
-    stream.appendChild(article);
-    stream.hidden = false;
-
-    blocks[key] = { article: article, thinking: thinking, text: text };
-    return blocks[key];
-  }
-
-  function handleDelta(raw) {
-    var data;
-    try {
-      data = JSON.parse(raw);
-    } catch (e) {
+  function openConfirm(message, onConfirm) {
+    if (!dialog || !window.AdaComponents || typeof window.AdaComponents.openModal !== 'function') {
+      console.error('[ssr-h] 页面缺少 [data-confirm-dialog] 组件，确认动作已取消');
       return;
     }
-    if (!data) return;
+    var messageNode = dialog.querySelector('[data-confirm-message]');
+    if (messageNode) messageNode.textContent = message;
+    pendingConfirm = onConfirm;
+    window.AdaComponents.openModal('confirm');
+  }
 
-    var entry = ensureBlock(data.messageId);
-    if (!entry) return;
+  function closeConfirm() {
+    pendingConfirm = null;
+    if (window.AdaComponents) window.AdaComponents.closeModal('confirm');
+  }
 
-    var kind = data.partKind || (data.thinking ? "thinking" : "text");
-    if (kind === "thinking") {
-      var thought = data.thinking || "";
-      if (!thought) return;
-      if (!entry.thinking.textContent) {
-        // 弱化样式 + 前缀，与历史里的「思考过程」区分。
-        entry.thinking.textContent = "思考：";
+  function wireDialog() {
+    if (!dialog) return;
+    dialog.addEventListener('click', function (event) {
+      var target = event.target;
+      if (!target || !target.closest) return;
+      // 取消/遮罩：关闭交给 data-modal-close，这里只清掉待确认动作。
+      if (target.closest('[data-confirm-cancel]')) {
+        pendingConfirm = null;
+        return;
       }
-      entry.thinking.textContent += thought;
-      entry.thinking.hidden = false;
-    } else {
-      var chunk = data.text || "";
-      if (!chunk) return;
-      entry.text.textContent += chunk;
-    }
-
-    if (nearBottom()) {
-      entry.article.scrollIntoView({ block: "nearest" });
-    }
+      if (target.closest('[data-confirm-ok]')) {
+        var action = pendingConfirm;
+        closeConfirm();
+        if (action) action();
+      }
+    });
+    // Esc / 点遮罩关闭时控制器会派发关闭事件，用来清掉悬着的动作。
+    document.addEventListener('ada:modal-close', function (event) {
+      if (event.detail && event.detail.id === 'confirm') pendingConfirm = null;
+    });
   }
 
-  function handleRunStatus(raw) {
-    var data;
+  document.addEventListener(
+    'submit',
+    function (event) {
+      var form = event.target;
+      if (!form || !form.matches || !form.matches('form[data-confirm]')) return;
+      if (form.dataset.confirmed === '1') {
+        delete form.dataset.confirmed;
+        return;
+      }
+      event.preventDefault();
+      var message = form.getAttribute('data-confirm') || '确认执行这个操作？';
+      openConfirm(message, function () {
+        form.dataset.confirmed = '1';
+        form.requestSubmit();
+      });
+    },
+    true
+  );
+
+  document.addEventListener('click', function (event) {
+    var target = event.target;
+    if (!target || !target.closest) return;
+
+    var dismissButton = target.closest('[data-dismiss]');
+    if (dismissButton) {
+      dismiss(dismissButton.closest('[data-flash]'));
+      return;
+    }
+
+    var confirmedLink = target.closest('a[data-confirm]');
+    if (confirmedLink) {
+      event.preventDefault();
+      openConfirm(confirmedLink.getAttribute('data-confirm'), function () {
+        window.location.href = confirmedLink.href;
+      });
+    }
+  });
+
+  /* 排序下拉框等：改选即提交 */
+  document.addEventListener('change', function (event) {
+    var field = event.target;
+    if (!field || !field.matches || !field.matches('[data-auto-submit]')) {
+      return;
+    }
+    if (field.form) field.form.submit();
+  });
+
+  /* ── 3. 侧栏：≤760px 是抽屉，>760px 是 56px 窄轨 ───────────────────────
+     两套形态共用一个按钮（data-sidebar-toggle），但状态不同：
+       · 窄屏：.ada-sidebar.is-open + 遮罩，点遮罩/Esc 关闭；
+       · 宽屏：.ada-shell.is-sidebar-collapsed（CSS 里收成窄轨，不是隐藏），
+         偏好存 localStorage。窄轨的目的是"收起不等于失去导航"，
+         所以别再改回 display:none —— 那会让折叠 = 自断一臂。 */
+  var COLLAPSE_KEY = 'a_da_sidebar_collapsed';
+  var narrowQuery = window.matchMedia('(max-width: 760px)');
+
+  function sidebar() {
+    return document.getElementById('chat-sidebar');
+  }
+
+  function backdrop() {
+    return document.getElementById('chat-backdrop');
+  }
+
+  function shell() {
+    return document.querySelector('.ada-shell');
+  }
+
+  function readCollapsed() {
     try {
-      data = JSON.parse(raw);
-    } catch (e) {
-      return;
-    }
-    var status = ((data && data.status) || "").toLowerCase();
-    var terminal = (
-      (data && (data.terminal || data.terminalResult)) ||
-      ""
-    ).toLowerCase();
-
-    // 终态或等待交互：交给服务端渲染最终历史 / 交互托盘。
-    if (terminal || status === "terminal" || TERMINAL[status]) {
-      reloadOnce();
-      return;
-    }
-    if (status === "waiting_input") {
-      reloadOnce();
-      return;
-    }
-    if (status === "running" || status === "finishing") {
-      showStatus(status === "finishing" ? "正在收尾…" : "正在生成…", "info");
+      return window.localStorage.getItem(COLLAPSE_KEY) === '1';
+    } catch (error) {
+      return false;
     }
   }
 
-  function handleError(raw) {
-    var data = {};
+  function writeCollapsed(collapsed) {
     try {
-      data = JSON.parse(raw) || {};
-    } catch (e) {
-      data = {};
+      window.localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0');
+    } catch (error) {
+      /* 隐私模式下不可用：忽略即可 */
     }
-    var message = data.message || data.detail || "出现可恢复错误。";
-    var diag = data.diag || data.name || "";
-    // evt.error 是进程内可恢复错误：只显示，不 reload，避免刷新循环。
-    showStatus(diag ? diag + "：" + message : message, "error");
   }
 
-  try {
-    source = new EventSource("/events/" + encodeURIComponent(threadId));
-  } catch (e) {
-    showStatus("无法建立实时连接，正在重试…", "warn");
-    return;
+  function isCollapsed() {
+    var wrap = shell();
+    return !!(wrap && wrap.classList.contains('is-sidebar-collapsed'));
   }
 
-  source.addEventListener("open", function () {
-    failures = 0;
-    clearStatus();
-  });
+  /* 按钮的无障碍状态要跟真实形态一致，否则读屏用户听到的是"打开侧栏"却按不开 */
+  function syncToggle() {
+    var button = document.querySelector('[data-sidebar-toggle]');
+    if (!button) return;
+    var narrow = narrowQuery.matches;
+    var open = narrow
+      ? !!(sidebar() && sidebar().classList.contains('is-open'))
+      : !isCollapsed();
+    var label = narrow
+      ? (open ? '关闭侧栏' : '打开侧栏')
+      : (open ? '收起侧栏' : '展开侧栏');
+    button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    button.setAttribute('aria-label', label);
+    button.setAttribute('title', label);
+  }
 
-  source.addEventListener("evt.message.delta", function (event) {
-    handleDelta(event.data);
-  });
+  function setSidebar(open) {
+    var side = sidebar();
+    var veil = backdrop();
+    if (!side || !veil) return;
+    side.classList.toggle('is-open', open);
+    veil.classList.toggle('is-open', open);
+    if (open) {
+      var search = side.querySelector('.ada-search__input');
+      if (search) search.focus();
+    }
+    syncToggle();
+  }
 
-  source.addEventListener("evt.run.status", function (event) {
-    handleRunStatus(event.data);
-  });
+  function setCollapsed(collapsed) {
+    var wrap = shell();
+    if (!wrap) return;
+    wrap.classList.toggle('is-sidebar-collapsed', collapsed);
+    writeCollapsed(collapsed);
+    syncToggle();
+  }
 
-  source.addEventListener("evt.interaction.requested", function () {
-    reloadOnce();
-  });
-
-  source.addEventListener("evt.error", function (event) {
-    handleError(event.data);
-  });
-
-  // resync 表示环形缓冲无法补齐历史，必须走 thread.get 全量重同步。
-  source.addEventListener("resync", function () {
-    reloadOnce();
-  });
-
-  // 断线重连由 EventSource 自身负责；这里只更新状态文案，不触发 reload。
-  source.addEventListener("error", function () {
-    failures += 1;
-    if (failures <= MAX_SILENT_RETRIES) {
-      showStatus("连接断开，正在重试…", "warn");
+  /* 跨断点时清理另一套形态的状态，避免"抽屉开着 + 折叠着"同时成立 */
+  function onBreakpointChange() {
+    var side = sidebar();
+    var veil = backdrop();
+    if (narrowQuery.matches) {
+      var wrap = shell();
+      if (wrap) wrap.classList.remove('is-sidebar-collapsed');
     } else {
-      showStatus("连接断开，已多次重试失败。请刷新页面。", "error");
+      if (side) side.classList.remove('is-open');
+      if (veil) veil.classList.remove('is-open');
+      setCollapsed(readCollapsed());
+    }
+    syncToggle();
+  }
+
+  document.addEventListener('click', function (event) {
+    var target = event.target;
+    if (!target || !target.closest) return;
+    if (target.closest('[data-sidebar-toggle]')) {
+      if (narrowQuery.matches) {
+        setSidebar(!(sidebar() && sidebar().classList.contains('is-open')));
+      } else {
+        setCollapsed(!isCollapsed());
+      }
+      return;
+    }
+    if (target.closest('#chat-backdrop')) {
+      setSidebar(false);
     }
   });
+
+  if (typeof narrowQuery.addEventListener === 'function') {
+    narrowQuery.addEventListener('change', onBreakpointChange);
+  } else if (typeof narrowQuery.addListener === 'function') {
+    narrowQuery.addListener(onBreakpointChange);
+  }
+
+  document.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape') return;
+    // 弹窗开着时 Esc 归弹窗控制器管，别顺手把侧栏也收起来。
+    if (window.AdaComponents && window.AdaComponents.modalOpen && window.AdaComponents.modalOpen()) {
+      return;
+    }
+    var side = sidebar();
+    if (side && side.classList.contains('is-open')) {
+      setSidebar(false);
+    }
+  });
+
+  function boot() {
+    wireDialog();
+    autoDismissFlashes();
+    // 恢复上次的折叠偏好（宽屏）并让按钮文案与真实状态一致
+    onBreakpointChange();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
 })();

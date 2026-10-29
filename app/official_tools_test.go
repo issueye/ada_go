@@ -1,7 +1,7 @@
 package app_test
 
 // M3/M5 官方插件的行为验收：tools-git / tools-ask / tools-skill / persona-coding，
-// 以及 coding 产品（skills=true，10 插件）的装配门控。全部走真实装配。
+// 以及 coding 产品（skills=true，13 插件）的装配门控。全部走真实装配。
 
 import (
 	"context"
@@ -19,10 +19,10 @@ import (
 	"github.com/adag/ada-go/internal/domain"
 	"github.com/adag/ada-go/internal/plugins/host"
 	"github.com/adag/ada-go/internal/toolkit"
-	"github.com/adag/ada-go/official"
+	"github.com/adag/ada-go/plugins/official"
 )
 
-// codingProduct 装配 coding 产品（skills=true，10 插件；前端插件由 Gateway 侧装配）。
+// codingProduct 装配 coding 产品（skills=true，13 插件；前端插件由 Gateway 侧装配）。
 func codingProduct(t *testing.T) *app.Assembly {
 	return codingProductIn(t, tempDir(t))
 }
@@ -70,18 +70,24 @@ func codingProductIn(t *testing.T, ws string) *app.Assembly {
 	return asm
 }
 
-// TestCodingProductAssembles 钉 coding 产品的装配：10 个声明插件全部就位
-// （9 个后端实例 + 1 个前端插件由 Gateway 侧装配），read_skill 在目录里，
+// TestCodingProductAssembles 钉 coding 产品的装配：13 个声明插件全部就位
+// （9 个后端实例 + 4 个前端插件由 Gateway 侧装配），read_skill 在目录里，
 // persona-coding 的提示词片段已结算。
 func TestCodingProductAssembles(t *testing.T) {
 	asm := codingProduct(t)
 
 	if len(asm.Plugins) != 9 {
-		t.Fatalf("后端插件数 = %d，期望 9（tools-subagent 是 v1.5；ui-task-plan 走 Gateway）: %v",
+		t.Fatalf("后端插件数 = %d，期望 9（tools-subagent 是 v1.5；前端插件走 Gateway）: %v",
 			len(asm.Plugins), pluginIDsOf(asm))
 	}
-	if len(asm.FrontendDecls) != 1 || asm.FrontendDecls[0] != "ui-task-plan" {
-		t.Fatalf("前端声明 = %v，期望 [ui-task-plan]", asm.FrontendDecls)
+	wantFrontend := []string{"ui-todo", "ui-ask-user", "provider-admin", "token-usage"}
+	if len(asm.FrontendDecls) != len(wantFrontend) {
+		t.Fatalf("前端声明 = %v，期望 %v", asm.FrontendDecls, wantFrontend)
+	}
+	for i, id := range wantFrontend {
+		if asm.FrontendDecls[i] != id {
+			t.Fatalf("前端声明[%d] = %q，期望 %q（全部：%v）", i, asm.FrontendDecls[i], id, asm.FrontendDecls)
+		}
 	}
 	if _, ok := asm.Tools.Lookup(context.Background(), "read_skill"); !ok {
 		t.Fatalf("coding 产品（skills=true）必须有基座工具 read_skill，现有 %v", toolNames(asm))

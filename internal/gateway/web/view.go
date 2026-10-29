@@ -121,12 +121,14 @@ type messagePayload struct {
 
 // toolPayload 对应工具结果条目（08 §8.4 / spec ToolResult）。
 type toolPayload struct {
-	CallID  string          `json:"callId"`
-	Tool    string          `json:"tool"`
-	Status  string          `json:"status"`
-	Content []messagePart   `json:"content"`
-	Details json.RawMessage `json:"details"`
-	Receipt struct {
+	CallID    string          `json:"callId"`
+	Tool      string          `json:"tool"`
+	Status    string          `json:"status"`
+	Input     json.RawMessage `json:"input"`
+	Arguments json.RawMessage `json:"arguments"`
+	Content   []messagePart   `json:"content"`
+	Details   json.RawMessage `json:"details"`
+	Receipt   struct {
 		Status     string `json:"status"`
 		DurationMS int64  `json:"durationMs"`
 		Truncated  bool   `json:"truncated"`
@@ -139,16 +141,35 @@ type toolPayload struct {
 // baseData 是所有页面共用的外壳字段（嵌入后模板按提升字段访问）。
 type baseData struct {
 	Title               string
+	Page                string // chat | overview | extensions | ext:<id>
 	ProductName         string
+	BrandName           string
+	ProductBadge        string
 	Locale              string
 	Identity            string
 	LoginPath           string
 	CSRF                string
 	Workspace           string
+	WorkspaceName       string
 	WorkspaceIndex      int
 	Workspaces          []workspaceOption
 	ShowWorkspacePicker bool
 	RefreshSeconds      int
+	Gateway             string
+	ActiveThreadID      string
+	Connected           bool
+	TopbarStatus        template.HTML
+	TopbarActions       template.HTML
+	// PluginNav 是前端插件声明的侧栏导航（供应商 / Token 用量等）。
+	PluginNav []pluginNavLink
+	// Flash 是提示条 HTML（空 = 不渲染）。
+	Flash template.HTML
+	// Sidebar 是组件库渲染好的侧栏整块 HTML。
+	Sidebar template.HTML
+	// Icons 是页面级 SVG sprite。
+	Icons template.HTML
+	// ConfirmDialog 是共享确认弹窗（每个外壳都必须带上）。
+	ConfirmDialog template.HTML
 	// Slots 是 12 个稳定插槽的 SSR 宿主内容。M2 阶段由基座保持为空，
 	// M4 接上插件宿主后由渲染结果填充；模板通过 {{slot ...}} 落位。
 	Slots slotViews
@@ -157,8 +178,6 @@ type baseData struct {
 	// PluginStyles / PluginScripts 是插件静态资源的 URL（/ext/{id}/static/...）。
 	PluginStyles  []string
 	PluginScripts []string
-	// Icons 是页面级 SVG 雪碧图/图标 HTML（M2 先为空，图标仍在模板内联）。
-	Icons template.HTML
 }
 
 // slotCounts 是 12 个插槽的贡献者计数，字段与 slotViews 一一对应。
@@ -200,6 +219,13 @@ type workspaceOption struct {
 	Index int
 	Name  string
 	Path  string
+}
+
+// pluginNavLink 是前端插件贡献的一个侧栏导航项。
+type pluginNavLink struct {
+	PluginID string
+	Label    string
+	Href     string
 }
 
 type threadsData struct {
@@ -266,6 +292,7 @@ type toolView struct {
 	StatusLabel string
 	DurationMS  int64
 	Truncated   bool
+	Args        string
 	Output      string
 	Details     string
 	Reason      string
@@ -294,6 +321,111 @@ type errorData struct {
 
 type loginData struct {
 	baseData
+}
+
+// overviewData 是概览页（/overview）：统计卡 + 最近会话 + 插件卡片。
+type overviewData struct {
+	baseData
+	Stats  []overviewStat
+	Recent []overviewThread
+}
+
+type overviewStat struct {
+	Label string
+	Value string
+	Hint  string
+	Tone  string // neutral | brand | warn
+}
+
+type overviewThread struct {
+	ID        string
+	Title     string
+	Workspace string
+	Mode      string
+	Running   bool
+	ItemCount int
+}
+
+// workspacesData 是工作区页（/workspaces）：磁盘/常用位置 + 最近工作区 + 目录浏览。
+type workspacesData struct {
+	baseData
+	Roots      []workspaceRoot
+	Recent     []workspaceRecent
+	Current    string
+	Parent     string
+	ParentHref string
+	Entries    []workspaceEntry
+	Truncated  bool
+	Omitted    int
+	BindThread string
+	// Selectable 表示当前浏览目录正好是某个已配置工作区，可以设为当前工作区。
+	Selectable bool
+}
+
+type workspaceRoot struct {
+	Label string
+	Path  string
+	Href  string
+	Kind  string
+}
+
+type workspaceRecent struct {
+	Path     string
+	Name     string
+	Sessions int
+	Active   bool
+	// Known 表示该工作区的会话数已知（只有当前工作区查询过）。
+	Known bool
+}
+
+type workspaceEntry struct {
+	Name string
+	Path string
+	Href string
+}
+
+// extensionsData 是插件页（/extensions）：统一列表（不再按前端/后端分区）。
+type extensionsData struct {
+	baseData
+	Plugins     []pluginRow
+	PluginCount int
+}
+
+// pluginRow 是插件列表/详情的一行：同一个 id 的前端与后端能力合并成一条。
+// 前端/后端归属（Frontend/Backend）只在详情页展示，列表里不分区。
+type pluginRow struct {
+	ID           string
+	Name         string
+	Version      string
+	Description  string
+	Source       string
+	Status       string
+	StatusLabel  string
+	StatusTone   string
+	Error        string
+	Enabled      bool
+	Frontend     bool
+	Backend      bool
+	Tools        int
+	Hooks        int
+	Skills       int
+	Slots        int
+	Pages        int
+	Nav          int
+	FirstPage    string
+	HasDashboard bool
+}
+
+// pluginDetailData 是 /extensions/{id} 的详情页。
+type pluginDetailData struct {
+	baseData
+	Plugin pluginRow
+}
+
+// offlineData 是二级页的离线壳：保留页面外壳，内容区如实说“未连接”。
+type offlineData struct {
+	baseData
+	Reason string
 }
 
 // buildRun 把 Core 的运行状态翻译成界面文案。
@@ -499,6 +631,10 @@ func toolViewFromPayload(raw json.RawMessage, itemTruncated bool) *toolView {
 	if tool == "" {
 		tool = "tool"
 	}
+	args := p.Input
+	if len(args) == 0 || string(args) == "null" {
+		args = p.Arguments
+	}
 	return &toolView{
 		CallID:      p.CallID,
 		Tool:        tool,
@@ -506,6 +642,7 @@ func toolViewFromPayload(raw json.RawMessage, itemTruncated bool) *toolView {
 		StatusLabel: toolStatusLabel(status),
 		DurationMS:  p.Receipt.DurationMS,
 		Truncated:   p.Receipt.Truncated || itemTruncated,
+		Args:        prettyJSON(args),
 		Output:      clip(strings.Join(texts, "\n"), maxToolOutput),
 		Details:     prettyJSON(p.Details),
 		Reason:      p.Receipt.Reason,

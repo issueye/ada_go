@@ -18,7 +18,7 @@ import (
 	"github.com/adag/ada-go/internal/conformance/testkit"
 	"github.com/adag/ada-go/internal/plugins"
 	"github.com/adag/ada-go/internal/plugins/host"
-	"github.com/adag/ada-go/official"
+	"github.com/adag/ada-go/plugins/official"
 )
 
 // ckptFixture 是测试夹具：builtin 信任、fs.write 能力、rollback=true 的写工具。

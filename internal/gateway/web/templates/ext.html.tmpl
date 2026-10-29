@@ -1,22 +1,8 @@
-{{define "ext"}}{{template "head" .}}
-<div class="ada-corner-dock" id="chat-corner" aria-hidden="true"></div>
-<div class="ada-chat-viewport">
-  <div class="ada-scroll" id="chat-scroll">
-    <div class="ada-wrap">
-      <div class="page ext-page" data-ext-plugin="{{.PluginID}}" data-ext-slug="{{.Slug}}">
-        <header class="thread-head">
-          <div>
-            <h1>{{.Title}}</h1>
-            <p class="muted">扩展页面 · {{.PluginID}}/{{.Slug}}</p>
-          </div>
-        </header>
-        <section class="ext-content" id="ext-content">
-{{.Content}}
-        </section>
-        {{slot "extensions.list" .Slots.ExtensionsList .SlotCounts.ExtensionsList ""}}
-        {{slot "dashboard.widgets" .Slots.DashboardWidgets .SlotCounts.DashboardWidgets ""}}
-      </div>
+{{define "ext"}}{{template "doc_head" .}}{{template "shell_start" .}}
+  <div class="ada-scroll">
+    <div class="ada-wrap" style="max-width:1040px">
+      {{template "flash" .}}
+      <div class="ext-page" id="ext-content" data-ext-plugin="{{.PluginID}}" data-ext-slug="{{.Slug}}" data-plugin-scope="{{.PluginID}}">{{.Content}}</div>
     </div>
   </div>
-</div>
-{{template "foot" .}}{{end}}
+{{template "shell_end" .}}{{end}}

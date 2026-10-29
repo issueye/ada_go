@@ -348,7 +348,7 @@ func TestGatewayE2E(t *testing.T) {
 	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/html") {
 		t.Fatalf("首页 Content-Type = %q，期望 text/html", ct)
 	}
-	if !strings.Contains(body, `class="brand"`) || !strings.Contains(body, "ada-go") {
+	if !strings.Contains(body, `class="ada-brand"`) || !strings.Contains(body, "ada-go") {
 		t.Fatalf("首页未包含品牌标识；正文片段: %.800s", body)
 	}
 	t.Logf("首页 OK（含品牌，%.0f ms）", float64(firstPageMS))
@@ -360,8 +360,8 @@ func TestGatewayE2E(t *testing.T) {
 		t.Fatalf("POST /threads 状态 = %d，期望 303；正文: %.800s", resp.StatusCode, body)
 	}
 	location := resp.Header.Get("Location")
-	if !strings.HasPrefix(location, "/thread/") || strings.TrimPrefix(location, "/thread/") == "" {
-		t.Fatalf("POST /threads Location = %q，期望 /thread/{id}", location)
+	if !strings.HasPrefix(location, "/threads/") || strings.TrimPrefix(location, "/threads/") == "" {
+		t.Fatalf("POST /threads Location = %q，期望 /threads/{id}", location)
 	}
 	threadPath := location
 	t.Logf("建会话 OK：%s", threadPath)

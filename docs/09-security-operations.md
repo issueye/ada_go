@@ -36,6 +36,7 @@
 - 不使用内联脚本；需要 nonce 时按请求生成，不接受插件注入。
 - 插件 CSS 允许外部文件；插件 JS 默认关闭，启用时仍受 CSP 限制。
 - SSE/WS 校验 cookie + Origin；登录后轮换会话 id；cookie `HttpOnly`，非回环时 `Secure`。
+- 写请求的 Origin 判定：同源 `Origin` 直接放行；`Referrer-Policy: no-referrer` 下 Chromium 会把表单 POST 的 `Origin` 发成 `null`（桌面壳命中），此时只看 `Sec-Fetch-Site: same-origin`——该头由浏览器写入、脚本不可伪造，sandbox iframe 等不透明来源一律拒绝。所有 POST 表单必须带 `csrf_token`（双提交 cookie 校验），侧栏/空态的新建会话表单同样适用。
 - 所有渲染默认转义；Markdown 用 goldmark 的安全模式 + 额外清洗，链接只允许 http/https/mailto/相对路径。
 - 上传：v1 只有插件 zip 安装（CLI），HTTP 不接受任意文件上传。
 

@@ -21,7 +21,7 @@ import (
 	"github.com/adag/ada-go/internal/coreapp"
 	"github.com/adag/ada-go/internal/domain"
 	"github.com/adag/ada-go/internal/plugins/host"
-	"github.com/adag/ada-go/official"
+	"github.com/adag/ada-go/plugins/official"
 )
 
 // memState 是线程级 KV 的测试替身（host.Context.State 的形状）。
@@ -220,11 +220,11 @@ func TestOfficialDistInSync(t *testing.T) {
 	if err != nil {
 		t.Skip("没有 node，跳过 dist 同步检查")
 	}
-	cmd := exec.Command(node, "official/build.mjs", "--check")
+	cmd := exec.Command(node, "plugins/official/build.mjs", "--check")
 	cmd.Dir = repoRoot(t)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("dist 与源码不同步（运行 node official/build.mjs）：%v\n%s", err, out)
+		t.Fatalf("dist 与源码不同步（运行 node plugins/official/build.mjs）：%v\n%s", err, out)
 	}
 }
 

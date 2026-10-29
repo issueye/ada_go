@@ -41,6 +41,35 @@ type StaticAssetProvider interface {
 	StaticAsset(pluginID, name string) ([]byte, bool)
 }
 
+// FrontendNavLink 是前端插件声明的侧栏导航项。
+type FrontendNavLink struct {
+	Label string
+	Slug  string
+}
+
+// FrontendPluginInfo 是扩展页展示的前端插件摘要。
+type FrontendPluginInfo struct {
+	ID           string
+	Name         string
+	Version      string
+	Description  string
+	NavCount     int
+	PageCount    int
+	SlotCount    int
+	FirstPage    string
+	HasDashboard bool
+	HasAssets    bool
+	Enabled      bool
+	Status       string
+	Errors       []string
+	Nav          []FrontendNavLink
+}
+
+// PluginLister 由渲染宿主可选实现：列出已装配的前端插件（扩展页/概览用）。
+type PluginLister interface {
+	List() []FrontendPluginInfo
+}
+
 // ActionBinding 是动作桥解析出的一条绑定：binding 名 → 目标后端动作。
 type ActionBinding struct {
 	// BackendID 是提供动作的插件 id（ActionEnvelope.pluginId）。
@@ -104,6 +133,28 @@ func (s *Server) pluginScripts() []string {
 	return s.cfg.PluginUI.Scripts()
 }
 
+// pluginNavLinks 收集前端插件声明的侧栏导航（供应商 / Token 用量等）。
+func (s *Server) pluginNavLinks() []pluginNavLink {
+	lister, ok := s.cfg.PluginUI.(PluginLister)
+	if !ok {
+		return nil
+	}
+	var out []pluginNavLink
+	for _, p := range lister.List() {
+		for _, n := range p.Nav {
+			if strings.TrimSpace(n.Label) == "" || strings.TrimSpace(n.Slug) == "" {
+				continue
+			}
+			out = append(out, pluginNavLink{
+				PluginID: p.ID,
+				Label:    n.Label,
+				Href:     "/ext/" + p.ID + "/" + n.Slug,
+			})
+		}
+	}
+	return out
+}
+
 // ---- /ext 路由 -------------------------------------------------------------
 
 // PageMeta 由渲染宿主可选实现：给出页面标题（清单 pages[].title）。
@@ -139,7 +190,7 @@ func (s *Server) handleExtPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := extPageData{
-		baseData: s.base(r, title),
+		baseData: s.base(r, "ext:"+id, title, nil, "", true),
 		PluginID: id,
 		Slug:     slug,
 		Content:  content,

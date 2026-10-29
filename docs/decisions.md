@@ -51,7 +51,7 @@ M1 期间若领域层不再需要独立常量，可让 `domain` 改为引用 `di
 
 - 允许：`products/*.agent.json`（装配选择）、`tools/verify/boundary.go` 的边界清单、插件包自身目录、测试夹具。
 - 禁止：`internal/**`、`app/**`、`cmd/**` 的非测试 Go 源码（含注释）。
-- 由 `adag verify boundary` 扫描阻断；同一检查还禁止 `internal/` import `official/`、禁止任何 `func RegisterTool|RegisterProvider|RegisterAction|RegisterSlot|...` 形态的平行 Go 注册入口。
+- 由 `adag verify boundary` 扫描阻断；同一检查还禁止 `internal/` import `plugins/official/`、禁止任何 `func RegisterTool|RegisterProvider|RegisterAction|RegisterSlot|...` 形态的平行 Go 注册入口。
 
 ### D-7 moejs 上游缺口的实测判定（M1-D 尖刺，`go run ./tools/moejspike`）
 
@@ -113,7 +113,7 @@ M1 期间若领域层不再需要独立常量，可让 `domain` 改为引用 `di
 | `adag verify boundary` / `nodecompat` | 通过（基座源码零官方插件 id、无平行 Go 注册入口、domain 只用标准库、ports 只依赖 domain） |
 | `adag doctor --fake` | 通过（M0 范围；SQLite/锁/端口检查显式待接入） |
 | 空基座桩启动（`products/skeleton.agent.json`，`plugins: []`） | 通过：34 方法 dispatch、0 工具、0 供应商、带空态提示 |
-| 未写任何具体工具、provider、审批规则与业务页面 | 是（`official/` 尚不存在，基座无兜底） |
+| 未写任何具体工具、provider、审批规则与业务页面 | 是（`plugins/official/` 尚不存在，基座无兜底） |
 
 ## 3b. M1-A 退出状态（引擎落地）
 

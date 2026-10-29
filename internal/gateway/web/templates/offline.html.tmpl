@@ -1,0 +1,17 @@
+{{define "offline"}}{{template "doc_head" .}}{{template "shell_start" .}}
+  <div class="ada-scroll">
+    <div class="ada-wrap" style="max-width:1040px">
+      {{template "flash" .}}
+      <div class="empty-state">
+        <span class="ada-empty__mark">{{icon "i-alert" 20}}</span>
+        <p class="text-sm font-semibold text-ink">未连接</p>
+        <p class="mt-1 text-xs text-muted">{{.Reason}}</p>
+        <p class="mt-1 text-xs text-faint">请确认桌面端或网关仍在运行，然后重新连接。已加载的页面不会伪造数据。</p>
+        <div class="mt-4 flex gap-2">
+          <a class="ada-btn ada-btn--primary ada-btn--sm" href="">重新连接</a>
+          <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/">返回会话</a>
+        </div>
+      </div>
+    </div>
+  </div>
+{{template "shell_end" .}}{{end}}

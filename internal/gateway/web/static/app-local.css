@@ -254,13 +254,49 @@ select {
   font: inherit;
 }
 
-input[type="text"]:focus-visible,
-textarea:focus-visible,
-select:focus-visible,
+/* 焦点态交给 a_da 组件层统一表达：
+   文本控件用 `.ada-input:focus` 的品牌描边 + 3px 光环，输入卡用
+   `.ada-composer__card:focus-within` 的整卡光环。这里不再给 textarea/input
+   叠加 outline——那会和组件层的光环形成"硬描边 + 柔光环"两层焦点。 */
 button:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--ph-brand);
   outline-offset: 2px;
+}
+
+/* 非组件类的原生文本控件（工作区输入框等）：同一套品牌描边 + 光环。 */
+input[type="text"]:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--ada-focus-border);
+  box-shadow: var(--ada-focus-ring);
+}
+
+/* 输入卡里的 textarea：焦点由卡片本体的 focus-within 表达，自身不再画环。 */
+.ada-composer__input:focus,
+.ada-composer__input:focus-visible {
+  outline: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+/* 输入卡：在 a_da 基线阴影上再叠一层更浅、更大的环境阴影，让输入框从画布上浮起来。
+   两层都用 --ph-brand 做色源（30% 保持基线观感，10% 是新增的浅色层）。
+   聚焦时保留环境阴影，再叠加 3px 焦点光环，而不是把阴影替换掉。 */
+.ada-composer__card {
+  box-shadow:
+    var(--ada-shadow-raised),
+    0 10px 26px -22px color-mix(in srgb, var(--ph-brand) 30%, transparent),
+    0 14px 36px -20px color-mix(in srgb, var(--ph-brand) 10%, transparent);
+}
+
+.ada-composer__card:focus-within {
+  box-shadow:
+    var(--ada-shadow-raised),
+    0 10px 26px -22px color-mix(in srgb, var(--ph-brand) 30%, transparent),
+    0 14px 36px -20px color-mix(in srgb, var(--ph-brand) 10%, transparent),
+    var(--ada-focus-ring);
 }
 
 .create-form input[type="text"] {

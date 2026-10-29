@@ -1,18 +1,17 @@
-{{define "error"}}{{template "head" .}}
-<div class="ada-scroll">
-<div class="ada-wrap">
-<div class="page">
-<section class="panel error-panel">
-  <p class="error-status">HTTP {{.Status}}</p>
-  <h1>{{.Heading}}</h1>
-  <p>{{.Message}}</p>
-  {{with .Detail}}<p class="error-detail">技术细节：{{.}}</p>{{end}}
-  <p class="actions">
-    <a class="btn btn-primary" href="{{.RetryPath}}">{{.RetryLabel}}</a>
-    <a class="btn btn-quiet" href="/">返回会话列表</a>
-  </p>
-</section>
-</div>
-</div>
-</div>
-{{template "foot" .}}{{end}}
+{{define "error"}}{{template "doc_head" .}}{{template "shell_start" .}}
+  <div class="ada-scroll">
+    <div class="ada-wrap" style="max-width:1040px">
+      {{template "flash" .}}
+      <div class="empty-state">
+        <span class="ada-empty__mark">{{icon "i-alert" 20}}</span>
+        <p class="text-sm font-semibold text-ink">{{.Heading}}</p>
+        <p class="mt-1 text-xs text-muted">{{.Message}}</p>
+        {{if .Detail}}<p class="mt-1 text-xs text-faint">{{.Detail}}</p>{{end}}
+        <div class="mt-4 flex gap-2">
+          <a class="ada-btn ada-btn--primary ada-btn--sm" href="{{.RetryPath}}">{{.RetryLabel}}</a>
+          <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/">返回会话</a>
+        </div>
+      </div>
+    </div>
+  </div>
+{{template "shell_end" .}}{{end}}

@@ -17,7 +17,7 @@
 - **前端**：VNode 校验、转义、标签/属性白名单、golden HTML、SSE 合并与断序快照、无 JS 表单链路。
 - **UI 设计系统**：token 名/值与 a_da 基线逐项一致（`adag verify ui`）；CSS 无硬编码十六进制色、奇数尺寸与 `dark:` 变体；组件 class/DOM 基线快照；Light/Dark 对比度 ≥4.5:1（大字/图标 ≥3:1）；1600/1280/1024/860/760/500 宽度无横向溢出；≤760px 抽屉与汉堡；`prefers-reduced-motion`、键盘焦点回归、`<details>`/真实链接无 JS 可操作；对话流、工具卡、三类托盘、任务卡、空状态、错误页的 golden HTML 与截图对照 a_da 基线。详见 [7.7.7](07-ssr-frontend.md#777-验收)。
 - **E2E**：`adag gateway --fake-provider` + httptest/浏览器（chromedp）：新建线程、流式、交互请求与响应、插件页面、重载插件、Gateway 重启恢复。
-- **边界**：零插件启动、禁用官方插件后对应能力消失、`internal/` 不依赖 `official/`、基座源码无官方插件 id、不存在 Go 插件注册 API。
+- **边界**：零插件启动、禁用官方插件后对应能力消失、`internal/` 不依赖 `plugins/official/`、基座源码无官方插件 id、不存在 Go 插件注册 API。
 - **模糊测试**：协议 JSON、VNode、路径 scope、Markdown 清洗。
 
 ### 11.2 门禁
@@ -32,7 +32,7 @@ go generate ./... && git diff --exit-code   # 生成物必须同步
 adag verify                                 # 协议/接线/能力/插槽/文档
 adag verify nodecompat                      # Node 模块表/能力位/错误码/偏差表
 adag verify ui                              # token/class/DOM 基线与 a_da 一致；无硬编码色与奇数尺寸
-adag verify boundary                        # 基座边界：不 import official/*、源码无官方插件 id、无 Go 插件注册 API
+adag verify boundary                        # 基座边界：不 import plugins/official/*、源码无官方插件 id、无 Go 插件注册 API
 adag doctor --fake                          # 无模型依赖的启动自检
 ```
 

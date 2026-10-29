@@ -183,7 +183,10 @@ JSON-RPC 标准错误码用于传输层；业务错误用 4 位应用码：
     "tools-skill",
     "policy-default",
     "persona-coding",
-    "ui-task-plan"
+    "ui-todo",
+    "ui-ask-user",
+    "provider-admin",
+    "token-usage"
   ],
   "capabilities": {
     "skills": true,

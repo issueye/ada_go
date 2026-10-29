@@ -21,7 +21,7 @@ import (
 	"github.com/adag/ada-go/internal/plugins/host"
 	"github.com/adag/ada-go/internal/plugins/provider"
 	"github.com/adag/ada-go/internal/toolkit"
-	"github.com/adag/ada-go/official"
+	"github.com/adag/ada-go/plugins/official"
 )
 
 // Deps 是装配期注入的宿主依赖。

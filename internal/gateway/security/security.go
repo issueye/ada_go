@@ -229,6 +229,12 @@ func (m *Middleware) originAllowed(r *http.Request) bool {
 		// 非浏览器客户端或同源表单不带 Origin；CSRF 仍会约束 Cookie 会话。
 		return true
 	}
+	// Chromium 在 Referrer-Policy: no-referrer 下会把表单 POST 的 Origin 发成 "null"
+	// （桌面壳正好命中）。Sec-Fetch-Site 由浏览器写入、脚本不可伪造：只有
+	// same-origin 才放行；sandbox iframe 之类的不透明来源不会是同源。
+	if strings.EqualFold(origin, "null") {
+		return strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "same-origin")
+	}
 	u, err := url.Parse(origin)
 	if err != nil || u.Host == "" {
 		return false

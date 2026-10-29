@@ -13,7 +13,7 @@ ada-go/
   go.mod                   ada-go 唯一 Go module；发布依赖版本仍在这里锁定
   go.sum
   cmd/adag/                main：gateway / core / plugin / doctor / verify
-  app/                     组合根：产品声明 + 嵌入的 official/ → coreapp
+  app/                     组合根：产品声明 + 嵌入的 plugins/official/ → coreapp
   sdk/                     TS 插件类型：agent.d.ts、ssr.d.ts、node.d.ts（Node 兼容子集）、tsconfig
   internal/
     domain/                消息、Part、工具描述符/回执、事件、错误、失败方向
@@ -24,7 +24,7 @@ ada-go/
     plugins/               manifest、loader、host(moejs)、contrib、hooks、skills
       host/node/           能力位 → stdlib.Config、env 白名单、Node 错误归一化
     coreproto/             JSON-RPC 服务端、事件发射、投影
-    coreapp/               通用装配器：接收插件集合 → 目录/引擎（不 import official/）
+    coreapp/               通用装配器：接收插件集合 → 目录/引擎（不 import plugins/official/）
     gateway/
       server/              Gin、中间件、路由
       registry/            工作区键、实例表、LRU、回收
@@ -36,18 +36,18 @@ ada-go/
     proto/                 生成的方法常量、DTO、错误码
     diag/                  诊断码词汇表
     conformance/           端口契约、不变量、golden、nodecompat、ui（token/class/DOM 基线）
-  official/                官方 TS 插件包（trust=builtin，可禁用）
-    <id>/
-      plugin.json
-      index.ts             后端入口（构建期编译）
-      slot.tsx/page.tsx    前端模板（可选）
-      dist/                esbuild 产物，go:embed 进二进制
-    provider-openai-chat/ provider-anthropic-messages/ provider-openai-responses/
-    tools-fs/ tools-shell/ tools-git/ tools-plan/ tools-ask/ tools-skill/ tools-subagent/
-    policy-default/
-    persona-coding/ ui-task-plan/ ui-hello-tsx/
-  plugins/                 第三方示例插件（与 official/ 同一 TS 契约，装时编译）
-    hello-tsx/ task-plan/ ask-user/
+  plugins/                 插件源码（官方与第三方同一 TS 契约）
+    official/              官方插件包（trust=builtin；源码可见可改，构建期 go:embed 进二进制）
+      <id>/
+        plugin.json
+        index.ts             后端入口（构建期预编译）
+        slot.tsx/page.tsx    前端模板（可选）
+        dist/                构建产物，go:embed 进二进制
+      provider-openai-chat/ provider-anthropic-messages/ provider-openai-responses/
+      tools-fs/ tools-shell/ tools-git/ tools-plan/ tools-ask/ tools-skill/ tools-subagent/
+      policy-default/
+      persona-coding/ ui-todo/ ui-ask-user/ provider-admin/ token-usage/ ui-hello-tsx/
+    hello-tsx/ task-plan/ ask-user/   第三方示例（装时编译）
   web/
     templates/             layout、chat、workspaces、overview、extensions、plugin、error（DOM 与 a_da 同构）
     static/
@@ -82,14 +82,14 @@ ada-go/
     plugin-api.md          从类型定义生成的插件 API 参考（后续）
   tools/
     genproto/              生成 methods_gen.go
-    bundle-official/       esbuild 预编译 official/* → dist/，供 go:embed
+    bundle-plugins/official/       esbuild 预编译 plugins/official/* → dist/，供 go:embed
     verify/                接线/能力/插槽/文档/边界门禁
 ```
 
 约束：
 
 - `internal/` 下不出现循环依赖；`domain` 不 import 其他内部包（除标准库）。
-- `internal/` 不 import `official/` 下的代码或资源；`official/` 只使用 `agent:*` / `ssr:*` 虚拟模块与公开 TS 类型，不 import 基座 Go 包。基座源码不出现任何官方插件 id。
+- `internal/` 不 import `plugins/official/` 下的代码或资源；`plugins/official/` 只使用 `agent:*` / `ssr:*` 虚拟模块与公开 TS 类型，不 import 基座 Go 包。基座源码不出现任何官方插件 id。
 - 基座不提供平行的 Go 插件注册 API；官方与第三方必须走同一个 TS 入口、同一个 moejs 宿主与同一套贡献校验。
 - Gateway 与 Core 不共享可变内存；共享的只有 `proto` DTO 与 `diag` 码。
 - 所有模板/静态资源通过 `embed.FS`；官方插件的 `dist/` 也在 `embed.FS` 中，开发模式可切换磁盘源码热编译。

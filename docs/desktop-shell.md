@@ -18,6 +18,14 @@ make desktop-pack   # electron-builder --win dir，产物在 desktop/dist/
 
 首次 `make desktop` 会经 `npx` 下载 Electron 33（约 100MB，之后有缓存）。
 
+也可以直接在 `desktop/` 下 `npx electron .`：壳启动时会自动准备网关——源码检出里
+`desktop/bin/adag` 缺失、或源码（`cmd`/`internal`/`official` 等）比产物新（例如刚
+`git pull`）时，自动执行 `GOWORK=off CGO_ENABLED=0 go build -trimpath` 到
+`desktop/bin/adag`，并注入 Revision/BuildTime；构建过程与结果写入
+`~/.adago/launcher.log`。等待期间窗口显示「正在启动网关」页，就绪等待上限 180 秒。
+设置 `ADAGO_GATEWAY_AUTOBUILD=0` 可关闭自动构建；显式指定外部网关（`--connect`
+或 `gateway_bin_path`）时不构建。打包形态只用随包 `resources/bin/adag`，不会构建。
+
 ## 与 a_da 的差异（迁移适配点）
 
 | 主题 | a_da | ada-go |
@@ -27,7 +35,7 @@ make desktop-pack   # electron-builder --win dir，产物在 desktop/dist/
 | 登录 | SSR guard 校验 `?token=` 换发 cookie | 网关同款：`?token=` 匹配 → IssueSession + 303 去 query（`gateway.tokenLoginGate`） |
 | 令牌来源 | CLI/配置，可空 | 本壳生成一次并持久化（`~/.adago/desktop_launcher.json`），经 `ADAG_GATEWAY_TOKEN` 注入网关——重启网关令牌不变 |
 | Core 进程 | 网关之外还要 spawn `ada-coding` | 网关内置 Core 监督（supervisor 按 workspace 拉起 `adag core`），壳只管网关 |
-| 系统托盘 | Tray + logo.ico | 不创建（ada-go 无品牌图标资产；a_da logo 不随 MIT 迁移），`desktop:open-web-ui` IPC 保留 |
+| 系统托盘 | Tray + logo.ico | Tray + logo.ico（图标取自 a_da `assets/logo.ico`），菜单项同形；`desktop:open-web-ui` IPC 保留 |
 | 构建工具 | bun + esbuild 打包 TS | 直接用 CJS（`main.cjs`/`preload.cjs`），零构建步骤 |
 | 产品声明 | `products/` 随 extraResources | `desktop/products/headless.agent.json`（`make desktop` 从 `products/` 拷贝），壳显式传 `--product` |
 
@@ -35,6 +43,13 @@ make desktop-pack   # electron-builder --win dir，产物在 desktop/dist/
 最小化/最大化/关闭（DOM/class 与 a_da 同形）、`desktop:*` IPC 通道名、
 launcher.log 位置语义（`~/.adago/launcher.log`）、网关不可用时的内联提示页、
 重启用 `taskkill /f /t`（Windows）。
+
+## 系统托盘
+
+启动后会在通知区创建托盘：单击把窗口叫到前台；右键菜单提供「显示/隐藏主窗口」
+「打开网页界面」「重新唤醒网关…」「退出 ada-go」。图标在打包后位于
+`resources/icon.ico`（构建时由 `build/app.ico` 映射），开发期直接读
+`desktop/build/app.ico`；找不到图标只记 `launcher.log`，不影响启动。
 
 ## 安全与边界
 
@@ -58,7 +73,7 @@ NSIS 安装包把 `--win dir` 换成 `--win nsis`（`npm run dist`）。注意
 
 ## 已知限制
 
-- 无系统托盘、无自动更新（a_da 亦无）、无深度链接协议。
+- 无自动更新（a_da 亦无）、无深度链接协议。
 - 打包后的产品声明固定 headless；要换产品改 `desktop_launcher.json` 的
   `product_path` 或用 `--product` 传入。
 - Electron 的下载/打包依赖网络；`make desktop` 首次运行需要可达 npm registry。

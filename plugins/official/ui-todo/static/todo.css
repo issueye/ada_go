@@ -1,0 +1,92 @@
+/* Todo 列表（ui-todo 插件）：颜色/尺寸只引用 --ph-* / --ada-* 令牌。 */
+
+.todo-card {
+  position: relative;
+  width: 320px;
+  max-width: calc(100vw - 48px);
+  border: 0;
+  background: transparent;
+}
+
+.todo-card > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 28px;
+  max-width: 380px;
+  padding: 0 10px;
+  border: 1px solid var(--ph-line-strong);
+  border-radius: var(--ada-radius-pill);
+  background: var(--ph-elevated);
+  color: var(--ph-ink);
+  font-size: var(--ada-text-sm);
+  font-weight: 600;
+  box-shadow: var(--ph-shadow);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: border-color var(--ada-transition), background var(--ada-transition);
+}
+.todo-card > summary::-webkit-details-marker {
+  display: none;
+}
+.todo-card > summary:hover {
+  border-color: var(--ph-faint);
+}
+
+.todo-card__head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.todo-card__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  font-size: var(--ada-text-sm);
+  font-weight: 600;
+}
+
+.todo-card__count {
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 0 6px;
+  border-radius: var(--ada-radius-pill);
+  background: var(--ph-brand-soft);
+  color: var(--ph-brand-ink);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+  font-weight: 600;
+}
+.todo-card.is-done .todo-card__count {
+  background: var(--ph-success-soft);
+  color: var(--ph-success-ink);
+}
+
+.todo-card[open] {
+  border: 1px solid var(--ph-line-strong);
+  border-radius: var(--ada-radius-lg);
+  background: var(--ph-elevated);
+  box-shadow: var(--ph-shadow);
+  overflow: hidden;
+}
+.todo-card[open] > summary {
+  height: auto;
+  max-width: none;
+  padding: 12px;
+  border: 0;
+  border-bottom: 1px solid var(--ph-line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: default;
+}
+
+.todo-card__body {
+  padding: 10px 12px 12px;
+}

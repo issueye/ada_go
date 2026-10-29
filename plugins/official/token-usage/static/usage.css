@@ -1,0 +1,117 @@
+/* Token 用量（token-usage 插件）：颜色/尺寸只引用 --ph-* / --ada-* 令牌。 */
+
+.tu-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tu-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tu-title {
+  margin: 0;
+  font-size: var(--ada-text-lg);
+  font-weight: 600;
+  color: var(--ph-ink);
+}
+
+.tu-sub {
+  margin: 0;
+  font-size: var(--ada-text-sm);
+  color: var(--ph-muted);
+}
+
+.tu-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.tu-card {
+  padding: 14px 16px;
+}
+
+.tu-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tu-card__title {
+  font-size: var(--ada-text-sm);
+  font-weight: 600;
+  color: var(--ph-ink);
+}
+
+.tu-card__total {
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-lg);
+  font-weight: 600;
+  color: var(--ph-ink);
+}
+
+.tu-card__hint {
+  margin: 4px 0 0;
+  font-size: var(--ada-text-xs);
+  color: var(--ph-faint);
+}
+
+.tu-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.tu-stat__label {
+  display: block;
+  font-size: var(--ada-text-xs);
+  color: var(--ph-faint);
+}
+
+.tu-stat__value {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-sm);
+  color: var(--ph-ink);
+}
+
+.tu-card__model {
+  margin: 12px 0 0;
+  font-size: var(--ada-text-xs);
+  color: var(--ph-muted);
+  word-break: break-all;
+}
+
+.tu-widget__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tu-widget__title {
+  font-size: var(--ada-text-sm);
+  font-weight: 600;
+  color: var(--ph-ink);
+}
+
+.tu-widget__total {
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-lg);
+  font-weight: 600;
+  color: var(--ph-ink);
+}
+
+.tu-widget__meta {
+  margin: 6px 0 0;
+  font-size: var(--ada-text-xs);
+  color: var(--ph-faint);
+  line-height: 1.6;
+}

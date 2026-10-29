@@ -24,7 +24,7 @@ import (
 	"github.com/adag/ada-go/internal/plugins/host"
 	"github.com/adag/ada-go/internal/plugins/provider"
 	"github.com/adag/ada-go/internal/ports"
-	"github.com/adag/ada-go/official"
+	"github.com/adag/ada-go/plugins/official"
 )
 
 func streamAssembly(t *testing.T, pluginID, serverURL string) *app.Assembly {

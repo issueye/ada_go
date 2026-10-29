@@ -1,0 +1,15 @@
+{
+  "id": "provider-admin",
+  "name": "供应商管理",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "供应商与模型列表；可切换当前模型。配置本身（API Key/端点）不在页面里回显，密钥永远不进浏览器。",
+  "trust": "builtin",
+  "frontend": {
+    "capabilities": ["backend.read"],
+    "nav": [{ "label": "供应商", "slug": "providers" }],
+    "pages": [{ "slug": "providers", "title": "供应商", "template": "page.tsx" }],
+    "styles": ["provider-admin.css"],
+    "assets": "static"
+  }
+}

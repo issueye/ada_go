@@ -180,17 +180,22 @@ func TestOriginAllowances(t *testing.T) {
 	h := m.Wrap(okHandler(nil))
 
 	cases := []struct {
-		name   string
-		host   string
-		origin string
-		want   int
+		name     string
+		host     string
+		origin   string
+		secFetch string
+		want     int
 	}{
-		{"回环 Origin", "127.0.0.1:9000", "http://127.0.0.1:8080", http.StatusOK},
-		{"localhost Origin", "127.0.0.1:9000", "http://localhost:8080", http.StatusOK},
-		{"白名单 Origin", "127.0.0.1:9000", "https://ui.example", http.StatusOK},
-		{"同源 Origin", "app.local:9000", "http://app.local:9000", http.StatusOK},
-		{"异源 Origin", "app.local:9000", "https://other.example", http.StatusForbidden},
-		{"无 Origin", "app.local:9000", "", http.StatusOK},
+		{"回环 Origin", "127.0.0.1:9000", "http://127.0.0.1:8080", "", http.StatusOK},
+		{"localhost Origin", "127.0.0.1:9000", "http://localhost:8080", "", http.StatusOK},
+		{"白名单 Origin", "127.0.0.1:9000", "https://ui.example", "", http.StatusOK},
+		{"同源 Origin", "app.local:9000", "http://app.local:9000", "", http.StatusOK},
+		{"异源 Origin", "app.local:9000", "https://other.example", "", http.StatusForbidden},
+		{"无 Origin", "app.local:9000", "", "", http.StatusOK},
+		// no-referrer 下 Chromium 的表单 POST 会发 Origin: null；靠 Sec-Fetch-Site 区分。
+		{"null Origin 同源导航", "app.local:9000", "null", "same-origin", http.StatusOK},
+		{"null Origin 跨站", "app.local:9000", "null", "cross-site", http.StatusForbidden},
+		{"null Origin 无 Sec-Fetch-Site", "app.local:9000", "null", "", http.StatusForbidden},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -199,6 +204,9 @@ func TestOriginAllowances(t *testing.T) {
 			req.Header.Set("Authorization", "Bearer "+testToken)
 			if tc.origin != "" {
 				req.Header.Set("Origin", tc.origin)
+			}
+			if tc.secFetch != "" {
+				req.Header.Set("Sec-Fetch-Site", tc.secFetch)
 			}
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, req)

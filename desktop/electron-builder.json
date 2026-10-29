@@ -14,7 +14,9 @@
   ],
   "extraResources": [
     { "from": "bin", "to": "bin", "filter": ["adag.exe", "adag"] },
-    { "from": "products", "to": "products" }
+    { "from": "products", "to": "products" },
+    { "from": "build/app.ico", "to": "icon.ico" },
+    { "from": "build/icon.png", "to": "icon.png" }
   ],
   "win": {
     "target": [

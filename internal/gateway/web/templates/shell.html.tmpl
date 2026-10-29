@@ -1,0 +1,67 @@
+{{define "doc_head"}}<!doctype html>
+<html lang="{{.Locale}}" class="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{{if .RefreshSeconds}}<meta http-equiv="refresh" content="{{.RefreshSeconds}}">{{end}}
+<title>{{.Title}} · {{.BrandName}}</title>
+<link rel="icon" type="image/png" href="{{asset "logo.png"}}">
+<script src="{{asset "theme.js"}}"></script>
+<!--
+  样式加载顺序固定为：设计令牌 → a_da 产物 → a_da 组件层 → ada-go 本地覆盖。
+  app-local.css 最后加载，承接无 JS 表单与实时流的本地细节。
+-->
+<link rel="stylesheet" href="{{asset "tokens.css"}}">
+<link rel="stylesheet" href="{{asset "app.css"}}">
+<link rel="stylesheet" href="{{asset "ui/components.css"}}">
+<link rel="stylesheet" href="{{asset "ui/layout.css"}}">
+<link rel="stylesheet" href="{{asset "ui/widgets.css"}}">
+<link rel="stylesheet" href="{{asset "ui/shell.css"}}">
+<link rel="stylesheet" href="{{asset "ui/pages.css"}}">
+<link rel="stylesheet" href="{{asset "app-local.css"}}">
+{{range .PluginStyles}}<link rel="stylesheet" href="{{.}}">
+{{end}}<script src="{{asset "htmx.min.js"}}" defer></script>
+<script src="{{asset "alpine.min.js"}}" defer></script>
+<script src="{{asset "app.js"}}" defer></script>
+<script src="{{asset "ada-select.js"}}" defer></script>
+<script src="{{asset "ada-modal.js"}}" defer></script>
+<script src="{{asset "components.js"}}" defer></script>
+{{range .PluginScripts}}<script src="{{.}}" defer></script>
+{{end}}</head>
+<body class="ada-body">
+<a class="skip-link" href="#main">跳到主要内容</a>
+{{.Icons}}
+{{end}}
+
+{{define "shell_start"}}
+<div class="ada-shell">
+  {{.Sidebar}}
+  <div class="ada-backdrop" id="chat-backdrop" aria-hidden="true"></div>
+
+  <main id="main" class="ada-main">
+    <header class="ada-topbar">
+      <button class="ada-icon-btn ada-menu-toggle" type="button" data-sidebar-toggle aria-label="打开侧栏" title="打开侧栏">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <div class="ada-topbar__title">
+        <h1 title="{{.Title}}">{{.Title}}</h1>
+        {{if eq .Page "chat"}}<div id="topbar-status">{{.TopbarStatus}}</div>{{else if .ProductBadge}}<span class="ada-chip">{{.ProductBadge}}</span>{{else}}<span class="ada-chip">{{.ProductName}}</span>{{end}}
+      </div>
+      <div class="ada-topbar__actions">
+        {{slot "topbar.right" .Slots.TopbarRight .SlotCounts.TopbarRight ""}}
+        <div id="topbar-actions">{{.TopbarActions}}</div>
+      </div>
+    </header>
+{{end}}
+
+{{define "shell_end"}}
+  </main>
+</div>
+{{.ConfirmDialog}}
+</body>
+</html>
+{{end}}
+
+{{define "csrf"}}{{with .CSRF}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}{{end}}
+
+{{define "flash"}}{{if .Flash}}{{.Flash}}{{end}}{{end}}

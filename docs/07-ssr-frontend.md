@@ -39,7 +39,9 @@
 └──────────────┴──────────────────────────────────────────────────────┘
 ```
 
-外壳尺寸、滚动归属与 a_da 完全一致：设计基准视口 1600×1000，视口锁定 `100dvh`（`100vh` 回退），页面本身不滚动，只有对话流、侧栏列表与二级内容滚动；侧栏 264px（≤960px 为 232px，≤760px 收为抽屉），主区最小 420px，顶栏 54px，Composer 固定底部，内容内边距 24–28px（窄屏 16–18px）。外壳 class 沿用 `chat-shell` / `chat-sidebar` / `chat-main` / `chat-topbar` / `chat-scroll` / `chat-composer`。
+外壳尺寸、滚动归属与 a_da 完全一致：设计基准视口 1600×1000，视口锁定 `100dvh`（`100vh` 回退），页面本身不滚动，只有对话流、侧栏列表与二级内容滚动；侧栏 264px（≤960px 为 232px，≤760px 收为抽屉），主区最小 420px，顶栏 54px，Composer 固定底部，内容内边距 24–28px（窄屏 16–18px）。外壳 class 与 a_da 当前基线一致：`ada-shell` / `ada-sidebar` / `ada-main` / `ada-topbar` / `ada-scroll` / `ada-composer` / `ada-rail`（折叠窄轨），由 `internal/gateway/web/ui.go` 的侧栏组件与 `templates/shell.html.tmpl` 输出。
+
+品牌位：侧栏始终显示 logo + 品牌名（产品 `identity.name`，默认 `ada-go`）+ 产品徽标（产品名去掉品牌前缀，如 `Headless`）；页面 `<title>` 用品牌名，顶栏 chip 用产品徽标。品牌名与产品名都由 Gateway 从产品声明注入，模板不写死；登录页也带同一套品牌位。
 
 12 个稳定插槽（其中 11 个与 a_da **同名同位**；`thread.tray` 是 ada-go 为通用交互新增的第 12 个）：
 
@@ -159,6 +161,15 @@ data: {"threadId":"th_...","seq":128,"baseSeq":120,"ops":[
 
 Render Runtime **不安装 Node 兼容层**：没有 `process`、`Buffer`、`fs`、`fetch`、`crypto` 模块，也不加载后端 stdlib。TSX 只做纯计算与 VNode 组装；需要的数据一律通过 `props`（含只读动作预取）进入，副作用走动作桥。
 
+**只读数据投影**（`backend.read` 能力位，与只读动作预取同一个门禁）：
+
+- `data.providers`：`provider.list` + `model.list` 的供应商/模型清单与当前模型（不含 API Key）；
+- `data.usage`：`usage.get` 的工作区与当前线程聚合（输入/输出/缓存 token、成本）；
+- `data.interactions`：`thread.get` 返回的当前线程待答交互（审批/选择/输入）；
+- `app.csrf`：写表单的双提交 token（与基座模板里的隐藏字段同源）。
+
+写操作仍走基座路由（如 `POST /model/select` 切换当前模型）或插件动作；投影只读，不改 Core 状态。当前渲染运行时的组件实现面是 `Icon` / `TodoList`，其它组件名虽在白名单里，执行会返回「尚未实现」——官方插件优先用原生标签 + `ada-*` class。
+
 **Props**：
 
 ```ts
@@ -208,13 +219,14 @@ ada-go 的界面不是“参考 a_da 风格”，而是**直接使用 a_da 的 U
 | `crates/agent-web/static/app.css` | `web/static/app.css` | 直接使用 a_da 的**预编译产物**（含 token 段与工具类）；ada-go 不运行 Tailwind，只固定并校验该产物 |
 | `components.css` / `layout.css` / `widgets.css` / `shell.css` / `pages.css` | `web/static/ui/` | 原样复制；引用顺序保持 components → layout → widgets → shell → pages |
 | `ada-select.js` / `ada-modal.js` | `web/static/` | 原样复制；`<ada-select>` / `<ada-modal>` 的 Web Components 行为不变 |
-| `components.js` / `chat.js` / `theme.js` | `web/static/` | 保留选择器、`data-*` 契约与交互；只改请求地址与 SSE 事件名 |
-| `ui/icons.rs` | `internal/gateway/web/ui/icons.go` | 同一组线性 SVG path、同一 stroke 1.75 与尺寸档位 |
-| `ui/components.rs` / `rows.rs` | `internal/gateway/web/ui/` | Go 组件函数，输出与 a_da **相同的 `ada-*` 标签、class 与 `data-*` 状态** |
+| `components.js` / `app.js` / `chat-live.js` / `theme.js` | `web/static/` | `components.js`（组件行为）、`app.js`（外壳：提示条/确认弹窗/侧栏）、`theme.js` 原样复制；`chat-live.js` 由 ada-go 维护，消费 `/events/{id}` 的 SSE 增量 |
+| `htmx.min.js` / `alpine.min.js` / `logo.png` | `web/static/` | 原样复制；概览页每 5 秒 `hx-get="/partials/dashboard"` 换新 |
+| `ui/icons.rs` | `internal/gateway/web/ui.go` | 同一组线性 SVG path、同一 stroke 1.75 与尺寸档位；模板经 `{{icon "…"}}` 或 sprite `<use>` 引用 |
+| `ui/components.rs` / `rows.rs` | `internal/gateway/web/ui.go` + `templates/` | Go 组件函数与模板输出 a_da **相同的 `ada-*` 标签、class 与 `data-*` 状态** |
 | `templates/*.html`、`partials/transcript.html` | `web/templates/` | 手写 Go 模板，DOM 层级与 class 不变；Askama 语法换成 `html/template` |
-| `plugins/task-plan/` | `official/ui-task-plan/` | 同一张计划卡，挂 `chat.corner`（默认）或 `composer.above` |
+| `plugins/task-plan/` | `plugins/official/ui-todo/` | 同一张 Todo 卡片（真实计划来自只读动作；无计划时不占位） |
 
-上游固定到 a_da 的一个 commit。`web/static/` 中的副本在文件头记录来源与 SHA-256；`adag verify ui` 比对 token 名/值、CSS 层顺序、组件 class 基线与图标集，任何漂移先改文档与基线再改实现。运行时链接顺序为 `app.css` → `tokens.css` → `components/layout/widgets/shell/pages.css`：后加载的 `tokens.css` 覆盖 `app.css` 内联的编译副本，保证颜色仍只有一个可读真源。
+上游固定到 a_da 的一个 commit。`web/static/` 中的副本在文件头记录来源与 SHA-256；`adag verify ui` 比对 token 名/值、CSS 层顺序、组件 class 基线与图标集，任何漂移先改文档与基线再改实现。运行时链接顺序为 `app.css` → `tokens.css` → `components/layout/widgets/shell/pages.css`：后加载的 `tokens.css` 覆盖 `app.css` 内联的编译副本，保证颜色仍只有一个可读真源。模板引用静态资源统一走 `{{asset "name"}}`，输出带内容指纹的 `/static/name?v=<hash>`；静态资源本身仍可长缓存，改 CSS/JS 后新 URL 会自动失效旧缓存（桌面壳的 Electron HTTP 缓存也在内）。
 
 #### 7.7.2 设计令牌
 
@@ -274,7 +286,7 @@ Go 组件库按 a_da 的组件清单实现，名字与输出对齐：
 
 #### 7.7.5 任务规划卡片
 
-任务卡是前端插件，不是基座组件：`official/ui-task-plan` 默认挂 `chat.corner`（会话区右上角），把清单里的 `slot` 改为 `composer.above` 即换到输入框上方。
+Todo 卡片是前端插件，不是基座组件：`plugins/official/ui-todo` 默认挂 `chat.corner`（会话区右上角），数据来自只读动作 `tools-plan` 的 `plan`（没有计划时不渲染）；提问卡片 `ui-ask-user` 挂 `thread.tray`，待答项来自 `data.interactions` 投影，插件让位时基座托盘自动接手。供应商管理（`provider-admin`）与 Token 用量（`token-usage`）分别提供页面与侧栏导航。
 
 - 收起态：胶囊 = 列表图标 + “任务规划” + `3/12` + 当前步骤标题。
 - 展开态：320px 卡片，头部（标题 + `3 / 12 已完成` + 复制 + 收起）+ 备注 + 步骤清单（最大 256px 内滚）。
@@ -284,7 +296,22 @@ Go 组件库按 a_da 的组件清单实现，名字与输出对齐：
 
 #### 7.7.6 页面范围
 
-基座提供与 a_da 同构的外壳页面：对话页（`/`、`/threads/{id}`）、工作区选择、概览、扩展、插件页、错误页与离线页。二级页与聊天页共用侧栏，内容最大宽度 1040px，表格横向滚动；供应商管理保持 a_da 的 Master-Detail 与两个真实链接页签，但它是**官方前端插件页面**，不是基座业务页——基座只提供 `/ext` 宿主、插槽与动作桥。API Key 只显示“已配置 + 尾号”，不回显。
+基座提供与 a_da 同构的外壳页面（`/`、`/threads/{id}` 是同一个对话页组件，空会话时渲染新会话空态）：
+
+| 路由 | 页面 | 数据来源 |
+|---|---|---|
+| `GET /`、`GET /threads`、`GET /threads/{id}` | 对话页 / 会话页 | `thread.list`、`thread.get`、`thread.entries` |
+| `GET /overview`、`GET /partials/dashboard` | 概览（统计卡、最近会话、插件卡片；htmx 每 5 秒换新） | `thread.list`、`plugin.list`、`dashboard.widgets` 插槽 |
+| `GET /workspaces` | 工作区选择（目录浏览限制在当前工作区子树内） | Gateway 配置 + `os.ReadDir` |
+| `GET /extensions` | 插件列表（全部随包/已安装插件合并成一张表，不分区；产品未声明的随包插件显示为「未启用 / unused」，不误报 failed） | `PluginLister`、`plugin.list`、`extensions.list` 插槽 |
+| `GET /extensions/{id}` | 插件详情（前端/后端归属、能力计数、启停、打开插件页面） | 同上 |
+| `POST /model/select` | 切换当前模型（工作区级；供应商管理插件页面调用） | `model.set` |
+| `GET /ext/{id}/{slug}` | 插件页 | `PluginUI.Page` |
+| `GET /login`、离线页、错误页 | 外壳页面 | — |
+
+二级页与聊天页共用侧栏，内容最大宽度 1040px，表格横向滚动；供应商管理保持 a_da 的 Master-Detail 与两个真实链接页签，但它是**官方前端插件页面**，不是基座业务页——基座只提供 `/ext` 宿主、插槽与动作桥。API Key 只显示“已配置 + 尾号”，不回显。
+
+与 a_da 的已知差异（如实声明）：工作区集合在 Gateway 启动时固定，目录选择器只能选用已配置的工作区（浏览子目录用于查看，不新增工作区）；前端插件在装配期加载，扩展页只提供 agent 插件的启用/停用与重载，前端插件变更需重启 Gateway。
 
 #### 7.7.7 验收
 

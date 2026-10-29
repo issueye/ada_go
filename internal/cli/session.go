@@ -719,6 +719,12 @@ func (s *Session) CallAction(ctx context.Context, pluginID, action string, input
 	hc.ThreadID = threadID
 	hc.Signal = ctx
 	hc.Now = time.Now().UTC()
+	// 只读动作也按线程命名空间读 state（t:<threadID>/<key>）：计划/任务类插件
+	// 的状态是线程级，不能因为前端预取而落到空线程。
+	if threadID != "" {
+		ctx = withThread(ctx, threadID)
+		hc.Signal = ctx
+	}
 	return inst.CallAction(ctx, def.Handler, input, hc)
 }
 
@@ -1505,7 +1511,7 @@ type PluginView struct {
 	APIVersion  int
 	Trust       string
 	Enabled     bool
-	Status      string // ready | degraded | disabled | failed
+	Status      string // ready | degraded | disabled | failed | unused
 	Fingerprint string
 	LastError   string
 	// Source 是发现来源：""＝随包（官方）；workspace | global。
@@ -1514,22 +1520,37 @@ type PluginView struct {
 	Hooks  []string
 	// Skills 是随包技能名（6.7 的 contributions.skills 计数来源）。
 	Skills []string
+	// Frontend / Backend 标明清单段；统一插件包可以两者都为真。
+	Frontend bool
+	Backend  bool
 }
 
 // PluginViews 列出随包 + 第三方插件的当前状态（plugin.list 的数据源）。
+//
+// 列表是「全部随包/已安装插件」而不是「当前产品装配的插件」：
+// 产品未声明的随包插件用中性状态 unused 表示，不伪装成 failed。
 func (s *Session) PluginViews(ctx context.Context) []PluginView {
 	s.mu.Lock()
 	asm := s.asm
 	base := s.baseScripts
+	frontend := append([]host.Script(nil), s.frontendScripts...)
 	discovered := append([]discovery.Plugin(nil), s.discovered...)
 	failed := map[string]string{}
 	for id, msg := range s.failedPlugins {
 		failed[id] = msg
 	}
+	product := s.product
 	s.mu.Unlock()
 
+	productIDs := map[string]bool{}
+	if product != nil {
+		for _, id := range product.Plugins {
+			productIDs[id] = true
+		}
+	}
+
 	meta := s.listPluginMeta(ctx)
-	out := make([]PluginView, 0, len(base)+len(discovered)+len(failed))
+	out := make([]PluginView, 0, len(base)+len(frontend)+len(discovered)+len(failed))
 	seen := map[string]bool{}
 	for _, sc := range base {
 		if sc.Manifest == nil {
@@ -1538,7 +1559,35 @@ func (s *Session) PluginViews(ctx context.Context) []PluginView {
 		id := sc.Manifest.ID
 		seen[id] = true
 		rec, hasRec := meta[id]
-		out = append(out, pluginViewOf(sc, "", nil, rec, hasRec, asm))
+		v := pluginViewOf(sc, "", nil, rec, hasRec, asm)
+		v.Backend = true
+		v.Frontend = sc.Manifest.Frontend != nil
+		if !productIDs[id] {
+			// 随包但当前产品未声明：可查看/可启用，但不是故障。
+			v.Status = "unused"
+			v.LastError = ""
+		}
+		out = append(out, v)
+	}
+	// frontend-only 插件也进列表：产品声明决定它是否已挂载。
+	for _, sc := range frontend {
+		if sc.Manifest == nil {
+			continue
+		}
+		id := sc.Manifest.ID
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		v := PluginView{
+			ID: id, Name: sc.Manifest.Name, Version: sc.Manifest.Version,
+			APIVersion: sc.Manifest.APIVersion, Trust: string(sc.Manifest.Trust),
+			Enabled: true, Frontend: true, Status: "ready",
+		}
+		if !productIDs[id] {
+			v.Status = "unused"
+		}
+		out = append(out, v)
 	}
 	for _, p := range discovered {
 		id := p.ID()
@@ -1547,14 +1596,17 @@ func (s *Session) PluginViews(ctx context.Context) []PluginView {
 		}
 		seen[id] = true
 		rec, hasRec := meta[id]
-		out = append(out, pluginViewOf(p.Script, p.Source, &p, rec, hasRec, asm))
+		v := pluginViewOf(p.Script, p.Source, &p, rec, hasRec, asm)
+		v.Backend = true
+		v.Frontend = p.Script.Manifest != nil && p.Script.Manifest.Frontend != nil
+		out = append(out, v)
 	}
 	for id, msg := range failed {
 		if seen[id] {
 			continue
 		}
 		seen[id] = true
-		v := PluginView{ID: id, Status: "failed", LastError: msg, Enabled: true,
+		v := PluginView{ID: id, Status: "failed", LastError: msg, Enabled: true, Backend: true,
 			Trust: string(plugins.TrustThirdParty)}
 		if rec, ok := meta[id]; ok {
 			v.Enabled = rec.Enabled

@@ -11,7 +11,10 @@
     "tools-skill",
     "policy-default",
     "persona-coding",
-    "ui-task-plan"
+    "ui-todo",
+    "ui-ask-user",
+    "provider-admin",
+    "token-usage"
   ],
   "capabilities": {
     "skills": true,

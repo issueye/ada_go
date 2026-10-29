@@ -194,7 +194,7 @@ interface HookContext {
 
 动作结果只接受 JSON 可序列化值，最大 1MB；`read` 动作的结果进入 `props.data.backend.<前端插件 id>.<绑定名>`，`write` 动作的结果不回填页面，靠 303 或后续刷新呈现。
 
-**官方与第三方共用同一 TS 插件面**：`official/*` 不提供 Go 注册入口，也不再存在平行的 Go SDK。官方插件与第三方一样导出 `export default function (agent: AgentAPI)`，通过同一份 `AgentAPI` 注册工具、provider、提示词、动作、路由与钩子。差别只在构建与信任：
+**官方与第三方共用同一 TS 插件面**：`plugins/official/*` 不提供 Go 注册入口，也不再存在平行的 Go SDK。官方插件与第三方一样导出 `export default function (agent: AgentAPI)`，通过同一份 `AgentAPI` 注册工具、provider、提示词、动作、路由与钩子。差别只在构建与信任：
 
 - 官方插件在构建期由 esbuild 预编译成 `dist/index.js`，用 `go:embed` 嵌入二进制，运行时直接交给 moejs；仓库保留 `index.ts` 作为源码与类型检查入口。
 - 第三方插件在安装/首次加载时编译，产物按内容指纹缓存。

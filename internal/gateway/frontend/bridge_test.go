@@ -19,7 +19,7 @@ import (
 	"github.com/adag/ada-go/internal/gateway/web"
 	"github.com/adag/ada-go/internal/plugins"
 	"github.com/adag/ada-go/internal/plugins/host"
-	"github.com/adag/ada-go/official"
+	"github.com/adag/ada-go/plugins/official"
 )
 
 // fakeSup / fakeCore 是最小 Supervisor/CoreClient 替身（与 web 包的测试同形）。
@@ -311,5 +311,111 @@ func TestBridgeAssetsAndBindings(t *testing.T) {
 	}
 	if got := frontend.PageBindingName("hello-world"); got != "page_hello_world" {
 		t.Fatalf("PageBindingName = %q", got)
+	}
+}
+
+// bridgeWithOnly 只装载一个前端插件（隔离同槽的其它贡献，断言不受干扰）。
+func bridgeWithOnly(t *testing.T, core *fakeCore, id, csrf string) *frontend.Bridge {
+	t.Helper()
+	scripts, err := official.FrontendScripts()
+	if err != nil {
+		t.Fatalf("official.FrontendScripts: %v", err)
+	}
+	var picked []host.Script
+	for _, s := range scripts {
+		if s.Manifest != nil && s.Manifest.ID == id {
+			picked = append(picked, s)
+		}
+	}
+	if len(picked) == 0 {
+		t.Fatalf("没有前端插件 %q", id)
+	}
+	var csrfFn func(*http.Request) string
+	if csrf != "" {
+		csrfFn = func(*http.Request) string { return csrf }
+	}
+	b, err := frontend.NewBridge(frontend.BridgeOptions{
+		Scripts:     picked,
+		Supervisor:  &fakeSup{core: core},
+		ProductName: "ada-go",
+		CSRF:        csrfFn,
+	})
+	if err != nil {
+		t.Fatalf("NewBridge: %v", err)
+	}
+	return b
+}
+
+// ui-ask-user：待答交互来自 thread.get 的只读投影，表单提交回基座交互路由。
+func TestBridgeAskUserSlotUsesInteractionProjection(t *testing.T) {
+	core := newFakeCore().
+		on("thread.get", `{"thread":{"id":"th_1"},"interactions":[{"id":"ir_1","threadId":"th_1","kind":"select","title":"选择环境","body":"请选择部署环境","options":["staging","prod"],"status":"pending"}]}`).
+		on("provider.list", `{"providers":[]}`).
+		on("usage.get", `{"thread":{},"workspace":{}}`)
+	b := bridgeWithOnly(t, core, "ui-ask-user", "csrf-x")
+
+	html, count, err := b.Slot("thread.tray", request(t, "/threads/th_1"))
+	if err != nil || count != 1 {
+		t.Fatalf("Slot(thread.tray) = %d, %v", count, err)
+	}
+	for _, want := range []string{
+		`class="aq-card"`,
+		"选择环境",
+		"请选择部署环境",
+		`name="csrf_token"`,
+		`value="csrf-x"`,
+		`action="/threads/th_1/interaction/ir_1"`,
+		`value="staging"`,
+		`value="prod"`,
+	} {
+		if !strings.Contains(string(html), want) {
+			t.Fatalf("提问卡缺少 %q\n%s", want, html)
+		}
+	}
+	if params, ok := core.lastParams("thread.get"); !ok || params["threadId"] != "th_1" {
+		t.Fatalf("thread.get 参数不对: %+v", params)
+	}
+}
+
+// provider-admin：页面读 provider.list + model.list 投影，切换模型走基座路由。
+func TestBridgeProviderAdminPageUsesProviderProjection(t *testing.T) {
+	core := newFakeCore().
+		on("provider.list", `{"providers":[{"id":"openai","displayName":"OpenAI","baseUrl":"https://api.openai.com/v1","active":true,"models":[{"id":"gpt-4o","displayName":"GPT-4o","contextWindow":128000,"maxOutput":16384,"supportsTools":true},{"id":"gpt-4o-mini","displayName":"GPT-4o mini","contextWindow":128000,"maxOutput":16384,"supportsTools":true}]}]}`).
+		on("model.list", `{"models":[],"current":{"providerId":"openai","modelId":"gpt-4o"}}`).
+		on("usage.get", `{"thread":{},"workspace":{}}`)
+	b := bridgeWithOnly(t, core, "provider-admin", "csrf-y")
+
+	html, err := b.Page("provider-admin", "providers", request(t, "/ext/provider-admin/providers"))
+	if err != nil {
+		t.Fatalf("Page(provider-admin): %v", err)
+	}
+	for _, want := range []string{
+		"当前模型", "openai / gpt-4o", "gpt-4o-mini", "设为当前",
+		`action="/model/select"`, `name="csrf_token"`, `value="csrf-y"`,
+		`name="providerId"`, `value="openai"`, `name="modelId"`, `value="gpt-4o-mini"`,
+	} {
+		if !strings.Contains(string(html), want) {
+			t.Fatalf("供应商页缺少 %q\n%s", want, html)
+		}
+	}
+}
+
+// token-usage：dashboard 贡献走同一条插槽渲染路径，数据来自 usage.get。
+func TestBridgeTokenUsageDashboardProjection(t *testing.T) {
+	core := newFakeCore().
+		on("provider.list", `{"providers":[]}`).
+		on("usage.get", `{"thread":{"provider":"openai","model":"gpt-4o","inputTokens":1200,"outputTokens":300,"cacheTokens":400,"costMicros":1500},"workspace":{"inputTokens":5000,"outputTokens":800,"cacheTokens":2000,"costMicros":9000}}`)
+	b := bridgeWithOnly(t, core, "token-usage", "")
+
+	html, count, err := b.Slot("dashboard.widgets", request(t, "/overview"))
+	if err != nil || count != 1 {
+		t.Fatalf("Slot(dashboard.widgets) = %d, %v", count, err)
+	}
+	for _, want := range []string{
+		"Token 用量", "5,800", "1,200", "$0.0090",
+	} {
+		if !strings.Contains(string(html), want) {
+			t.Fatalf("Token 用量卡片缺少 %q\n%s", want, html)
+		}
 	}
 }

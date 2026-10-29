@@ -1,0 +1,107 @@
+{{define "workspaces"}}{{template "doc_head" .}}{{template "shell_start" .}}
+  <div class="ada-scroll">
+    <div class="ada-wrap" style="max-width:1040px">
+      {{template "flash" .}}
+      <div class="section-head">
+        <div>
+          <div class="flex flex-wrap items-center gap-2">
+            <h1 class="page-title">工作区</h1>
+            <span class="badge badge-neutral">{{len .Roots}} 个位置</span>
+          </div>
+          <p class="page-sub">选一个目录作为当前工作区；工作区在 Gateway 启动时配置，目录浏览限制在当前工作区内。</p>
+        </div>
+      </div>
+
+      {{if .Current}}
+      <div class="ada-picker-current">
+        <div class="min-w-0">
+          <p class="ada-eyebrow">当前浏览目录</p>
+          <p class="ada-picker-current__path" title="{{.Current}}">{{.Current}}</p>
+        </div>
+        {{if .Selectable}}
+        <form method="post" action="/workspaces/select">
+          {{template "csrf" .}}
+          <input type="hidden" name="path" value="{{.Current}}">
+          <button class="btn btn-primary btn-sm" type="submit">使用此目录</button>
+        </form>
+        {{else}}
+        <span class="badge badge-neutral" title="Gateway 的工作区在启动时固定">非配置工作区</span>
+        {{end}}
+      </div>
+      {{end}}
+
+      <div class="ada-picker">
+        <aside class="card ada-picker__side">
+          <div class="ada-picker__section">
+            <p class="ada-eyebrow">磁盘与常用位置</p>
+            {{if .Roots}}
+            {{range .Roots}}
+            <a class="ada-picker__root ada-picker__root--{{.Kind}}{{if eq .Path $.Current}} is-active{{end}}" href="{{.Href}}" title="{{.Path}}">
+              <svg class="ada-icon" width="13" height="13" aria-hidden="true"><use href="#i-folder"></use></svg>
+              <span class="ada-picker__root-label">{{.Label}}</span>
+              <span class="ada-picker__root-path">{{.Path}}</span>
+            </a>
+            {{end}}
+            {{else}}
+            <p class="ada-picker__empty">没有可用的根目录</p>
+            {{end}}
+          </div>
+
+          <div class="ada-picker__section">
+            <p class="ada-eyebrow">最近工作区</p>
+            {{if .Recent}}
+            {{range .Recent}}
+            <form method="post" action="/workspaces/select" class="ada-picker__recent-form">
+              {{template "csrf" $}}
+              <input type="hidden" name="path" value="{{.Path}}">
+              <button class="ada-picker__recent{{if eq .Path $.Current}} is-active{{end}}" type="submit" title="{{.Path}}">
+                <span class="ada-picker__recent-name">{{.Name}}</span>
+                <span class="ada-picker__recent-meta">{{if .Known}}{{.Sessions}} 会话{{else}}会话数未加载{{end}}{{if eq .Path $.Current}} · 当前{{end}}</span>
+              </button>
+            </form>
+            {{end}}
+            {{else}}
+            <p class="ada-picker__empty">还没有带会话的工作区</p>
+            {{end}}
+          </div>
+        </aside>
+
+        <section class="card ada-picker__main">
+          <div class="ada-picker__crumbs">
+            {{if .ParentHref}}<a class="btn btn-ghost btn-sm" href="{{.ParentHref}}">上一级</a>{{end}}
+            <span class="ada-picker__path">{{.Current}}</span>
+          </div>
+
+          <form method="post" action="/workspaces/mkdir" class="ada-picker__mkdir">
+            {{template "csrf" .}}
+            <input type="hidden" name="parent" value="{{.Current}}">
+            <input class="input" name="name" placeholder="新建文件夹名称" required autocomplete="off">
+            <button class="btn btn-secondary btn-sm" type="submit">新建目录</button>
+          </form>
+
+          {{if .Truncated}}<p class="ada-picker__notice">目录项过多，已省略 {{.Omitted}} 项；可用上方路径直接进入更深的目录。</p>{{end}}
+
+          {{if .Entries}}
+          <div class="ada-picker__body">
+            <ul class="ada-picker__list">
+              {{range .Entries}}
+              <li>
+                <a class="ada-picker__entry" href="{{.Href}}" title="{{.Path}}">
+                  <svg class="ada-icon" width="14" height="14" aria-hidden="true"><use href="#i-folder"></use></svg>
+                  <span>{{.Name}}</span>
+                </a>
+              </li>
+              {{end}}
+            </ul>
+          </div>
+          {{else}}
+          <div class="empty-state">
+            <p class="text-sm font-medium text-ink">这个目录下没有子目录</p>
+            <p class="mt-1 text-xs leading-5 text-faint">可以直接选择当前工作区，或在上面新建一个文件夹。</p>
+          </div>
+          {{end}}
+        </section>
+      </div>
+    </div>
+  </div>
+{{template "shell_end" .}}{{end}}

@@ -1,0 +1,92 @@
+/* 提问卡片（ui-ask-user 插件）：颜色/尺寸只引用 --ph-* / --ada-* 令牌。 */
+
+.aq-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.aq-card {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 12px;
+  border: 1px solid var(--ph-line-strong);
+  border-radius: var(--ada-radius-lg);
+  background: var(--ph-elevated);
+  box-shadow: var(--ph-shadow);
+}
+
+.aq-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.aq-card__title {
+  font-size: var(--ada-text-sm);
+  font-weight: 600;
+  color: var(--ph-ink);
+}
+
+.aq-card__meta {
+  font-size: var(--ada-text-xs);
+  color: var(--ph-warn-ink);
+  background: var(--ph-warn-soft);
+  border-radius: var(--ada-radius-pill);
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+.aq-card__prompt {
+  margin: 8px 0 0;
+  font-size: var(--ada-text-sm);
+  line-height: 1.6;
+  color: var(--ph-muted);
+}
+
+.aq-card__options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.aq-card__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-surface);
+  font-size: var(--ada-text-sm);
+  color: var(--ph-ink);
+  cursor: pointer;
+}
+
+.aq-card__option:hover {
+  border-color: var(--ph-line-strong);
+}
+
+.aq-card__option-label {
+  min-width: 0;
+}
+
+.aq-card__text {
+  margin-top: 10px;
+}
+
+.aq-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.aq-card__buttons {
+  display: inline-flex;
+  gap: 8px;
+}

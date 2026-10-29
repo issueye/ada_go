@@ -121,23 +121,23 @@ func TestGatewayHandlerHomeAndAuth(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Bearer 访问首页状态 = %d，期望 200；正文: %.800s", resp.StatusCode, body)
 	}
-	for _, want := range []string{`class="brand"`, "ada-go", "演示会话"} {
+	for _, want := range []string{`class="ada-brand"`, "ada-go", "演示会话"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("首页缺少 %q；正文片段: %.800s", want, body)
 		}
 	}
 }
 
-// TestGatewayHandlerCoreErrorPage 验证 Core 不可用时渲染人话错误页而非 500/崩溃。
+// TestGatewayHandlerCoreErrorPage 验证 Core 不可用时首页保留外壳并如实说“未连接”。
 func TestGatewayHandlerCoreErrorPage(t *testing.T) {
 	srv := newFakeGateway(t, &fakeSupervisor{acquireErr: fmt.Errorf("core 未启动")})
 
 	resp, body := httpGet(t, srv.URL+"/", testAccessToken)
-	if resp.StatusCode != http.StatusBadGateway {
-		t.Fatalf("Core 不可用时首页状态 = %d，期望 502；正文: %.800s", resp.StatusCode, body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Core 不可用时首页状态 = %d，期望 200（外壳 + 未连接空态）；正文: %.800s", resp.StatusCode, body)
 	}
-	if !strings.Contains(body, "Core 暂时不可用") {
-		t.Fatalf("错误页缺少「Core 暂时不可用」；正文片段: %.800s", body)
+	if !strings.Contains(body, "暂时没有连上 agent") {
+		t.Fatalf("首页缺少「暂时没有连上 agent」；正文片段: %.800s", body)
 	}
 }
 

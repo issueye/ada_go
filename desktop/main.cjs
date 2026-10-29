@@ -14,11 +14,11 @@
 // 环境变量 ADAGO_DESKTOP_SMOKE=1：网关就绪后打印一行 `[smoke] ...` 并退出，
 // 供自动化冒烟，不弹窗口常驻。
 
-const { app, BrowserWindow, ipcMain, dialog, screen, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, screen, shell, Tray, Menu, nativeImage } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
-const { spawn, execSync } = require('child_process')
+const { spawn, execSync, execFileSync } = require('child_process')
 const readline = require('readline')
 
 /** 解析随包/开发期资源路径（a_da 同款：不能信 bun/打包器硬编码的 __dirname）。 */
@@ -47,6 +47,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 let mainWindow = null
+let tray = null
 
 // ── CLI 参数 ────────────────────────────────────────────────────────────
 function parseCliArgs() {
@@ -123,6 +124,134 @@ function findBinary(customBin) {
   return null
 }
 
+// ── 网关自动准备（开发期自动构建）──────────────────────────────────────
+// 壳启动不再依赖先跑 make：源码检出里缺 adag、或源码比产物新（例如刚 git pull）时，
+// 自动 go build 到 desktop/bin（与 make desktop 同路径）。打包形态只用随包
+// resources/bin/adag，不构建。关闭自动构建：ADAGO_GATEWAY_AUTOBUILD=0。
+const GATEWAY_AUTOBUILD = process.env.ADAGO_GATEWAY_AUTOBUILD !== '0'
+const BUILD_TIMEOUT_MS = 180000
+const SPAWN_TIMEOUT_MS = 15000
+const READY_TIMEOUT_MS = 180000
+const SOURCE_SKIP_DIRS = new Set(['node_modules', '.git', 'bin', 'dist', 'out', 'dist-cache', '.adago'])
+const SOURCE_ROOTS = ['go.mod', 'go.sum', 'cmd', 'internal', 'app', 'official', 'products', 'spec', 'plugins']
+const SOURCE_EXTS = new Set(['.go', '.ts', '.tsx', '.js', '.json', '.md'])
+
+function executableName() {
+  return process.platform === 'win32' ? 'adag.exe' : 'adag'
+}
+
+function findRepoRoot() {
+  const candidates = [
+    path.resolve(app.getAppPath(), '..'),
+    process.cwd(),
+    path.resolve(process.cwd(), '..'),
+    path.dirname(process.execPath),
+    path.resolve(path.dirname(process.execPath), '..'),
+  ]
+  for (const dir of candidates) {
+    try {
+      if (fs.existsSync(path.join(dir, 'go.mod')) && fs.existsSync(path.join(dir, 'cmd', 'adag'))) return dir
+    } catch { /* 候选不可读就试下一个 */ }
+  }
+  return null
+}
+
+// 源码树里最新的 mtime：只扫与网关产物相关的目录/后缀，用来判断是否需要重建。
+function newestSourceMtime(repoRoot) {
+  let newest = 0
+  const walk = (p) => {
+    let stat
+    try { stat = fs.statSync(p) } catch { return }
+    if (stat.isDirectory()) {
+      if (SOURCE_SKIP_DIRS.has(path.basename(p))) return
+      let entries = []
+      try { entries = fs.readdirSync(p) } catch { return }
+      for (const name of entries) walk(path.join(p, name))
+      return
+    }
+    if (SOURCE_EXTS.has(path.extname(p)) && stat.mtimeMs > newest) newest = stat.mtimeMs
+  }
+  for (const rel of SOURCE_ROOTS) walk(path.join(repoRoot, rel))
+  return newest
+}
+
+function runGoBuild(repoRoot, args) {
+  return new Promise((resolve) => {
+    const env = { ...process.env, GOWORK: 'off', CGO_ENABLED: '0' }
+    let child
+    try {
+      child = spawn('go', args, { cwd: repoRoot, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    } catch (err) {
+      appendLauncherLog(`[自动构建] 无法启动 go: ${err.message}`)
+      resolve(false)
+      return
+    }
+    const timer = setTimeout(() => {
+      appendLauncherLog(`[自动构建] 超时（${BUILD_TIMEOUT_MS}ms），终止`)
+      try { child.kill() } catch { /* 已退出 */ }
+      resolve(false)
+    }, BUILD_TIMEOUT_MS)
+    const logPipe = (stream, tag) => {
+      if (!stream) return
+      readline.createInterface({ input: stream }).on('line', (line) => {
+        appendLauncherLog(`[自动构建 ${tag}] ${line}`)
+      })
+    }
+    logPipe(child.stdout, 'stdout')
+    logPipe(child.stderr, 'stderr')
+    child.on('error', (err) => {
+      clearTimeout(timer)
+      appendLauncherLog(`[自动构建] 失败: ${err.message}`)
+      resolve(false)
+    })
+    child.on('exit', (code) => {
+      clearTimeout(timer)
+      appendLauncherLog(`[自动构建] 退出 code=${code}`)
+      resolve(code === 0)
+    })
+  })
+}
+
+// 返回可用的网关二进制路径；开发检出里会按需自动构建。
+async function ensureGatewayBinary(customBin) {
+  const existing = findBinary(customBin)
+  if (!GATEWAY_AUTOBUILD) return existing
+  if (app.isPackaged) return existing // 打包形态：只用随包二进制
+  if (customBin && customBin.trim()) return existing // 显式指定就尊重用户选择
+
+  const repoRoot = findRepoRoot()
+  if (!repoRoot) return existing // 打包形态：只用随包二进制
+
+  const outPath = path.join(__dirname, 'bin', executableName())
+  let existingMtime = 0
+  if (existing) {
+    try { existingMtime = fs.statSync(existing).mtimeMs } catch { existingMtime = 0 }
+  }
+  const newest = newestSourceMtime(repoRoot)
+  if (existing && existingMtime >= newest) return existing
+
+  appendLauncherLog(`[自动构建] ${existing ? '源码比网关产物新' : '未找到网关二进制'}，开始 go build（cwd=${repoRoot}）`)
+
+  let revision = ''
+  try {
+    revision = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: repoRoot, encoding: 'utf-8' }).trim()
+  } catch { /* 非 git 检出：版本号留空 */ }
+  const buildTime = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  const ldflags = [
+    `-X github.com/adag/ada-go/internal/version.Revision=${revision || 'dev'}`,
+    `-X github.com/adag/ada-go/internal/version.BuildTime=${buildTime}`,
+  ].join(' ')
+
+  try { fs.mkdirSync(path.dirname(outPath), { recursive: true }) } catch { /* 目录已存在 */ }
+  const ok = await runGoBuild(repoRoot, ['build', '-trimpath', '-ldflags', ldflags, '-o', outPath, './cmd/adag'])
+  if (ok && fs.existsSync(outPath)) {
+    appendLauncherLog(`[自动构建] 完成: ${outPath}`)
+    return outPath
+  }
+  appendLauncherLog('[自动构建] 失败，回退到已有产物（若有）')
+  return existing
+}
+
 // ── 网关状态与看门狗 ────────────────────────────────────────────────────
 const coreState = { alive: false, port: 0, token: '', url: '', childPid: null, error: null, endpoint: '' }
 let childProcess = null
@@ -179,9 +308,11 @@ async function startGatewaySupervisor() {
     return
   }
 
-  const gatewayBin = findBinary(cli['gateway-bin'] || cfg.gateway_bin_path)
+  const gatewayBin = await ensureGatewayBinary(cli['gateway-bin'] || cfg.gateway_bin_path)
   if (!gatewayBin) {
-    const msg = '未找到 adag 二进制：请先 `make release`（或 make desktop 拷贝到 desktop/bin），或在设置中指定外部网关地址'
+    const msg = (!app.isPackaged && findRepoRoot())
+      ? '未能准备 adag 网关：自动构建失败或 go 工具链不可用。详见 ~/.adago/launcher.log；也可先手动 `make desktop`，或在设置中指定外部网关地址'
+      : '未找到 adag 二进制：请先 `make release`（或 make desktop 拷贝到 desktop/bin），或在设置中指定外部网关地址'
     appendLauncherLog(`[错误] ${msg}`)
     dialog.showErrorBox('ada-go 启动错误', msg)
     coreState.error = msg
@@ -260,11 +391,12 @@ async function startGatewaySupervisor() {
 
     setTimeout(() => {
       if (!isReady) {
-        coreState.error = '启动网关超时（15 秒内未收到握手行）'
-        appendLauncherLog('[超时] 未在 15 秒内收到网关握手行')
+        const seconds = Math.round(SPAWN_TIMEOUT_MS / 1000)
+        coreState.error = `启动网关超时（${seconds} 秒内未收到握手行）`
+        appendLauncherLog(`[超时] 未在 ${seconds} 秒内收到网关握手行`)
         resolveReadySignal()
       }
-    }, 15000)
+    }, SPAWN_TIMEOUT_MS)
   }
 
   let child = attempt('127.0.0.1:52353')
@@ -305,7 +437,7 @@ async function restartGatewaySupervisor() {
   coreState.url = ''; coreState.endpoint = ''; coreState.childPid = null
   resetReadySignal()
   await startGatewaySupervisor()
-  await Promise.race([readySignalPromise, new Promise((resolve) => setTimeout(resolve, 16000))])
+  await Promise.race([readySignalPromise, new Promise((resolve) => setTimeout(resolve, READY_TIMEOUT_MS))])
   return {
     core_alive: coreState.alive, core_url: coreState.url, core_port: coreState.port,
     error: coreState.error, processes: collectProcesses(),
@@ -366,15 +498,44 @@ async function loadGatewayErrorPage(win, reason) {
   await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
 }
 
+// 网关还没就绪时先显示准备页：首次启动会自动构建 adag，可能停留十几秒。
+async function loadPreparingPage(win, detail) {
+  const safe = String(detail || '正在启动本地网关…').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+  const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+  <title>ada-go · 正在启动</title>
+  <style>
+    body { margin:0; height:100vh; display:grid; place-items:center; background:#18181b;
+      color:#e4e4e7; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif }
+    .box { max-width: 30rem; padding: 2rem; text-align: center }
+    h1 { font-size: 15px; font-weight: 600; margin: 0 0 .75rem }
+    p { margin: 0 0 .5rem; font-size: 13px; line-height: 1.6; color:#a1a1aa }
+    .dot { display:inline-block; width:7px; height:7px; margin-right:6px; border-radius:50%;
+      background:#a1a1aa; animation: pulse 1.2s ease-in-out infinite }
+    @keyframes pulse { 0%,100% { opacity:.25 } 50% { opacity:1 } }
+  </style></head><body><div class="box">
+    <h1><span class="dot"></span>正在启动网关</h1>
+    <p>${safe}</p>
+    <p>首次启动或代码刚更新时，壳会自动构建 adag，请稍候。</p>
+  </div></body></html>`
+  try {
+    await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
+  } catch (err) {
+    appendLauncherLog(`[警告] 准备页加载失败: ${err?.message ?? String(err)}`)
+  }
+}
+
 // SSR 界面：等网关就绪后 `/?token=` 登录——网关校验后换发 HttpOnly 会话 cookie
 // 并 303 去掉 query，令牌不留在地址栏/历史记录（与 a_da 的 SSR guard 同语义）。
 async function loadSsrUi(win) {
+  if (!coreState.alive) {
+    await loadPreparingPage(win, '正在准备 adag gateway（缺二进制或源码有更新时会自动构建）…')
+  }
   const ready = await Promise.race([
     readySignalPromise.then(() => true),
-    new Promise((resolve) => setTimeout(() => resolve(false), 16000)),
+    new Promise((resolve) => setTimeout(() => resolve(false), READY_TIMEOUT_MS)),
   ])
   if (!ready || !coreState.alive || !coreState.port) {
-    const reason = coreState.error || '等待网关超时（16s）'
+    const reason = coreState.error || `等待网关超时（${READY_TIMEOUT_MS / 1000}s）`
     appendLauncherLog(`[警告] 网关未就绪（${reason}），显示提示页`)
     await loadGatewayErrorPage(win, reason)
     return
@@ -407,6 +568,7 @@ async function createMainWindow() {
 
   mainWindow = new BrowserWindow({
     title: 'ada-go',
+    icon: resolveAppPath('icon.ico') || resolveAppPath('build', 'app.ico') || undefined,
     width: initial.width,
     height: initial.height,
     minWidth: SSR_WINDOW_MIN_WIDTH,
@@ -460,6 +622,86 @@ function showMainWindow() {
   mainWindow.focus()
 }
 
+function toggleMainWindow() {
+  if (!mainWindow) return
+  if (mainWindow.isVisible() && !mainWindow.isMinimized()) mainWindow.hide()
+  else showMainWindow()
+}
+
+// 托盘图标：打包后在 resources/icon.ico|png；开发期在 desktop/build/app.ico|png。
+function trayIconPath() {
+  for (const candidate of [
+    resolveAppPath('icon.ico'),
+    resolveAppPath('icon.png'),
+    resolveAppPath('build', 'app.ico'),
+    resolveAppPath('build', 'icon.png'),
+  ]) {
+    if (candidate) return candidate
+  }
+  return null
+}
+
+// 系统托盘：窗口隐藏后仍能显示 / 打开网页 / 重启网关 / 退出。
+// 图标缺失只记日志，不影响桌面端启动。
+function createTray() {
+  if (tray) return
+  const iconPath = trayIconPath()
+  if (!iconPath) {
+    appendLauncherLog('[托盘] 未找到可用的托盘图标（icon.ico / icon.png / build/app.ico），跳过创建')
+    return
+  }
+  let image = nativeImage.createFromPath(iconPath)
+  if (image.isEmpty()) {
+    appendLauncherLog(`[托盘] 图标读取失败: ${iconPath}`)
+    return
+  }
+  if (process.platform === 'win32') image = image.resize({ width: 16, height: 16 })
+
+  try {
+    tray = new Tray(image)
+  } catch (err) {
+    appendLauncherLog(`[托盘] 创建失败: ${err?.message ?? String(err)}`)
+    return
+  }
+  tray.setToolTip('ada-go')
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: '显示 / 隐藏主窗口', click: () => toggleMainWindow() },
+      { label: '打开网页界面', click: () => void openWebUi() },
+      { type: 'separator' },
+      { label: '重新唤醒网关…', click: () => void restartGatewayFromTray() },
+      { type: 'separator' },
+      { label: '退出 ada-go', click: () => app.quit() },
+    ])
+  )
+  // 单击：把窗口叫到前台（不隐藏，避免用户只是想显示时反而消失）。
+  tray.on('click', () => showMainWindow())
+  appendLauncherLog(`[托盘] 已创建系统托盘图标（${iconPath}）`)
+}
+
+async function restartGatewayFromTray() {
+  const answer = await dialog.showMessageBox({
+    type: 'question',
+    buttons: ['取消', '重新唤醒'],
+    defaultId: 1,
+    cancelId: 0,
+    message: '重新唤醒网关？',
+    detail: '正在执行的会话会中断；桌面端会重新加载当前界面。',
+  })
+  if (answer.response !== 1) return
+
+  try {
+    appendLauncherLog('[托盘] 收到「重新唤醒网关」请求')
+    const report = await restartGatewaySupervisor()
+    appendLauncherLog(`[托盘] 重新唤醒网关结束: alive=${report.core_alive} port=${report.core_port}`)
+    if (mainWindow) await loadSsrUi(mainWindow)
+  } catch (err) {
+    const message = err?.message ?? String(err)
+    appendLauncherLog(`[托盘] 重新唤醒网关失败: ${message}`)
+    await dialog.showMessageBox({ type: 'error', message: '重新唤醒网关失败', detail: message })
+  }
+}
+
 // ── IPC（通道名与 a_da 保持一致）───────────────────────────────────────
 function registerIpcHandlers() {
   ipcMain.handle('desktop:get-core-info', async () => {
@@ -495,7 +737,11 @@ function registerIpcHandlers() {
 
 // ── 生命周期 ────────────────────────────────────────────────────────────
 app.on('second-instance', () => showMainWindow())
-app.on('before-quit', () => cleanupChildProcess())
+app.on('before-quit', () => {
+  cleanupChildProcess()
+  tray?.destroy()
+  tray = null
+})
 app.on('window-all-closed', () => {
   cleanupChildProcess()
   if (process.platform !== 'darwin') app.quit()
@@ -506,8 +752,9 @@ app.whenReady().then(async () => {
   startGatewaySupervisor()
   const smoke = process.env.ADAGO_DESKTOP_SMOKE === '1'
   await createMainWindow()
+  createTray()
   if (smoke) {
-    await Promise.race([readySignalPromise, new Promise((resolve) => setTimeout(resolve, 16000))])
+    await Promise.race([readySignalPromise, new Promise((resolve) => setTimeout(resolve, READY_TIMEOUT_MS))])
     const line = `[smoke] alive=${coreState.alive} endpoint=${coreState.endpoint || '(none)'} port=${coreState.port} error=${coreState.error ?? 'none'}`
     appendLauncherLog(line)
     process.stdout.write(line + '\n')

@@ -13,9 +13,10 @@ import (
 // officialPluginIDs 是 v1 随包发布的官方插件 id（development-plan §1.1、02 §5.4 表）。
 // 只在测试代码里出现：产品声明与清单夹具决定启用哪些，基座源码不认得它们（1.5.5）。
 var officialPluginIDs = []string{
-	"provider-openai-chat", "tools-fs", "tools-shell", "tools-git", "tools-plan",
-	"tools-ask", "tools-skill", "tools-subagent", "policy-default", "persona-coding",
-	"ui-task-plan", "task-plan",
+	"provider-openai-chat", "provider-anthropic-messages", "provider-openai-responses",
+	"tools-fs", "tools-shell", "tools-git", "tools-plan", "tools-ask", "tools-skill", "tools-subagent",
+	"policy-default", "persona-coding", "ui-todo", "ui-ask-user", "provider-admin", "token-usage",
+	"ui-task-plan", "ui-hello-tsx",
 }
 
 // TestConformanceBoundary 是 10 §11.1「边界」分层在 M0 能跑的两条：

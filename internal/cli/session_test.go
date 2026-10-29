@@ -13,7 +13,7 @@ import (
 	"github.com/adag/ada-go/internal/cli"
 	"github.com/adag/ada-go/internal/conformance/testkit"
 	"github.com/adag/ada-go/internal/domain"
-	"github.com/adag/ada-go/official"
+	"github.com/adag/ada-go/plugins/official"
 )
 
 func testConfig(t *testing.T, model string) cli.Config {

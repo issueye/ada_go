@@ -15,7 +15,7 @@ import (
 	"github.com/adag/ada-go/internal/domain"
 	"github.com/adag/ada-go/internal/plugins/host"
 	"github.com/adag/ada-go/internal/ports"
-	"github.com/adag/ada-go/official"
+	"github.com/adag/ada-go/plugins/official"
 )
 
 // codingProductPath 返回 coding 产品声明（capabilities.skills=true，10 插件）。

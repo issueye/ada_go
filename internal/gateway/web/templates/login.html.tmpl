@@ -1,17 +1,20 @@
-{{define "login"}}{{template "head" .}}
-<div class="ada-scroll">
-<div class="ada-wrap">
-<div class="page">
-<section class="panel login-panel">
-  <h1>登录</h1>
-  <p>本机回环访问通常无需登录。若通过其他地址访问，认证由网关外部的安全中间件负责。</p>
-  <form method="post" action="{{.LoginPath}}">
-    {{template "csrf" .}}
-    <button type="submit" class="btn-primary">继续</button>
-  </form>
-  <p class="muted">本页不校验密码，也不会保存任何凭据。</p>
-</section>
-</div>
-</div>
-</div>
-{{template "foot" .}}{{end}}
+{{define "login"}}{{template "doc_head" .}}{{template "shell_start" .}}
+  <div class="ada-scroll">
+    <div class="ada-wrap" style="max-width:520px">
+      {{template "flash" .}}
+      <div class="card p-6 mt-4">
+        <div class="flex items-center gap-2 mb-4">
+          <img src="{{asset "logo.png"}}" alt="" width="32" height="32" decoding="async">
+          <span class="ada-brand__name">{{.BrandName}}</span>
+          {{if .ProductBadge}}<span class="ada-brand__badge">{{.ProductBadge}}</span>{{end}}
+        </div>
+        <h1 class="page-title">登录</h1>
+        <p class="page-sub mt-2">认证由 Gateway 的安全中间件负责。若你看到这一页，说明当前请求还没有通过鉴权。</p>
+        <form method="post" action="{{.LoginPath}}" class="mt-4">
+          {{template "csrf" .}}
+          <button class="ada-btn ada-btn--primary ada-btn--md" type="submit">继续</button>
+        </form>
+      </div>
+    </div>
+  </div>
+{{template "shell_end" .}}{{end}}

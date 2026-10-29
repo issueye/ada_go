@@ -158,6 +158,7 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 			Supervisor:   sup,
 			WorkspaceFor: resolveWorkspace,
 			ProductName:  product.Name,
+			CSRF:         mw.CSRFToken,
 		})
 		if err != nil {
 			if ownSup {
@@ -170,7 +171,8 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 	webSrv, err := web.New(web.Config{
 		Supervisor: sup, Workspace: cfg.Workspace, Workspaces: workspaces,
 		WorkspaceFor: resolveWorkspace, CookieSecure: cfg.Secure,
-		ProductName: product.Name, Locale: product.Identity.Locale,
+		ProductName: product.Name, BrandName: product.Identity.Name,
+		Locale: product.Identity.Locale,
 		Events: events, CSRF: mw.CSRFToken, LoginPath: "/login",
 		PluginUI: pluginUI,
 	})

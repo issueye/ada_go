@@ -38,12 +38,15 @@ type BridgeOptions struct {
 	// Scripts 是前端插件（frontend-only）的加载单元：清单 + 模板源码（Script.Bundle）
 	// + 静态资源（Script.StaticAssets）。
 	Scripts []host.Script
-	// Supervisor 用于动作预取（action.invoke）；nil 时跳过预取（props 无 backend 数据）。
+	// Supervisor 用于动作预取（action.invoke）与只读数据投影（provider/usage/interaction）；
+	// nil 时跳过（props 无对应数据）。
 	Supervisor contracts.Supervisor
 	// WorkspaceFor 把请求解析成工作区；nil 时用空串（supervisor 默认工作区）。
 	WorkspaceFor func(*http.Request) string
 	// ProductName 进 props.app.product。
 	ProductName string
+	// CSRF 为每次请求返回 token（写表单需要；nil 时 props.app.csrf 为空）。
+	CSRF func(*http.Request) string
 }
 
 // unit 是一个已登记的前端插件。
@@ -67,6 +70,7 @@ type Bridge struct {
 	sup          contracts.Supervisor
 	workspaceFor func(*http.Request) string
 	product      string
+	csrf         func(*http.Request) string
 }
 
 var _ web.PluginUI = (*Bridge)(nil)
@@ -80,6 +84,7 @@ func NewBridge(opts BridgeOptions) (*Bridge, error) {
 		sup:          opts.Supervisor,
 		workspaceFor: opts.WorkspaceFor,
 		product:      opts.ProductName,
+		csrf:         opts.CSRF,
 	}
 	pairs := make([]host.ComponentPair, 0, len(AllowedComponents)+1)
 	for _, name := range AllowedComponents {
@@ -121,6 +126,15 @@ func NewBridge(opts BridgeOptions) (*Bridge, error) {
 		for _, sc := range f.Slots {
 			b.slotIndex[sc.Slot] = append(b.slotIndex[sc.Slot], slotContrib{u: u, contrib: sc})
 		}
+		// dashboard 贡献挂到概览页的稳定插槽：模板与插槽贡献走同一条渲染路径。
+		for _, dc := range f.Dashboard {
+			b.slotIndex["dashboard.widgets"] = append(b.slotIndex["dashboard.widgets"], slotContrib{
+				u: u,
+				contrib: plugins.SlotContribution{
+					Slot: "dashboard.widgets", Template: dc.Template, Order: dc.Order,
+				},
+			})
+		}
 	}
 	for name := range b.slotIndex {
 		list := b.slotIndex[name]
@@ -154,6 +168,11 @@ func newUnit(s host.Script) (*unit, error) {
 	for _, pc := range u.manifest.Frontend.Pages {
 		if _, ok := u.templates[pc.Template]; !ok {
 			return nil, fmt.Errorf("frontend: 插件 %s 的页面 %s 引用模板 %q，但包里没有它", u.manifest.ID, pc.Slug, pc.Template)
+		}
+	}
+	for _, dc := range u.manifest.Frontend.Dashboard {
+		if _, ok := u.templates[dc.Template]; !ok {
+			return nil, fmt.Errorf("frontend: 插件 %s 的 dashboard 卡片引用模板 %q，但包里没有它", u.manifest.ID, dc.Template)
 		}
 	}
 	for _, style := range u.manifest.Frontend.Styles {
@@ -313,8 +332,11 @@ type renderProps struct {
 	Slot   string     `json:"slot,omitempty"`
 	Page   string     `json:"page,omitempty"`
 	Data   struct {
-		Thread  *threadRef                            `json:"thread,omitempty"`
-		Backend map[string]map[string]json.RawMessage `json:"backend,omitempty"`
+		Thread       *threadRef                            `json:"thread,omitempty"`
+		Backend      map[string]map[string]json.RawMessage `json:"backend,omitempty"`
+		Providers    *providersProjection                  `json:"providers,omitempty"`
+		Usage        *usageProjection                      `json:"usage,omitempty"`
+		Interactions []interactionProjection               `json:"interactions,omitempty"`
 	} `json:"data"`
 }
 
@@ -328,6 +350,8 @@ type appInfo struct {
 	Workspace string `json:"workspace"`
 	Product   string `json:"product"`
 	Route     string `json:"route"`
+	// CSRF 让插件页面的写表单能过双提交校验（与基座模板里的 csrf_token 同源）。
+	CSRF string `json:"csrf,omitempty"`
 }
 
 type threadRef struct {
@@ -343,6 +367,9 @@ func (b *Bridge) buildProps(u *unit, r *http.Request, kind, name string) (json.R
 			Product:   b.product,
 			Route:     r.URL.Path,
 		},
+	}
+	if b.csrf != nil {
+		p.App.CSRF = b.csrf(r)
 	}
 	switch kind {
 	case "slot":
@@ -370,6 +397,26 @@ func (b *Bridge) buildProps(u *unit, r *http.Request, kind, name string) (json.R
 				p.Data.Backend[u.manifest.ID] = map[string]json.RawMessage{}
 			}
 			p.Data.Backend[u.manifest.ID][bindingName] = raw
+		}
+	}
+	// 只读数据投影：供应商/模型、用量、待答交互。统一由 backend.read 能力位约束。
+	if hasCapability(u.manifest.Frontend.Capabilities, plugins.CapBackendRead) {
+		if providers, err := b.loadProviders(r); err == nil {
+			p.Data.Providers = providers
+		} else {
+			log.Printf("frontend: 插件 %s 读取供应商投影失败: %v", u.manifest.ID, err)
+		}
+		if usage, err := b.loadUsage(r, threadID); err == nil {
+			p.Data.Usage = usage
+		} else {
+			log.Printf("frontend: 插件 %s 读取用量投影失败: %v", u.manifest.ID, err)
+		}
+		if threadID != "" {
+			if interactions, err := b.loadInteractions(r, threadID); err == nil {
+				p.Data.Interactions = interactions
+			} else {
+				log.Printf("frontend: 插件 %s 读取待答交互失败: %v", u.manifest.ID, err)
+			}
 		}
 	}
 	raw, err := json.Marshal(p)
@@ -430,10 +477,17 @@ func threadIDFromRequest(r *http.Request) string {
 	if v := strings.TrimSpace(r.URL.Query().Get("threadId")); v != "" {
 		return v
 	}
-	if rest, ok := strings.CutPrefix(r.URL.Path, "/thread/"); ok {
+	// 页面路由是 /threads/{id}（a_da 同形）；/thread/{id} 是 M2 旧路径的兼容别名。
+	for _, prefix := range []string{"/threads/", "/thread/"} {
+		rest, ok := strings.CutPrefix(r.URL.Path, prefix)
+		if !ok {
+			continue
+		}
 		seg, _, _ := strings.Cut(rest, "/")
 		if id, err := url.PathUnescape(seg); err == nil {
-			return strings.TrimSpace(id)
+			if id = strings.TrimSpace(id); id != "" {
+				return id
+			}
 		}
 	}
 	return ""
@@ -465,3 +519,44 @@ func sanitizeBindingName(s string) string {
 	}
 	return b.String()
 }
+
+// List 实现 web.PluginLister：列出已装配的前端插件（扩展页与概览计数用）。
+//
+// 装配期失败的插件不会进 byID（NewBridge 直接报错），所以这里列出的都是已就绪的；
+// 状态固定为 ready，Enabled 恒为 true（禁用插件在装配前已被过滤）。
+func (b *Bridge) List() []web.FrontendPluginInfo {
+	ids := make([]string, 0, len(b.byID))
+	for id := range b.byID {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	out := make([]web.FrontendPluginInfo, 0, len(ids))
+	for _, id := range ids {
+		u := b.byID[id]
+		m := u.manifest
+		info := web.FrontendPluginInfo{
+			ID: m.ID, Name: m.Name, Version: m.Version, Description: m.Description,
+			Enabled: true, Status: "ready",
+		}
+		if m.Frontend != nil {
+			info.NavCount = len(m.Frontend.Nav)
+			info.PageCount = len(m.Frontend.Pages)
+			info.SlotCount = len(m.Frontend.Slots)
+			info.HasDashboard = len(m.Frontend.Dashboard) > 0
+			info.HasAssets = m.Frontend.Assets != "" || len(u.script.StaticAssets) > 0
+			if len(m.Frontend.Pages) > 0 {
+				info.FirstPage = m.Frontend.Pages[0].Slug
+			}
+			for _, n := range m.Frontend.Nav {
+				if strings.TrimSpace(n.Label) == "" || strings.TrimSpace(n.Slug) == "" {
+					continue
+				}
+				info.Nav = append(info.Nav, web.FrontendNavLink{Label: n.Label, Slug: n.Slug})
+			}
+		}
+		out = append(out, info)
+	}
+	return out
+}
+
+var _ web.PluginLister = (*Bridge)(nil)

@@ -19,7 +19,7 @@ import (
 	"github.com/adag/ada-go/internal/gateway/contracts"
 	"github.com/adag/ada-go/internal/gateway/frontend"
 	"github.com/adag/ada-go/internal/gateway/web"
-	"github.com/adag/ada-go/official"
+	"github.com/adag/ada-go/plugins/official"
 )
 
 // uiFakeCore 只实现 SSR 取数需要的面：thread.get/entries 走固定 fixture，

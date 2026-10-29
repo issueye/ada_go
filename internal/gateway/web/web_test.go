@@ -263,15 +263,16 @@ func TestHomeRendersThreadList(t *testing.T) {
 	wantContains(t, body, "第二个会话")
 	wantContains(t, body, `action="/threads"`)
 	wantContains(t, body, "新会话")
-	wantContains(t, body, "最近会话")
-	wantContains(t, body, `href="/thread/th_1"`)
+	wantContains(t, body, "开始一段新的对话")
+	wantContains(t, body, `href="/threads/th_1"`)
+	wantContains(t, body, "ada-thread-list")
 
 	call, ok := core.lastCall("thread.list")
 	if !ok {
 		t.Fatal("没有调用 thread.list")
 	}
-	if got := call.Params["limit"]; got != 20 {
-		t.Fatalf("thread.list limit = %v, want 20", got)
+	if got := call.Params["limit"]; got != 50 {
+		t.Fatalf("thread.list limit = %v, want 50", got)
 	}
 }
 
@@ -283,8 +284,8 @@ func TestCreateThreadCallsCoreAndRedirects(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("POST /threads = %d, want 303 (body=%s)", rec.Code, rec.Body.String())
 	}
-	if loc := rec.Header().Get("Location"); loc != "/thread/th_new" {
-		t.Fatalf("Location = %q, want /thread/th_new", loc)
+	if loc := rec.Header().Get("Location"); loc != "/threads/th_new" {
+		t.Fatalf("Location = %q, want /threads/th_new", loc)
 	}
 	call, ok := core.lastCall("thread.create")
 	if !ok {
@@ -328,10 +329,10 @@ func TestThreadPageRendersTranscriptToolCardAndTray(t *testing.T) {
 	wantContains(t, body, "批准操作")
 	wantContains(t, body, "允许一次")
 	wantContains(t, body, `name="decision"`)
-	wantContains(t, body, `/thread/th_1/cancel`)
+	wantContains(t, body, `/threads/th_1/abort`)
 
 	// Composer 表单。
-	wantContains(t, body, `action="/thread/th_1/turn"`)
+	wantContains(t, body, `action="/threads/th_1/send"`)
 	wantContains(t, body, `name="text"`)
 
 	call, ok := core.lastCall("thread.entries")
@@ -356,7 +357,8 @@ func TestThreadPageExposesLiveStreamHooks(t *testing.T) {
 	body := rec.Body.String()
 	wantContains(t, body, `data-thread-id="th_1"`)
 	wantContains(t, body, `data-run-status="running"`)
-	wantContains(t, body, `<script src="/static/app.js" defer></script>`)
+	wantContains(t, body, `<script src="/static/app.js?v=`)
+	wantContains(t, body, `<script src="/static/chat-live.js?v=`)
 	wantContains(t, body, `id="live-stream"`)
 	wantContains(t, body, `id="live-status"`)
 }
@@ -364,36 +366,41 @@ func TestThreadPageExposesLiveStreamHooks(t *testing.T) {
 func TestStaticAppJSServed(t *testing.T) {
 	srv, _ := newServer(t, newFakeCore())
 
-	rec := serve(t, srv, "GET", "/static/app.js", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("/static/app.js = %d", rec.Code)
+	for _, target := range []string{"/static/app.js", "/static/chat-live.js"} {
+		rec := serve(t, srv, "GET", target, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s = %d", target, rec.Code)
+		}
+		if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/javascript") {
+			t.Fatalf("%s Content-Type = %q", target, ct)
+		}
+		if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Fatalf("%s X-Content-Type-Options = %q", target, got)
+		}
+		if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "max-age") {
+			t.Fatalf("%s Cache-Control = %q", target, cc)
+		}
 	}
-	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/javascript") {
-		t.Fatalf("JS Content-Type = %q", ct)
-	}
-	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
-		t.Fatalf("JS X-Content-Type-Options = %q", got)
-	}
-	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "max-age") {
-		t.Fatalf("JS Cache-Control = %q", cc)
-	}
-	body := rec.Body.String()
-	wantContains(t, body, "EventSource")
-	wantContains(t, body, "evt.message.delta")
+	// a_da 外壳脚本：提示条 + 确认弹窗 + 侧栏。
+	wantContains(t, serve(t, srv, "GET", "/static/app.js", nil).Body.String(), "data-confirm")
+	// 实时增强脚本：SSE 增量。
+	live := serve(t, srv, "GET", "/static/chat-live.js", nil).Body.String()
+	wantContains(t, live, "EventSource")
+	wantContains(t, live, "evt.message.delta")
 }
 
 func TestTurnStartUsesTextAndIdempotencyKey(t *testing.T) {
 	core := newFakeCore().on("turn.start", `{"runId":"run_1","duplicate":false,"seq":1}`)
 	srv, _ := newServer(t, core)
 
-	rec := serve(t, srv, "POST", "/thread/th_1/turn", url.Values{
+	rec := serve(t, srv, "POST", "/threads/th_1/send", url.Values{
 		"text":           {"你好，世界"},
 		"idempotencyKey": {"abcdefgh"},
 	})
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("turn.start = %d (body=%s)", rec.Code, rec.Body.String())
 	}
-	if loc := rec.Header().Get("Location"); loc != "/thread/th_1" {
+	if loc := rec.Header().Get("Location"); loc != "/threads/th_1" {
 		t.Fatalf("Location = %q", loc)
 	}
 	call, _ := core.lastCall("turn.start")
@@ -411,7 +418,7 @@ func TestTurnStartUsesTextAndIdempotencyKey(t *testing.T) {
 func TestTurnStartGeneratesKeyAndRejectsEmptyText(t *testing.T) {
 	srv, _ := newServer(t, newFakeCore())
 
-	rec := serve(t, srv, "POST", "/thread/th_1/turn", url.Values{"text": {"   "}})
+	rec := serve(t, srv, "POST", "/threads/th_1/send", url.Values{"text": {"   "}})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("空消息 = %d, want 400", rec.Code)
 	}
@@ -419,7 +426,7 @@ func TestTurnStartGeneratesKeyAndRejectsEmptyText(t *testing.T) {
 
 	core := newFakeCore().on("turn.start", `{"runId":"run_1","duplicate":false,"seq":1}`)
 	srv2, _ := newServer(t, core)
-	rec = serve(t, srv2, "POST", "/thread/th_1/turn", url.Values{"text": {"你好"}})
+	rec = serve(t, srv2, "POST", "/threads/th_1/send", url.Values{"text": {"你好"}})
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("缺省幂等键 = %d, want 303", rec.Code)
 	}
@@ -519,7 +526,7 @@ func TestCoreErrorRendersPageInsteadOfPanicking(t *testing.T) {
 	body := rec.Body.String()
 	wantContains(t, body, "没有找到这个会话")
 	wantContains(t, body, "重试")
-	wantContains(t, body, "/thread/th_missing")
+	wantContains(t, body, "/threads/th_missing")
 
 	// Core 不可用（非「不存在」）走 502，也不 panic。
 	core2 := newFakeCore().fail("thread.get", errors.New("dial core: connection refused"))
@@ -610,29 +617,30 @@ func TestWorkspacePickerOnlyWhenMultiple(t *testing.T) {
 
 	single, _ := newServer(t, core)
 	body := serve(t, single, "GET", "/", nil).Body.String()
+	// 单工作区也保留切换入口（/workspaces），但不再有内联 index 选择表单。
+	wantContains(t, body, `href="/workspaces"`)
 	wantNotContains(t, body, `action="/workspace"`)
 
 	multi, _ := newServerWithWorkspaces(t, core, []string{"/tmp/ws-a", "/tmp/ws-b"})
-	rec := serve(t, multi, "GET", "/", nil)
+	rec := serve(t, multi, "GET", "/workspaces", nil)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("GET / = %d", rec.Code)
+		t.Fatalf("GET /workspaces = %d", rec.Code)
 	}
 	body = rec.Body.String()
-	wantContains(t, body, `action="/workspace"`)
-	wantContains(t, body, `name="index"`)
+	wantContains(t, body, `action="/workspaces/select"`)
+	wantContains(t, body, `name="path"`)
 	wantContains(t, body, "ws-a")
 	wantContains(t, body, "/tmp/ws-a")
 	wantContains(t, body, "ws-b")
 	wantContains(t, body, "/tmp/ws-b")
-	wantContains(t, body, `value="0" selected`)
 }
 
 func TestWorkspaceSelectSetsCookieAndRedirects(t *testing.T) {
 	srv, _ := newServerWithWorkspaces(t, newFakeCore(), []string{"/tmp/ws-a", "/tmp/ws-b"})
 
-	rec := serve(t, srv, "POST", "/workspace", url.Values{"index": {"1"}})
+	rec := serve(t, srv, "POST", "/workspaces/select", url.Values{"path": {"/tmp/ws-b"}})
 	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("POST /workspace = %d, want 303 (body=%s)", rec.Code, rec.Body.String())
+		t.Fatalf("POST /workspaces/select = %d, want 303 (body=%s)", rec.Code, rec.Body.String())
 	}
 	if loc := rec.Header().Get("Location"); loc != "/" {
 		t.Fatalf("Location = %q, want /", loc)
@@ -663,9 +671,9 @@ func TestWorkspaceSelectSetsCookieAndRedirects(t *testing.T) {
 		t.Fatal("工作区选择 cookie 不应为 HttpOnly（选择器需要可读）")
 	}
 
-	// GET 只做 PRG 回首页。
+	// GET 只做 PRG 回工作区页。
 	rec = serve(t, srv, "GET", "/workspace", nil)
-	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/" {
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/workspaces" {
 		t.Fatalf("GET /workspace = %d %q", rec.Code, rec.Header().Get("Location"))
 	}
 }
@@ -834,28 +842,23 @@ func slotNamesInOrder(body string) []string {
 	}
 }
 
-// 会话页必须落下全部 12 个插槽宿主点，顺序与模板布局一致。
-func TestThreadPageHostsAllTwelveSlotsInOrder(t *testing.T) {
+// 12 个插槽按 a_da 的页面归属分布：对话页 10 个，扩展页与概览页各 1 个。
+func TestAllTwelveSlotsHostedAcrossPages(t *testing.T) {
 	core := newFakeCore().
 		on("thread.get", threadGetRunning).
-		on("thread.entries", entriesDescending)
+		on("thread.entries", entriesDescending).
+		on("thread.list", emptyThreadList).
+		on("plugin.list", `{"plugins":[]}`)
 	srv, _ := newServerWithWorkspaces(t, core, []string{"/tmp/ws-a", "/tmp/ws-b"})
 
-	rec := serve(t, srv, "GET", "/thread/th_1", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /thread/th_1 = %d", rec.Code)
-	}
-	body := rec.Body.String()
-
-	got := slotNamesInOrder(body)
+	chatBody := serve(t, srv, "GET", "/threads/th_1", nil).Body.String()
+	got := slotNamesInOrder(chatBody)
 	want := []string{
 		"sidebar.top",
 		"sidebar.bottom",
 		"topbar.right",
 		"chat.corner",
 		"transcript.after",
-		"extensions.list",
-		"dashboard.widgets",
 		"composer.above",
 		"thread.tray",
 		"composer.left",
@@ -863,15 +866,38 @@ func TestThreadPageHostsAllTwelveSlotsInOrder(t *testing.T) {
 		"composer.footer",
 	}
 	if len(got) != len(want) {
-		t.Fatalf("data-slot 数量 = %d, want %d：%v", len(got), len(want), got)
+		t.Fatalf("对话页 data-slot 数量 = %d, want %d：%v", len(got), len(want), got)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("第 %d 个 data-slot = %q, want %q（全部：%v）", i+1, got[i], want[i], got)
+			t.Fatalf("对话页第 %d 个 data-slot = %q, want %q（全部：%v）", i+1, got[i], want[i], got)
 		}
 	}
-	if strings.Count(body, `class="ada-slot"`) != 12 {
-		t.Fatalf("ada-slot 容器数量 = %d, want 12", strings.Count(body, `class="ada-slot"`))
+	if strings.Count(chatBody, `class="ada-slot"`) != len(want) {
+		t.Fatalf("对话页 ada-slot 容器数量 = %d, want %d", strings.Count(chatBody, `class="ada-slot"`), len(want))
+	}
+
+	extBody := serve(t, srv, "GET", "/extensions", nil).Body.String()
+	wantContains(t, extBody, `data-slot="extensions.list"`)
+
+	ovBody := serve(t, srv, "GET", "/overview", nil).Body.String()
+	wantContains(t, ovBody, `data-slot="dashboard.widgets"`)
+
+	// 三页合起来必须刚好覆盖 12 个契约插槽。
+	all := map[string]bool{}
+	for _, body := range []string{chatBody, extBody, ovBody} {
+		for _, name := range slotNamesInOrder(body) {
+			all[name] = true
+		}
+	}
+	for _, name := range []string{
+		"sidebar.top", "sidebar.bottom", "topbar.right", "chat.corner",
+		"composer.left", "composer.right", "composer.footer", "composer.above",
+		"thread.tray", "transcript.after", "extensions.list", "dashboard.widgets",
+	} {
+		if !all[name] {
+			t.Fatalf("插槽 %s 没有宿主位置（已见：%v）", name, all)
+		}
 	}
 }
 
@@ -888,6 +914,10 @@ func TestThreadPageUsesAdaShellAndComponentDOM(t *testing.T) {
 		`class="ada-shell"`,
 		`class="ada-sidebar"`,
 		`class="ada-side"`,
+		`class="ada-ws-switch"`,
+		`class="ada-search"`,
+		`class="ada-thread-list"`,
+		`class="ada-rail"`,
 		`class="ada-main"`,
 		`class="ada-topbar"`,
 		`class="ada-topbar__actions"`,
@@ -922,10 +952,55 @@ func TestThreadPageUsesAdaShellAndComponentDOM(t *testing.T) {
 	wantContains(t, body, `id="live-status"`)
 	wantContains(t, body, `data-thread-id="th_1"`)
 	wantContains(t, body, `data-run-status="running"`)
-	wantContains(t, body, `<script src="/static/app.js" defer></script>`)
-	wantContains(t, body, `action="/workspace"`)
-	wantContains(t, body, `name="index"`)
-	wantContains(t, body, `value="0" selected`)
+	wantContains(t, body, `<script src="/static/app.js?v=`)
+	wantContains(t, body, `<script src="/static/chat-live.js?v=`)
+	wantContains(t, body, `href="/workspaces"`)
+	wantContains(t, body, `href="/overview"`)
+	wantContains(t, body, `href="/extensions"`)
+}
+
+// 插件列表不再分前端/后端；归属只在详情页展示。
+func TestPluginsUnifiedListAndDetail(t *testing.T) {
+	core := newFakeCore().
+		on("thread.list", emptyThreadList).
+		on("plugin.list", `{"plugins":[
+			{"id":"tools-fs","name":"文件工具","version":"1.2.0","enabled":true,"status":"ready","contributions":{"tools":["read","write"],"hooks":["tool.beforeCall"],"skills":[],"frontend":false,"backend":true}},
+			{"id":"tools-git","name":"Git 工具","version":"1.2.0","enabled":true,"status":"unused","contributions":{"tools":[],"frontend":false,"backend":true}}
+		]}`)
+	ui := &stubUI{list: []web.FrontendPluginInfo{
+		{ID: "ui-demo", Name: "演示前端", Version: "0.1.0", Status: "ready", PageCount: 1, SlotCount: 2, NavCount: 1, FirstPage: "home"},
+	}}
+	srv, _ := newServerWithUI(t, core, ui)
+
+	body := serve(t, srv, "GET", "/extensions", nil).Body.String()
+	wantContains(t, body, "文件工具")
+	wantContains(t, body, "演示前端")
+	// 随包但产品未声明的插件也在列表里，用「未启用」而不是 failed 表示。
+	wantContains(t, body, "Git 工具")
+	wantContains(t, body, "未启用")
+	wantNotContains(t, body, "前端插件")
+	wantNotContains(t, body, "后端插件")
+	wantContains(t, body, `href="/extensions/tools-fs"`)
+	wantContains(t, body, `href="/extensions/ui-demo"`)
+
+	backend := serve(t, srv, "GET", "/extensions/tools-fs", nil).Body.String()
+	wantContains(t, backend, "后端插件")
+	wantContains(t, backend, "文件工具")
+	wantContains(t, backend, "工具")
+
+	unused := serve(t, srv, "GET", "/extensions/tools-git", nil).Body.String()
+	wantContains(t, unused, "后端插件")
+	wantContains(t, unused, "未启用")
+	wantContains(t, unused, "当前产品没有声明这个插件")
+	wantNotContains(t, unused, "action=\"/extensions/tools-git/enable\"")
+
+	frontend := serve(t, srv, "GET", "/extensions/ui-demo", nil).Body.String()
+	wantContains(t, frontend, "前端插件")
+	wantContains(t, frontend, "演示前端")
+
+	if rec := serve(t, srv, "GET", "/extensions/missing", nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("未知插件详情 = %d, want 404", rec.Code)
+	}
 }
 
 // RenderSlot 是唯一的插槽输出函数：签名固定为 template.HTML，空贡献回退。

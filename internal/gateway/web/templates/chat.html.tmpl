@@ -1,0 +1,195 @@
+{{define "chat"}}{{template "doc_head" .}}{{template "shell_start" .}}
+  <div class="ada-corner-dock" id="chat-corner" aria-label="会话状态卡">{{slot "chat.corner" .Slots.ChatCorner .SlotCounts.ChatCorner ""}}</div>
+
+  {{template "flash" .}}
+
+  <div class="ada-chat-viewport">
+    <div class="ada-scroll" id="chat-scroll">
+      <div class="ada-wrap">
+        {{if not .Connected}}
+        <div class="ada-empty">
+          <span class="ada-empty__mark">{{icon "i-alert" 20}}</span>
+          <h2 class="ada-empty__title">暂时没有连上 agent</h2>
+          <p class="ada-empty__desc">请确认桌面端或网关仍在运行，然后重新连接。已加载的页面不会伪造会话数据。</p>
+          <div class="ada-empty__action"><a class="ada-btn ada-btn--primary ada-btn--md" href="">重新连接</a></div>
+        </div>
+        {{else if .Thread.ID}}
+        <div id="transcript" class="ada-transcript" data-thread-id="{{.Thread.ID}}" data-run-status="{{.Run.Status}}">
+          {{if .Transcript}}{{range .Transcript}}{{template "row" .}}{{end}}{{else}}
+          <div class="ada-empty">
+            <span class="ada-empty__mark">{{icon "i-chat" 20}}</span>
+            <h2 class="ada-empty__title">这个会话还没有消息</h2>
+            <p class="ada-empty__desc">在下方输入内容并发送，agent 的回复会出现在这里。</p>
+          </div>
+          {{end}}
+          <div id="live-stream" class="live-stream" aria-live="polite" aria-label="实时输出" hidden></div>
+          {{slot "transcript.after" .Slots.TranscriptAfter .SlotCounts.TranscriptAfter ""}}
+        </div>
+        <div id="live-status" class="live-status" role="status" aria-live="polite" hidden></div>
+        {{else}}
+        <div class="ada-empty ada-empty--newconv">
+          <span class="ada-empty__mark"><img class="ada-empty__logo" src="{{asset "logo.png"}}" alt="" width="32" height="32" decoding="async"></span>
+          <h2 class="ada-empty__title">开始一段新的对话</h2>
+          <p class="ada-empty__desc">左侧会自动列出本地会话。新建会话后，在下方输入框向 agent 发送任务。</p>
+          <div class="ada-empty__action">
+            <form method="post" action="/threads">
+              {{template "csrf" .}}
+              <input type="hidden" name="title" value="新会话">
+              <button class="ada-btn ada-btn--primary ada-btn--md" type="submit">{{icon "i-plus" 14}}<span class="ada-btn__label">新建会话</span></button>
+            </form>
+          </div>
+        </div>
+        {{end}}
+      </div>
+      <button class="ada-scroll-bottom" id="scroll-bottom" type="button" data-ada-scroll-bottom hidden title="回到最新">
+        <svg class="ada-icon" width="13" height="13" aria-hidden="true"><use href="#i-chevron-down"></use></svg>
+        <span>回到最新</span>
+      </button>
+    </div>
+
+    <div class="ada-float-dock" id="composer-above" aria-label="插件悬浮区">{{slot "composer.above" .Slots.ComposerAbove .SlotCounts.ComposerAbove ""}}</div>
+    <div class="ada-run-status-dock" id="run-status">{{if .Run.Active}}<span class="ada-run-status" role="status" aria-live="polite" aria-label="运行中" title="运行中"><svg class="ada-run-status__spin" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-opacity=".25" stroke-width="2"/><path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>{{end}}</div>
+  </div>
+
+  <div class="ada-trays" id="ada-trays" role="region" aria-live="polite" aria-label="待处理事项">
+    {{slot "thread.tray" .Slots.ThreadTray .SlotCounts.ThreadTray ""}}
+    {{if and .Interactions (eq .SlotCounts.ThreadTray 0)}}{{template "interactions" .Interactions}}{{end}}
+  </div>
+
+  {{if .Thread.ID}}
+  <form class="ada-composer" method="post" action="/threads/{{.Thread.ID}}/send">
+    {{template "csrf" .}}
+    <div class="ada-composer__card">
+      <div class="ada-composer__images" id="composer-images" hidden></div>
+      <textarea class="ada-composer__input" name="text" rows="2" maxlength="65536" placeholder="向 {{.ProductName}} 提问，或指派一个任务…" aria-label="消息输入框" required></textarea>
+      <div class="ada-composer__bar">
+        <div class="ada-composer__group ada-composer__group--left">
+          <details class="ada-plus">
+            <summary class="ada-plus__button" title="更多操作" aria-label="更多操作">{{icon "i-plus" 14}}</summary>
+            <div class="ada-plus__panel">
+              <form method="post" action="/threads">{{template "csrf" .}}<input type="hidden" name="title" value="新会话"><button class="ada-plus__item" type="submit">{{icon "i-chat" 14}}<span>新会话</span></button></form>
+              <a class="ada-plus__item" href="/workspaces">{{icon "i-folder" 14}}<span>切换工作区</span></a>
+            </div>
+          </details>
+          <span class="ada-tool ada-tool--workspace" title="{{.Workspace}}">{{icon "i-git-branch" 14}}<span class="ada-tool__label">{{.WorkspaceName}}</span></span>
+          {{slot "composer.left" .Slots.ComposerLeft .SlotCounts.ComposerLeft ""}}
+        </div>
+        <div class="ada-composer__group ada-composer__group--right">
+          {{slot "composer.right" .Slots.ComposerRight .SlotCounts.ComposerRight ""}}
+          <button class="ada-send" type="submit" aria-label="发送" title="发送（Enter）">{{icon "i-send" 14}}</button>
+        </div>
+      </div>
+    </div>
+    <div id="composer-aux">
+      <div class="ada-aux">
+        <span class="ada-aux__group">
+          {{if .Run.Active}}<span class="ada-aux__item ada-aux__item--brand">{{icon "i-wave" 12}}<span>{{.Run.Label}}</span></span>{{end}}
+          <span class="ada-aux__item ada-aux__item--neutral"><span>工作区：{{.WorkspaceName}}</span></span>
+        </span>
+        <div class="ada-aux__actions">
+          {{if .Run.Active}}<form class="ada-action-form" method="post" action="/threads/{{.Thread.ID}}/abort" data-confirm="确定中止当前轮次吗？"><button class="ada-btn ada-btn--danger ada-btn--sm ada-aux__action" type="submit">{{icon "i-stop" 14}}<span class="ada-btn__label">中止</span></button></form>{{end}}
+        </div>
+        <span class="ada-aux__plugins">{{slot "composer.footer" .Slots.ComposerFooter .SlotCounts.ComposerFooter ""}}</span>
+      </div>
+    </div>
+    <input type="hidden" name="idempotencyKey" value="{{.TurnKey}}">
+  </form>
+  <script src="{{asset "chat-live.js"}}" defer></script>
+  {{end}}
+{{template "shell_end" .}}{{end}}
+
+{{define "parts_user"}}{{range .Parts}}{{if eq .Type "thinking"}}{{template "thinking" .}}{{else if eq .Type "image"}}<span class="ada-msg__images">[图片]</span>{{else}}<div class="part-text">{{.Text}}</div>{{end}}{{end}}{{end}}
+
+{{define "parts_assistant"}}{{range .Parts}}{{if eq .Type "thinking"}}{{template "thinking" .}}{{else if eq .Type "image"}}<span class="ada-msg__images">[图片]</span>{{else}}<div class="part-text">{{markdown .Text}}</div>{{end}}{{end}}{{end}}
+
+{{define "thinking"}}
+<details class="ada-disclosure" data-kind="thinking" data-state="closed">
+  <summary class="ada-disclosure__summary">
+    <span class="ada-disclosure__icon">{{icon "i-brain" 12}}</span>
+    <span class="ada-disclosure__caret">{{icon "i-chevron" 12}}</span>
+    <span class="ada-disclosure__label">思考</span>
+  </summary>
+  <div class="ada-disclosure__rail"><div class="ada-panel"><pre class="ada-panel__body">{{.Text}}</pre></div></div>
+</details>
+{{end}}
+
+{{define "row"}}
+{{if eq .Kind "user"}}
+<div class="ada-msg ada-msg--user"><div class="ada-bubble">{{template "parts_user" .}}</div></div>
+{{else if eq .Kind "assistant"}}
+<div class="ada-msg ada-msg--assistant"><span class="ada-avatar" title="助手">{{icon "i-bot" 14}}</span><div class="ada-msg__body markdown-body ada-markdown">{{template "parts_assistant" .}}</div></div>
+{{else if eq .Kind "tool"}}
+{{template "tool" .Tool}}
+{{else if eq .Kind "notice"}}
+<div class="ada-notice ada-notice--{{if eq .Level "error"}}danger{{else if eq .Level "warn"}}warn{{else}}brand{{end}}"><div class="ada-notice__row">{{icon "i-alert" 14}}<span>{{.Text}}</span></div></div>
+{{else}}
+<div class="ada-msg ada-msg--plain"><div class="ada-plain">{{.Text}}</div></div>
+{{end}}
+{{end}}
+
+{{define "tool"}}
+<details class="ada-disclosure" data-kind="tool" data-state="closed"{{if .CallID}} data-key="{{.CallID}}"{{end}}{{if eq .Status "error"}} data-phase="danger"{{else if eq .Status "denied"}} data-phase="warn"{{end}}>
+  <summary class="ada-disclosure__summary">
+    <span class="ada-disclosure__icon">{{icon "i-terminal" 12}}</span>
+    <span class="ada-disclosure__caret">{{icon "i-chevron" 12}}</span>
+    <span class="ada-disclosure__label">{{.Tool}}</span>
+    {{if .StatusLabel}}<span class="ada-badge ada-badge--{{statusTone .Status}}">{{.StatusLabel}}</span>{{end}}
+    {{if .DurationMS}}<span class="ada-disclosure__meta">{{.DurationMS}} ms</span>{{end}}
+    {{if .Truncated}}<span class="ada-badge ada-badge--warn">已截断</span>{{end}}
+  </summary>
+  <div class="ada-disclosure__rail">
+    {{with .Reason}}<p class="ada-notice__row">原因：{{.}}</p>{{end}}
+    {{if .Output}}
+    <div class="ada-panel ada-tool-output" data-expanded="shown" data-body="text">
+      <div class="ada-panel__head">
+        <span class="ada-panel__title">执行输出</span>
+        <span class="ada-tool-output__meta">共 {{lineCount .Output}} 行</span>
+        <button class="ada-panel__copy" type="button" data-copy="{{.Output}}" data-copy-label="复制">复制</button>
+      </div>
+      <div class="ada-panel__body ada-tool-output__scroll"><pre class="ada-tool-output__preview">{{.Output}}</pre></div>
+    </div>
+    {{end}}
+    {{if .Args}}
+    <div class="ada-panel">
+      <div class="ada-panel__head"><span class="ada-panel__title">输入参数</span><button class="ada-panel__copy" type="button" data-copy="{{.Args}}" data-copy-label="复制">复制</button></div>
+      <pre class="ada-panel__body">{{.Args}}</pre>
+    </div>
+    {{end}}
+    {{if .Details}}
+    <div class="ada-panel">
+      <div class="ada-panel__head"><span class="ada-panel__title">详情</span><button class="ada-panel__copy" type="button" data-copy="{{.Details}}" data-copy-label="复制">复制</button></div>
+      <pre class="ada-panel__body">{{.Details}}</pre>
+    </div>
+    {{end}}
+    {{if and (not .Output) (not .Args) (not .Details)}}<div class="ada-panel"><div class="ada-panel__body ada-panel__body--html"><p>这个工具没有返回可展示的内容。</p></div></div>{{end}}
+  </div>
+</details>
+{{end}}
+
+{{define "interactions"}}
+<div class="ada-tray ada-tray--approval" aria-label="待处理交互">
+  <div class="ada-tray__head"><span class="ada-tray__icon">{{icon "i-alert" 14}}</span><span class="ada-tray__title">待答复 · {{len .}} 条</span></div>
+  {{range .}}
+  <div class="ada-tray__row">
+    <div class="ada-tray__text">
+      <strong>{{.Title}}</strong>{{if .Body}} — {{.Body}}{{end}}
+    </div>
+    <form class="ada-tray__form" method="post" action="{{.Action}}">
+      {{template "csrf" .}}
+      <input type="hidden" name="kind" value="{{.Kind}}">
+      {{if eq .Kind "select"}}<select class="ada-input" name="value" aria-label="选择">{{range .Options}}<option value="{{.}}">{{.}}</option>{{end}}</select>
+      {{else if eq .Kind "input"}}<input class="ada-input" type="text" name="value" autocomplete="off" aria-label="回答">
+      {{end}}
+      {{if eq .Kind "confirm"}}
+      <button class="ada-btn ada-btn--secondary ada-btn--sm" type="submit" name="decision" value="deny">拒绝</button>
+      <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit" name="decision" value="accept">接受</button>
+      {{else}}
+      <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit" name="decision" value="accept">提交</button>
+      <button class="ada-btn ada-btn--secondary ada-btn--sm" type="submit" name="decision" value="deny">拒绝</button>
+      {{end}}
+      <button class="ada-btn ada-btn--ghost ada-btn--sm" type="submit" name="decision" value="cancel">取消</button>
+    </form>
+  </div>
+  {{end}}
+</div>
+{{end}}

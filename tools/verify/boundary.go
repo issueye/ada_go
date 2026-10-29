@@ -16,16 +16,17 @@ import (
 var officialPluginIDs = []string{
 	"provider-openai-chat", "provider-anthropic-messages", "provider-openai-responses",
 	"tools-fs", "tools-shell", "tools-git", "tools-plan", "tools-ask", "tools-skill", "tools-subagent",
-	"policy-default", "persona-coding", "ui-task-plan", "ui-hello-tsx",
+	"policy-default", "persona-coding", "ui-todo", "ui-ask-user", "provider-admin", "token-usage",
+	"ui-task-plan", "ui-hello-tsx",
 }
 
 // goFileRe 匹配可能构成「平行 Go 注册入口」的导出函数（1.5.2「零协议扩展」「基座不提供 Go 插件注册 API」）。
 var registrationAPIRe = regexp.MustCompile(`(?m)^func\s+(?:\([^)]+\)\s+)?(RegisterTool|RegisterProvider|RegisterPrompt|RegisterAction|RegisterRoute|RegisterSlot|RegisterHook|AddTool|BuiltinTool)\s*\(`)
 
-// importOfficialRe 匹配对 official/ 的 import（含模块根包 official，不只是子包）。
-// 组合根 app/ 是唯一允许 import 它的包（01 §3.3：app 唯一知道 official/）；
-// internal/ 与 cmd/ 出现即越界。
-var importOfficialRe = regexp.MustCompile(`"(?:github\.com/[^"/]+/[^"/]+/)?official(?:/[^"]*)?"`)
+// importOfficialRe 匹配对官方插件源码包（plugins/official）的 import，
+// 同时兼容模块根包旧路径 official。组合根 app/ 是唯一允许 import 它的包
+// （01 §3.3：app 唯一知道官方插件包）；internal/ 与 cmd/ 出现即越界。
+var importOfficialRe = regexp.MustCompile(`"(?:github\.com/[^"/]+/[^"/]+/)?(?:plugins/)?official(?:/[^"]*)?"`)
 
 // checkDocs 检查文档链接可解析、文档地图完整、以及「核心数字」与生成结果一致。
 //
@@ -207,9 +208,9 @@ func checkBoundary(root string) error {
 		}
 		text := string(raw)
 
-		// 1. 基座（internal/、cmd/）不 import official/；app/ 是唯一例外（组合根）。
+		// 1. 基座（internal/、cmd/）不 import 官方插件包；app/ 是唯一例外（组合根）。
 		if importOfficialRe.MatchString(text) && !strings.HasPrefix(rel, "app/") {
-			hits = append(hits, finding{rel, "import 了 official/ 下的包"})
+			hits = append(hits, finding{rel, "import 了官方插件包（plugins/official）"})
 		}
 		// 2. 基座源码不出现官方插件 id（注释里也拦：避免「文档先行」把 id 固化进基座）
 		for _, id := range officialPluginIDs {

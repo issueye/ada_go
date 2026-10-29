@@ -6,7 +6,7 @@
 
 ## 附录 A：插件示例
 
-示例由两个插件组成：`tools-plan`（后端，builtin，TS）负责维护计划；`task-plan`（前端，third-party，TSX）只负责把计划渲染成悬浮卡。两者通过清单里的只读动作绑定连接，互不 import。官方包里的 `ui-task-plan` 是同一思路的 builtin 实现；这里刻意用第三方版本，展示最小权限路径。
+示例由两个插件组成：`tools-plan`（后端，builtin，TS）负责维护计划；`task-plan`（前端，third-party，TSX）只负责把计划渲染成悬浮卡。两者通过清单里的只读动作绑定连接，互不 import。官方包里的 `ui-todo` 是同一思路的 builtin 实现（真实动作数据，无示例回退）；这里刻意用第三方版本，展示最小权限路径。
 
 ### A.1 `task-plan/plugin.json`（只有前端）
 
@@ -50,7 +50,7 @@
 }
 ```
 
-`official/tools-plan/index.ts`（只保留计划相关部分）：
+`plugins/official/tools-plan/index.ts`（只保留计划相关部分）：
 
 ```ts
 import type { AgentAPI } from "agent:api";

@@ -147,11 +147,11 @@ domain（消息/工具/事件/错误）
              ▲
              ├── coreapp（通用装配器：插件集合 → 目录/引擎）
              │      ▲
-             │      └── app（组合根：产品声明 + 嵌入的 official/*）
+             │      └── app（组合根：产品声明 + 嵌入的 plugins/official/*）
              ├── coreproto（JSON-RPC 服务端）
              └── cmd/adag core
 
-official/*（官方 TS 插件包：provider、fs、shell、git、plan…；只用 agent:* 虚拟模块）
+plugins/official/*（官方 TS 插件包：provider、fs、shell、git、plan…；只用 agent:* 虚拟模块）
    ▲
    └── app（唯一嵌入与装配点）
 
@@ -297,8 +297,8 @@ Core 的 WebSocket 使用独立的一次性 token（环境变量传入，不出�
 ### 5.1 分层
 
 ```
-app             组合根：产品声明 + 嵌入的官方插件包 → coreapp；唯一知道 official/ 的包
-coreapp         通用装配器：接收插件集合 → 工具目录 / 引擎 / 存储（不 import official/）
+app             组合根：产品声明 + 嵌入的官方插件包 → coreapp；唯一知道 plugins/official/ 的包
+coreapp         通用装配器：接收插件集合 → 工具目录 / 引擎 / 存储（不 import plugins/official/）
   ├── coreproto JSON-RPC 服务端、事件发射、状态投影
   ├── engine    RunTurn（唯一多轮循环）、钩子编排、工具前策略、终止条件
   ├── toolkit   工具描述符注册表、能力/scope 校验、文件变更队列、检查点（零具体工具）
@@ -307,7 +307,7 @@ coreapp         通用装配器：接收插件集合 → 工具目录 / 引擎 /
   └── domain    消息、Part、工具描述符/回执、事件、错误、失败方向
 ```
 
-依赖只能向下。`domain` 不知道 Gin，`engine` 不知道 moejs，`coreproto` 不知道模板。`adapters` 只放基础设施；具体 provider 与具体工具都在 `official/`，和第三方插件一样通过 `agent:*` 虚拟模块注册，由同一个 moejs 宿主执行。
+依赖只能向下。`domain` 不知道 Gin，`engine` 不知道 moejs，`coreproto` 不知道模板。`adapters` 只放基础设施；具体 provider 与具体工具都在 `plugins/official/`，和第三方插件一样通过 `agent:*` 虚拟模块注册，由同一个 moejs 宿主执行。
 
 ### 5.2 端口
 
