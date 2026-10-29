@@ -445,10 +445,13 @@ func TestDependencyDirection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Glob: %v", err)
 	}
+	// workspacepath 是只依赖 domain 的叶子工具（路径归一化），
+	// 不构成对上层/适配器层的反向依赖。
 	allowedInternal := []string{
 		"github.com/adag/ada-go/internal/domain",
 		"github.com/adag/ada-go/internal/ports",
 		"github.com/adag/ada-go/internal/diag",
+		"github.com/adag/ada-go/internal/workspacepath",
 	}
 	seen := 0
 	for _, f := range files {

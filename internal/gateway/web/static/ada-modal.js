@@ -47,6 +47,8 @@
 
     open() {
       if (this.isOpen) return;
+      // 记住打开前的焦点：关闭后要还给触发按钮，否则键盘用户会掉回 <body>。
+      this._returnFocus = document.activeElement;
       openModals.push(this);
       this.removeAttribute('hidden');
       this.classList.add('is-open');
@@ -66,6 +68,11 @@
       this.setAttribute('hidden', '');
       this.classList.remove('is-open');
       if (!openModals.length) document.body.classList.remove('ada-modal-open');
+      const back = this._returnFocus;
+      this._returnFocus = null;
+      if (back && back.isConnected && typeof back.focus === 'function') {
+        back.focus();
+      }
       document.dispatchEvent(
         new CustomEvent('ada:modal-close', { detail: { id: this.modalId } })
       );

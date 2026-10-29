@@ -2,8 +2,8 @@
  * 插件 HTTP API 的浏览器端小工具（route）。
  *
  * 用法（插件自带脚本或页面内联脚本）：
- *   const data = await window.adaAPI("provider-admin", "/providers", { method: "GET" });
- *   await window.adaAPI("provider-admin", "/providers/save", { method: "POST", body: {...} });
+ *   const data = await window.adaAPI("example-plugin", "/items", { method: "GET" });
+ *   await window.adaAPI("example-plugin", "/items/save", { method: "POST", body: {...} });
  *   const es = window.adaSSE("my-plugin", "/events", { onMessage: fn }); // SSE 路由
  *
  * - 路径相对于 /ext/<pluginId>/api；

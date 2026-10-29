@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/adag/ada-go/internal/adapters/sqlite"
 	"github.com/adag/ada-go/internal/gateway/contracts"
+	"github.com/adag/ada-go/internal/workspacepath"
 )
 
 // ErrShutdown 表示 Supervisor 已关闭，不再接受新的 Acquire。
@@ -168,7 +168,7 @@ func (s *Supervisor) Acquire(ctx context.Context, workspace string) (contracts.C
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	key, err := sqlite.WorkspaceKey(workspace)
+	key, err := workspacepath.Key(workspace)
 	if err != nil {
 		return nil, fmt.Errorf("supervisor: 归一化工作区 %q 失败: %w", workspace, err)
 	}
@@ -286,7 +286,7 @@ func (s *Supervisor) Acquire(ctx context.Context, workspace string) (contracts.C
 
 // Release 表示一次请求结束：只递减 lease 并刷新 lastUsed，不关闭 Core。
 func (s *Supervisor) Release(workspace string) {
-	key, err := sqlite.WorkspaceKey(workspace)
+	key, err := workspacepath.Key(workspace)
 	if err != nil {
 		return
 	}

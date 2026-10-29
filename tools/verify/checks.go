@@ -792,6 +792,37 @@ func checkUI(root string) error {
 			return fmt.Errorf("缺少 a_da 副本 %s（7.7.1 复用清单）", name)
 		}
 	}
+
+	// CSP 是 style-src 'self'：内联 style 属性会被浏览器直接丢弃。
+	// 布局宽度必须走 class（.ada-wrap--page / --narrow），否则页面只在
+	// 无 CSP 的开发环境里看起来是对的。
+	templatesDir := filepath.Join(root, "internal", "gateway", "web", "templates")
+	var inline []string
+	err = filepath.WalkDir(templatesDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".tmpl") {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, path)
+		for i, line := range strings.Split(string(raw), "\n") {
+			if strings.Contains(line, `style="`) {
+				inline = append(inline, fmt.Sprintf("%s:%d", filepath.ToSlash(rel), i+1))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("扫描模板内联样式失败: %w", err)
+	}
+	if len(inline) > 0 {
+		return fmt.Errorf("模板出现内联 style（CSP style-src 'self' 会拦截，改用 class）:\n  - %s", strings.Join(inline, "\n  - "))
+	}
 	return nil
 }
 

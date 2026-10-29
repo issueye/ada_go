@@ -13,6 +13,9 @@
   'use strict';
 
   var root = document.documentElement;
+  // 脚本可用标记：无 JS 时 <noscript> 里的原生控件接手（下拉选择等），
+  // 有 JS 时才隐藏这些回退控件。必须在这里同步加上，晚于样式表就会闪一下。
+  root.classList.add('js');
   var saved = null;
   try {
     saved = localStorage.getItem('a_da_theme');

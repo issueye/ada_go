@@ -31,14 +31,12 @@ a_da UI 基线资产来源与许可
   crates/agent-web/static/ada-select.js  → ada-select.js
   crates/agent-web/static/ada-modal.js   → ada-modal.js
   crates/agent-web/static/htmx.min.js    → htmx.min.js
-  crates/agent-web/static/alpine.min.js  → alpine.min.js
 
   品牌：
   assets/logo.png                        → logo.png
 
 上游 NOTICE 中声明的第三方前端资产（沿用上游声明）：
   - htmx 2.0.4 — MIT — https://htmx.org/
-  - Alpine.js 3.17.5 CSP build — MIT — https://alpinejs.dev/
   - Tailwind CSS 3.4.19（生成的 app.css）— MIT — https://tailwindcss.com/
 
 说明：

@@ -144,7 +144,7 @@
     }
   });
 
-  /* 下拉选择与弹窗已升级为 Web Components（见 static/elements.js）：
+  /* 下拉选择与弹窗已升级为 Web Components（见 static/ada-select.js 与 ada-modal.js）：
      `<ada-select>` 与 `<ada-modal>`。这里只保留非元素化的行为（折叠、输入框、复制、插槽）。 */
 
   /* ── 3. 输入框：聚焦态 + 发送可用性 + 自动增高 ───────────────────────── */
@@ -202,33 +202,10 @@
     syncSend();
   }
 
-  /* ── 4. 插件插槽注册表 ─────────────────────────────────────────────────
-     服务端已经把插槽内容渲染进 HTML（SSR），这里把同一份状态暴露给
-     客户端插件与调试面板，保证"服务端看到什么，客户端就能读到什么"。 */
-  function loadSlotRegistry() {
-    if (!window.fetch) return;
-    window
-      .fetch('/web-ui/frontend-plugins', { headers: { Accept: 'application/json' } })
-      .then(function (response) {
-        return response.ok ? response.json() : null;
-      })
-      .then(function (data) {
-        if (!data) return;
-        window.AdaPlugins = data;
-        var slots = document.querySelectorAll('.ada-slot');
-        for (var i = 0; i < slots.length; i += 1) {
-          var name = slots[i].getAttribute('data-slot');
-          for (var j = 0; j < (data.slots || []).length; j += 1) {
-            if (data.slots[j].slot === name) {
-              slots[i].dataset.contributors = String(data.slots[j].contributors);
-            }
-          }
-        }
-      })
-      .catch(function () {
-        /* 插件注册表不可用不影响主界面 */
-      });
-  }
+  /* ── 4. 插件插槽 ───────────────────────────────────────────────────────
+     插槽内容与 contributor 数量都由服务端 SSR 一次写进 DOM（data-contributors）。
+     不再额外请求注册表：那条 /web-ui/frontend-plugins 在网关里没有路由，
+     每页只会多一个 404，且客户端也没有消费者。 */
 
   /* ── 工具输出：单层「展开全部」────────────────────────────────────────── */
   /* 全文服务端已经渲染进 DOM，这里只切 data-expanded：
@@ -558,7 +535,6 @@
     // 运行中的工具每秒刷新一次耗时：1s 粒度足够，也能让"它还在跑"看得见。
     window.setInterval(tickRunningElapsed, 1000);
     watchTranscript();
-    loadSlotRegistry();
   }
 
   if (document.readyState === 'loading') {
@@ -568,7 +544,7 @@
   }
 
   // 供插件与调试使用。
-  // 下拉与弹窗的实现在 elements.js 的 Web Components 里（`<ada-select>` / `<ada-modal>`），
+  // 下拉与弹窗的实现在 ada-select.js / ada-modal.js 的 Web Components 里（`<ada-select>` / `<ada-modal>`），
   // 这里只转一层，保持老调用点（app.js 的确认框）不变。
   window.AdaComponents = {
     bindDisclosures: bindDisclosures,

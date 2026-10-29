@@ -491,7 +491,13 @@ func newPluginStreamID() string {
 	return "ps_" + hex.EncodeToString(buf[:])
 }
 
-// handleTurn 提交用户消息，调用 turn.start，然后 303 回会话页。
+// handleTurn 提交用户消息：空闲时 turn.start；运行中则排队为 steering 消息。
+//
+// 运行中仍允许输入是刻意的（用户能在工具执行时补充约束）。直接 turn.start
+// 会撞上 thread_busy 并整页报错，所以这里先读 turn.get：
+//   - running       → turn.steer，在当前工具批次后送达；
+//   - waiting_input → 提示先回答待处理交互（同时只允许一个待答项）；
+//   - finishing     → 提示轮次正在收尾。
 func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := s.parseForm(w, r); err != nil {
@@ -506,20 +512,79 @@ func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 			"请输入消息正文后再发送。", "", threadPath(id), "返回会话")
 		return
 	}
+
+	// 无 JS 的浏览器用 <noscript> 里的原生 select 提交 model（provider|model）；
+	// 有 JS 时模型在选中的那一刻已经通过 /model/select 切换，这里不会有值。
+	if raw := strings.TrimSpace(r.PostFormValue("model")); raw != "" {
+		providerID, modelID, ok := strings.Cut(raw, "|")
+		if ok && providerID != "" && modelID != "" {
+			params := map[string]any{
+				"model":    map[string]any{"providerId": providerID, "modelId": modelID},
+				"threadId": id,
+			}
+			if _, err := s.call(r, "model.set", params); err != nil {
+				s.renderCoreError(w, r, err, threadPath(id))
+				return
+			}
+		}
+	}
+
 	key := strings.TrimSpace(r.PostFormValue("idempotencyKey"))
 	if key == "" {
 		key = newIdempotencyKey()
 	}
-	params := map[string]any{
+	startParams := map[string]any{
 		"threadId":       id,
 		"idempotencyKey": key,
 		"text":           text,
 	}
-	if _, err := s.call(r, "turn.start", params); err != nil {
+
+	switch s.turnStatus(r, id) {
+	case "running":
+		if _, err := s.call(r, "turn.steer", map[string]any{"threadId": id, "text": text}); err != nil {
+			// 轮次可能在 turn.get 与 turn.steer 之间结束。此时消息并没有进队，
+			// 退回 turn.start 比把一条本来能发的消息变成错误页更合理。
+			if _, startErr := s.call(r, "turn.start", startParams); startErr != nil {
+				s.renderCoreError(w, r, startErr, threadPath(id))
+				return
+			}
+		} else {
+			redirect(w, flashRedirect(threadPath(id), "notice", "已加入队列，会在当前步骤后送达"))
+			return
+		}
+		redirect(w, threadPath(id))
+		return
+	case "waiting_input":
+		redirect(w, flashRedirect(threadPath(id), "error", "请先回答待处理的问题，再发送新消息"))
+		return
+	case "finishing":
+		redirect(w, flashRedirect(threadPath(id), "error", "当前轮次正在收尾，请稍后再发送"))
+		return
+	}
+
+	if _, err := s.call(r, "turn.start", startParams); err != nil {
 		s.renderCoreError(w, r, err, threadPath(id))
 		return
 	}
 	redirect(w, threadPath(id))
+}
+
+// turnStatus 读取线程当前轮次状态；读不到返回空串，让调用方按空闲处理
+// （此时 turn.start 会给出真正的错误，而不是把 Core 故障伪装成排队）。
+func (s *Server) turnStatus(r *http.Request, threadID string) string {
+	raw, err := s.call(r, "turn.get", map[string]any{"threadId": threadID})
+	if err != nil {
+		return ""
+	}
+	var res struct {
+		Run struct {
+			Status string `json:"status"`
+		} `json:"run"`
+	}
+	if json.Unmarshal(raw, &res) != nil {
+		return ""
+	}
+	return res.Run.Status
 }
 
 // handleThreadDelete 删除会话（Core 软删 + 清理任务），成功后回到来源页。

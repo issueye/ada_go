@@ -84,6 +84,45 @@ func TestConformanceBoundary(t *testing.T) {
 	t.Logf("边界检查：%d 个文件、%d 条 import，无 official/ 依赖、非测试源码无官方插件 id",
 		len(files), importsChecked)
 
+	// 基座不只在 Go 里：模板与静态资源同样可能写死插件 id 或插件页面路由。
+	// 用同一条清单扫描，避免「Go 干净、模板破功」的假绿。
+	var assets []string
+	assetExt := map[string]bool{
+		".tmpl": true, ".js": true, ".mjs": true, ".css": true, ".ts": true, ".tsx": true,
+	}
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == "testdata" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if assetExt[strings.ToLower(filepath.Ext(path))] {
+			assets = append(assets, path)
+		}
+		return nil
+	})
+	mustNoErr(t, "扫描 internal/ 的模板与静态资源", err)
+	if len(assets) < 10 {
+		t.Fatalf("扫描到的模板/静态资源太少（%d），边界检查等于空转", len(assets))
+	}
+	for _, path := range assets {
+		raw, rerr := readFile(path)
+		if rerr != nil {
+			t.Fatalf("读取 %s: %v", path, rerr)
+		}
+		for _, id := range officialPluginIDs {
+			if strings.Contains(raw, id) {
+				t.Errorf("%s 的模板/静态资源里出现官方插件 id %q（基座不得特判，1.5.5）",
+					filepath.ToSlash(path), id)
+			}
+		}
+	}
+	t.Logf("模板/静态资源边界检查：%d 个文件无官方插件 id", len(assets))
+
 	// 本包自己也必须遵守同一规则（防止 conformance 变成「例外通道」）。
 	assertNoImport(t, "internal/conformance", []string{"official/"})
 	if self := findGoFiles(t, filepath.Join(root, "conformance")); len(self) < 8 {

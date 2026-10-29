@@ -870,31 +870,6 @@ select:focus {
   font-size: var(--ada-text-xs);
 }
 
-.ada-model-picker__foot {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
-  margin-top: 4px;
-  padding: 6px 4px 2px;
-  border-top: 1px solid var(--ph-line);
-  background: var(--ph-elevated);
-}
-
-.ada-model-picker__manage {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-radius: var(--ada-radius-sm);
-  color: var(--ph-brand-ink);
-  font-size: var(--ada-text-sm);
-  text-decoration: none;
-}
-
-.ada-model-picker__manage:hover {
-  background: var(--ph-subtle);
-}
-
 /* 交互托盘里的选择：与模型选择器共用 ada-select，宽度随托盘表单。 */
 .ada-tray__select {
   min-width: 160px;
@@ -1089,3 +1064,57 @@ select:focus {
 .ada-msg__body.markdown-body > :last-child {
   margin-bottom: 0;
 }
+
+/* ── 页面宽度：模板不再写内联 style（CSP style-src 'self' 会拦掉） ────── */
+.ada-wrap--page {
+  max-width: 1040px;
+}
+.ada-wrap--narrow {
+  max-width: 520px;
+}
+
+/* ── 组件层漏掉的几个语义 class ─────────────────────────────────────── */
+.ada-panel__title {
+  color: var(--ph-ink);
+  font-weight: 600;
+}
+
+/* 自定义消息（非 user/assistant 的 plain 行）：居中弱化，不抢正文。 */
+.ada-msg--plain {
+  display: flex;
+  justify-content: center;
+  margin: 4px 0;
+}
+.ada-msg--plain .ada-plain {
+  max-width: 100%;
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
+}
+
+.ada-aux__item--neutral {
+  color: var(--ph-muted);
+}
+
+.ada-slot-host {
+  display: block;
+}
+
+/* 插件/表格里仍在使用的最小工具类；app.css 的产物没有生成这一档。 */
+.mr-3 {
+  margin-right: 12px;
+}
+
+/* ── 无 JS：原生控件接手 Web Component 下拉 ─────────────────────────────
+   theme.js 在 <head> 同步给 <html> 加 .js；没有 .js 说明脚本不可用，
+   隐藏自绘触发层，显示 <noscript> 里的原生 select。 */
+html:not(.js) .ada-select [data-select-trigger],
+html:not(.js) .ada-select [data-select-menu] {
+  display: none !important;
+}
+
+.ada-select__fallback {
+  display: block;
+  width: 100%;
+  min-width: 160px;
+}
+

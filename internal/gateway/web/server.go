@@ -281,14 +281,16 @@ func (s *Server) base(r *http.Request, page, title string, threads []threadSumma
 		SidebarTopCount:    counts.SidebarTop,
 		SidebarBottom:      slots.SidebarBottom,
 		SidebarBottomCount: counts.SidebarBottom,
-		Search:             page == "chat",
-		Connected:          &conn,
-		ProductName:        s.cfg.ProductName,
-		BrandName:          s.cfg.BrandName,
-		ProductBadge:       badge,
-		CSRF:               csrf,
-		CurrentPath:        r.URL.Path,
-		PluginNav:          pluginNav,
+		// 搜索框跟随「有会话可搜」而不是只跟随聊天页：概览/插件页的侧栏
+		// 同样列着会话，没有搜索会让同一份侧栏在页面之间功能不一致。
+		Search:       page == "chat" || len(threads) > 0,
+		Connected:    &conn,
+		ProductName:  s.cfg.ProductName,
+		BrandName:    s.cfg.BrandName,
+		ProductBadge: badge,
+		CSRF:         csrf,
+		CurrentPath:  r.URL.Path,
+		PluginNav:    pluginNav,
 	})
 	return baseData{
 		Title:               title,

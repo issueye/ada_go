@@ -71,7 +71,6 @@
   <form class="ada-composer" method="post" action="/threads/{{.Thread.ID}}/send">
     {{template "csrf" .}}
     <div class="ada-composer__card">
-      <div class="ada-composer__images" id="composer-images" hidden></div>
       <textarea class="ada-composer__input" name="text" rows="2" maxlength="65536" placeholder="向 {{.ProductName}} 提问，或指派一个任务…" aria-label="消息输入框" required></textarea>
       <div class="ada-composer__bar">
         <div class="ada-composer__group ada-composer__group--left">
@@ -97,16 +96,16 @@
                 <span class="ada-model-picker__provider">{{.ProviderID}}</span>
               </button>
               {{end}}
-              <div class="ada-model-picker__foot"><a class="ada-model-picker__manage" href="/ext/provider-admin/providers">{{icon "i-plug" 12}}<span>管理供应商与模型</span></a></div>
             </div>
-            <input type="hidden" name="model" data-select-input value="{{.CurrentModelValue}}">
+            <input type="hidden" data-select-input value="{{.CurrentModelValue}}">
+            <noscript><select class="input ada-select__fallback" name="model" aria-label="选择当前模型">{{range .Models}}<option value="{{.ProviderID}}|{{.ModelID}}"{{if .Current}} selected{{end}}>{{.Label}}</option>{{end}}</select></noscript>
           </ada-select>
           {{end}}
           {{slot "composer.left" .Slots.ComposerLeft .SlotCounts.ComposerLeft ""}}
         </div>
         <div class="ada-composer__group ada-composer__group--right">
           {{slot "composer.right" .Slots.ComposerRight .SlotCounts.ComposerRight ""}}
-          <button class="ada-send" type="submit" aria-label="发送" title="发送（Enter）">{{icon "i-send" 14}}</button>
+          <button class="ada-send" type="submit" aria-label="{{if .Run.Active}}排队发送{{else}}发送{{end}}" title="{{if .Run.Active}}运行中发送会排队，在当前步骤后送达{{else}}发送（Enter）{{end}}">{{icon "i-send" 14}}</button>
         </div>
       </div>
     </div>
@@ -211,7 +210,7 @@
     <form class="ada-tray__form" method="post" action="{{.Action}}">
       {{template "csrf" .}}
       <input type="hidden" name="kind" value="{{.Kind}}">
-      {{if eq .Kind "select"}}{{if .Options}}{{$first := index .Options 0}}<ada-select class="ada-select ada-tray__select"><button class="ada-select__trigger" type="button" data-select-trigger aria-expanded="false" aria-label="选择"><span class="ada-select__label" data-select-label>{{$first}}</span><span class="ada-select__caret">{{icon "i-chevron-down" 12}}</span></button><div class="ada-select__menu" data-select-menu hidden>{{range .Options}}<button class="ada-select__option" type="button" data-value="{{.}}">{{.}}</button>{{end}}</div><input type="hidden" name="value" data-select-input value="{{$first}}"></ada-select>{{end}}
+      {{if eq .Kind "select"}}{{if .Options}}{{$first := index .Options 0}}<ada-select class="ada-select ada-tray__select"><button class="ada-select__trigger" type="button" data-select-trigger aria-expanded="false" aria-label="选择"><span class="ada-select__label" data-select-label>{{$first}}</span><span class="ada-select__caret">{{icon "i-chevron-down" 12}}</span></button><div class="ada-select__menu" data-select-menu hidden>{{range .Options}}<button class="ada-select__option" type="button" data-value="{{.}}">{{.}}</button>{{end}}</div><input type="hidden" name="value" data-select-input value="{{$first}}" disabled><noscript><select class="input ada-select__fallback" name="value" aria-label="选择">{{range .Options}}<option value="{{.}}">{{.}}</option>{{end}}</select></noscript></ada-select>{{end}}
       {{else if eq .Kind "input"}}<input class="ada-input" type="text" name="value" autocomplete="off" aria-label="回答">
       {{end}}
       {{if eq .Kind "confirm"}}
@@ -242,7 +241,7 @@
   <div class="ask-wizard__step" data-ask-step="{{.Index}}">
     <p class="ask-wizard__question">{{.Question}}</p>
     {{if eq .Kind "select"}}
-      {{if .Options}}<ada-select class="ada-select ask-wizard__select"><button class="ada-select__trigger" type="button" data-select-trigger aria-expanded="false" aria-label="选择"><span class="ada-select__label" data-select-label>{{index .Options 0}}</span><span class="ada-select__caret">{{icon "i-chevron-down" 12}}</span></button><div class="ada-select__menu" data-select-menu hidden>{{range .Options}}<button class="ada-select__option" type="button" data-value="{{.}}">{{.}}</button>{{end}}</div><input type="hidden" name="q{{.Index}}" data-select-input value="{{index .Options 0}}"></ada-select>{{end}}
+      {{if .Options}}<ada-select class="ada-select ask-wizard__select"><button class="ada-select__trigger" type="button" data-select-trigger aria-expanded="false" aria-label="选择"><span class="ada-select__label" data-select-label>{{index .Options 0}}</span><span class="ada-select__caret">{{icon "i-chevron-down" 12}}</span></button><div class="ada-select__menu" data-select-menu hidden>{{range .Options}}<button class="ada-select__option" type="button" data-value="{{.}}">{{.}}</button>{{end}}</div><input type="hidden" name="q{{.Index}}" data-select-input value="{{index .Options 0}}" disabled><noscript><select class="input ada-select__fallback" name="q{{.Index}}" aria-label="回答">{{range .Options}}<option value="{{.}}">{{.}}</option>{{end}}</select></noscript></ada-select>{{end}}
     {{else if eq .Kind "confirm"}}
       <div class="ask-wizard__choices">
         <label class="ask-wizard__choice"><input type="radio" name="q{{.Index}}" value="yes" checked><span>是</span></label>

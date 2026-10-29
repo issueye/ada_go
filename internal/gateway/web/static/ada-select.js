@@ -16,6 +16,23 @@
     connectedCallback() {
       if (this._wired) return;
       this._wired = true;
+      // 隐藏 input 在模板里默认 disabled：无 JS 时由 <noscript> 原生 select 提交，
+      // 有 JS 时由组件接管。放在这里启用，表单不会同时提交两个同名字段。
+      if (this.input) this.input.disabled = false;
+      // 自绘 listbox 的角色交给组件补齐；模板只写状态属性，读屏才知道这是弹出列表。
+      if (this.trigger) {
+        this.trigger.setAttribute('aria-haspopup', 'listbox');
+      }
+      if (this.menu) {
+        this.menu.setAttribute('role', 'listbox');
+        for (const child of this.menu.children) {
+          if (!child.matches('[data-value]')) child.setAttribute('role', 'presentation');
+        }
+        for (const option of this.options) {
+          option.setAttribute('role', 'option');
+          option.setAttribute('aria-selected', option.classList.contains('is-selected') ? 'true' : 'false');
+        }
+      }
       this._handleClick = (event) => this.onClick(event);
       this._handleKeydown = (event) => this.onKeydown(event);
       this.addEventListener('click', this._handleClick);

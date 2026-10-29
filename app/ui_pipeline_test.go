@@ -153,6 +153,28 @@ func TestTaskPlanCardHiddenWithoutAction(t *testing.T) {
 	}
 }
 
+// 供应商管理入口由 provider-admin 的 composer.left 插槽提供：
+// 基座模板不再写死插件 id 与页面路由；禁用插件时入口随插槽一起消失。
+func TestProviderAdminSlotInComposer(t *testing.T) {
+	core := &uiFakeCore{}
+	srv := newUIServer(t, core)
+
+	rec := uiGet(t, srv, "/thread/th_1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /thread/th_1 = %d\n%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`data-slot="composer.left" data-contributors="1"`,
+		`href="/ext/provider-admin/providers"`,
+		`管理供应商与模型`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("composer.left 插槽缺少 %q", want)
+		}
+	}
+}
+
 // /ext 页面：hello 页 200，未知页面 404，静态资源 allowlist。
 func TestUIExtRoutes(t *testing.T) {
 	core := &uiFakeCore{}

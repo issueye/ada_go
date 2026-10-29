@@ -1,7 +1,7 @@
 {
   "id": "provider-admin",
   "name": "供应商管理",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "apiVersion": 1,
   "description": "模型设置：集中管理供应商（端点/API 格式/密钥/模型清单）与当前模型；数据经插件 route 读写，密钥不经过浏览器。",
   "trust": "builtin",
@@ -11,6 +11,7 @@
   },
   "frontend": {
     "capabilities": ["frontend.script"],
+    "slots": [{ "slot": "composer.left", "template": "slot.tsx", "order": 10 }],
     "nav": [{ "label": "供应商", "slug": "providers" }],
     "pages": [{ "slug": "providers", "title": "供应商", "template": "page.tsx" }],
     "scripts": ["provider-admin.js"],

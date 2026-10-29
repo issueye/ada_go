@@ -281,18 +281,18 @@ ada-go 的界面不是“参考 a_da 风格”，而是**直接使用 a_da 的 U
 
 | a_da 资产 | ada-go 落点 | 复用方式 |
 |---|---|---|
-| `design/tokens.css` | `web/static/tokens.css` | 原样复制；所有 `--ph-*` 颜色的唯一真源 |
-| `crates/agent-web/static/app.css` | `web/static/app.css` | 直接使用 a_da 的**预编译产物**（含 token 段与工具类）；ada-go 不运行 Tailwind，只固定并校验该产物 |
-| `components.css` / `layout.css` / `widgets.css` / `shell.css` / `pages.css` | `web/static/ui/` | 原样复制；引用顺序保持 components → layout → widgets → shell → pages |
-| `ada-select.js` / `ada-modal.js` | `web/static/` | 原样复制；`<ada-select>` / `<ada-modal>` 的 Web Components 行为不变 |
-| `components.js` / `app.js` / `chat-live.js` / `theme.js` | `web/static/` | `components.js`（组件行为）、`theme.js` 原样复制；`app.js`（外壳：提示条/确认弹窗/侧栏）以 a_da 为基线，含「窄屏初始关闭抽屉」的本地补丁；`chat-live.js` 由 ada-go 维护，消费 `/events/{id}` 的 SSE 增量 |
-| `htmx.min.js` / `alpine.min.js` / `logo.png` | `web/static/` | 原样复制；概览页每 5 秒 `hx-get="/partials/dashboard"` 换新 |
+| `design/tokens.css` | `internal/gateway/web/static/tokens.css` | 原样复制；所有 `--ph-*` 颜色的唯一真源 |
+| `crates/agent-web/static/app.css` | `internal/gateway/web/static/app.css` | 直接使用 a_da 的**预编译产物**（含 token 段与工具类）；ada-go 不运行 Tailwind，只固定并校验该产物 |
+| `components.css` / `layout.css` / `widgets.css` / `shell.css` / `pages.css` | `internal/gateway/web/static/ui/` | 原样复制；引用顺序保持 components → layout → widgets → shell → pages |
+| `ada-select.js` / `ada-modal.js` | `internal/gateway/web/static/` | 原样复制；`<ada-select>` / `<ada-modal>` 的 Web Components 行为不变 |
+| `components.js` / `app.js` / `chat-live.js` / `theme.js` | `internal/gateway/web/static/` | `components.js`（组件行为）、`theme.js` 原样复制；`app.js`（外壳：提示条/确认弹窗/侧栏）以 a_da 为基线，含「窄屏初始关闭抽屉」的本地补丁；`chat-live.js` 由 ada-go 维护，消费 `/events/{id}` 的 SSE 增量 |
+| `htmx.min.js` / `logo.png` | `internal/gateway/web/static/` | 原样复制；概览页每 5 秒 `hx-get="/partials/dashboard"` 换新。不引入 Alpine：仓库不再加载/分发 `alpine.min.js` |
 | `ui/icons.rs` | `internal/gateway/web/ui.go` | 同一组线性 SVG path、同一 stroke 1.75 与尺寸档位；模板经 `{{icon "…"}}` 或 sprite `<use>` 引用 |
 | `ui/components.rs` / `rows.rs` | `internal/gateway/web/ui.go` + `templates/` | Go 组件函数与模板输出 a_da **相同的 `ada-*` 标签、class 与 `data-*` 状态** |
-| `templates/*.html`、`partials/transcript.html` | `web/templates/` | 手写 Go 模板，DOM 层级与 class 不变；Askama 语法换成 `html/template` |
+| `templates/*.html`、`partials/transcript.html` | `internal/gateway/web/templates/` | 手写 Go 模板，DOM 层级与 class 不变；Askama 语法换成 `html/template` |
 | `plugins/task-plan/` | `plugins/official/tools-plan`（前端段） | 同一张 Todo 卡片（真实计划来自只读动作；无计划时不占位） |
 
-上游固定到 a_da 的一个 commit。`web/static/` 中的副本在文件头记录来源与 SHA-256；`adag verify ui` 比对 token 名/值、CSS 层顺序、组件 class 基线与图标集，任何漂移先改文档与基线再改实现。运行时链接顺序为 `app.css` → `tokens.css` → `components/layout/widgets/shell/pages.css`：后加载的 `tokens.css` 覆盖 `app.css` 内联的编译副本，保证颜色仍只有一个可读真源。模板引用静态资源统一走 `{{asset "name"}}`，输出带内容指纹的 `/static/name?v=<hash>`；静态资源本身仍可长缓存，改 CSS/JS 后新 URL 会自动失效旧缓存（桌面壳的 Electron HTTP 缓存也在内）。
+上游固定到 a_da 的一个 commit。`internal/gateway/web/static/` 中的副本在文件头记录来源与 SHA-256；`adag verify ui` 比对 token 名/值、CSS 层顺序、组件 class 基线与图标集，任何漂移先改文档与基线再改实现。运行时链接顺序为 `app.css` → `tokens.css` → `components/layout/widgets/shell/pages.css`：后加载的 `tokens.css` 覆盖 `app.css` 内联的编译副本，保证颜色仍只有一个可读真源。模板引用静态资源统一走 `{{asset "name"}}`，输出带内容指纹的 `/static/name?v=<hash>`；静态资源本身仍可长缓存，改 CSS/JS 后新 URL 会自动失效旧缓存（桌面壳的 Electron HTTP 缓存也在内）。
 
 #### 7.7.2 设计令牌
 
@@ -343,7 +343,7 @@ Go 组件库按 a_da 的组件清单实现，名字与输出对齐：
 
 - **状态颜色**：运行中用 warn（顶栏徽标）或品牌色（左侧呼吸条）；等待批准用 warn；待答复用 brand；失败/停止用 danger。完成态不加绿标；颜色不是唯一信号，同时有文字或图标。
 - **布局稳定**：审批/排队托盘位于 transcript 与 Composer 之间，出现时不覆盖输入框；提问卡浮在托盘区顶部，不占布局；浮层出现/消失不顶动对话流。
-- **Composer**：Enter 发送、Shift+Enter 换行、IME 组合输入中不发送；空内容禁用发送；运行中允许继续输入并明确显示“已排队 N 条”；图片 PNG/JPEG/WebP/GIF，单张 ≤8MB、最多 4 张。
+- **Composer**：Enter 发送、Shift+Enter 换行、IME 组合输入中不发送；空内容禁用发送；运行中允许继续输入，提交后按 `turn.steer` 排队并在当前步骤后送达（内容为空时不发）；图片 PNG/JPEG/WebP/GIF，单张 ≤8MB、最多 4 张。
 - **工具卡**：执行中的耗时是活的（服务端 `startedAt` + 客户端每秒续走）；长输出只有一层折叠（10 行预览 + “展开全部”），展开后 420px 内滚；JSON 走等宽原文，其余按 Markdown。
 - **回到最新**：离开底部时出现底部中央胶囊；点击回到底部并恢复自动跟随；与 `composer.above` 插件卡分开，互不遮挡。
 - **通信**：`flash` 横幅 error 9s、其它 6s，可手动关闭；失败 Notice 带“重试这一轮”真实表单；离线保留外壳并显示“未连接/重新连接”，不显示假统计。
@@ -376,7 +376,7 @@ Todo 卡片是插件的前端段，不是基座组件：`plugins/official/tools-
 | `GET /ext/{id}/{slug}` | 插件页 | `PluginUI.Page` |
 | `GET /login`、离线页、错误页 | 外壳页面 | — |
 
-二级页与聊天页共用侧栏，内容最大宽度 1040px，表格横向滚动。供应商管理是**统一官方插件**（backend `route` + TSX 骨架 + JS）：Master-Detail 管理供应商、端点、API 格式、API Key 与模型清单，可拉取 `/models`、启停供应商/模型；密钥由后端保存，页面只显示尾号。输入框旁的模型选择器通过 `POST /model/select` 切换线程级/工作区级模型，列表来自 `model.list`。供应商页与选择器依赖 JS；基座仍保留 `POST /model/select` 作为无 JS 的兼容入口。
+二级页与聊天页共用侧栏，内容最大宽度 1040px，表格横向滚动。供应商管理是**统一官方插件**（backend `route` + TSX 骨架 + JS）：Master-Detail 管理供应商、端点、API 格式、API Key 与模型清单，可拉取 `/models`、启停供应商/模型；密钥由后端保存，页面只显示尾号。输入框旁的模型选择器通过 `POST /model/select` 切换线程级/工作区级模型，列表来自 `model.list`。有 JS 时选择即切换；无 JS 时 `<noscript>` 原生 select 随消息一起提交，基座在 `turn.start` 前调用 `model.set`。
 
 与 a_da 的已知差异（如实声明）：工作区集合在 Gateway 启动时固定，目录选择器只能选用已配置的工作区（浏览子目录用于查看，不新增工作区）；前端插件在装配期加载，扩展页只提供 agent 插件的启用/停用与重载，前端插件变更需重启 Gateway。
 
@@ -391,10 +391,10 @@ Todo 卡片是插件的前端段，不是基座组件：`plugins/official/tools-
 
 ### 7.8 渐进增强与可访问性
 
-- 没有 JS：发消息、响应交互、重载插件、切换线程全部是原生表单 + 303；运行中页面用 `<meta http-equiv="refresh" content="2">` 轮询，完成后停止。
-- 有 JS：表单拦截为 `fetch`，SSE 增量更新；提交后不整页刷新。
+- 没有 JS：发消息、响应交互、重载插件、切换线程全部是原生表单 + 303；运行中页面用 `<meta http-equiv="refresh" content="2">` 轮询，完成后停止。`<ada-select>` 在无 JS 时展示 `<noscript>` 原生 select（交互回答、分步表单、模型选择都可提交）。
+- 有 JS：表单拦截为 `fetch`，SSE 增量更新；提交后不整页刷新。运行中发送转成 `turn.steer` 排队，不再以 `thread_busy` 整页报错。
 - 语义结构：`<main>`、`<nav>`、`<form>`、`<button>`；消息列表 `aria-live="polite"`，流式期间不逐 token 播报，只在完成时播报。
-- 键盘：Tab 顺序自然；交互托盘打开时聚焦安全选项（确认框默认“拒绝”），Esc 关闭；发送快捷键可配置。
+- 键盘：Tab 顺序自然；交互托盘打开时聚焦安全选项（确认框默认“拒绝”），Esc 关闭；`Ctrl/Cmd+K` 聚焦会话搜索，`Esc` 清空搜索。
 - 错误：页面级错误显示原因与下一步（重试/打开日志/重启 Core），不显示堆栈；开发模式可展开。
 
 ---

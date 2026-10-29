@@ -516,15 +516,9 @@ func (st *Store) RecordUsage(ctx context.Context, u UsageRecord) error {
 	return st.w.submitUsage(u)
 }
 
-// UsageAggregate 是 usage 表的聚合视图（08 usage.get）。
-type UsageAggregate struct {
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
-	Input    int64  `json:"inputTokens"`
-	Output   int64  `json:"outputTokens"`
-	Cache    int64  `json:"cacheTokens"`
-	Cost     int64  `json:"costMicros"`
-}
+// UsageAggregate 是用量聚合的端口类型别名（08 usage.get）。
+// 规则在 ports 里定义，SQLite 只负责把行扫进这个结构。
+type UsageAggregate = ports.UsageAggregate
 
 // UsageByThread 返回线程的用量汇总（只读；provider+model 分组）。
 func (r *Reader) UsageByThread(ctx context.Context, threadID string) ([]UsageAggregate, error) {

@@ -1,50 +1,19 @@
 package sqlite
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
-	"strings"
+
+	"github.com/adag/ada-go/internal/workspacepath"
 )
 
-// WorkspaceHash 按 01 §4.2 的身份键规则算出工作区的 12 位哈希：
-// filepath.Abs → EvalSymlinks（真实落点）→ Windows 折叠盘符与大小写、统一分隔符 →
-// sha256[:12]。E:\x、E:/x/、e:/X 必须落到同一个键（01 §4.2）。
-//
-// 它同时用于 <dataDir>/workspaces/<hash> 目录名、锁文件名 ws-<hash>.lock 与
-// 线程 id 前缀 th_<hash>_<ulid>（04 §5.7）。
-func WorkspaceHash(workspace string) (string, error) {
-	real, err := WorkspaceKey(workspace)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256([]byte(real))
-	return hex.EncodeToString(sum[:])[:12], nil
-}
+// WorkspaceHash / WorkspaceKey 保留在适配器上，供本包与既有调用方使用；
+// 规则本体在 internal/workspacepath，Gateway 的进程监督也直接用它。
+// 这样基座的不同部分不会各自实现一套路径归一化（01 §4.2）。
+func WorkspaceHash(workspace string) (string, error) { return workspacepath.Hash(workspace) }
 
-// WorkspaceKey 返回归一化后的真实路径（身份键的原文，供 workspace 列与诊断输出）。
-func WorkspaceKey(workspace string) (string, error) {
-	if strings.TrimSpace(workspace) == "" {
-		return "", invalidInput("工作区路径为空：身份键无法计算（01 §4.2）")
-	}
-	abs, err := filepath.Abs(workspace)
-	if err != nil {
-		return "", fmt.Errorf("sqlite: 归一化工作区路径失败 %s: %w", workspace, err)
-	}
-	// EvalSymlinks 需要路径存在；不存在时退回到 Abs（01 §4.2 的 workspace_missing
-	// 由上层判定，本包只在打开时要求目录存在）。
-	if real, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = real
-	}
-	abs = filepath.Clean(abs)
-	if runtime.GOOS == "windows" {
-		abs = strings.ToLower(filepath.ToSlash(abs))
-	}
-	return abs, nil
-}
+func WorkspaceKey(workspace string) (string, error) { return workspacepath.Key(workspace) }
 
 // DefaultDataDir 返回产品级默认数据目录 ~/.adago/workspaces/<hash>（04 §5.7）。
 //

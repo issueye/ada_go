@@ -38,6 +38,36 @@
     }
   }
 
+  /* 非阻塞提示：替代 window.alert。alert 会冻结整页脚本，且和页面内
+     提示条是两种观感；这里复用服务端 flash 的 DOM 与样式。 */
+  function notify(message, kind) {
+    var host = document.querySelector('.ada-main') || document.body;
+    var box = document.createElement('div');
+    var tone = kind === 'error' ? 'alert-danger' : 'alert-info';
+    box.className = 'ada-flash alert ' + tone;
+    box.setAttribute('data-flash', kind === 'error' ? 'error' : 'info');
+    box.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+
+    var text = document.createElement('p');
+    text.className = 'alert-message';
+    text.textContent = message;
+
+    var close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'ada-flash__close';
+    close.setAttribute('data-dismiss', '');
+    close.setAttribute('aria-label', '关闭提示');
+    close.setAttribute('title', '关闭');
+    close.textContent = '×';
+
+    box.appendChild(text);
+    box.appendChild(close);
+    host.insertBefore(box, host.firstChild);
+    window.setTimeout(function () {
+      if (box.isConnected) dismiss(box);
+    }, kind === 'error' ? 9000 : 6000);
+  }
+
   /* ── 2. 共享确认弹窗 ─────────────────────────────────────────────────
      弹窗本体是组件库的 `ui::ConfirmDialog`（`data-modal="confirm"`）；开合、焦点圈、
      Esc、遮罩与滚动锁定由 `components.js` 的 `[data-modal]` 控制器统一负责。
@@ -183,7 +213,7 @@
       });
     }).catch(function (err) {
       picker.removeAttribute("aria-busy");
-      window.alert("切换模型失败：" + (err && err.message ? err.message : err));
+      notify("切换模型失败：" + (err && err.message ? err.message : err), "error");
     });
   });
 
@@ -326,6 +356,28 @@
     scroller.scrollTop = scroller.scrollHeight;
   }
 
+  /* 「回到最新」：模板里默认 hidden，用户向上滚出底部才显示。
+     它挂在 app.js（每页都加载）而不是 chat-live.js（只在运行中加载），
+     这样浏览历史消息时也能一键回到底部。 */
+  function bindScrollBottom() {
+    var scroller = document.getElementById('chat-scroll');
+    var button = document.getElementById('scroll-bottom');
+    if (!scroller || !button) return;
+
+    function sync() {
+      button.hidden = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 140;
+    }
+
+    scroller.addEventListener('scroll', sync, { passive: true });
+    button.addEventListener('click', function () {
+      // 直接置底而不是 smooth：流式输出期间内容高度持续变化，平滑动画
+      // 可能停在半途；后台标签页也会暂停 rAF，按钮看起来“没反应”。
+      scroller.scrollTop = scroller.scrollHeight;
+      sync();
+    });
+    sync();
+  }
+
   /* ── 分步表单（ask_user 一次问多个）：上一题 / 下一题 / 提交 ─────────────
      没有 JS 时所有题目一起展开、直接提交也能用（字段名 q0、q1…，基座按序拼成
      answers）；这里只做翻阅与按钮显隐，答案仍由表单本身提交。 */
@@ -384,11 +436,76 @@
     render();
   }
 
+  /* ── 会话搜索：本地过滤已渲染的会话行 ─────────────────────────────────
+     侧栏的输入框、Ctrl/Cmd+K 与窄轨上的搜索按钮都指向同一份过滤逻辑。
+     不做服务端搜索：线程列表本来就在 DOM 里，过滤是微秒级；重新请求
+     反而会让侧栏闪一下。清空后恢复全部行与分组。 */
+  function bindThreadSearch() {
+    var input = document.getElementById('chat-thread-search');
+    if (!input) return;
+    var count = document.querySelector('.ada-search__count');
+    var rows = document.querySelectorAll('[data-thread-row]');
+
+    function apply() {
+      var needle = input.value.trim().toLowerCase();
+      var visible = 0;
+      for (var i = 0; i < rows.length; i += 1) {
+        var title = rows[i].querySelector('.ada-thread__title');
+        var text = title ? title.textContent.toLowerCase() : '';
+        var hit = !needle || text.indexOf(needle) !== -1;
+        rows[i].hidden = !hit;
+        if (hit) visible += 1;
+      }
+
+      // 「其它工作区」的分组标题跟着可见行一起收起。
+      var groups = document.querySelectorAll('#thread-list .ada-ws');
+      var anyGroup = false;
+      for (var g = 0; g < groups.length; g += 1) {
+        var hasRow = !!groups[g].querySelector('[data-thread-row]:not([hidden])');
+        groups[g].hidden = !hasRow;
+        if (hasRow) anyGroup = true;
+      }
+      var section = document.querySelector('[data-ws-section]');
+      if (section) section.hidden = !anyGroup;
+
+      if (count) {
+        count.hidden = !needle;
+        if (needle) count.textContent = visible ? visible + ' / ' + rows.length : '未找到';
+      }
+    }
+
+    function focusSearch() {
+      if (narrowQuery.matches) setSidebar(true);
+      input.focus();
+      input.select();
+    }
+
+    input.addEventListener('input', apply);
+    input.addEventListener('search', apply);
+    input.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') return;
+      input.value = '';
+      apply();
+      input.blur();
+    });
+
+    document.addEventListener('keydown', function (event) {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'k') return;
+      event.preventDefault();
+      focusSearch();
+    });
+
+    var railSearch = document.querySelector('[data-rail-search]');
+    if (railSearch) railSearch.addEventListener('click', focusSearch);
+  }
+
   function boot() {
     wireDialog();
     autoDismissFlashes();
     scrollChatToBottom();
+    bindScrollBottom();
     bindAskWizards(document);
+    bindThreadSearch();
     // 恢复上次的折叠偏好（宽屏）并让按钮文案与真实状态一致
     onBreakpointChange();
   }

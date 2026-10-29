@@ -187,7 +187,10 @@ func checkBoundary(root string) error {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".go") {
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".go", ".tmpl", ".js", ".mjs", ".css", ".ts", ".tsx":
+			// 基座源码不只有 Go：模板与静态资源同样会写死插件 id/路由。
+		default:
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)
@@ -209,7 +212,7 @@ func checkBoundary(root string) error {
 		text := string(raw)
 
 		// 1. 基座（internal/、cmd/）不 import 官方插件包；app/ 是唯一例外（组合根）。
-		if importOfficialRe.MatchString(text) && !strings.HasPrefix(rel, "app/") {
+		if strings.HasSuffix(rel, ".go") && importOfficialRe.MatchString(text) && !strings.HasPrefix(rel, "app/") {
 			hits = append(hits, finding{rel, "import 了官方插件包（plugins/official）"})
 		}
 		// 2. 基座源码不出现官方插件 id（注释里也拦：避免「文档先行」把 id 固化进基座）
@@ -219,8 +222,10 @@ func checkBoundary(root string) error {
 			}
 		}
 		// 3. 不存在平行的 Go 插件注册 API
-		if m := registrationAPIRe.FindStringSubmatch(text); m != nil {
-			hits = append(hits, finding{rel, "声明了 Go 侧注册入口 " + m[1] + "（扩展只能走 TS AgentAPI）"})
+		if strings.HasSuffix(rel, ".go") {
+			if m := registrationAPIRe.FindStringSubmatch(text); m != nil {
+				hits = append(hits, finding{rel, "声明了 Go 侧注册入口 " + m[1] + "（扩展只能走 TS AgentAPI）"})
+			}
 		}
 		return nil
 	})

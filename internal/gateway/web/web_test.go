@@ -395,10 +395,14 @@ func TestThreadPageRendersTranscriptToolCardAndTray(t *testing.T) {
 	wantContains(t, body, "已截断")
 	wantContains(t, body, `M14 3H7a2 2 0 0 0-2 2v14`) // i-file 的第一段路径
 
-	// 交互托盘：select 表单与选项。
+	// 交互托盘：select 表单与选项；无 JS 时由 noscript 原生 select 提交，
+	// 自绘组件的隐藏 input 默认 disabled（JS 接管后才启用）。
 	wantContains(t, body, "批准操作")
 	wantContains(t, body, "允许一次")
 	wantContains(t, body, `name="decision"`)
+	wantContains(t, body, `name="value"`)
+	wantContains(t, body, `ada-select__fallback`)
+	wantContains(t, body, `data-select-input value="允许一次" disabled`)
 	wantContains(t, body, `/threads/th_1/abort`)
 
 	// Composer 表单。
@@ -504,6 +508,81 @@ func TestTurnStartGeneratesKeyAndRejectsEmptyText(t *testing.T) {
 	key, _ := call.Params["idempotencyKey"].(string)
 	if len(key) < 8 || len(key) > 64 {
 		t.Fatalf("生成的幂等键长度不合法: %q", key)
+	}
+}
+
+// 运行中发送不再撞 thread_busy 整页报错，而是排进 steering 队列。
+func TestTurnSendSteersWhileRunning(t *testing.T) {
+	core := newFakeCore().
+		on("turn.get", `{"run":{"runId":"run_1","status":"running","startedAt":"2026-10-28T10:00:00Z"},"queueLength":0}`).
+		on("turn.steer", `{"queued":true,"position":1}`)
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "POST", "/threads/th_1/send", url.Values{"text": {"补充一下"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("运行中发送 = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, "/threads/th_1?notice=") {
+		t.Fatalf("Location = %q，期望带排队提示", loc)
+	}
+	call, ok := core.lastCall("turn.steer")
+	if !ok {
+		t.Fatal("运行中发送应调用 turn.steer")
+	}
+	if call.Params["text"] != "补充一下" {
+		t.Fatalf("turn.steer text = %v", call.Params["text"])
+	}
+	if _, ok := core.lastCall("turn.start"); ok {
+		t.Fatal("运行中发送不应再调用 turn.start")
+	}
+}
+
+// 等待用户回答交互时，新消息应当提示先回答，而不是报 thread_busy。
+func TestTurnSendWhileWaitingInputRedirects(t *testing.T) {
+	core := newFakeCore().
+		on("turn.get", `{"run":{"runId":"run_1","status":"waiting_input","startedAt":"2026-10-28T10:00:00Z"},"queueLength":0}`)
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "POST", "/threads/th_1/send", url.Values{"text": {"先等等"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("等待交互时发送 = %d", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, "/threads/th_1?error=") {
+		t.Fatalf("Location = %q，期望提示先回答交互", loc)
+	}
+	if _, ok := core.lastCall("turn.start"); ok {
+		t.Fatal("等待交互时不应启动新一轮")
+	}
+}
+
+// 无 JS 浏览器用原生 select 提交 model：开始轮次前先切换线程模型。
+func TestTurnSendAppliesModelFromNativeSelect(t *testing.T) {
+	core := newFakeCore().
+		on("turn.get", `{"run":{"status":"terminal","terminal":"completed"},"queueLength":0}`).
+		on("model.set", `{"model":{"providerId":"openai","modelId":"gpt-4o"},"scope":"thread"}`).
+		on("turn.start", `{"runId":"run_1","duplicate":false,"seq":1}`)
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "POST", "/threads/th_1/send", url.Values{
+		"text":  {"你好"},
+		"model": {"openai|gpt-4o"},
+	})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("带 model 发送 = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	call, ok := core.lastCall("model.set")
+	if !ok {
+		t.Fatal("带 model 的发送应先调用 model.set")
+	}
+	model, ok := call.Params["model"].(map[string]any)
+	if !ok || model["providerId"] != "openai" || model["modelId"] != "gpt-4o" {
+		t.Fatalf("model.set 参数 = %#v", call.Params["model"])
+	}
+	if call.Params["threadId"] != "th_1" {
+		t.Fatalf("model.set threadId = %v", call.Params["threadId"])
+	}
+	if _, ok := core.lastCall("turn.start"); !ok {
+		t.Fatal("模型切换后应继续 turn.start")
 	}
 }
 
@@ -1195,7 +1274,12 @@ func TestThreadComposerShowsModelPicker(t *testing.T) {
 	wantContains(t, body, `data-value="custom|deepseek"`)
 	wantContains(t, body, `data-label="DeepSeek"`)
 	wantContains(t, body, `data-select-label`)
-	wantContains(t, body, "管理供应商与模型")
+	// 无 JS 时的原生 select 回退：随消息提交，基座在 turn.start 前切模型。
+	wantContains(t, body, `name="model"`)
+	wantContains(t, body, `ada-select__fallback`)
+	// 供应商管理入口由 provider-admin 插件贡献到 composer.left，
+	// 基座模板只保留插槽宿位（不再写死插件 id 与页面路由）。
+	wantContains(t, body, `data-slot="composer.left"`)
 }
 
 func TestThreadPageShowsRunError(t *testing.T) {

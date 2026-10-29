@@ -23,7 +23,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/adag/ada-go/internal/adapters/sqlite"
 	"github.com/adag/ada-go/internal/cli"
 	"github.com/adag/ada-go/internal/coreapp"
 	"github.com/adag/ada-go/internal/coreproto"
@@ -1260,7 +1259,7 @@ func (s *Server) handleUsageGet(ctx context.Context, raw json.RawMessage) (any, 
 // 04 §5.7 的 usage 表读取端口只提供线程/工作区全量聚合（UsageByThread/UsageWorkspace），
 // 没有 since 参数；runs 表保存了每轮的使用量快照与开始时间，因此时间窗路径从 runs 汇总。
 func (s *Server) usageSince(ctx context.Context, threadIDs []string, since time.Time) (proto.Usage, error) {
-	groups := map[[2]string]*sqlite.UsageAggregate{}
+	groups := map[[2]string]*ports.UsageAggregate{}
 	for _, tid := range threadIDs {
 		runs, err := s.sess.Store().ListRuns(ctx, tid, 100000)
 		if err != nil {
@@ -1278,7 +1277,7 @@ func (s *Server) usageSince(ctx context.Context, threadIDs []string, since time.
 			key := [2]string{ref.ProviderID, ref.ModelID}
 			agg := groups[key]
 			if agg == nil {
-				agg = &sqlite.UsageAggregate{Provider: key[0], Model: key[1]}
+				agg = &ports.UsageAggregate{Provider: key[0], Model: key[1]}
 				groups[key] = agg
 			}
 			agg.Input += u.InputTokens
@@ -1287,7 +1286,7 @@ func (s *Server) usageSince(ctx context.Context, threadIDs []string, since time.
 			agg.Cost += u.CostMicros
 		}
 	}
-	out := make([]sqlite.UsageAggregate, 0, len(groups))
+	out := make([]ports.UsageAggregate, 0, len(groups))
 	for _, agg := range groups {
 		out = append(out, *agg)
 	}
@@ -1314,7 +1313,7 @@ func (s *Server) threadIDs(ctx context.Context) ([]string, error) {
 	}
 }
 
-func usageFromAggregates(aggs []sqlite.UsageAggregate) proto.Usage {
+func usageFromAggregates(aggs []ports.UsageAggregate) proto.Usage {
 	var out proto.Usage
 	providers := map[string]struct{}{}
 	models := map[string]struct{}{}

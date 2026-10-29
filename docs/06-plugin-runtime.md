@@ -170,7 +170,7 @@ agent.on("tool.beforeCall", async (event, ctx) => {
 | 工具 | `tools-subagent` | TS | `invoke_subagent`（v1.5） |
 | 策略 | `policy-default` | TS | `tool.beforeCall` + `ctx.ui`；readonly/ask/auto/full；角色 `tool-policy` |
 | 提示词 | `persona-coding` | TS | `registerPrompt`：编码助手人格与领域规则 |
-| UI | `provider-admin` | TS + TSX + JS | 模型设置：Master-Detail 管理供应商/端点/API 格式/密钥/模型清单，拉取 `/models`，切换当前模型；页面经插件 route 调用，密钥只显示尾号 |
+| UI | `provider-admin` | TS + TSX + JS | 模型设置：Master-Detail 管理供应商/端点/API 格式/密钥/模型清单，拉取 `/models`，切换当前模型；页面经插件 route 调用，密钥只显示尾号；`composer.left` 插槽贡献模型设置入口（基座不写死插件 id/路由） |
 | UI | `token-usage` | TSX | 工作区/线程 Token 用量页面与概览卡片（`usage.get`） |
 | UI | `ui-hello-tsx` | TSX | 示例：页面、仪表盘、API、插槽 |
 
