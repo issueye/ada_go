@@ -787,40 +787,6 @@ button:hover {
   min-height: 1px;
 }
 
-/* M2 还没有接侧栏抽屉脚本：窄屏下 a_da 会把 .ada-sidebar 平移出视口，
-   工作区选择器和登录入口就一起消失。这里先把侧栏放回文档流，保证无 JS
-   也能切换工作区/登录；M4 接上 data-sidebar-toggle 后退回抽屉形态。 */
-@media (max-width: 760px) {
-  .ada-body {
-    height: auto;
-    min-height: 100dvh;
-    overflow: auto;
-  }
-
-  .ada-shell {
-    flex-direction: column;
-    height: auto;
-    min-height: 100dvh;
-  }
-
-  .ada-sidebar {
-    position: static;
-    inset: auto;
-    width: 100%;
-    max-height: none;
-    transform: none;
-    box-shadow: none;
-    border-right: 0;
-    border-bottom: 1px solid var(--ph-line);
-  }
-
-  .ada-side,
-  .ada-shell.is-sidebar-collapsed .ada-side {
-    display: flex;
-    width: 100%;
-  }
-
-  .ada-sidebar__foot {
-    margin-top: 0;
-  }
-}
+/* 窄屏由 a_da 的抽屉形态负责（pages.css：.ada-sidebar 固定 + is-open 平移，
+   app.js 的 data-sidebar-toggle/遮罩/Esc 已接）。这里不再把侧栏放回文档流，
+   否则会出现「侧栏占满一屏、聊天区被挤到下面」的堆叠布局。 */

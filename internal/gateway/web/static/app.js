@@ -211,13 +211,16 @@
     syncToggle();
   }
 
-  /* 跨断点时清理另一套形态的状态，避免"抽屉开着 + 折叠着"同时成立 */
+  /* 跨断点时清理另一套形态的状态，避免"抽屉开着 + 折叠着"同时成立。
+     进入窄屏时也强制关掉抽屉：首屏/bfcache 不应残留 is-open 遮住正文。 */
   function onBreakpointChange() {
     var side = sidebar();
     var veil = backdrop();
     if (narrowQuery.matches) {
       var wrap = shell();
       if (wrap) wrap.classList.remove('is-sidebar-collapsed');
+      if (side) side.classList.remove('is-open');
+      if (veil) veil.classList.remove('is-open');
     } else {
       if (side) side.classList.remove('is-open');
       if (veil) veil.classList.remove('is-open');

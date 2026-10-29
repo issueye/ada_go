@@ -285,7 +285,7 @@ ada-go 的界面不是“参考 a_da 风格”，而是**直接使用 a_da 的 U
 | `crates/agent-web/static/app.css` | `web/static/app.css` | 直接使用 a_da 的**预编译产物**（含 token 段与工具类）；ada-go 不运行 Tailwind，只固定并校验该产物 |
 | `components.css` / `layout.css` / `widgets.css` / `shell.css` / `pages.css` | `web/static/ui/` | 原样复制；引用顺序保持 components → layout → widgets → shell → pages |
 | `ada-select.js` / `ada-modal.js` | `web/static/` | 原样复制；`<ada-select>` / `<ada-modal>` 的 Web Components 行为不变 |
-| `components.js` / `app.js` / `chat-live.js` / `theme.js` | `web/static/` | `components.js`（组件行为）、`app.js`（外壳：提示条/确认弹窗/侧栏）、`theme.js` 原样复制；`chat-live.js` 由 ada-go 维护，消费 `/events/{id}` 的 SSE 增量 |
+| `components.js` / `app.js` / `chat-live.js` / `theme.js` | `web/static/` | `components.js`（组件行为）、`theme.js` 原样复制；`app.js`（外壳：提示条/确认弹窗/侧栏）以 a_da 为基线，含「窄屏初始关闭抽屉」的本地补丁；`chat-live.js` 由 ada-go 维护，消费 `/events/{id}` 的 SSE 增量 |
 | `htmx.min.js` / `alpine.min.js` / `logo.png` | `web/static/` | 原样复制；概览页每 5 秒 `hx-get="/partials/dashboard"` 换新 |
 | `ui/icons.rs` | `internal/gateway/web/ui.go` | 同一组线性 SVG path、同一 stroke 1.75 与尺寸档位；模板经 `{{icon "…"}}` 或 sprite `<use>` 引用 |
 | `ui/components.rs` / `rows.rs` | `internal/gateway/web/ui.go` + `templates/` | Go 组件函数与模板输出 a_da **相同的 `ada-*` 标签、class 与 `data-*` 状态** |
