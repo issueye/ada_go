@@ -172,11 +172,11 @@ agent.on("tool.beforeCall", async (event, ctx) => {
 | 提示词 | `persona-coding` | TS | `registerPrompt`：编码助手人格与领域规则 |
 | UI | `ui-todo` | TSX | 把 `tools-plan` 的计划投影成 `chat.corner` 的 Todo 卡片（真实动作数据，无示例回退） |
 | UI | `ui-ask-user` | TSX | `thread.tray` 的待答交互卡片（数据来自线程交互投影，提交回基座路由） |
-| UI | `provider-admin` | TSX | 供应商/模型清单 + 切换当前模型（只读投影，不含密钥） |
+| UI | `provider-admin` | TS + TSX | 统一插件：后端 `route` 提供供应商目录与切换当前模型，页面经 `/ext/provider-admin/api/*` 调用（密钥与端点不进页面） |
 | UI | `token-usage` | TSX | 工作区/线程 Token 用量页面与概览卡片（`usage.get`） |
 | UI | `ui-hello-tsx` | TSX | 示例：页面、仪表盘、API、插槽 |
 
-官方插件不是基座：它们与第三方插件使用同一个 moejs 宿主、同一份清单与同一套注册契约；审批规则由 `policy-default`（或其他 `tool-policy` 插件）提供。区别只有信任级别（可用控制面钩子与 `exec`/`ui.ask`/`net.sse` 等受信能力）与随包发布。基座源码不出现这些 id；产品声明选择启用哪些，禁用后能力必须消失；禁用策略插件后写/执行工具立即被基座拒绝。
+官方插件不是基座：它们与第三方插件使用同一个 moejs 宿主、同一份清单与同一套注册契约；审批规则由 `policy-default`（或其他 `tool-policy` 插件）提供。区别只有信任级别（可用控制面钩子与 `exec`/`ui.ask`/`net.sse`/`model.admin` 等受信能力）与随包发布。基座源码不出现这些 id；产品声明选择启用哪些，禁用后能力必须消失；禁用策略插件后写/执行工具立即被基座拒绝。
 
 ## 6.9 信任、签名与热重载
 

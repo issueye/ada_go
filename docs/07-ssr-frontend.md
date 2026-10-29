@@ -215,6 +215,8 @@ agent.route("GET", "/items/*", (req, ctx) => ({ items: [] }));
 agent.route({ method: "POST", path: "/items", handler(req, ctx) { return { ok: true }; } });
 ```
 
+官方 `provider-admin` 就是一个真实消费者：`GET /state` 读供应商/模型目录，`POST /select` 切换当前模型；页面脚本经 `window.adaAPI("provider-admin", …)` 调用，密钥与端点不经过插件。
+
 ```
 浏览器 GET/POST /ext/{id}/api/{path}
   → Gateway 校验会话、CSRF、Origin、插件状态（请求体上限 1MB）
@@ -326,11 +328,12 @@ Todo 卡片是前端插件，不是基座组件：`plugins/official/ui-todo` 默
 | `GET /workspaces` | 工作区选择（目录浏览限制在当前工作区子树内） | Gateway 配置 + `os.ReadDir` |
 | `GET /extensions` | 插件列表（全部随包/已安装插件合并成一张表，不分区；产品未声明的随包插件显示为「未启用 / unused」，不误报 failed） | `PluginLister`、`plugin.list`、`extensions.list` 插槽 |
 | `GET /extensions/{id}` | 插件详情（前端/后端归属、能力计数、启停、打开插件页面） | 同上 |
-| `POST /model/select` | 切换当前模型（工作区级；供应商管理插件页面调用） | `model.set` |
+| `GET/POST /ext/provider-admin/api/*` | 供应商管理插件的 route：`GET /state` 读目录，`POST /select` 切当前模型 | Core `plugin.http` → 插件 `ctx.providers` |
+| `POST /model/select` | 切换当前模型（工作区级；供应商管理页无 JS 时的回落入口） | `model.set` |
 | `GET /ext/{id}/{slug}` | 插件页 | `PluginUI.Page` |
 | `GET /login`、离线页、错误页 | 外壳页面 | — |
 
-二级页与聊天页共用侧栏，内容最大宽度 1040px，表格横向滚动；供应商管理保持 a_da 的 Master-Detail 与两个真实链接页签，但它是**官方前端插件页面**，不是基座业务页——基座只提供 `/ext` 宿主、插槽与动作桥。API Key 只显示“已配置 + 尾号”，不回显。
+二级页与聊天页共用侧栏，内容最大宽度 1040px，表格横向滚动。供应商管理是**统一官方插件**（backend `route` + TSX 页面）：首屏由只读投影渲染，交互走插件自己的 `route`；无 JS 时“设为当前”回落到 `POST /model/select`。端点与密钥只来自配置，页面不回显也不编辑。
 
 与 a_da 的已知差异（如实声明）：工作区集合在 Gateway 启动时固定，目录选择器只能选用已配置的工作区（浏览子目录用于查看，不新增工作区）；前端插件在装配期加载，扩展页只提供 agent 插件的启用/停用与重载，前端插件变更需重启 Gateway。
 

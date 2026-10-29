@@ -226,8 +226,15 @@ func assembleSet(ctx context.Context, p *coreapp.Product, base, extras []host.Sc
 			continue
 		}
 		if deps.FrontendIDs[id] {
-			// M4 前端插件：由 Gateway 渲染桥装配，本侧容忍缺席并记录声明。
+			// M4 前端插件：由 Gateway 渲染桥装配，本侧记录声明。
+			// 统一插件（同时声明 backend）的后端段仍要在这里装配；
+			// 纯前端插件没有 byID 条目，跳过即可。
 			frontendDecls = append(frontendDecls, id)
+			s, ok := byID[id]
+			if !ok || s.Manifest.Backend == nil {
+				continue
+			}
+			picked = append(picked, s)
 			continue
 		}
 		s, ok := byID[id]

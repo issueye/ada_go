@@ -114,7 +114,7 @@ func load(id string) (host.Script, error) {
 		return host.Script{}, fmt.Errorf("official: 官方插件 %s 的清单校验失败: %w", id, err)
 	}
 	if m.Backend == nil {
-		// 前端插件：模板源码进 Bundle（键 = 文件名），静态资源进 StaticAssets。
+		// 纯前端插件：模板源码进 Bundle（键 = 文件名），静态资源进 StaticAssets。
 		return loadFrontend(id, m)
 	}
 	src, err := files.ReadFile(id + "/dist/index.js")
@@ -130,12 +130,27 @@ func load(id string) (host.Script, error) {
 	if err != nil {
 		return host.Script{}, err
 	}
-	return host.Script{
+	script := host.Script{
 		Manifest:     m,
 		EntryName:    host.EntryScheme + "://" + id + "/index.js",
 		Source:       string(src),
 		StaticAssets: assets,
-	}, nil
+	}
+	// 统一插件（backend + frontend）：同一份包同时提供 route 后端与页面资源。
+	if m.Frontend != nil {
+		fe, ferr := loadFrontend(id, m)
+		if ferr != nil {
+			return host.Script{}, ferr
+		}
+		script.Bundle = fe.Bundle
+		if script.StaticAssets == nil {
+			script.StaticAssets = map[string][]byte{}
+		}
+		for name, data := range fe.StaticAssets {
+			script.StaticAssets[name] = data
+		}
+	}
+	return script, nil
 }
 
 // bundledSkills 收集一个官方插件包内 skills/<name>/SKILL.md 的内容。

@@ -71,7 +71,7 @@
         "capabilities": {
           "type": "array",
           "items": {
-            "enum": ["fs.read", "fs.write", "net.fetch", "net.sse", "exec", "state", "ui.ask", "subagent.invoke"]
+            "enum": ["fs.read", "fs.write", "net.fetch", "net.sse", "exec", "state", "ui.ask", "subagent.invoke", "model.admin"]
           },
           "uniqueItems": true,
           "description": "可安装能力的白名单（§6.2）。没声明的能力不安装：node:fs 需 fs.read/fs.write、node:child_process 需 exec、ctx.fetch 需 net.fetch、ctx.http.sse 需 net.sse、ctx.state 需 state、ctx.ui 需 ui.ask；未安装的模块链接期报 ERR_ACCESS_DENIED，不是运行期空值（§6.12）。信任规则（违反即装配失败，见根 allOf 的 x-trust-rule）：ui.ask/net.sse/exec 仅 builtin|verified；subagent.invoke 仅 builtin。",
@@ -474,7 +474,7 @@
       }
     },
     {
-      "x-trust-rule": "T4：subagent.invoke 仅 builtin（供 tools-subagent 使用，§6.2）。verified 声明该能力位即装配失败；exec/net.sse/ui.ask 对 builtin|verified 开放（见 T3 的反面）。",
+      "x-trust-rule": "T4：subagent.invoke / model.admin 仅 builtin（前者供 tools-subagent，后者供供应商管理页切换模型，§6.2）。verified 声明这两个能力位即装配失败；exec/net.sse/ui.ask 对 builtin|verified 开放（见 T3 的反面）。",
       "if": {
         "required": ["trust"],
         "properties": {
@@ -491,7 +491,7 @@
             "x-consumer": "coreapp: 信任规则 T4 条件（收敛 backend.capabilities 可声明集合）",
             "properties": {
               "capabilities": {
-                "x-consumer": "stdlib: 信任规则 T4（非 builtin 不安装 subagent.invoke，声明即装配失败）",
+                "x-consumer": "stdlib: 信任规则 T4（非 builtin 不安装 subagent.invoke / model.admin，声明即装配失败）",
                 "items": { "enum": ["fs.read", "fs.write", "net.fetch", "net.sse", "exec", "state", "ui.ask"] }
               }
             }

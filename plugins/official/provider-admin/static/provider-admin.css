@@ -72,6 +72,10 @@
   word-break: break-all;
 }
 
+.pa-provider[data-current="false"] .pa-provider__badge {
+  display: none;
+}
+
 .pa-models {
   display: flex;
   flex-direction: column;
@@ -112,6 +116,32 @@
 
 .pa-model__form {
   flex-shrink: 0;
+}
+
+/* 当前行由 data-current 驱动：无 JS 时 SSR 直接给出正确状态，JS 只翻转属性。 */
+.pa-model[data-current="true"] {
+  border-color: var(--ph-brand);
+  background: var(--ph-brand-soft);
+}
+
+.pa-model[data-current="true"] .pa-model__form,
+.pa-model[data-current="false"] .pa-model__badge {
+  display: none;
+}
+
+.pa-status {
+  margin: 0;
+  min-height: 1.25em;
+  font-size: var(--ada-text-sm);
+  color: var(--ph-muted);
+}
+
+.pa-status[data-tone="error"] {
+  color: var(--ph-danger-ink);
+}
+
+.pa-status[data-tone="success"] {
+  color: var(--ph-success-ink);
 }
 
 .pa-empty {

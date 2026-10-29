@@ -246,6 +246,9 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 	// 给插件的只读技能通道（6.7）：官方的技能搜索工具用它做匹配；
 	// 快照随每次装配更新，调用时读当前值。
 	hc.Skills = s.skillsMetaSnapshot
+	// 供应商管理（model.admin）：目录只读、不含密钥；切换复用 model.set 的解析。
+	hc.Providers = s.providerCatalog
+	hc.SelectModel = s.selectModelFromPlugin
 	// M5 检查点：宿主 fs 写入前把被覆盖文件备份进持久化账目（changes/）。
 	s.changes = toolkit.NewChangeQueue()
 	s.changeStore = newChangeStore(dataDir)
@@ -899,6 +902,43 @@ func (s *Session) ModelRefFor(threadID string) ports.ModelRef {
 		return *override
 	}
 	return s.defaultModelRef()
+}
+
+// providerCatalog 实现 host.Context.Providers（capability: model.admin）。
+// 目录与 provider.list 一致：不含密钥，BaseURL 是当前生效的兼容端点。
+func (s *Session) providerCatalog() host.ProviderCatalog {
+	cat := host.ProviderCatalog{Providers: []host.ProviderInfo{}}
+	if asm := s.Assembly(); asm != nil && asm.Providers != nil {
+		for _, pid := range asm.Providers.Providers() {
+			cat.Providers = append(cat.Providers, host.ProviderInfo{
+				ID:          pid,
+				DisplayName: pid,
+				BaseURL:     s.BaseURL(),
+				Models:      asm.Providers.Models(pid),
+			})
+		}
+	}
+	cur := s.ModelRef()
+	cat.Current = host.ModelRef{ProviderID: cur.ProviderID, ModelID: cur.ModelID}
+	return cat
+}
+
+// selectModelFromPlugin 实现 host.Context.SelectModel（capability: model.admin）。
+// 与 model.set 同一套校验：provider/model 必须在当前装配里存在；线程级切换先校验线程。
+func (s *Session) selectModelFromPlugin(ctx context.Context, providerID, modelID, threadID string) (host.ModelRef, error) {
+	ref, ok := s.ResolveModel(providerID, modelID)
+	if !ok {
+		return host.ModelRef{}, fmt.Errorf("模型 %s/%s 未在装配中声明", providerID, modelID)
+	}
+	if threadID != "" {
+		if _, err := s.store.GetThread(ctx, threadID); err != nil {
+			return host.ModelRef{}, err
+		}
+		s.SetThreadModel(threadID, ref)
+	} else {
+		s.SetWorkspaceModel(ref)
+	}
+	return host.ModelRef{ProviderID: ref.ProviderID, ModelID: ref.ModelID}, nil
 }
 
 func (s *Session) threadOverrideLocked(threadID string) *ports.ModelRef {

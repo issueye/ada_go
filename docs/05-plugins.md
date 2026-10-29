@@ -73,7 +73,7 @@ plugins/my-plugin/
 - `backend.env` 是环境变量白名单：只有列出的名字出现在 `process.env`，值在装配期冻结；宿主环境里不存在的名字不注入（`undefined`），不伪造空串。密钥不得写入环境变量，仍走 `secret`。
 - Node 内置模块同样由能力位安装：`node:fs` 需要 `fs.read`/`fs.write`，`node:child_process` 需要 `exec`，`node:os` 始终受限安装；`node:path`/`node:crypto`/`node:buffer` 等纯计算模块无需能力。未安装的模块在链接期报 `ERR_ACCESS_DENIED`；`node:http(s)`/`node:net`/`node:dns`/`node:worker_threads`/`node:vm` 不安装。完整矩阵见 [6.12](12-node-compat.md#612-node-兼容原生库)。
 - `backend.roles` 声明插件角色；v1 只定义 `tool-policy`（审批策略）。它只用于产品装配校验与“无策略时失败关闭”，基座不解释具体规则。
-- `capabilities` 里的 `ui.ask` 只授予 builtin/verified：它允许插件发起通用用户交互（confirm/select/input），不授予任何工具或文件权限。`net.sse` 同样只授予 builtin/verified，供官方 provider 做流式模型协议；`subagent.invoke` 只授予 builtin，供 `tools-subagent` 使用。
+- `capabilities` 里的 `ui.ask` 只授予 builtin/verified：它允许插件发起通用用户交互（confirm/select/input），不授予任何工具或文件权限。`net.sse` 同样只授予 builtin/verified，供官方 provider 做流式模型协议；`subagent.invoke` 只授予 builtin，供 `tools-subagent` 使用；`model.admin` 只授予 builtin，供供应商管理插件读取目录并切换当前模型（不含密钥）。
 - `apiVersion` 主版本不匹配直接拒绝加载；次版本兼容，宿主忽略未知字段并记录。
 - `id` 必须匹配 `^[a-z][a-z0-9-]{1,63}$`，且等于目录名。
 - `trust`：`builtin`（预编译后嵌入二进制，只能启用/禁用）、`verified`（签名有效）、`third-party`（默认，受限）。
@@ -154,6 +154,10 @@ interface ToolContext {
     get<T>(key: string): Promise<T | null>;
     set(key: string, value: unknown): Promise<void>;
     delete(key: string): Promise<void>;
+  };
+  providers?: {                      // capability: model.admin，仅 builtin
+    list(): Promise<{ providers: ProviderInfo[]; current: ModelRef }>;
+    select(providerId: string, modelId: string): Promise<ModelRef>;
   };
   secret?(name: string): string | null; // 仅在 manifest 声明 secrets 时存在
   ui?: UIContext;                    // capability: ui.ask，仅 builtin/verified

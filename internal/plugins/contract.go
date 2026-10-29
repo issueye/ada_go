@@ -228,6 +228,9 @@ const (
 	CapUIAsk Capability = "ui.ask"
 	// CapSubagentInvoke 仅 builtin，供子智能体委派（v1.5）。
 	CapSubagentInvoke Capability = "subagent.invoke"
+	// CapModelAdmin 允许读取供应商/模型目录并切换当前模型（仅 builtin）。
+	// 它不授予任何出网、文件或执行权限，也不暴露密钥。
+	CapModelAdmin Capability = "model.admin"
 	// CapBackendRead 是前端能力：预取只读后端动作结果。
 	CapBackendRead Capability = "backend.read"
 	// CapFrontendScript 是前端能力：加载插件自带 JS（默认关闭，仍受 CSP 限制）。
@@ -237,7 +240,7 @@ const (
 // backendCapabilities 是后端可声明的能力白名单。
 var backendCapabilities = []Capability{
 	CapFSRead, CapFSWrite, CapNetFetch, CapNetSSE,
-	CapExec, CapState, CapUIAsk, CapSubagentInvoke,
+	CapExec, CapState, CapUIAsk, CapSubagentInvoke, CapModelAdmin,
 }
 
 // frontendCapabilities 是前端可声明的能力白名单。
@@ -266,7 +269,7 @@ func (c Capability) MinTrust() Trust {
 	switch c {
 	case CapExec, CapNetSSE, CapUIAsk:
 		return TrustVerified
-	case CapSubagentInvoke:
+	case CapSubagentInvoke, CapModelAdmin:
 		return TrustBuiltin
 	default:
 		return TrustThirdParty

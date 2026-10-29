@@ -377,7 +377,7 @@ func TestBridgeAskUserSlotUsesInteractionProjection(t *testing.T) {
 	}
 }
 
-// provider-admin：页面读 provider.list + model.list 投影，切换模型走基座路由。
+// provider-admin：首屏读 provider.list + model.list 投影；交互走插件 route（基座路由是无 JS 回落）。
 func TestBridgeProviderAdminPageUsesProviderProjection(t *testing.T) {
 	core := newFakeCore().
 		on("provider.list", `{"providers":[{"id":"openai","displayName":"OpenAI","baseUrl":"https://api.openai.com/v1","active":true,"models":[{"id":"gpt-4o","displayName":"GPT-4o","contextWindow":128000,"maxOutput":16384,"supportsTools":true},{"id":"gpt-4o-mini","displayName":"GPT-4o mini","contextWindow":128000,"maxOutput":16384,"supportsTools":true}]}]}`).
@@ -393,6 +393,7 @@ func TestBridgeProviderAdminPageUsesProviderProjection(t *testing.T) {
 		"当前模型", "openai / gpt-4o", "gpt-4o-mini", "设为当前",
 		`action="/model/select"`, `name="csrf_token"`, `value="csrf-y"`,
 		`name="providerId"`, `value="openai"`, `name="modelId"`, `value="gpt-4o-mini"`,
+		`data-provider-admin`, `data-pa-select`, `data-pa-current`, `data-current="false"`,
 	} {
 		if !strings.Contains(string(html), want) {
 			t.Fatalf("供应商页缺少 %q\n%s", want, html)

@@ -198,7 +198,7 @@ func TestCoreRPCThreadAndTurn(t *testing.T) {
 	if hello["productId"] != "headless" || hello["pid"] == nil {
 		t.Fatalf("hello = %v", hello)
 	}
-	if plugins, _ := hello["plugins"].([]any); len(plugins) != 6 {
+	if plugins, _ := hello["plugins"].([]any); len(plugins) != 7 {
 		t.Fatalf("plugins = %v", hello["plugins"])
 	}
 	if ws, _ := hello["workspace"].(map[string]any); ws["workspaceKey"] == "" {
@@ -302,6 +302,85 @@ done:
 	raw = c.call(t, "model.list", map[string]any{})
 	if err := json.Unmarshal(raw, &models); err != nil || len(models.Models) == 0 {
 		t.Fatalf("model.list = %s", raw)
+	}
+}
+
+// provider-admin 的 route 后端在真实会话里可用：plugin.http 读目录、切模型。
+func TestPluginHTTPProviderAdmin(t *testing.T) {
+	sess := newSession(t, nil)
+	url, _ := startServer(t, sess, "secret")
+	c := dial(t, url, "secret")
+
+	raw := c.call(t, "plugin.http", map[string]any{
+		"pluginId": "provider-admin", "method": "GET", "path": "/state",
+	})
+	var state struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Providers []struct {
+				ID     string `json:"id"`
+				Models []struct {
+					ID string `json:"id"`
+				} `json:"models"`
+			} `json:"providers"`
+			Current struct {
+				ProviderID string `json:"providerId"`
+				ModelID    string `json:"modelId"`
+			} `json:"current"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &state); err != nil {
+		t.Fatalf("plugin.http 结果不是 JSON: %v (%s)", err, raw)
+	}
+	if !state.OK || len(state.Result.Providers) == 0 {
+		t.Fatalf("GET /state = %s", raw)
+	}
+	if state.Result.Providers[0].ID != "openai" {
+		t.Fatalf("供应商 = %+v", state.Result.Providers)
+	}
+
+	raw = c.call(t, "plugin.http", map[string]any{
+		"pluginId": "provider-admin", "method": "POST", "path": "/select",
+		"body": map[string]any{"providerId": "openai", "modelId": "gpt-4o"},
+	})
+	var selected struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			ProviderID string `json:"providerId"`
+			ModelID    string `json:"modelId"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &selected); err != nil {
+		t.Fatalf("select 结果: %v (%s)", err, raw)
+	}
+	if !selected.OK || selected.Result.ModelID != "gpt-4o" {
+		t.Fatalf("POST /select = %s", raw)
+	}
+
+	raw = c.call(t, "model.list", map[string]any{})
+	var models struct {
+		Current struct {
+			ProviderID string `json:"providerId"`
+			ModelID    string `json:"modelId"`
+		} `json:"current"`
+	}
+	if err := json.Unmarshal(raw, &models); err != nil {
+		t.Fatalf("model.list: %v", err)
+	}
+	if models.Current.ProviderID != "openai" || models.Current.ModelID != "gpt-4o" {
+		t.Fatalf("切换后的当前模型 = %+v", models.Current)
+	}
+
+	raw = c.call(t, "plugin.http", map[string]any{
+		"pluginId": "provider-admin", "method": "GET", "path": "/missing",
+	})
+	var missing struct {
+		OK       bool `json:"ok"`
+		NotFound bool `json:"notFound"`
+	}
+	_ = json.Unmarshal(raw, &missing)
+	if missing.OK || !missing.NotFound {
+		t.Fatalf("未知路由 = %s", raw)
 	}
 }
 

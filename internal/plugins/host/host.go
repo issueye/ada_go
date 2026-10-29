@@ -171,6 +171,32 @@ type Context struct {
 	// Settings 是该插件自己的设置值（13 §附录 B：[plugins.settings.<id>] 解析后的对象）。
 	// 基座不解释字段，只按插件 id 透传给脚本（ctx.settings）。
 	Settings map[string]any
+	// Providers 返回供应商/模型目录（capability: model.admin）；nil 表示未授予。
+	// 目录不含密钥；Active 由 Current 表达。
+	Providers func() ProviderCatalog
+	// SelectModel 切换当前模型（capability: model.admin）。
+	// threadID 为空表示工作区级；否则先校验线程存在再写线程级覆盖。
+	SelectModel func(ctx context.Context, providerID, modelID, threadID string) (ModelRef, error)
+}
+
+// ModelRef 是当前模型的引用。
+type ModelRef struct {
+	ProviderID string `json:"providerId"`
+	ModelID    string `json:"modelId"`
+}
+
+// ProviderCatalog 是 model.admin 能力看到的供应商/模型目录（不含端点密钥）。
+type ProviderCatalog struct {
+	Providers []ProviderInfo `json:"providers"`
+	Current   ModelRef       `json:"current"`
+}
+
+// ProviderInfo 是单个供应商的只读投影。
+type ProviderInfo struct {
+	ID          string      `json:"id"`
+	DisplayName string      `json:"displayName,omitempty"`
+	BaseURL     string      `json:"baseUrl,omitempty"`
+	Models      []ModelInfo `json:"models"`
 }
 
 // CheckpointMeta 是一次检查点登记的归属（M5）。

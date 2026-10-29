@@ -441,3 +441,60 @@ func TestRouteRegistersAndCalls(t *testing.T) {
 		t.Fatalf("路由结果 = %s", out)
 	}
 }
+
+// model.admin：ctx.providers 只在声明能力后安装，list/select 都走宿主回调。
+func TestModelAdminRoutes(t *testing.T) {
+	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapModelAdmin)
+	src := "export default function (agent) {\n" +
+		"  agent.route('GET', '/state', function (req, ctx) { return ctx.providers.list(); });\n" +
+		"  agent.route('POST', '/select', function (req, ctx) {\n" +
+		"    return ctx.providers.select(req.body.providerId, req.body.modelId);\n" +
+		"  });\n" +
+		"}"
+	routes := &recordingRoutes{}
+	hc := Context{
+		Providers: func() ProviderCatalog {
+			return ProviderCatalog{
+				Providers: []ProviderInfo{{ID: "openai", Models: []ModelInfo{{ID: "gpt-4o", ContextWindow: 128000}}}},
+				Current:   ModelRef{ProviderID: "openai", ModelID: "gpt-4o"},
+			}
+		},
+		SelectModel: func(_ context.Context, providerID, modelID, threadID string) (ModelRef, error) {
+			return ModelRef{ProviderID: providerID, ModelID: modelID}, nil
+		},
+	}
+	p, err := Load(context.Background(), testScript(t, caps, src), caps, hc,
+		Options{Targets: Targets{Routes: routes}})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	defer func() { _ = p.Close(context.Background()) }()
+
+	var state RouteDef
+	var selectRoute RouteDef
+	for _, reg := range routes.regs {
+		switch reg.Def.Path {
+		case "/state":
+			state = reg.Def
+		case "/select":
+			selectRoute = reg.Def
+		}
+	}
+	out, err := p.CallRoute(context.Background(), state.Handler,
+		json.RawMessage(`{"method":"GET","path":"/state"}`), hc)
+	if err != nil {
+		t.Fatalf("GET /state: %v", err)
+	}
+	if !strings.Contains(string(out), `"gpt-4o"`) {
+		t.Fatalf("providers.list 结果 = %s", out)
+	}
+
+	out, err = p.CallRoute(context.Background(), selectRoute.Handler,
+		json.RawMessage(`{"method":"POST","path":"/select","body":{"providerId":"openai","modelId":"gpt-4o"}}`), hc)
+	if err != nil {
+		t.Fatalf("POST /select: %v", err)
+	}
+	if !strings.Contains(string(out), `"providerId":"openai"`) {
+		t.Fatalf("providers.select 结果 = %s", out)
+	}
+}

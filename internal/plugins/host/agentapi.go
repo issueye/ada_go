@@ -518,6 +518,33 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 		}))
 	}
 
+	// providers：capability: model.admin。只暴露目录读取与当前模型切换；
+	// 不暴露密钥、端点客户端或任何出网能力。
+	if p.caps.Has(plugins.CapModelAdmin) && hc.Providers != nil {
+		providers := r.NewObject()
+		_ = providers.SetProp(r, r.KeyFromGoString("list"), rt.Function("providers.list", 0,
+			func(_ *moejs.Realm, _ moejs.Value, _ []moejs.Value) (moejs.Value, error) {
+				return p.hostAsync(c, "providers.list", func(context.Context) (any, error) {
+					return hc.Providers(), nil
+				}), nil
+			}))
+		_ = providers.SetProp(r, r.KeyFromGoString("select"), rt.Function("providers.select", 2,
+			func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+				providerID := strings.TrimSpace(moejs.Arg(args, 0).String())
+				modelID := strings.TrimSpace(moejs.Arg(args, 1).String())
+				if hc.SelectModel == nil {
+					return moejs.Undefined(), r.TypeError("providers.select: 宿主没有提供模型切换")
+				}
+				if providerID == "" || modelID == "" {
+					return moejs.Undefined(), r.TypeError("providers.select(providerId, modelId): 两个参数都不能为空")
+				}
+				return p.hostAsync(c, "providers.select", func(ctx context.Context) (any, error) {
+					return hc.SelectModel(ctx, providerID, modelID, hc.ThreadID)
+				}), nil
+			}))
+		set("providers", engine.ObjectValue(providers))
+	}
+
 	// provider 的 ctx.emit / ctx.http 只在 callProvider 上安装（03 §5.5）：
 	// emit 是归一化增量的唯一出口，http 是 provider 出网的唯一出口。
 	if c.kind == callProvider {

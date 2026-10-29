@@ -64,6 +64,12 @@ var installSites = map[Capability]InstallSite{
 		EnforcedBy:    "复用同一 RunTurn，只换装配；子表里永远没有 invoke_subagent（04 §5.8）",
 		Milestone:     "v1.5（v1 不装配）",
 	},
+	CapModelAdmin: {
+		Capability: CapModelAdmin, HostInstall: "安装供应商目录读取与当前模型切换（仅 builtin）",
+		ScriptSurface: "ctx.providers.list() / ctx.providers.select(providerId, modelId)",
+		EnforcedBy:    "只读目录不含密钥；切换复用 model.set 的解析与线程校验，插件不能指定目录外模型",
+		Milestone:     "M5",
+	},
 	CapBackendRead: {
 		Capability: CapBackendRead, HostInstall: "Gateway 侧预取只读后端动作结果（最多 16 个、并发 4、单个 300ms、缓存 8s）",
 		ScriptSurface: "props.data.backend.<插件 id>.<binding>",
