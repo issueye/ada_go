@@ -175,6 +175,8 @@
 /* 图标按钮 */
 .ada-icon-btn {
   display: grid;
+  justify-content: center;
+  align-content: center;
   place-items: center;
   width: 30px;
   height: 30px;

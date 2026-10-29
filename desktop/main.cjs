@@ -125,16 +125,13 @@ function findBinary(customBin) {
 }
 
 // ── 网关自动准备（开发期自动构建）──────────────────────────────────────
-// 壳启动不再依赖先跑 make：源码检出里缺 adag、或源码比产物新（例如刚 git pull）时，
-// 自动 go build 到 desktop/bin（与 make desktop 同路径）。打包形态只用随包
+// 壳启动不再依赖先跑 make：开发模式下每次启动都 go build 到 desktop/bin
+// （与 make desktop 同路径），保证运行的就是当前源码。打包形态只用随包
 // resources/bin/adag，不构建。关闭自动构建：ADAGO_GATEWAY_AUTOBUILD=0。
 const GATEWAY_AUTOBUILD = process.env.ADAGO_GATEWAY_AUTOBUILD !== '0'
 const BUILD_TIMEOUT_MS = 180000
 const SPAWN_TIMEOUT_MS = 15000
 const READY_TIMEOUT_MS = 180000
-const SOURCE_SKIP_DIRS = new Set(['node_modules', '.git', 'bin', 'out', 'dist-cache', '.adago'])
-const SOURCE_ROOTS = ['go.mod', 'go.sum', 'cmd', 'internal', 'app', 'official', 'products', 'spec', 'plugins']
-const SOURCE_EXTS = new Set(['.go', '.ts', '.tsx', '.js', '.json', '.md'])
 
 function executableName() {
   return process.platform === 'win32' ? 'adag.exe' : 'adag'
@@ -154,25 +151,6 @@ function findRepoRoot() {
     } catch { /* 候选不可读就试下一个 */ }
   }
   return null
-}
-
-// 源码树里最新的 mtime：只扫与网关产物相关的目录/后缀，用来判断是否需要重建。
-function newestSourceMtime(repoRoot) {
-  let newest = 0
-  const walk = (p) => {
-    let stat
-    try { stat = fs.statSync(p) } catch { return }
-    if (stat.isDirectory()) {
-      if (SOURCE_SKIP_DIRS.has(path.basename(p))) return
-      let entries = []
-      try { entries = fs.readdirSync(p) } catch { return }
-      for (const name of entries) walk(path.join(p, name))
-      return
-    }
-    if (SOURCE_EXTS.has(path.extname(p)) && stat.mtimeMs > newest) newest = stat.mtimeMs
-  }
-  for (const rel of SOURCE_ROOTS) walk(path.join(repoRoot, rel))
-  return newest
 }
 
 function runGoBuild(repoRoot, args) {
@@ -212,7 +190,7 @@ function runGoBuild(repoRoot, args) {
   })
 }
 
-// 返回可用的网关二进制路径；开发检出里会按需自动构建。
+// 返回可用的网关二进制路径；开发检出里每次启动都重新构建。
 async function ensureGatewayBinary(customBin) {
   const existing = findBinary(customBin)
   if (!GATEWAY_AUTOBUILD) return existing
@@ -220,17 +198,12 @@ async function ensureGatewayBinary(customBin) {
   if (customBin && customBin.trim()) return existing // 显式指定就尊重用户选择
 
   const repoRoot = findRepoRoot()
-  if (!repoRoot) return existing // 打包形态：只用随包二进制
+  if (!repoRoot) return existing // 不在源码检出里：只能用已有产物
 
   const outPath = path.join(__dirname, 'bin', executableName())
-  let existingMtime = 0
-  if (existing) {
-    try { existingMtime = fs.statSync(existing).mtimeMs } catch { existingMtime = 0 }
-  }
-  const newest = newestSourceMtime(repoRoot)
-  if (existing && existingMtime >= newest) return existing
-
-  appendLauncherLog(`[自动构建] ${existing ? '源码比网关产物新' : '未找到网关二进制'}，开始 go build（cwd=${repoRoot}）`)
+  // 开发模式不依赖 mtime 判断：每次启动都构建，保证二进制与当前源码/嵌入插件一致。
+  // go 的构建缓存会让未变化的部分很快；调用方要的是「所见即所得」。
+  appendLauncherLog(`[自动构建] 开发模式：每次启动重新构建网关（cwd=${repoRoot}）`)
 
   let revision = ''
   try {

@@ -18,13 +18,14 @@ make desktop-pack   # electron-builder --win dir，产物在 desktop/dist/
 
 首次 `make desktop` 会经 `npx` 下载 Electron 33（约 100MB，之后有缓存）。
 
-也可以直接在 `desktop/` 下 `npx electron .`：壳启动时会自动准备网关——源码检出里
-`desktop/bin/adag` 缺失、或源码（`cmd`/`internal`/`official` 等）比产物新（例如刚
-`git pull`）时，自动执行 `GOWORK=off CGO_ENABLED=0 go build -trimpath` 到
-`desktop/bin/adag`，并注入 Revision/BuildTime；构建过程与结果写入
+也可以直接在 `desktop/` 下 `npx electron .`：壳启动时会自动准备网关——开发模式下
+**每次启动都重新构建**（不依赖 mtime 判断），执行 `GOWORK=off CGO_ENABLED=0 go build
+-trimpath` 到 `desktop/bin/adag`，并注入 Revision/BuildTime；构建过程与结果写入
 `~/.adago/launcher.log`。等待期间窗口显示「正在启动网关」页，就绪等待上限 180 秒。
-设置 `ADAGO_GATEWAY_AUTOBUILD=0` 可关闭自动构建；显式指定外部网关（`--connect`
-或 `gateway_bin_path`）时不构建。打包形态只用随包 `resources/bin/adag`，不会构建。
+重复执行 `npm run start`（单实例锁挡住新进程）会让已运行实例重新构建、重启网关并
+刷新界面。设置 `ADAGO_GATEWAY_AUTOBUILD=0` 可关闭自动构建；显式指定外部网关
+（`--connect` 或 `gateway_bin_path`）时不构建。打包形态只用随包
+`resources/bin/adag`，不会构建。
 
 ## 与 a_da 的差异（迁移适配点）
 
