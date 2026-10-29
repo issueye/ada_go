@@ -14,7 +14,7 @@
 // 环境变量 ADAGO_DESKTOP_SMOKE=1：网关就绪后打印一行 `[smoke] ...` 并退出，
 // 供自动化冒烟，不弹窗口常驻。
 
-const { app, BrowserWindow, ipcMain, dialog, screen, shell, Tray, Menu, nativeImage } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, screen, shell, Tray, Menu, nativeImage, nativeTheme } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
@@ -584,7 +584,9 @@ async function createMainWindow() {
     minHeight: WINDOW_MIN_HEIGHT,
     center: true,
     frame: false, // 无边框；preload 在 .ada-topbar 注入拖拽区与窗口控制（同 a_da）。
-    backgroundColor: '#18181b',
+    // 表单 POST → 303 的导航间隙里 Chromium 会先画窗口底色；写死深色会让
+    // 浅色主题看起来像“黑屏”。跟随系统主题，至少不会与页面主题相反。
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#18181b' : '#F6F3EC',
     webPreferences: {
       preload: preloadPath ?? undefined,
       contextIsolation: true,
@@ -606,8 +608,17 @@ async function createMainWindow() {
     appendLauncherLog(`[Renderer console ${level}] ${message} (${sourceId}:${line})`)
   })
   mainWindow.webContents.on('preload-error', (_e, p, err) => appendLauncherLog(`[preload-error] ${p}: ${err?.message ?? String(err)}`))
-  mainWindow.webContents.on('render-process-gone', (_e, d) => appendLauncherLog(`[render-process-gone] reason=${d?.reason} exitCode=${d?.exitCode}`))
-  mainWindow.webContents.on('did-fail-load', (_e, code, desc, u) => appendLauncherLog(`[did-fail-load] ${code}: ${desc} on ${u}`))
+  mainWindow.webContents.on('render-process-gone', (_e, d) => {
+    appendLauncherLog(`[render-process-gone] reason=${d?.reason} exitCode=${d?.exitCode}`)
+    if (mainWindow) void loadGatewayErrorPage(mainWindow, `渲染进程退出（${d?.reason || 'unknown'}）`)
+  })
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc, u, isMainFrame) => {
+    appendLauncherLog(`[did-fail-load] ${code}: ${desc} on ${u}`)
+    // -3 是导航被新的导航取代（重定向/刷新），不是页面故障。
+    if (!isMainFrame || code === -3) return
+    if (!/^https?:/i.test(String(u || ''))) return
+    if (mainWindow) void loadGatewayErrorPage(mainWindow, `${desc}（${code}） ${u}`)
+  })
 
   mainWindow.on('maximize', () => mainWindow?.webContents.send('window:maximize-change', true))
   mainWindow.on('unmaximize', () => mainWindow?.webContents.send('window:maximize-change', false))
