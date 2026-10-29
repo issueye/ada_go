@@ -146,7 +146,7 @@ M4 同时依赖 M2 的页面宿主与 M3 的完整装配/信任模型。若 M3 �
 | 编号 | 任务 | 产出 | 依赖 | 估算 |
 |---|---|---|---|---:|
 | M0.1 | 初始化仓库与依赖基线 | 单一 `go.mod`/`go.sum`、联合 `.` 与 `../moejs` 的 `go.work`/`go.work.sum`、目录骨架、模块路径、Go/工具链版本、CI 三平台模板 | 无 | 1–2 |
-| M0.2 | 固化 Core RPC 契约 | `spec/proto.json`：34 方法、事件、错误码、握手与版本 | M0.1 | 2–3 |
+| M0.2 | 固化 Core RPC 契约 | `spec/proto.json`：35 方法、事件、错误码、握手与版本 | M0.1 | 2–3 |
 | M0.3 | 固化插件与产品契约 | manifest/VNode Schema、`coding.agent.json`、`skeleton.agent.json` | M0.1 | 1–2 |
 | M0.4 | 建立生成与校验骨架 | `genproto`、`adag verify` 桩、文档链接/数量检查、生成物提交规则 | M0.2–0.3 | 2–3 |
 | M0.5 | 建立测试基础设施 | fake provider、脚本化模型、事件记录器、临时工作区、CI 门禁脚本 | M0.1 | 1–2 |
@@ -157,7 +157,7 @@ M4 同时依赖 M2 的页面宿主与 M3 的完整装配/信任模型。若 M3 �
 - workspace 与 `GOWORK=off` module 两种模式均能解析依赖并构建；`go.work` 只含相对路径，发布依赖仍由 `go.mod`/`go.sum` 锁定。
 - `go generate ./... && git diff --exit-code` 通过；协议常量与 dispatch 覆盖率可校验。
 - `products/skeleton.agent.json` 的 `plugins: []` 能驱动空基座桩启动。
-- 所有清单字段都有消费者或明确删除；文档中的 34 方法、15 钩子、12 插槽与生成结果一致。
+- 所有清单字段都有消费者或明确删除；文档中的 35 方法、15 钩子、12 插槽与生成结果一致。
 - 不写任何具体工具、provider、审批规则或业务页面。
 
 ### 4.2 M1：无头内核（40–55 人日）

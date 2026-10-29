@@ -83,6 +83,7 @@ const (
 	MethodPluginReload          = "plugin.reload"          // 重载一个或全部插件（双代原子替换；在途调用用旧代）
 	MethodPluginSetEnabled      = "plugin.setEnabled"      // 启用/禁用插件（产品门禁：禁用唯一策略插件且存在写/执行工具时拒绝）
 	MethodPluginHttp            = "plugin.http"            // 调用插件注册的动态 HTTP API（route；GET/POST，JSON 入参/出参）
+	MethodPluginHttpStream      = "plugin.httpStream"      // 插件 route 的 SSE 流（prepare 订阅 → start 启动 → cancel 取消；GET 专用）
 	MethodSkillList             = "skill.list"             // 技能元数据（插件目录与工作区目录合并，同名工作区优先）
 	MethodSkillRead             = "skill.read"             // 读取 SKILL.md 正文（模型工具 read_skill 走同一实现）
 	MethodActionInvoke          = "action.invoke"          // 前端动作 → 后端动作（用户点击触发；不进模型、不受 tool.beforeCall 约束）
@@ -105,6 +106,7 @@ const (
 	EvtNotice               = "evt.notice"                // 只给人的提示（永不进模型，INV-10）
 	EvtUsage                = "evt.usage"                 // token 与成本增量（turn.after 后发出；不进模型上下文）
 	EvtPluginChanged        = "evt.plugin.changed"        // 插件状态/贡献变化（工作区级；装载 workspaceSeq）
+	EvtPluginStream         = "evt.plugin.stream"         // 插件 route 的 SSE 数据帧与终止帧（streamId 关联；data 原样 JSON）
 	EvtError                = "evt.error"                 // 可恢复错误 + 诊断码（ADG-<AREA>-<NNN>；页面只显示码+人话+下一步）
 )
 
@@ -174,6 +176,7 @@ var Methods = []MethodMeta{
 	{Name: "plugin.reload", Group: "plugin", Summary: "重载一个或全部插件（双代原子替换；在途调用用旧代）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "plugin.setEnabled", Group: "plugin", Summary: "启用/禁用插件（产品门禁：禁用唯一策略插件且存在写/执行工具时拒绝）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "plugin.http", Group: "plugin", Summary: "调用插件注册的动态 HTTP API（route；GET/POST，JSON 入参/出参）", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
+	{Name: "plugin.httpStream", Group: "plugin", Summary: "插件 route 的 SSE 流（prepare 订阅 → start 启动 → cancel 取消；GET 专用）", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "skill.list", Group: "skill", Summary: "技能元数据（插件目录与工作区目录合并，同名工作区优先）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "skill.read", Group: "skill", Summary: "读取 SKILL.md 正文（模型工具 read_skill 走同一实现）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "action.invoke", Group: "action", Summary: "前端动作 → 后端动作（用户点击触发；不进模型、不受 tool.beforeCall 约束）", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
@@ -204,6 +207,7 @@ var Events = []EventMeta{
 	{Name: "evt.notice", Scope: "thread", Summary: "只给人的提示（永不进模型，INV-10）", Replayable: true, EntersModelContext: false},
 	{Name: "evt.usage", Scope: "thread", Summary: "token 与成本增量（turn.after 后发出；不进模型上下文）", Replayable: true, EntersModelContext: false},
 	{Name: "evt.plugin.changed", Scope: "workspace", Summary: "插件状态/贡献变化（工作区级；装载 workspaceSeq）", Replayable: true, EntersModelContext: false},
+	{Name: "evt.plugin.stream", Scope: "workspace", Summary: "插件 route 的 SSE 数据帧与终止帧（streamId 关联；data 原样 JSON）", Replayable: false, EntersModelContext: false},
 	{Name: "evt.error", Scope: "workspace", Summary: "可恢复错误 + 诊断码（ADG-<AREA>-<NNN>；页面只显示码+人话+下一步）", Replayable: true, EntersModelContext: false},
 }
 
@@ -306,7 +310,7 @@ var MethodsByGroup = map[string][]string{
 	"debug":       {"debug.state"},
 	"interaction": {"interaction.list", "interaction.respond"},
 	"model":       {"model.list", "model.set"},
-	"plugin":      {"plugin.list", "plugin.reload", "plugin.setEnabled", "plugin.http"},
+	"plugin":      {"plugin.list", "plugin.reload", "plugin.setEnabled", "plugin.http", "plugin.httpStream"},
 	"provider":    {"provider.list"},
 	"skill":       {"skill.list", "skill.read"},
 	"system":      {"system.hello", "system.ping", "system.shutdown"},

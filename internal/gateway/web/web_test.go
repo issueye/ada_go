@@ -31,12 +31,16 @@ type fakeCore struct {
 	responses map[string]json.RawMessage
 	errs      map[string]error
 	calls     []callRecord
+	callFn    func(method string, params any) (json.RawMessage, error)
+	subs      map[int]chan contracts.Event
+	nextSub   int
 }
 
 func newFakeCore() *fakeCore {
 	return &fakeCore{
 		responses: map[string]json.RawMessage{},
 		errs:      map[string]error{},
+		subs:      map[int]chan contracts.Event{},
 	}
 }
 
@@ -56,7 +60,6 @@ func (f *fakeCore) fail(method string, err error) *fakeCore {
 
 func (f *fakeCore) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	rec := callRecord{Method: method}
 	if m, ok := params.(map[string]any); ok {
 		rec.Params = make(map[string]any, len(m))
@@ -65,18 +68,62 @@ func (f *fakeCore) Call(ctx context.Context, method string, params any) (json.Ra
 		}
 	}
 	f.calls = append(f.calls, rec)
-	if err := f.errs[method]; err != nil {
-		return nil, err
+	fn := f.callFn
+	callErr := f.errs[method]
+	raw, configured := f.responses[method]
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(method, params)
 	}
-	raw, ok := f.responses[method]
-	if !ok {
+	if callErr != nil {
+		return nil, callErr
+	}
+	if !configured {
 		return nil, errors.New("fake: 未配置方法 " + method)
 	}
 	return raw, nil
 }
 
-func (f *fakeCore) Subscribe(int) (<-chan contracts.Event, func()) { return nil, func() {} }
-func (f *fakeCore) Close() error                                   { return nil }
+func (f *fakeCore) Subscribe(buffer int) (<-chan contracts.Event, func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.subs == nil {
+		f.subs = map[int]chan contracts.Event{}
+	}
+	if buffer <= 0 {
+		buffer = 1
+	}
+	ch := make(chan contracts.Event, buffer)
+	id := f.nextSub
+	f.nextSub++
+	f.subs[id] = ch
+	return ch, func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if c, ok := f.subs[id]; ok {
+			delete(f.subs, id)
+			close(c)
+		}
+	}
+}
+
+// push 向当前全部订阅者投递一条 Core 通知（测试用）。
+func (f *fakeCore) push(method, params string) {
+	f.mu.Lock()
+	channels := make([]chan contracts.Event, 0, len(f.subs))
+	for _, ch := range f.subs {
+		channels = append(channels, ch)
+	}
+	f.mu.Unlock()
+	for _, ch := range channels {
+		select {
+		case ch <- contracts.Event{Method: method, Params: json.RawMessage(params)}:
+		default:
+		}
+	}
+}
+
+func (f *fakeCore) Close() error { return nil }
 
 func (f *fakeCore) lastCall(method string) (callRecord, bool) {
 	f.mu.Lock()

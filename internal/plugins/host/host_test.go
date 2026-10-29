@@ -442,6 +442,58 @@ func TestRouteRegistersAndCalls(t *testing.T) {
 	}
 }
 
+// SSE 路由：登记 sse:true，处理器用 ctx.sse.send 推帧，宿主按帧回调。
+func TestSSERouteStreams(t *testing.T) {
+	caps := testCaps(t, plugins.TrustBuiltin)
+	src := "export default function (agent) {\n" +
+		"  agent.route({ method: 'GET', path: '/events', sse: true, handler: function (req, ctx) {\n" +
+		"    ctx.sse.send({ n: 1 });\n" +
+		"    ctx.sse.send({ n: 2 }, 'update');\n" +
+		"  } });\n" +
+		"  agent.route('GET', '/plain', function () { return { ok: true }; });\n" +
+		"}"
+	routes := &recordingRoutes{}
+	p, err := Load(context.Background(), testScript(t, caps, src), caps, Context{},
+		Options{Targets: Targets{Routes: routes}})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	defer func() { _ = p.Close(context.Background()) }()
+
+	var sseDef RouteDef
+	for _, reg := range routes.regs {
+		if reg.Def.Path == "/events" {
+			sseDef = reg.Def
+		}
+		if reg.Def.Path == "/plain" && reg.Def.SSE {
+			t.Fatalf("普通路由不应标记 SSE: %+v", reg.Def)
+		}
+	}
+	if !sseDef.SSE || sseDef.Method != "GET" {
+		t.Fatalf("SSE 路由登记 = %+v", sseDef)
+	}
+
+	var frames []RouteEvent
+	err = p.CallRouteStream(context.Background(), sseDef.Handler,
+		json.RawMessage(`{"method":"GET","path":"/events"}`), Context{},
+		func(ev RouteEvent) error {
+			frames = append(frames, ev)
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("CallRouteStream: %v", err)
+	}
+	if len(frames) != 2 {
+		t.Fatalf("帧数 = %d: %+v", len(frames), frames)
+	}
+	if frames[0].Event != "" || !strings.Contains(string(frames[0].Data), `"n":1`) {
+		t.Fatalf("第 1 帧 = %+v", frames[0])
+	}
+	if frames[1].Event != "update" || !strings.Contains(string(frames[1].Data), `"n":2`) {
+		t.Fatalf("第 2 帧 = %+v", frames[1])
+	}
+}
+
 // model.admin：ctx.providers 只在声明能力后安装，list/select 都走宿主回调。
 func TestModelAdminRoutes(t *testing.T) {
 	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapModelAdmin)

@@ -115,3 +115,53 @@ func TestPluginRouteCarriesThreadIntoState(t *testing.T) {
 		t.Fatalf("路由结果 = %s", out)
 	}
 }
+
+// SSE 路由：普通调用被 406 拒绝，流式调用按帧回调；类型不匹配也有明确错误。
+func TestPluginHTTPAPIStream(t *testing.T) {
+	ctx := context.Background()
+	src := "export default function (agent) {\n" +
+		"  agent.route({ method: 'GET', path: '/events', sse: true, handler: function (req, ctx) {\n" +
+		"    ctx.sse.send({ n: 1 });\n" +
+		"    ctx.sse.send({ n: 2 }, 'update');\n" +
+		"  } });\n" +
+		"  agent.route('GET', '/plain', function () { return { ok: true }; });\n" +
+		"}"
+	m := &plugins.Manifest{
+		ID: "route-sse", Name: "SSE 路由夹具", Version: "0.1.0",
+		APIVersion: plugins.APIVersionMajor, Trust: plugins.TrustBuiltin,
+		Backend: &plugins.Backend{Entry: "index.js"},
+	}
+	script := host.Script{Manifest: m, EntryName: host.EntryScheme + "://route-sse/index.js", Source: src}
+	asm, err := app.Assemble(ctx, testProduct(t, "route-sse"), []host.Script{script}, app.Deps{Context: host.Context{Workspace: t.TempDir()}})
+	if err != nil {
+		t.Fatalf("app.Assemble: %v", err)
+	}
+	t.Cleanup(func() { _ = asm.Close(context.Background()) })
+
+	if _, err := asm.CallHTTPAPI(ctx, "route-sse", "GET", "/events", nil, ""); !errors.Is(err, app.ErrRouteStreaming) {
+		t.Fatalf("普通调用 SSE 路由 = %v, want ErrRouteStreaming", err)
+	}
+	if err := asm.CheckHTTPAPIStream("route-sse", "GET", "/events"); err != nil {
+		t.Fatalf("CheckHTTPAPIStream(/events) = %v", err)
+	}
+	if err := asm.CheckHTTPAPIStream("route-sse", "GET", "/plain"); !errors.Is(err, app.ErrRouteNotStreaming) {
+		t.Fatalf("CheckHTTPAPIStream(/plain) = %v, want ErrRouteNotStreaming", err)
+	}
+	err = asm.StreamHTTPAPI(ctx, "route-sse", "GET", "/plain", nil, "", func(host.RouteEvent) error { return nil })
+	if !errors.Is(err, app.ErrRouteNotStreaming) {
+		t.Fatalf("流式调用普通路由 = %v, want ErrRouteNotStreaming", err)
+	}
+
+	var frames []host.RouteEvent
+	err = asm.StreamHTTPAPI(ctx, "route-sse", "GET", "/events", nil, "",
+		func(ev host.RouteEvent) error {
+			frames = append(frames, ev)
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("StreamHTTPAPI: %v", err)
+	}
+	if len(frames) != 2 || frames[1].Event != "update" || !strings.Contains(string(frames[1].Data), `"n":2`) {
+		t.Fatalf("帧 = %+v", frames)
+	}
+}

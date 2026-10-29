@@ -19,9 +19,12 @@ import (
 )
 
 // ErrRouteNotFound / ErrRouteMethodNotAllowed 供 Core RPC 映射 404/405。
+// ErrRouteStreaming / ErrRouteNotStreaming 表示调用方式与路由类型不匹配（406）。
 var (
 	ErrRouteNotFound         = errors.New("app: 没有匹配的插件 HTTP 路由")
 	ErrRouteMethodNotAllowed = errors.New("app: 该路径不支持此 HTTP 方法")
+	ErrRouteStreaming        = errors.New("app: 该路由是 SSE，需要流式调用")
+	ErrRouteNotStreaming     = errors.New("app: 该路由不是 SSE")
 )
 
 type routeRegistry struct {
@@ -43,6 +46,9 @@ func (r *routeRegistry) AddRoute(reg host.RouteRegistration) error {
 	}
 	if method != "GET" && method != "POST" {
 		return fmt.Errorf("app: 插件 %s 的 HTTP 路由 %q 方法非法: %s", id, path, method)
+	}
+	if reg.Def.SSE && method != "GET" {
+		return fmt.Errorf("app: 插件 %s 的 SSE 路由 %q 只支持 GET", id, path)
 	}
 	if !strings.HasPrefix(path, "/") || strings.Contains(path, "..") {
 		return fmt.Errorf("app: 插件 %s 的 HTTP 路由路径非法: %q", id, path)
@@ -66,7 +72,9 @@ func (r *routeRegistry) AddRoute(reg host.RouteRegistration) error {
 	if _, dup := routes[path]; dup {
 		return fmt.Errorf("app: 插件 %s 重复登记 HTTP 路由 %s %s", id, method, path)
 	}
-	routes[path] = reg.Def
+	def := reg.Def
+	def.Method, def.Path = method, path
+	routes[path] = def
 	return nil
 }
 
@@ -135,27 +143,63 @@ func routePrefixMatch(route, path string) bool {
 }
 
 // CallHTTPAPI 执行一次插件动态路由。req 是交给插件 handler 的 JSON 请求包
-// （method/path/query/body 等，由 Core RPC 组装）。
+// （method/path/query/body 等，由 Core RPC 组装）。SSE 路由必须走 StreamHTTPAPI。
 func (a *Assembly) CallHTTPAPI(ctx context.Context, pluginID, method, path string, req json.RawMessage, threadID string) (json.RawMessage, error) {
-	if a == nil || a.Routes == nil {
-		return nil, ErrRouteNotFound
-	}
-	pluginID = strings.TrimSpace(pluginID)
-	if pluginID == "" {
-		return nil, errors.New("app: 缺少插件 id")
-	}
-	def, err := a.Routes.match(pluginID, method, path)
+	def, inst, hc, err := a.routeTarget(ctx, pluginID, method, path, threadID)
 	if err != nil {
 		return nil, err
 	}
+	if def.SSE {
+		return nil, ErrRouteStreaming
+	}
+	return inst.CallRoute(ctx, def.Handler, req, hc)
+}
+
+// StreamHTTPAPI 执行一次 SSE 路由：处理器每推一帧同步调用 onEvent。
+func (a *Assembly) StreamHTTPAPI(ctx context.Context, pluginID, method, path string, req json.RawMessage, threadID string, onEvent func(host.RouteEvent) error) error {
+	def, inst, hc, err := a.routeTarget(ctx, pluginID, method, path, threadID)
+	if err != nil {
+		return err
+	}
+	if !def.SSE {
+		return ErrRouteNotStreaming
+	}
+	return inst.CallRouteStream(ctx, def.Handler, req, hc, onEvent)
+}
+
+// CheckHTTPAPIStream 只校验「这条路由存在且是 SSE」，不执行处理器。
+// Gateway 在写 SSE 响应头之前用它把 404/405/406 同步返回给浏览器。
+func (a *Assembly) CheckHTTPAPIStream(pluginID, method, path string) error {
+	def, _, _, err := a.routeTarget(context.Background(), pluginID, method, path, "")
+	if err != nil {
+		return err
+	}
+	if !def.SSE {
+		return ErrRouteNotStreaming
+	}
+	return nil
+}
+
+func (a *Assembly) routeTarget(ctx context.Context, pluginID, method, path, threadID string) (host.RouteDef, *host.Instance, host.Context, error) {
+	if a == nil || a.Routes == nil {
+		return host.RouteDef{}, nil, host.Context{}, ErrRouteNotFound
+	}
+	pluginID = strings.TrimSpace(pluginID)
+	if pluginID == "" {
+		return host.RouteDef{}, nil, host.Context{}, errors.New("app: 缺少插件 id")
+	}
+	def, err := a.Routes.match(pluginID, method, path)
+	if err != nil {
+		return host.RouteDef{}, nil, host.Context{}, err
+	}
 	inst, ok := a.Plugin(pluginID)
 	if !ok {
-		return nil, fmt.Errorf("app: 插件 %s 未加载", pluginID)
+		return host.RouteDef{}, nil, host.Context{}, fmt.Errorf("app: 插件 %s 未加载", pluginID)
 	}
 	hc := inst.BaseContext()
 	hc.PluginID = pluginID
 	hc.ThreadID = strings.TrimSpace(threadID)
 	hc.Signal = ctx
 	hc.Now = time.Now().UTC()
-	return inst.CallRoute(ctx, def.Handler, req, hc)
+	return def, inst, hc, nil
 }

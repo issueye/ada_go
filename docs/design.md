@@ -10,7 +10,7 @@
 
 ada-go 是本地优先、单二进制、插件优先的 Agent 系统：Gateway 只负责 HTTP/SSR/SSE，Core 每个工作区一个进程跑唯一的 `RunTurn`；工具、provider、人格、策略、页面全部由插件贡献，官方插件也走同一 TS/moejs 契约。
 
-核心数字：**2 个进程角色、1 条 RPC 契约、34 个 RPC 方法、15 个钩子点、12 个前端插槽、1 份协议源文件**。
+核心数字：**2 个进程角色、1 条 RPC 契约、35 个 RPC 方法、15 个钩子点、12 个前端插槽、1 份协议源文件**。
 
 ## 文档地图
 
@@ -24,7 +24,7 @@ ada-go 是本地优先、单二进制、插件优先的 Agent 系统：Gateway �
 | [05-plugins.md](05-plugins.md) | §6.1–6.3 | 插件包形态、`plugin.json`、能力与信任、后端 `AgentAPI` |
 | [06-plugin-runtime.md](06-plugin-runtime.md) | §6.4–6.9 | moejs 沙箱、调用预算、装配期结算、钩子、技能、官方插件、签名与热重载 |
 | [07-ssr-frontend.md](07-ssr-frontend.md) | §7 | SSR 技术选型、a_da UI/设计元语直接复用、页面布局、组件与 VNode、SSE、前端插件化、动作桥、渐进增强 |
-| [08-protocol.md](08-protocol.md) | §8 | 传输、34 个 RPC 方法、快照与补丁、工具 DTO、错误码、产品声明 |
+| [08-protocol.md](08-protocol.md) | §8 | 传输、35 个 RPC 方法、快照与补丁、工具 DTO、错误码、产品声明 |
 | [09-security-operations.md](09-security-operations.md) | §9–10 | 威胁模型、路径/命令/Web 安全、提示注入边界、资源限制、可观测性与运维 |
 | [10-testing-performance.md](10-testing-performance.md) | §11–12 | 分层测试、门禁、关键用例、性能目标与优化顺序 |
 | [11-structure-roadmap.md](11-structure-roadmap.md) | §13–15 | 目录结构、Go workspace、依赖约束、里程碑、风险与开放问题 |

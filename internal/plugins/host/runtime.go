@@ -157,6 +157,7 @@ const (
 	callHook
 	callAction
 	callRoute
+	callRouteStream
 	callProvider
 )
 
@@ -174,6 +175,8 @@ func (k callKind) String() string {
 		return "action"
 	case callRoute:
 		return "route"
+	case callRouteStream:
+		return "route-stream"
 	case callProvider:
 		return "provider"
 	}
@@ -199,6 +202,8 @@ type call struct {
 	signal context.Context
 	// onDelta 只在 provider 流上使用；它只在 owner goroutine 上被调用。
 	onDelta func(json.RawMessage) error
+	// onRouteEvent 只在 SSE 路由上使用；同样只在 owner goroutine 上被调用。
+	onRouteEvent func(RouteEvent) error
 
 	done chan outcome
 
@@ -459,6 +464,9 @@ func (p *Instance) newBudgetFor(c *call) *callBudget {
 		}
 	case callRoute:
 		soft = b.Route
+	case callRouteStream:
+		// SSE 路由是长连接：脚本空闲预算用 provider 的空闲档，总时长共用 30 分钟墙钟。
+		soft, wall = b.ProviderIdle, b.ProviderTotal
 	case callProvider:
 		soft, wall = b.ProviderConnect, b.ProviderTotal
 	default:
@@ -632,6 +640,14 @@ func (p *Instance) invoke(rt *mojsRuntime, c *call, fn moejs.Value) {
 // adopt 结算脚本返回值：thenable 走 then 回调，其余直接按 JSON 回（06 §6.4「Await 语义」）。
 func (p *Instance) adopt(rt *mojsRuntime, c *call, v moejs.Value) {
 	r := rt.Realm()
+	// SSE 路由允许处理器不返回值（帧已经通过 ctx.sse.send 推完）。
+	if c.kind == callRouteStream && v.IsNullish() {
+		c.reply(outcome{data: json.RawMessage("null")})
+		if p.loop != nil {
+			p.loop.StopNoWait()
+		}
+		return
+	}
 	then, err := r.GetMethod(v, r.KeyFromGoString("then"))
 	if err != nil {
 		p.replyErr(c, p.exportError(err))
@@ -1297,6 +1313,20 @@ func (p *Instance) CallRoute(ctx context.Context, h HandlerRef, req json.RawMess
 	c := newCall(callRoute, h.Slot, routeKeyOf(req), req, routeCtx, ctx)
 	o := p.roundTrip(ctx, c)
 	return o.data, o.err
+}
+
+// CallRouteStream 执行一次 SSE 路由：处理器用 ctx.sse.send 推帧，
+// 每帧同步交给 onEvent（背压作用在脚本 goroutine 上）。
+func (p *Instance) CallRouteStream(ctx context.Context, h HandlerRef, req json.RawMessage, routeCtx Context, onEvent func(RouteEvent) error) error {
+	if err := p.prepare(ctx); err != nil {
+		return err
+	}
+	if onEvent == nil {
+		return errors.New("host: SSE 路由需要事件回调")
+	}
+	c := newCall(callRouteStream, h.Slot, routeKeyOf(req), req, routeCtx, ctx)
+	c.onRouteEvent = onEvent
+	return p.roundTrip(ctx, c).err
 }
 
 // CallProviderStream 执行 provider 的 stream（建连 15s / 空闲 90s / 总 30 分钟）。

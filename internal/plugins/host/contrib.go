@@ -76,10 +76,18 @@ type ActionDef struct {
 }
 
 // RouteDef 是 route(method, path, handler) 登记的一条动态路由（7.6）。
+// SSE=true 的路由只接受 GET，调用方以 EventSource 订阅，处理器用 ctx.sse.send 推帧。
 type RouteDef struct {
 	Method  string     `json:"method"`
 	Path    string     `json:"path"`
+	SSE     bool       `json:"sse,omitempty"`
 	Handler HandlerRef `json:"-"`
+}
+
+// RouteEvent 是 SSE 路由的一帧：Event 为空表示默认 message。
+type RouteEvent struct {
+	Event string
+	Data  json.RawMessage
 }
 
 // HookDef 是 agent.on(point, fn, opts) 登记的一个钩子。

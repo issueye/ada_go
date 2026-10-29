@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -19,6 +20,8 @@ import (
 	"github.com/adag/ada-go/internal/cli"
 	"github.com/adag/ada-go/internal/conformance/testkit"
 	"github.com/adag/ada-go/internal/corerpc"
+	"github.com/adag/ada-go/internal/plugins"
+	"github.com/adag/ada-go/internal/plugins/host"
 	"github.com/adag/ada-go/internal/ports"
 )
 
@@ -901,4 +904,100 @@ func TestCoreRPCChangeListAndRevert(t *testing.T) {
 
 	// scope=all 且线程没有检查点：同样报错。
 	c.callError(t, "change.revert", map[string]any{"threadId": "th_missing", "scope": "all"})
+}
+
+// SSE 路由的 Core 侧三段式协议：prepare（同步校验）→ start → evt.plugin.stream → done。
+func TestCoreRPCPluginHTTPStream(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	productPath := filepath.Join(dir, "product.json")
+	product := `{
+  "id": "sse-test", "name": "SSE 测试",
+  "plugins": ["sse-fixture"],
+  "capabilities": {"skills": false, "images": false, "subagents": false},
+  "identity": {"name": "ada-go", "locale": "zh-CN"},
+  "policies": {"toolTimeoutMs": 120000, "turnTimeoutMs": 0, "maxTurnTokens": 0,
+    "loopRepeatLimit": 3, "loopAbortLimit": 5, "parallelTools": 1}
+}`
+	if err := os.WriteFile(productPath, []byte(product), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := &plugins.Manifest{
+		ID: "sse-fixture", Name: "SSE 夹具", Version: "0.1.0",
+		APIVersion: plugins.APIVersionMajor, Trust: plugins.TrustBuiltin,
+		Backend: &plugins.Backend{Entry: "index.js"},
+	}
+	src := "export default function (agent) {\n" +
+		"  agent.route({ method: 'GET', path: '/events', sse: true, handler: function (req, ctx) {\n" +
+		"    ctx.sse.send({ n: 1 });\n" +
+		"    ctx.sse.send({ n: 2 }, 'update');\n" +
+		"  } });\n" +
+		"}"
+	script := host.Script{Manifest: m, EntryName: host.EntryScheme + "://sse-fixture/index.js", Source: src}
+	sess, err := cli.Open(ctx, cli.Config{
+		Workspace: t.TempDir(), DataDir: t.TempDir(), Product: productPath,
+		Scripts: []host.Script{script}, Fake: true, In: strings.NewReader(""),
+	})
+	if err != nil {
+		t.Fatalf("cli.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = sess.Close(context.Background()) })
+
+	url, _ := startServer(t, sess, "secret")
+	c := dial(t, url, "secret")
+	streamID := "ps_test123"
+
+	raw := c.call(t, "plugin.httpStream", map[string]any{
+		"action": "prepare", "streamId": streamID, "pluginId": "sse-fixture",
+		"method": "GET", "path": "/events",
+	})
+	var prepared struct {
+		Prepared bool `json:"prepared"`
+	}
+	if err := json.Unmarshal(raw, &prepared); err != nil || !prepared.Prepared {
+		t.Fatalf("prepare = %s (%v)", raw, err)
+	}
+	c.call(t, "plugin.httpStream", map[string]any{"action": "start", "streamId": streamID})
+
+	want := map[string]string{"message": `"n":1`, "update": `"n":2`}
+	deadline := time.After(10 * time.Second)
+	seen := 0
+	for seen < 3 {
+		select {
+		case ev := <-c.events:
+			if ev.Method != "evt.plugin.stream" {
+				continue
+			}
+			var f struct {
+				StreamID string          `json:"streamId"`
+				Event    string          `json:"event"`
+				Data     json.RawMessage `json:"data"`
+				Done     bool            `json:"done"`
+			}
+			if err := json.Unmarshal(ev.Params, &f); err != nil || f.StreamID != streamID {
+				continue
+			}
+			if f.Done {
+				seen++
+				continue
+			}
+			name := f.Event
+			if name == "" {
+				name = "message"
+			}
+			if needle, ok := want[name]; ok {
+				if !strings.Contains(string(f.Data), needle) {
+					t.Fatalf("事件 %s 数据 = %s", f.Event, f.Data)
+				}
+				seen++
+			}
+		case <-deadline:
+			t.Fatalf("等待 SSE 事件超时（已收到 %d/3）", seen)
+		}
+	}
+
+	raw = c.call(t, "plugin.httpStream", map[string]any{"action": "cancel", "streamId": streamID})
+	if !strings.Contains(string(raw), `"cancelled"`) {
+		t.Fatalf("cancel = %s", raw)
+	}
 }

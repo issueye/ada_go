@@ -750,15 +750,53 @@ func (s *Session) CallHTTPAPI(ctx context.Context, pluginID, method, path string
 	}
 	out, err := asm.CallHTTPAPI(ctx, pluginID, method, path, req, threadID)
 	if err != nil {
-		switch {
-		case errors.Is(err, app.ErrRouteNotFound):
-			return nil, &HTTPAPIError{Status: 404, Message: "没有匹配的接口"}
-		case errors.Is(err, app.ErrRouteMethodNotAllowed):
-			return nil, &HTTPAPIError{Status: 405, Message: "该路径不支持此方法"}
-		}
-		return nil, err
+		return nil, httpAPIError(err)
 	}
 	return out, nil
+}
+
+// CallHTTPAPIStream 执行一次 SSE 路由；每帧通过 onEvent 交给调用方。
+// 与 CallHTTPAPI 共用同一套路由表、线程上下文与 404/405 映射；类型不符返回 406。
+func (s *Session) CallHTTPAPIStream(ctx context.Context, pluginID, method, path string, req json.RawMessage, threadID string, onEvent func(host.RouteEvent) error) error {
+	s.mu.Lock()
+	asm := s.asm
+	s.mu.Unlock()
+	if asm == nil {
+		return domain.NewError(domain.CodeCoreUnavailable, "插件装配尚未就绪")
+	}
+	if err := asm.StreamHTTPAPI(ctx, pluginID, method, path, req, threadID, onEvent); err != nil {
+		return httpAPIError(err)
+	}
+	return nil
+}
+
+// CheckHTTPAPIStream 校验路由存在且是 SSE（不执行处理器）。
+func (s *Session) CheckHTTPAPIStream(pluginID, method, path string) error {
+	s.mu.Lock()
+	asm := s.asm
+	s.mu.Unlock()
+	if asm == nil {
+		return domain.NewError(domain.CodeCoreUnavailable, "插件装配尚未就绪")
+	}
+	if err := asm.CheckHTTPAPIStream(pluginID, method, path); err != nil {
+		return httpAPIError(err)
+	}
+	return nil
+}
+
+// httpAPIError 把路由层的判定映射成可读的 HTTP 状态（由 Core RPC 透给 Gateway）。
+func httpAPIError(err error) error {
+	switch {
+	case errors.Is(err, app.ErrRouteNotFound):
+		return &HTTPAPIError{Status: 404, Message: "没有匹配的接口"}
+	case errors.Is(err, app.ErrRouteMethodNotAllowed):
+		return &HTTPAPIError{Status: 405, Message: "该路径不支持此方法"}
+	case errors.Is(err, app.ErrRouteStreaming):
+		return &HTTPAPIError{Status: 406, Message: "该接口是 SSE，请用 EventSource 订阅"}
+	case errors.Is(err, app.ErrRouteNotStreaming):
+		return &HTTPAPIError{Status: 406, Message: "该接口不是 SSE"}
+	}
+	return err
 }
 
 // Policies 返回当前生效的运行参数（workspace.updatePolicy 覆盖优先，否则用产品声明）。

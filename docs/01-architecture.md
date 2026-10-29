@@ -76,7 +76,7 @@ ada-go 的取舍：保留双层消息、统一流、树形会话、steering、co
 | 扩展安全 | 无隔离 | Boa + 能力开关，无内存上限 | moejs + 能力安装 + 内存/时间/深度上限 |
 | 工具来源 | 内置 + TS 扩展 | 内置 Rust + TS 插件 | 基座零工具；官方与第三方都是 TS 插件，走同一 moejs 引擎与目录契约 |
 | 会话存储 | JSONL 树 | 会话文件 | SQLite append-only DAG + 快照投影 |
-| 协议 | SDK/内部事件 | 83 个方法，多处手写 | 34 个方法，JSON 单源 + 生成常量 |
+| 协议 | SDK/内部事件 | 83 个方法，多处手写 | 35 个方法，JSON 单源 + 生成常量 |
 | 审批 | 扩展钩子 | 当前实现已移除 | 策略插件（`tool.beforeCall` + `ctx.ui`）+ 通用交互桥；基座无审批规则 |
 | 前端 | TUI | Askama + HTMX + TSX（Black Swan 设计系统） | html/template + HTMX + TSX（moejs），直接复用同一套 token、`ada-*` 组件与 DOM |
 | 产品装配 | 代码装配 | 声明式 spec | 声明式 spec + 逐字段消费者门禁 |

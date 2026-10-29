@@ -159,6 +159,9 @@ interface ToolContext {
     list(): Promise<{ providers: ProviderInfo[]; current: ModelRef }>;
     select(providerId: string, modelId: string): Promise<ModelRef>;
   };
+  sse?: {                            // 仅 sse:true 的 route 处理器内存在
+    send(data: unknown, event?: string): void;
+  };
   secret?(name: string): string | null; // 仅在 manifest 声明 secrets 时存在
   ui?: UIContext;                    // capability: ui.ask，仅 builtin/verified
   settings?: Record<string, unknown>; // 插件自己的设置（[plugins.settings.<id>]，基座不解释）
@@ -177,7 +180,7 @@ interface UIContext {
 
 - **工具**给模型调用，进入工具目录，受 `tool.beforeCall` 策略与 scope 约束。
 - **动作**只给界面调用（`POST /ext/{id}/action/{name}`），不进入模型上下文。读动作可以在 SSR 时预取；写动作必须用户点击，并支持 `confirm` 文案。
-- 动态路由（`route`）给插件自己的 HTTP API 用：`GET/POST /ext/{id}/api/*`，查询串与 JSON 请求体由宿主传入；返回 JSON，响应大小上限 64KB。
+- 动态路由（`route`）给插件自己的 HTTP API 用：`GET/POST /ext/{id}/api/*`，查询串与 JSON 请求体由宿主传入；返回 JSON，响应大小上限 64KB。`sse: true` 的路由只允许 GET，处理器用 `ctx.sse.send(data, event?)` 推帧（见 [7.6.2](07-ssr-frontend.md#762-sse-路由)）。
 
 ```ts
 interface ActionDef {

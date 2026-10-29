@@ -1216,6 +1216,40 @@
       "errors": ["invalid_params", "internal_error"]
     },
     {
+      "name": "plugin.httpStream",
+      "group": "plugin",
+      "summary": "插件 route 的 SSE 流（prepare 订阅 → start 启动 → cancel 取消；GET 专用）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": false,
+      "requiresReadyInstance": true,
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": { "type": "string", "enum": ["prepare", "start", "cancel"] },
+          "streamId": { "type": "string", "pattern": "^ps_[A-Za-z0-9]+$" },
+          "pluginId": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "method": { "type": "string", "enum": ["GET"] },
+          "path": { "type": "string", "pattern": "^/" },
+          "query": { "type": "object", "additionalProperties": { "type": "string" } },
+          "threadId": { "type": "string", "description": "线程上下文；route 的 ctx.state 按它读写" }
+        },
+        "required": ["action"]
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "streamId": { "type": "string" },
+          "prepared": { "type": "boolean" },
+          "started": { "type": "boolean" },
+          "cancelled": { "type": "boolean" }
+        }
+      },
+      "errors": ["invalid_params", "plugin_timeout", "plugin_crashed", "plugin_denied"]
+    },
+    {
       "name": "skill.list",
       "group": "skill",
       "summary": "技能元数据（插件目录与工作区目录合并，同名工作区优先）",
@@ -1640,6 +1674,25 @@
           "workspaceSeq": { "type": "integer", "minimum": 1, "description": "工作区级事件序号（8.1）" }
         },
         "required": ["plugin", "change", "workspaceSeq"]
+      }
+    },
+    {
+      "name": "evt.plugin.stream",
+      "scope": "workspace",
+      "summary": "插件 route 的 SSE 数据帧与终止帧（streamId 关联；data 原样 JSON）",
+      "replayable": false,
+      "entersModelContext": false,
+      "payload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "streamId": { "type": "string" },
+          "event": { "type": "string", "maxLength": 64, "description": "SSE 事件名；缺省 message" },
+          "data": {},
+          "done": { "type": "boolean", "description": "终止帧；与 error 互斥（可同时为 done+error）" },
+          "error": { "type": "string", "maxLength": 2048, "description": "流内失败的人话描述" }
+        },
+        "required": ["streamId"]
       }
     },
     {

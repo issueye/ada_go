@@ -286,8 +286,9 @@ func TestBridgeAssetsAndBindings(t *testing.T) {
 	if !found {
 		t.Fatalf("Styles 缺少任务卡样式: %v", styles)
 	}
-	if scripts := b.Scripts(); len(scripts) != 0 {
-		t.Fatalf("示例插件不声明 scripts，got %v", scripts)
+	scripts := b.Scripts()
+	if len(scripts) != 1 || scripts[0] != "/ext/provider-admin/static/provider-admin.js" {
+		t.Fatalf("Scripts 应只含 provider-admin 的增强脚本，got %v", scripts)
 	}
 	if data, ok := b.StaticAsset("ui-task-plan", "task-plan.css"); !ok || len(data) == 0 {
 		t.Fatal("StaticAsset 应能取到 task-plan.css")

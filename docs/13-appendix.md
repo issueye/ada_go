@@ -211,7 +211,7 @@ plugin_route_kb = 64
 | 模板引擎 | Askama（编译期） | `html/template` + Go 组件函数 |
 | TSX 运行时 | OXC + Boa | esbuild + moejs |
 | 插件内存 | 无上限 | 每 Runtime 64MB + 超时重建 |
-| 协议 | 多处手写、83 方法 | JSON 单源 + 生成常量、34 方法 |
+| 协议 | 多处手写、83 方法 | JSON 单源 + 生成常量、35 方法 |
 | 会话 | 文件 | SQLite append-only DAG |
 | 审批 | 当前实现移除 | 基座只提供交互桥；策略插件（`tool.beforeCall` + `ctx.ui`）+ UI 托盘，无策略则失败关闭 |
 | UI 与设计系统 | Black Swan token、`ada-*` 组件、DOM 与交互 | **直接复用同一套** token/CSS/DOM/插槽与交互；只把 Askama/Rust 换成 `html/template`/Go，不另造视觉语言 |

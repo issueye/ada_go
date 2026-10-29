@@ -65,7 +65,22 @@ type Server struct {
 	conns map[*client]struct{}
 	sub   func()
 
+	streamMu sync.Mutex
+	streams  map[string]*pluginStream
+
 	shutOnce sync.Once
+}
+
+// pluginStream 是 Gateway 与 Core 之间的一次 SSE 路由登记（prepare → start → cancel）。
+type pluginStream struct {
+	cancel   context.CancelFunc
+	pluginID string
+	method   string
+	path     string
+	threadID string
+	req      json.RawMessage
+	started  bool
+	prepared time.Time
 }
 
 type runInfo struct {
@@ -97,8 +112,8 @@ func New(opts Options) (*Server, error) {
 		core:  coreproto.NewServer(p.ID, instanceID(p.ID, opts.Session.Workspace()), os.Getpid()),
 		token: opts.Token, readyAt: readyAt, onShut: opts.OnShutdown,
 		runs: map[string]*runInfo{}, idem: map[string]string{},
-		conns: map[*client]struct{}{},
-		root:  rootCtx,
+		conns: map[*client]struct{}{}, streams: map[string]*pluginStream{},
+		root: rootCtx,
 	}
 	s.pid = os.Getpid()
 	if err := s.register(); err != nil {
@@ -121,6 +136,18 @@ func (s *Server) Close() {
 		}
 		s.conns = map[*client]struct{}{}
 		s.mu.Unlock()
+		s.streamMu.Lock()
+		streams := make([]*pluginStream, 0, len(s.streams))
+		for id, st := range s.streams {
+			streams = append(streams, st)
+			delete(s.streams, id)
+		}
+		s.streamMu.Unlock()
+		for _, st := range streams {
+			if st.cancel != nil {
+				st.cancel()
+			}
+		}
 		for _, c := range conns {
 			c.close()
 		}
@@ -159,6 +186,7 @@ func (s *Server) register() error {
 		"plugin.reload":          s.handlePluginReload,
 		"plugin.setEnabled":      s.handlePluginSetEnabled,
 		"plugin.http":            s.handlePluginHTTP,
+		"plugin.httpStream":      s.handlePluginHTTPStream,
 		"action.invoke":          s.handleActionInvoke,
 		"skill.list":             s.handleSkillList,
 		"skill.read":             s.handleSkillRead,
@@ -881,7 +909,7 @@ func (s *Server) handlePluginHTTP(ctx context.Context, raw json.RawMessage) (any
 	if err != nil {
 		var he *cli.HTTPAPIError
 		if errors.As(err, &he) {
-			res := map[string]any{"ok": false, "error": he.Message}
+			res := map[string]any{"ok": false, "error": he.Message, "status": he.Status}
 			switch he.Status {
 			case 404:
 				res["notFound"] = true
@@ -899,6 +927,147 @@ func (s *Server) handlePluginHTTP(ctx context.Context, raw json.RawMessage) (any
 		}
 	}
 	return map[string]any{"ok": true, "result": result}, nil
+}
+
+// handlePluginHTTPStream 管理 SSE 路由的三段式生命周期：
+//
+//	prepare（登记，不启动）→ Gateway 写完 SSE 响应头 → start（启动）→ cancel（断开时取消）
+//
+// prepare 与 start 分开是为了消除「订阅建立前插件已经开始推帧」的丢帧窗口。
+func (s *Server) handlePluginHTTPStream(_ context.Context, raw json.RawMessage) (any, error) {
+	var p struct {
+		Action   string            `json:"action"`
+		StreamID string            `json:"streamId"`
+		PluginID string            `json:"pluginId"`
+		Method   string            `json:"method"`
+		Path     string            `json:"path"`
+		Query    map[string]string `json:"query"`
+		ThreadID string            `json:"threadId"`
+	}
+	if err := decode(raw, &p); err != nil {
+		return nil, invalid("plugin.httpStream: " + err.Error())
+	}
+	action := strings.TrimSpace(p.Action)
+	streamID := strings.TrimSpace(p.StreamID)
+	switch action {
+	case "prepare":
+		pluginID := strings.TrimSpace(p.PluginID)
+		method := strings.ToUpper(strings.TrimSpace(p.Method))
+		path := strings.TrimSpace(p.Path)
+		if pluginID == "" || path == "" || method != "GET" {
+			return nil, invalid("plugin.httpStream.prepare: 需要 pluginId、method=GET 与 path")
+		}
+		if !strings.HasPrefix(path, "/") {
+			return nil, invalid("plugin.httpStream.prepare: path 必须以 / 开头")
+		}
+		if !strings.HasPrefix(streamID, "ps_") || len(streamID) < 4 {
+			return nil, invalid("plugin.httpStream.prepare: streamId 必须以 ps_ 开头")
+		}
+		envelope, err := json.Marshal(map[string]any{"method": method, "path": path, "query": p.Query})
+		if err != nil {
+			return nil, invalid("plugin.httpStream.prepare: 请求无法编码")
+		}
+		// 同步校验路由存在且是 SSE：Gateway 在写响应头之前就能返回 404/405/406。
+		if err := s.sess.CheckHTTPAPIStream(pluginID, method, path); err != nil {
+			status, message := 502, err.Error()
+			var he *cli.HTTPAPIError
+			if errors.As(err, &he) {
+				status, message = he.Status, he.Message
+			}
+			return map[string]any{"prepared": false, "status": status, "error": message}, nil
+		}
+		s.streamMu.Lock()
+		// 回收「prepare 后连接就断了、从未 start」的登记，避免长时间运行积累。
+		for id, stale := range s.streams {
+			if !stale.started && !stale.prepared.IsZero() && time.Since(stale.prepared) > time.Minute {
+				delete(s.streams, id)
+			}
+		}
+		if _, exists := s.streams[streamID]; exists {
+			s.streamMu.Unlock()
+			return nil, invalid("plugin.httpStream.prepare: streamId 已存在")
+		}
+		s.streams[streamID] = &pluginStream{
+			pluginID: pluginID, method: method, path: path,
+			threadID: strings.TrimSpace(p.ThreadID), req: envelope, prepared: time.Now(),
+		}
+		s.streamMu.Unlock()
+		return map[string]any{"streamId": streamID, "prepared": true}, nil
+	case "start":
+		s.streamMu.Lock()
+		st := s.streams[streamID]
+		if st == nil || st.started {
+			s.streamMu.Unlock()
+			return nil, invalid("plugin.httpStream.start: 未 prepare 或已启动")
+		}
+		ctx, cancel := context.WithCancel(s.root)
+		st.cancel = cancel
+		st.started = true
+		snapshot := *st
+		s.streamMu.Unlock()
+		go s.runPluginStream(ctx, streamID, snapshot)
+		return map[string]any{"streamId": streamID, "started": true}, nil
+	case "cancel":
+		s.streamMu.Lock()
+		st := s.streams[streamID]
+		if st != nil {
+			delete(s.streams, streamID)
+			if st.cancel != nil {
+				st.cancel()
+			}
+		}
+		s.streamMu.Unlock()
+		return map[string]any{"streamId": streamID, "cancelled": st != nil}, nil
+	default:
+		return nil, invalid("plugin.httpStream: action 只能是 prepare / start / cancel")
+	}
+}
+
+func (s *Server) runPluginStream(ctx context.Context, streamID string, st pluginStream) {
+	defer func() {
+		s.streamMu.Lock()
+		delete(s.streams, streamID)
+		s.streamMu.Unlock()
+	}()
+	err := s.sess.CallHTTPAPIStream(ctx, st.pluginID, st.method, st.path, st.req, st.threadID,
+		func(ev host.RouteEvent) error {
+			return s.emitPluginStream(streamID, ev.Event, ev.Data, false, "")
+		})
+	if err != nil {
+		if ctx.Err() == nil { // 客户端主动断开时不额外报错
+			_ = s.emitPluginStream(streamID, "", nil, true, err.Error())
+		}
+		return
+	}
+	_ = s.emitPluginStream(streamID, "", nil, true, "")
+}
+
+// emitPluginStream 把一帧/终止帧转成 evt.plugin.stream 通知并扇出。
+// data 保持 JSON 原文；超过单条消息上限时 NewEvent 拒绝，调用方据此中断流。
+func (s *Server) emitPluginStream(streamID, event string, data json.RawMessage, done bool, errMsg string) error {
+	payload := map[string]any{"streamId": streamID}
+	if event != "" {
+		payload["event"] = event
+	}
+	if len(data) > 0 && string(data) != "null" {
+		payload["data"] = data
+	}
+	if done {
+		payload["done"] = true
+	}
+	if errMsg != "" {
+		payload["error"] = errMsg
+	}
+	note, err := coreproto.NewEvent("evt.plugin.stream", payload)
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(note)
+	if err != nil {
+		return err
+	}
+	s.fanout(raw)
+	return nil
 }
 
 // ---- action（M4：前端动作 → 插件后端动作）----

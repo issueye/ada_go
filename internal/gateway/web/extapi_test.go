@@ -113,6 +113,12 @@ func TestExtAPIMapsPluginErrors(t *testing.T) {
 		t.Fatalf("methodNotAllowed 状态 = %d, want 405", rec.Code)
 	}
 
+	core.on("plugin.http", `{"ok":false,"status":406,"error":"该接口是 SSE，请用 EventSource 订阅"}`)
+	rec = serveExt(t, srv, http.MethodGet, "/ext/tools-fs/api/events", "")
+	if rec.Code != http.StatusNotAcceptable {
+		t.Fatalf("SSE 路由的普通请求状态 = %d, want 406", rec.Code)
+	}
+
 	core.on("plugin.http", `{"ok":false,"error":"插件已停用"}`)
 	rec = serveExt(t, srv, http.MethodGet, "/ext/tools-fs/api/echo", "")
 	if rec.Code != http.StatusBadGateway {
@@ -152,4 +158,80 @@ func TestExtAPINormalizesEmptyResult(t *testing.T) {
 	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "null" {
 		t.Fatalf("空结果 = %d %q, want 200 null", rec.Code, rec.Body.String())
 	}
+}
+
+// SSE 路由：Accept: text/event-stream 时走 prepare → 事件转发 → start/cancel。
+func TestExtAPISSE(t *testing.T) {
+	core := newFakeCore()
+	core.callFn = func(method string, params any) (json.RawMessage, error) {
+		if method != "plugin.httpStream" {
+			return nil, errors.New("未预期的方法 " + method)
+		}
+		p, _ := params.(map[string]any)
+		action, _ := p["action"].(string)
+		streamID, _ := p["streamId"].(string)
+		switch action {
+		case "prepare":
+			// 订阅在 prepare 之前建立，这里投递的帧会先入队。
+			core.push("evt.plugin.stream", `{"streamId":"`+streamID+`","event":"update","data":{"ok":true}}`)
+			core.push("evt.plugin.stream", `{"streamId":"`+streamID+`","done":true}`)
+			return json.RawMessage(`{"prepared":true}`), nil
+		case "start":
+			return json.RawMessage(`{"started":true}`), nil
+		case "cancel":
+			return json.RawMessage(`{"cancelled":true}`), nil
+		}
+		return nil, errors.New("未知 action " + action)
+	}
+	srv, _ := newServer(t, core)
+
+	req := httptest.NewRequest(http.MethodGet, "/ext/provider-admin/api/events?threadId=th_1", nil)
+	req.Header.Set("Accept", "text/event-stream")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("状态 = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+		t.Fatalf("Content-Type = %q", ct)
+	}
+	for _, want := range []string{"event: update", `data: {"ok":true}`, "event: done"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("SSE 响应缺少 %q:\n%s", want, rec.Body.String())
+		}
+	}
+	core.mu.Lock()
+	foundPrepare := false
+	for _, c := range core.calls {
+		if c.Method == "plugin.httpStream" && c.Params["action"] == "prepare" {
+			foundPrepare = c.Params["pluginId"] == "provider-admin" &&
+				c.Params["path"] == "/events" && c.Params["threadId"] == "th_1"
+		}
+	}
+	core.mu.Unlock()
+	if !foundPrepare {
+		t.Fatalf("prepare 参数不对: %+v", core.calls)
+	}
+	if core.countCalls("plugin.httpStream") != 3 {
+		t.Fatalf("plugin.httpStream 调用次数 = %d, want 3（prepare/start/cancel）", core.countCalls("plugin.httpStream"))
+	}
+}
+
+// prepare 同步返回 406 时，浏览器拿到的是普通 JSON 错误，而不是 200 的空流。
+func TestExtAPISSEPrepareRejected(t *testing.T) {
+	core := newFakeCore()
+	core.callFn = func(string, any) (json.RawMessage, error) {
+		return json.RawMessage(`{"prepared":false,"status":406,"error":"该接口不是 SSE"}`), nil
+	}
+	srv, _ := newServer(t, core)
+
+	req := httptest.NewRequest(http.MethodGet, "/ext/provider-admin/api/state", nil)
+	req.Header.Set("Accept", "text/event-stream")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotAcceptable {
+		t.Fatalf("状态 = %d, want 406; body=%s", rec.Code, rec.Body.String())
+	}
+	wantContains(t, rec.Body.String(), "该接口不是 SSE")
 }

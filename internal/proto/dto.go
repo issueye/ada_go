@@ -199,6 +199,15 @@ type PluginChanged struct {
 	WorkspaceSeq int64         `json:"workspaceSeq"`
 }
 
+// PluginStreamEvent 是插件 route SSE 的数据帧/终止帧（data 原样 JSON）。
+type PluginStreamEvent struct {
+	StreamID string `json:"streamId"`
+	Event    string `json:"event,omitempty"`
+	Data     any    `json:"data,omitempty"`
+	Done     bool   `json:"done,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
 // ErrorEvent 是可恢复错误 + 诊断码（8.5）。threadId/runId 可空：非线程级错误只有工作区序号。
 type ErrorEvent struct {
 	Code         int    `json:"code"`

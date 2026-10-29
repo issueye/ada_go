@@ -112,7 +112,7 @@ M1 期间若领域层不再需要独立常量，可让 `domain` 改为引用 `di
 | `adag verify`（11 项 + 1 项 M2 前 SKIP） | 通过；反向验证：在仓库副本注入 5 类漂移后 `manifest/vnode/products` 如期红掉 |
 | `adag verify boundary` / `nodecompat` | 通过（基座源码零官方插件 id、无平行 Go 注册入口、domain 只用标准库、ports 只依赖 domain） |
 | `adag doctor --fake` | 通过（M0 范围；SQLite/锁/端口检查显式待接入） |
-| 空基座桩启动（`products/skeleton.agent.json`，`plugins: []`） | 通过：34 方法 dispatch、0 工具、0 供应商、带空态提示 |
+| 空基座桩启动（`products/skeleton.agent.json`，`plugins: []`） | 通过：35 方法 dispatch、0 工具、0 供应商、带空态提示 |
 | 未写任何具体工具、provider、审批规则与业务页面 | 是（`plugins/official/` 尚不存在，基座无兜底） |
 
 ## 3b. M1-A 退出状态（引擎落地）

@@ -4,6 +4,7 @@
  * 用法（插件自带脚本或页面内联脚本）：
  *   const data = await window.adaAPI("provider-admin", "/providers", { method: "GET" });
  *   await window.adaAPI("provider-admin", "/providers/save", { method: "POST", body: {...} });
+ *   const es = window.adaSSE("my-plugin", "/events", { onMessage: fn }); // SSE 路由
  *
  * - 路径相对于 /ext/<pluginId>/api；
  * - 线程页自动带 threadId（query），插件 route 的 ctx.state 因此落在正确线程；
@@ -80,5 +81,60 @@
       throw failure;
     }
     return data;
+  };
+
+  function parseData(raw) {
+    if (raw === undefined || raw === null || raw === "") return null;
+    try {
+      return JSON.parse(raw);
+    } catch (err) {
+      return raw;
+    }
+  }
+
+  /**
+   * 订阅插件 SSE 路由（agent.route({ sse: true, ... })）。
+   *
+   *   const es = window.adaSSE("my-plugin", "/events", {
+   *     onMessage(data) {},
+   *     handlers: { update(data) {} },   // 插件用 ctx.sse.send(data, "update") 命名的事件
+   *     onError(data) {},                // 服务端流内错误
+   *     onDone() {},                     // 正常结束
+   *     onDisconnect() {},               // 网络断开（EventSource 会自动重连）
+   *   });
+   *   es.close();
+   *
+   * 线程页会自动带 threadId；返回原生 EventSource，调用方负责 close()。
+   */
+  window.adaSSE = function (pluginId, path, options) {
+    if (!pluginId) throw new Error("adaSSE: 缺少 pluginId");
+    options = options || {};
+    var target = String(path || "/");
+    if (target.charAt(0) !== "/") target = "/" + target;
+    target = withThread(target, options);
+    var source = new EventSource("/ext/" + encodeURIComponent(pluginId) + "/api" + target);
+
+    var handlers = options.handlers || {};
+    Object.keys(handlers).forEach(function (name) {
+      source.addEventListener(name, function (event) {
+        handlers[name](parseData(event.data), event);
+      });
+    });
+    source.addEventListener("message", function (event) {
+      if (options.onMessage) options.onMessage(parseData(event.data), event);
+    });
+    source.addEventListener("done", function (event) {
+      if (options.onDone) options.onDone(parseData(event.data), event);
+      source.close();
+    });
+    source.addEventListener("error", function (event) {
+      if (event && event.data) {
+        if (options.onError) options.onError(parseData(event.data), event);
+        source.close();
+        return;
+      }
+      if (options.onDisconnect) options.onDisconnect(event);
+    });
+    return source;
   };
 })();

@@ -47,6 +47,7 @@
 | plugin | `plugin.reload` | 重载一个或全部 |
 | plugin | `plugin.setEnabled` | 启用/禁用 |
 | plugin | `plugin.http` | 调用插件 `route` 注册的动态接口 |
+| plugin | `plugin.httpStream` | 插件 SSE 路由：prepare 登记 → start 启动 → cancel 取消 |
 | skill | `skill.list` | 技能元数据 |
 | skill | `skill.read` | 读取正文（模型工具也走同一实现） |
 | action | `action.invoke` | 前端动作 → 后端动作 |
@@ -70,6 +71,7 @@
 | `evt.notice` | 只给人的提示（永不进模型） |
 | `evt.usage` | token 与成本增量 |
 | `evt.plugin.changed` | 插件状态/贡献变化（工作区级） |
+| `evt.plugin.stream` | 插件 SSE 路由的数据帧/终止帧（`streamId` 关联） |
 | `evt.error` | 可恢复错误 + 诊断码 |
 
 ### 8.3 快照与补丁

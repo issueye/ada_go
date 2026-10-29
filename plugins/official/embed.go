@@ -42,18 +42,24 @@ var frontendFiles embed.FS
 // 前端插件不在其中：它们没有 backend Runtime 可装配（host.Load 会拒绝），
 // 由 FrontendScripts() 交给 Gateway 渲染桥。
 func Scripts() ([]host.Script, error) {
-	return loadAll(func(m *plugins.Manifest) bool { return m.Backend != nil })
+	return loadAll(
+		func(m *plugins.Manifest) bool { return m.Backend != nil },
+		load,
+	)
 }
 
 // FrontendScripts 返回前端插件的加载单元（按 id 排序）。
 // 统一插件包（同时声明 backend 与 frontend）也会出现在这里：后端段进 Scripts()，
 // 前端段交给 Gateway 渲染桥；两条装配路径互不影响。
 func FrontendScripts() ([]host.Script, error) {
-	return loadAll(func(m *plugins.Manifest) bool { return m.Frontend != nil })
+	return loadAll(
+		func(m *plugins.Manifest) bool { return m.Frontend != nil },
+		loadFrontendScript,
+	)
 }
 
-// loadAll 按 manifest 谓词挑选插件目录。
-func loadAll(keep func(*plugins.Manifest) bool) ([]host.Script, error) {
+// loadAll 按 manifest 谓词挑选插件目录，loader 决定是后端形态还是前端形态。
+func loadAll(keep func(*plugins.Manifest) bool, loader func(string) (host.Script, error)) ([]host.Script, error) {
 	paths, err := fs.Glob(files, "*/plugin.json")
 	if err != nil {
 		return nil, fmt.Errorf("official: 扫描嵌入插件失败: %w", err)
@@ -62,7 +68,7 @@ func loadAll(keep func(*plugins.Manifest) bool) ([]host.Script, error) {
 	out := make([]host.Script, 0, len(paths))
 	for _, manifestPath := range paths {
 		id := strings.SplitN(manifestPath, "/", 2)[0]
-		script, err := load(id)
+		script, err := loader(id)
 		if err != nil {
 			return nil, err
 		}
@@ -71,6 +77,18 @@ func loadAll(keep func(*plugins.Manifest) bool) ([]host.Script, error) {
 		}
 	}
 	return out, nil
+}
+
+// loadFrontendScript 只按前端形态加载（模板进 Bundle、静态资源进 StaticAssets）。
+func loadFrontendScript(id string) (host.Script, error) {
+	m, err := loadManifest(id)
+	if err != nil {
+		return host.Script{}, err
+	}
+	if m.Frontend == nil {
+		return host.Script{Manifest: m}, nil
+	}
+	return loadFrontend(id, m)
 }
 
 // Script 按 id 取一个插件（后端或前端形态）；第二个返回值为 false 表示没有这个插件。
@@ -100,18 +118,11 @@ func IDs() ([]string, error) {
 }
 
 // load 读一个插件的清单与内容，并做与第三方完全相同的清单校验。
+// 后端插件返回后端形态；纯前端插件返回前端形态（统一插件由 FrontendScripts 另给前端形态）。
 func load(id string) (host.Script, error) {
-	raw, err := files.ReadFile(id + "/plugin.json")
+	m, err := loadManifest(id)
 	if err != nil {
-		return host.Script{}, fmt.Errorf("official: 读取 %s/plugin.json 失败: %w", id, err)
-	}
-	m, err := plugins.LoadManifest(raw)
-	if err != nil {
-		return host.Script{}, fmt.Errorf("official: 官方插件 %s 的清单非法: %w", id, err)
-	}
-	// 目录名必须等于 id：官方插件也不能靠「特权路径」绕过同一条校验。
-	if err := m.Validate(id); err != nil {
-		return host.Script{}, fmt.Errorf("official: 官方插件 %s 的清单校验失败: %w", id, err)
+		return host.Script{}, err
 	}
 	if m.Backend == nil {
 		// 纯前端插件：模板源码进 Bundle（键 = 文件名），静态资源进 StaticAssets。
@@ -130,27 +141,29 @@ func load(id string) (host.Script, error) {
 	if err != nil {
 		return host.Script{}, err
 	}
-	script := host.Script{
+	return host.Script{
 		Manifest:     m,
 		EntryName:    host.EntryScheme + "://" + id + "/index.js",
 		Source:       string(src),
 		StaticAssets: assets,
+	}, nil
+}
+
+// loadManifest 读取并校验一个官方插件的清单（与第三方同一条校验路径）。
+func loadManifest(id string) (*plugins.Manifest, error) {
+	raw, err := files.ReadFile(id + "/plugin.json")
+	if err != nil {
+		return nil, fmt.Errorf("official: 读取 %s/plugin.json 失败: %w", id, err)
 	}
-	// 统一插件（backend + frontend）：同一份包同时提供 route 后端与页面资源。
-	if m.Frontend != nil {
-		fe, ferr := loadFrontend(id, m)
-		if ferr != nil {
-			return host.Script{}, ferr
-		}
-		script.Bundle = fe.Bundle
-		if script.StaticAssets == nil {
-			script.StaticAssets = map[string][]byte{}
-		}
-		for name, data := range fe.StaticAssets {
-			script.StaticAssets[name] = data
-		}
+	m, err := plugins.LoadManifest(raw)
+	if err != nil {
+		return nil, fmt.Errorf("official: 官方插件 %s 的清单非法: %w", id, err)
 	}
-	return script, nil
+	// 目录名必须等于 id：官方插件也不能靠「特权路径」绕过同一条校验。
+	if err := m.Validate(id); err != nil {
+		return nil, fmt.Errorf("official: 官方插件 %s 的清单校验失败: %w", id, err)
+	}
+	return m, nil
 }
 
 // bundledSkills 收集一个官方插件包内 skills/<name>/SKILL.md 的内容。

@@ -210,6 +210,11 @@ func (s *Server) broadcast(evt domain.Event) {
 	if err != nil {
 		return
 	}
+	s.fanout(raw)
+}
+
+// fanout 把一条已编码的 JSON-RPC 通知发给当前全部连接（慢连接由各自队列处理）。
+func (s *Server) fanout(raw []byte) {
 	s.mu.Lock()
 	conns := make([]*client, 0, len(s.conns))
 	for c := range s.conns {

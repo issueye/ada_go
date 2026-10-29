@@ -119,6 +119,7 @@ func eventPayloadBindings() map[string]reflect.Type {
 		"evt.notice":                reflect.TypeOf(proto.Notice{}),
 		"evt.usage":                 reflect.TypeOf(proto.UsageDelta{}),
 		"evt.plugin.changed":        reflect.TypeOf(proto.PluginChanged{}),
+		"evt.plugin.stream":         reflect.TypeOf(proto.PluginStreamEvent{}),
 		"evt.error":                 reflect.TypeOf(proto.ErrorEvent{}),
 	}
 }

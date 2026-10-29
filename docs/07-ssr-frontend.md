@@ -231,6 +231,48 @@ agent.route({ method: "POST", path: "/items", handler(req, ctx) { return { ok: t
 - 接口不是工具、不进模型上下文；能力位与 scope 仍由插件清单决定，`exec` 等能力不因此放开。
 - 浏览器侧统一用 `window.adaAPI(pluginId, path, { method, body })`（`api.js`，自动带 CSRF），不要手写 `/ext/...` URL。
 
+#### 7.6.2 SSE 路由
+
+`route` 可以用 `sse: true` 声明长连接接口（只允许 GET）：
+
+```ts
+agent.route({
+  method: "GET",
+  path: "/events",
+  sse: true,
+  handler(req, ctx) {
+    ctx.sse.send({ state: "ready" });   // 默认 message 事件
+    ctx.sse.send({ n: 1 }, "tick");     // 命名事件
+  },
+});
+```
+
+浏览器侧用原生 `EventSource` 或 `window.adaSSE`：
+
+```js
+const es = window.adaSSE("my-plugin", "/events", {
+  onMessage(data) {},
+  handlers: { tick(data) {} },
+  onDone() {},
+  onError(data) {},
+  onDisconnect() {},
+});
+```
+
+```
+EventSource GET /ext/{id}/api/events
+  → Gateway 先订阅 Core 事件，再 plugin.httpStream prepare（同步校验 404/405/406）
+  → 写 text/event-stream 响应头 → start 启动插件处理器
+  → 插件 ctx.sse.send → Core evt.plugin.stream → Gateway 转成 SSE 帧
+  → 正常结束 event: done；流内错误 event: error + done
+```
+
+- prepare 在写响应头之前完成，所以非 SSE 路由/未知路径仍返回普通 JSON 错误；开始推帧后的失败只能以 SSE 事件表达。
+- 每帧 JSON ≤64KB；空闲 90s、总时长 30min（与 provider 流共用预算）；客户端断开时 Gateway 调 cancel，宿主 `ctx.signal` 中止处理器。
+- 处理器返回即发送 `done` 并关闭连接；要持续推送就保持在处理器里等待（await 定时器/宿主长调用），不要提前 return。`done` / `error` 是保留事件名。
+- 线程上下文与普通 route 相同；EventSource 不能带 CSRF，所以 SSE 只允许 GET。
+- SSE 是渐进增强：没有 JS 的页面不要把 SSE 当作首屏唯一数据源。
+
 ### 7.7 UI 与设计元语：直接复用 a_da
 
 ada-go 的界面不是“参考 a_da 风格”，而是**直接使用 a_da 的 UI 与设计元语**：同一套 token、同一套 `ada-*` 组件样式、同一套 DOM 结构、class 名、插槽位置与交互规则。只替换服务端实现技术，不产生第二套视觉语言。

@@ -247,6 +247,7 @@ func buildAgentAPI(rt *mojsRuntime, owner func() *Instance) moejs.Value {
 		}
 		method := "GET"
 		var path string
+		sse := false
 		handler := moejs.Undefined()
 		first := moejs.Arg(args, 0)
 		if first.IsObject() && !engine.IsCallable(first) {
@@ -255,6 +256,9 @@ func buildAgentAPI(rt *mojsRuntime, owner func() *Instance) moejs.Value {
 			}
 			if v, gerr := rt.Get(first, "path"); gerr == nil {
 				path = strings.TrimSpace(v.String())
+			}
+			if v, gerr := rt.Get(first, "sse"); gerr == nil {
+				sse = v.IsTrue()
 			}
 			if v, gerr := rt.Get(first, "handler"); gerr == nil && engine.IsCallable(v) {
 				handler = v
@@ -269,6 +273,9 @@ func buildAgentAPI(rt *mojsRuntime, owner func() *Instance) moejs.Value {
 		if method != "GET" && method != "POST" {
 			return moejs.Undefined(), r.TypeError("route: method 只能是 GET 或 POST（7.6）")
 		}
+		if sse && method != "GET" {
+			return moejs.Undefined(), r.TypeError("route: sse 路由只支持 GET（EventSource 是 GET）")
+		}
 		if !strings.HasPrefix(path, "/") || strings.Contains(path, "..") || strings.Contains(path, "?") {
 			return moejs.Undefined(), r.TypeError("route: path 必须以 / 开头，且不能包含 .. 或查询串（7.6）")
 		}
@@ -279,7 +286,9 @@ func buildAgentAPI(rt *mojsRuntime, owner func() *Instance) moejs.Value {
 		if err != nil {
 			return moejs.Undefined(), r.TypeError("%v", err)
 		}
-		st.data.Routes = append(st.data.Routes, RouteDef{Method: method, Path: path, Handler: HandlerRef{Slot: slot}})
+		st.data.Routes = append(st.data.Routes, RouteDef{
+			Method: method, Path: path, SSE: sse, Handler: HandlerRef{Slot: slot},
+		})
 		return moejs.Undefined(), nil
 	}
 	put("route", registerHTTP)
@@ -545,6 +554,41 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 				}), nil
 			}))
 		set("providers", engine.ObjectValue(providers))
+	}
+
+	// SSE 路由的 ctx.sse.send(data, event?)：只在流式调用上安装，普通 route
+	// 看不到它（防止把长连接误当成请求/响应接口）。
+	if c.kind == callRouteStream {
+		sse := r.NewObject()
+		_ = sse.SetProp(r, r.KeyFromGoString("send"), rt.Function("sse.send", 2,
+			func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+				eventName := ""
+				if ev := moejs.Arg(args, 1); !ev.IsNullish() {
+					eventName = strings.TrimSpace(ev.String())
+				}
+				if len(eventName) > 64 || strings.ContainsAny(eventName, "\r\n:") {
+					return moejs.Undefined(), r.TypeError("sse.send(data, event): 事件名最多 64 字符，且不能包含换行或冒号")
+				}
+				raw, err := rt.AppendJSON(nil, moejs.Arg(args, 0))
+				if err != nil {
+					return moejs.Undefined(), r.TypeError("sse.send(data): data 不可 JSON 序列化: %v", err)
+				}
+				if len(raw) > p.budgets.RouteBytes {
+					return moejs.Undefined(), r.TypeError("sse.send(data): 单帧 %d 字节，超过上限 %d", len(raw), p.budgets.RouteBytes)
+				}
+				if c.onRouteEvent == nil {
+					return moejs.Undefined(), errors.New("host: SSE 路由没有事件回调")
+				}
+				if err := c.onRouteEvent(RouteEvent{Event: eventName, Data: raw}); err != nil {
+					return moejs.Undefined(), err
+				}
+				if c.budget != nil {
+					// 每帧重置空闲窗口：只要还在推帧，就不受 5s 路由预算限制；总时长仍受墙钟约束。
+					c.budget.window(p.budgets.ProviderIdle)
+				}
+				return moejs.Undefined(), nil
+			}))
+		set("sse", engine.ObjectValue(sse))
 	}
 
 	// provider 的 ctx.emit / ctx.http 只在 callProvider 上安装（03 §5.5）：
