@@ -373,7 +373,7 @@
     },
     "HTTPAPIRequest": {
       "type": "object",
-      "description": "插件动态 HTTP API 调用（7.6：registerHTTPAPI 注册的 GET/POST 路由；JSON 入参/出参）。",
+      "description": "插件动态 HTTP API 调用（7.6：route 注册的 GET/POST 路由；JSON 入参/出参）。",
       "additionalProperties": false,
       "properties": {
         "pluginId": { "type": "string", "minLength": 1, "maxLength": 64 },
@@ -1195,7 +1195,7 @@
     {
       "name": "plugin.http",
       "group": "plugin",
-      "summary": "调用插件注册的动态 HTTP API（registerHTTPAPI；GET/POST，JSON 入参/出参）",
+      "summary": "调用插件注册的动态 HTTP API（route；GET/POST，JSON 入参/出参）",
       "direction": "gateway->core",
       "since": "1.0",
       "idempotent": false,

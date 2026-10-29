@@ -1,6 +1,6 @@
 package web_test
 
-// 插件动态 HTTP API（registerHTTPAPI）在 Gateway 侧的转发契约：
+// 插件动态 HTTP API（route）在 Gateway 侧的转发契约：
 // 统一走 Core 的 plugin.http，把请求方法/路径/查询/JSON 体透传，
 // 并把插件的 404/405 与失败收敛成统一的 JSON 错误形状。
 

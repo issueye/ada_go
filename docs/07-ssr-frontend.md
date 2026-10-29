@@ -206,14 +206,13 @@ type SlotProps = {
 - 动作不是工具：不进模型上下文，不受 `tool.beforeCall` 策略约束，但必须在界面上由用户点击确认，且受插件能力与 scope 约束；`exec` 能力不对第三方开放。
 - 所有插件 HTTP 响应都带 `Cache-Control: no-store`（静态资源除外），避免跨用户缓存。
 
-#### 7.6.1 插件动态 HTTP API（registerHTTPAPI）
+#### 7.6.1 插件动态 HTTP API（route）
 
 后端插件在加载期登记自己的数据接口，供自己的前端页面/脚本调用：
 
 ```ts
-agent.registerHTTPAPI("GET", "/items/*", (req, ctx) => ({ items: [] }));
-agent.registerHTTPAPI({ method: "POST", path: "/items", handler(req, ctx) { return { ok: true }; } });
-agent.route("GET", "/items/*", handler); // 旧名别名，等价于 registerHTTPAPI
+agent.route("GET", "/items/*", (req, ctx) => ({ items: [] }));
+agent.route({ method: "POST", path: "/items", handler(req, ctx) { return { ok: true }; } });
 ```
 
 ```

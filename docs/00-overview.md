@@ -134,7 +134,7 @@ ada-go 是一个**本地优先、单二进制、插件优先**的 AI Agent 系�
 | 会话 | DAG、分支、压缩、恢复 | 不参与 | `SessionStore` |
 | 安全 | scope、能力授予、交互桥、失败关闭 | 策略规则与询问时机 | manifest `roles` + `ctx.ui` |
 | UI | 外壳、组件、插槽、通用卡片 | 卡片/页面/样式 | manifest + VNode |
-| 路由 | 核心路由、`/ext` 命名空间 | `/ext/{id}/*` | `registerHTTPAPI` |
+| 路由 | 核心路由、`/ext` 命名空间 | `/ext/{id}/*` | `route` |
 | 协议 | 方法、事件、错误码 | 不可扩展 | `spec/proto.json` |
 | 存储 | SQLite、线程/entry | 仅 scoped KV | `ctx.state` |
 | 进程 | 监督、进程树终止原语 | 不能直接起进程 | `exec` 能力 |

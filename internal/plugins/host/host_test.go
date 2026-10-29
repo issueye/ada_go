@@ -397,7 +397,7 @@ export default function (agent) {
 	}
 }
 
-// recordingRoutes 收集 registerHTTPAPI / route 的登记项。
+// recordingRoutes 收集 route 登记项。
 type recordingRoutes struct{ regs []RouteRegistration }
 
 func (r *recordingRoutes) AddRoute(reg RouteRegistration) error {
@@ -405,11 +405,11 @@ func (r *recordingRoutes) AddRoute(reg RouteRegistration) error {
 	return nil
 }
 
-// registerHTTPAPI 支持 (method, path, handler) 与对象形式；route 是旧名。
-func TestRegisterHTTPAPIRegistersAndCalls(t *testing.T) {
+// route 支持 (method, path, handler) 与对象形式。
+func TestRouteRegistersAndCalls(t *testing.T) {
 	caps := testCaps(t, plugins.TrustBuiltin)
 	src := "export default function (agent) {\n" +
-		"  agent.registerHTTPAPI({ method: 'POST', path: '/echo', handler: function (req) { return { echo: req.body }; } });\n" +
+		"  agent.route({ method: 'POST', path: '/echo', handler: function (req) { return { echo: req.body }; } });\n" +
 		"  agent.route('GET', '/ping', function () { return { ok: true }; });\n" +
 		"}"
 	routes := &recordingRoutes{}
@@ -430,7 +430,7 @@ func TestRegisterHTTPAPIRegistersAndCalls(t *testing.T) {
 		}
 	}
 	if echo.Method != "POST" || echo.Handler.Slot == 0 {
-		t.Fatalf("对象形式的 registerHTTPAPI 没登记成 POST /echo: %+v", echo)
+		t.Fatalf("对象形式的 route 没登记成 POST /echo: %+v", echo)
 	}
 	out, err := p.CallRoute(context.Background(), echo.Handler,
 		json.RawMessage(`{"method":"POST","path":"/echo","body":{"n":2}}`), Context{})

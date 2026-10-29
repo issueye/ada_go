@@ -15,10 +15,10 @@ import (
 // routeFixtureScript 是一个只登记 HTTP 路由的后端插件夹具。
 func routeFixtureScript() host.Script {
 	src := "export default function (agent) {\n" +
-		"  agent.registerHTTPAPI({ method: 'POST', path: '/echo', handler: function (req) {\n" +
+		"  agent.route({ method: 'POST', path: '/echo', handler: function (req) {\n" +
 		"    return { method: req.method, path: req.path, query: req.query, body: req.body };\n" +
 		"  } });\n" +
-		"  agent.registerHTTPAPI('GET', '/items/*', function (req) { return { prefix: req.path }; });\n" +
+		"  agent.route('GET', '/items/*', function (req) { return { prefix: req.path }; });\n" +
 		"}"
 	m := &plugins.Manifest{
 		ID: "route-fixture", Name: "路由夹具", Version: "0.1.0",

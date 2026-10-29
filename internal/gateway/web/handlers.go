@@ -134,7 +134,7 @@ func (s *Server) handleCreateThread(w http.ResponseWriter, r *http.Request) {
 	redirect(w, threadPath(res.Thread.ID))
 }
 
-// handleExtAPI 是插件动态 HTTP API 的 Gateway 入口（registerHTTPAPI）。
+// handleExtAPI 是插件动态 HTTP API 的 Gateway 入口（route）。
 // 请求经 Core RPC plugin.http 转发到插件路由；返回插件结果 JSON。
 // 认证由外部安全中间件负责（cookie/Bearer）；写方法额外要求 CSRF（同一中间件）。
 func (s *Server) handleExtAPI(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,6 @@
 package app
 
-// 插件动态 HTTP 路由（registerHTTPAPI / route）的运行时目录与调用入口。
+// 插件动态 HTTP 路由（route）的运行时目录与调用入口。
 //
 // 插件在装配期登记 (method, path, handler)；前端插件 / 浏览器脚本经 Gateway 的
 // /ext/{id}/api/* 调用，Gateway 通过 Core RPC `plugin.http` 转发到这里。

@@ -82,7 +82,7 @@ const (
 	MethodPluginList            = "plugin.list"            // 插件、版本、状态、错误
 	MethodPluginReload          = "plugin.reload"          // 重载一个或全部插件（双代原子替换；在途调用用旧代）
 	MethodPluginSetEnabled      = "plugin.setEnabled"      // 启用/禁用插件（产品门禁：禁用唯一策略插件且存在写/执行工具时拒绝）
-	MethodPluginHttp            = "plugin.http"            // 调用插件注册的动态 HTTP API（registerHTTPAPI；GET/POST，JSON 入参/出参）
+	MethodPluginHttp            = "plugin.http"            // 调用插件注册的动态 HTTP API（route；GET/POST，JSON 入参/出参）
 	MethodSkillList             = "skill.list"             // 技能元数据（插件目录与工作区目录合并，同名工作区优先）
 	MethodSkillRead             = "skill.read"             // 读取 SKILL.md 正文（模型工具 read_skill 走同一实现）
 	MethodActionInvoke          = "action.invoke"          // 前端动作 → 后端动作（用户点击触发；不进模型、不受 tool.beforeCall 约束）
@@ -173,7 +173,7 @@ var Methods = []MethodMeta{
 	{Name: "plugin.list", Group: "plugin", Summary: "插件、版本、状态、错误", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "plugin.reload", Group: "plugin", Summary: "重载一个或全部插件（双代原子替换；在途调用用旧代）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "plugin.setEnabled", Group: "plugin", Summary: "启用/禁用插件（产品门禁：禁用唯一策略插件且存在写/执行工具时拒绝）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
-	{Name: "plugin.http", Group: "plugin", Summary: "调用插件注册的动态 HTTP API（registerHTTPAPI；GET/POST，JSON 入参/出参）", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
+	{Name: "plugin.http", Group: "plugin", Summary: "调用插件注册的动态 HTTP API（route；GET/POST，JSON 入参/出参）", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "skill.list", Group: "skill", Summary: "技能元数据（插件目录与工作区目录合并，同名工作区优先）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "skill.read", Group: "skill", Summary: "读取 SKILL.md 正文（模型工具 read_skill 走同一实现）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "action.invoke", Group: "action", Summary: "前端动作 → 后端动作（用户点击触发；不进模型、不受 tool.beforeCall 约束）", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},

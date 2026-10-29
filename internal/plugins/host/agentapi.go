@@ -233,16 +233,16 @@ func buildAgentAPI(rt *mojsRuntime, owner func() *Instance) moejs.Value {
 		return moejs.Undefined(), nil
 	})
 
-	// registerHTTPAPI / route：登记一条动态 HTTP 路由（GET/POST）。
+	// route：登记一条动态 HTTP 路由（GET/POST）。
 	// 兼容两种调用：
-	//   registerHTTPAPI("GET", "/path", handler)
-	//   registerHTTPAPI({ method: "POST", path: "/path", handler })
+	//   route("GET", "/path", handler)
+	//   route({ method: "POST", path: "/path", handler })
 	registerHTTP := func(_ *engine.Realm, _ engine.Value, args []engine.Value) (engine.Value, error) {
 		p, st, err := inst()
 		if err != nil {
 			return moejs.Undefined(), err
 		}
-		if frozen(p, "registerHTTPAPI") {
+		if frozen(p, "route") {
 			return moejs.Undefined(), nil
 		}
 		method := "GET"
@@ -267,13 +267,13 @@ func buildAgentAPI(rt *mojsRuntime, owner func() *Instance) moejs.Value {
 			handler = moejs.Arg(args, 2)
 		}
 		if method != "GET" && method != "POST" {
-			return moejs.Undefined(), r.TypeError("registerHTTPAPI: method 只能是 GET 或 POST（7.6）")
+			return moejs.Undefined(), r.TypeError("route: method 只能是 GET 或 POST（7.6）")
 		}
 		if !strings.HasPrefix(path, "/") || strings.Contains(path, "..") || strings.Contains(path, "?") {
-			return moejs.Undefined(), r.TypeError("registerHTTPAPI: path 必须以 / 开头，且不能包含 .. 或查询串（7.6）")
+			return moejs.Undefined(), r.TypeError("route: path 必须以 / 开头，且不能包含 .. 或查询串（7.6）")
 		}
 		if !engine.IsCallable(handler) {
-			return moejs.Undefined(), r.TypeError("registerHTTPAPI(%s %s): handler 必须是函数", method, path)
+			return moejs.Undefined(), r.TypeError("route(%s %s): handler 必须是函数", method, path)
 		}
 		slot, err := st.add(slotKindRoute, routeIdent(method, path), handler)
 		if err != nil {
@@ -282,8 +282,6 @@ func buildAgentAPI(rt *mojsRuntime, owner func() *Instance) moejs.Value {
 		st.data.Routes = append(st.data.Routes, RouteDef{Method: method, Path: path, Handler: HandlerRef{Slot: slot}})
 		return moejs.Undefined(), nil
 	}
-	put("registerHTTPAPI", registerHTTP)
-	// route 是 registerHTTPAPI 的旧名，保留兼容。
 	put("route", registerHTTP)
 
 	put("on", func(_ *engine.Realm, _ engine.Value, args []engine.Value) (engine.Value, error) {

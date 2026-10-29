@@ -736,7 +736,7 @@ type HTTPAPIError struct {
 
 func (e *HTTPAPIError) Error() string { return e.Message }
 
-// CallHTTPAPI 调用插件注册的动态 HTTP 路由（registerHTTPAPI）。
+// CallHTTPAPI 调用插件注册的动态 HTTP 路由（route）。
 // 路由表与插件实例都在当前装配里；404/405 转换成 HTTPAPIError。
 func (s *Session) CallHTTPAPI(ctx context.Context, pluginID, method, path string, req json.RawMessage, threadID string) (json.RawMessage, error) {
 	s.mu.Lock()

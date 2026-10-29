@@ -209,7 +209,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /ext/{id}/static/{name...}", s.handleExtStatic)
 	mux.HandleFunc("GET /ext/{id}/action/{name}", s.handleExtActionRead)
 	mux.HandleFunc("POST /ext/{id}/action/{name}", s.handleExtActionWrite)
-	// 插件动态 HTTP API（registerHTTPAPI）：前端插件/浏览器脚本调用。
+	// 插件动态 HTTP API（route）：前端插件/浏览器脚本调用。
 	mux.HandleFunc("/ext/{id}/api/{path...}", s.handleExtAPI)
 	mux.HandleFunc("GET /ext/{id}/{slug}", s.handleExtPage)
 	mux.HandleFunc("GET /login", s.handleLoginPage)

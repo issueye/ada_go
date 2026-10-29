@@ -1,5 +1,5 @@
 /*
- * 插件 HTTP API 的浏览器端小工具（registerHTTPAPI）。
+ * 插件 HTTP API 的浏览器端小工具（route）。
  *
  * 用法（插件自带脚本或页面内联脚本）：
  *   const data = await window.adaAPI("provider-admin", "/providers", { method: "GET" });

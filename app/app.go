@@ -71,7 +71,7 @@ type Assembly struct {
 	Providers *provider.Registry
 	// Actions 是前端动作目录（pluginID → name → ActionDef，M4 的 action.invoke 数据面）。
 	Actions *actionRegistry
-	// Routes 是插件动态 HTTP 路由目录（registerHTTPAPI；Gateway /ext/{id}/api/* 的数据面）。
+	// Routes 是插件动态 HTTP 路由目录（route；Gateway /ext/{id}/api/* 的数据面）。
 	Routes *routeRegistry
 	// FrontendDecls 记录产品声明里被 Gateway 侧装配的前端插件 id（本侧不装配）。
 	FrontendDecls []string

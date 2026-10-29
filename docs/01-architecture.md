@@ -277,7 +277,7 @@ Core 的 WebSocket 使用独立的一次性 token（环境变量传入，不出�
 | GET | `/ext/{id}/{slug}` | 插件独立页面 |
 | GET | `/ext/{id}/static/*` | 插件静态资源（只读、内容类型白名单） |
 | POST | `/ext/{id}/action/{name}` | 前端动作 → Core 后端动作 |
-| ANY | `/ext/{id}/api/*` | 插件动态接口（`registerHTTPAPI`，GET/POST） |
+| ANY | `/ext/{id}/api/*` | 插件动态接口（`route`，GET/POST） |
 | GET | `/static/*` | 内嵌静态资源（哈希文件名 + 长缓存） |
 | GET/POST | `/__auth` | 换取会话 cookie |
 | GET | `/healthz` | 存活与版本（不含敏感信息） |

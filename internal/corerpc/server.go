@@ -840,7 +840,7 @@ func (s *Server) handlePluginSetEnabled(ctx context.Context, raw json.RawMessage
 	return map[string]any{"plugin": pluginViewJSON(view)}, nil
 }
 
-// ---- 插件 HTTP API（registerHTTPAPI）----
+// ---- 插件 HTTP API（route）----
 
 // handlePluginHTTP 调用插件注册的动态 HTTP 路由。
 // 返回 {ok,result} 或 {ok:false,error,notFound|methodNotAllowed}，由 Gateway 映射 HTTP 状态。
