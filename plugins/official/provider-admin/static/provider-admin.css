@@ -499,3 +499,27 @@
     padding: 16px;
   }
 }
+
+/* 模型编辑弹窗（ada-modal）里的表单布局。 */
+.pm-model-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pm-model-form__row {
+  display: flex;
+  gap: 12px;
+}
+
+.pm-model-form__row .pm-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.pm-model-form__flags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}

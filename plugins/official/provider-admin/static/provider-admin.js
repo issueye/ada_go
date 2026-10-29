@@ -11,8 +11,7 @@
     providers: [],
     current: { providerId: "", modelId: "" },
     selectedId: "",
-    editingModelId: "",
-    draftModel: null,
+    editingIndex: -1,
     busy: false,
   };
   var root = null;
@@ -177,8 +176,7 @@
           if (state.providers[i].id === state.selectedId) still = true;
         }
         if (!still) state.selectedId = state.providers.length ? state.providers[0].id : "";
-        state.editingModelId = "";
-        state.draftModel = null;
+        state.editingIndex = -1;
         render();
       })
       .catch(fail);
@@ -320,8 +318,7 @@
       }
       item.addEventListener("click", function () {
         state.selectedId = p.id;
-        state.editingModelId = "";
-        state.draftModel = null;
+        state.editingIndex = -1;
         render();
       });
       list.appendChild(item);
@@ -443,16 +440,9 @@
 
     var models = el("div", "pm-models");
     (p.models || []).forEach(function (m, index) {
-      if (state.editingModelId === m.id) {
-        models.appendChild(renderModelEditor(m, index));
-      } else {
-        models.appendChild(renderModelRow(m, index));
-      }
+      models.appendChild(renderModelRow(m, index));
     });
-    if (state.draftModel) {
-      models.appendChild(renderModelEditor(state.draftModel, -1));
-    }
-    if (!(p.models || []).length && !state.draftModel) {
+    if (!(p.models || []).length) {
       models.appendChild(el("p", "pm-empty", "还没有模型。可以手动添加，或点刷新从 /models 拉取。"));
     }
     box.appendChild(models);
@@ -489,9 +479,7 @@
       actions.appendChild(btn("pm-text-btn", "使用", "", function () { selectModel(m.id); }));
     }
     actions.appendChild(btn("pm-icon-btn", "", "edit", function () {
-      state.editingModelId = m.id;
-      state.draftModel = null;
-      renderDetail();
+      openModelModal(m, index);
     }));
     actions.appendChild(btn("pm-icon-btn", "", "trash", function () {
       confirmAction("删除模型「" + m.id + "」？", function () { removeModel(index); });
@@ -508,59 +496,86 @@
     return row;
   }
 
-  function renderModelEditor(m, index) {
-    var row = el("div", "pm-model pm-model--editing");
-    var id = input("pm-input pm-model__field", m.id || "", "模型 id");
-    var ctx = input("pm-input pm-model__num", m.contextWindow ? String(m.contextWindow) : "", "上下文窗口");
-    ctx.inputMode = "numeric";
-    var max = input("pm-input pm-model__num", m.maxOutput ? String(m.maxOutput) : "", "最大输出");
-    max.inputMode = "numeric";
-    row.appendChild(el("span", "pm-field__label", "ID"));
-    row.appendChild(id);
-    row.appendChild(ctx);
-    row.appendChild(max);
+  function buildModelModal() {
+    if (document.getElementById("pm-model-modal")) return;
+    var modal = document.createElement("ada-modal");
+    modal.id = "pm-model-modal";
+    modal.className = "ada-modal";
+    modal.setAttribute("data-modal", "pm-model");
+    modal.hidden = true;
+    modal.innerHTML =
+      '<div class="ada-modal__backdrop" data-modal-close></div>' +
+      '<div class="ada-modal__panel" role="dialog" aria-modal="true" aria-labelledby="pm-model-title">' +
+      '<h2 class="ada-modal__title" id="pm-model-title" data-pm-model-title>编辑模型</h2>' +
+      '<form class="pm-model-form" data-pm-model-form>' +
+      '<label class="pm-field"><span class="pm-field__label">模型 ID</span><input class="pm-input" name="id" data-modal-autofocus autocomplete="off"></label>' +
+      '<label class="pm-field"><span class="pm-field__label">显示名称（可选）</span><input class="pm-input" name="displayName" autocomplete="off"></label>' +
+      '<div class="pm-model-form__row">' +
+      '<label class="pm-field"><span class="pm-field__label">上下文窗口</span><input class="pm-input" name="contextWindow" inputmode="numeric" autocomplete="off"></label>' +
+      '<label class="pm-field"><span class="pm-field__label">最大输出</span><input class="pm-input" name="maxOutput" inputmode="numeric" autocomplete="off"></label>' +
+      "</div>" +
+      '<div class="pm-model-form__flags">' +
+      '<label class="pm-check"><input type="checkbox" name="supportsTools"><span>工具</span></label>' +
+      '<label class="pm-check"><input type="checkbox" name="supportsThinking"><span>思考</span></label>' +
+      '<label class="pm-check"><input type="checkbox" name="image"><span>视觉</span></label>' +
+      "</div>" +
+      '<div class="ada-modal__actions">' +
+      '<button class="ada-btn ada-btn--secondary ada-btn--sm" type="button" data-modal-close>取消</button>' +
+      '<button class="ada-btn ada-btn--primary ada-btn--sm" type="submit">保存</button>' +
+      "</div></form></div>";
+    document.body.appendChild(modal);
 
-    var flags = el("div", "pm-model__flags");
-    var boxes = {};
-    [["supportsTools", "工具"], ["supportsThinking", "思考"], ["image", "视觉"]].forEach(function (f) {
-      var label = el("label", "pm-check");
-      var cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = f[0] === "image"
-        ? Array.isArray(m.input) && m.input.indexOf("image") >= 0
-        : !!m[f[0]];
-      boxes[f[0]] = cb;
-      label.appendChild(cb);
-      label.appendChild(el("span", "", f[1]));
-      flags.appendChild(label);
-    });
-    row.appendChild(flags);
-
-    var actions = el("div", "pm-model__actions");
-    actions.appendChild(btn("pm-text-btn", "保存", "", function () {
+    var form = modal.querySelector("[data-pm-model-form]");
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
       var model = {
-        id: id.value.trim(),
-        displayName: m.displayName || "",
-        contextWindow: Number(ctx.value || 0),
-        maxOutput: Number(max.value || 0),
-        input: boxes.image.checked ? ["text", "image"] : ["text"],
-        supportsTools: boxes.supportsTools.checked,
-        supportsThinking: boxes.supportsThinking.checked,
-        disabled: !!m.disabled,
+        id: String(form.elements.id.value || "").trim(),
+        displayName: String(form.elements.displayName.value || "").trim(),
+        contextWindow: Number(form.elements.contextWindow.value || 0),
+        maxOutput: Number(form.elements.maxOutput.value || 0),
+        input: form.elements.image.checked ? ["text", "image"] : ["text"],
+        supportsTools: form.elements.supportsTools.checked,
+        supportsThinking: form.elements.supportsThinking.checked,
+        disabled: false,
       };
       if (!model.id) {
         status("模型 id 不能为空", "error");
+        form.elements.id.focus();
         return;
       }
+      var index = state.editingIndex;
+      if (index >= 0) {
+        var existing = allModels()[index];
+        if (existing) model.disabled = !!existing.disabled;
+      }
       saveModel(model, index);
-    }));
-    actions.appendChild(btn("pm-text-btn", "取消", "", function () {
-      state.editingModelId = "";
-      state.draftModel = null;
-      renderDetail();
-    }));
-    row.appendChild(actions);
-    return row;
+    });
+  }
+
+  function openModelModal(model, index) {
+    buildModelModal();
+    if (!window.AdaComponents) {
+      status("缺少弹窗组件，无法编辑模型。", "error");
+      return;
+    }
+    var modal = document.getElementById("pm-model-modal");
+    if (!modal) return;
+    state.editingIndex = index;
+    var form = modal.querySelector("[data-pm-model-form]");
+    var title = modal.querySelector("[data-pm-model-title]");
+    if (title) title.textContent = index >= 0 ? "编辑模型" : "添加模型";
+    var m = model || {
+      id: "", displayName: "", contextWindow: 128000, maxOutput: 0,
+      input: ["text"], supportsTools: true, supportsThinking: false, disabled: false,
+    };
+    form.elements.id.value = m.id || "";
+    form.elements.displayName.value = m.displayName || "";
+    form.elements.contextWindow.value = m.contextWindow ? String(m.contextWindow) : "";
+    form.elements.maxOutput.value = m.maxOutput ? String(m.maxOutput) : "";
+    form.elements.supportsTools.checked = !!m.supportsTools;
+    form.elements.supportsThinking.checked = !!m.supportsThinking;
+    form.elements.image.checked = Array.isArray(m.input) && m.input.indexOf("image") >= 0;
+    window.AdaComponents.openModal("pm-model");
   }
 
   function allModels() {
@@ -572,8 +587,8 @@
     var models = allModels();
     if (index >= 0) models[index] = model;
     else models.push(model);
-    state.editingModelId = "";
-    state.draftModel = null;
+    state.editingIndex = -1;
+    if (window.AdaComponents) window.AdaComponents.closeModal("pm-model");
     saveProvider({ models: models }, index >= 0 ? "模型已保存" : "模型已添加");
   }
 
@@ -591,12 +606,7 @@
   }
 
   function addModel() {
-    state.editingModelId = "";
-    state.draftModel = {
-      id: "", contextWindow: 128000, maxOutput: 0,
-      input: ["text"], supportsTools: true, supportsThinking: false, disabled: false,
-    };
-    renderDetail();
+    openModelModal(null, -1);
   }
 
   // ── 启动 ───────────────────────────────────────────────────────────────
@@ -604,6 +614,7 @@
   function start() {
     root = document.querySelector("[data-provider-admin]");
     if (!root) return;
+    buildModelModal();
     var refresh = root.querySelector("[data-pm-refresh]");
     if (refresh) refresh.addEventListener("click", load);
     var add = root.querySelector("[data-pm-add]");

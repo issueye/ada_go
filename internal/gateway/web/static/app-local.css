@@ -303,20 +303,6 @@ select:focus {
   min-width: 260px;
 }
 
-button {
-  padding: 8px 14px;
-  border: 1px solid transparent;
-  border-radius: var(--ada-radius-sm);
-  background: var(--ph-brand);
-  color: var(--ph-on-brand);
-  font: inherit;
-  cursor: pointer;
-}
-
-button:hover {
-  background: var(--ph-brand-strong);
-}
-
 /* a_da 的 .btn 体系已经定义了布局与尺寸；这里只补暗色主题下的对比度。
    不要在本地覆盖 display/padding——那会把带图标的按钮挤成两行。 */
 .btn-primary {
