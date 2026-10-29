@@ -14,6 +14,8 @@ package frontend
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -269,8 +271,15 @@ func (b *Bridge) assetURLs(pick func(*plugins.Frontend) []string) []string {
 	sort.Strings(ids)
 	var out []string
 	for _, id := range ids {
-		for _, name := range pick(b.byID[id].manifest.Frontend) {
-			out = append(out, "/ext/"+url.PathEscape(id)+"/static/"+url.PathEscape(name))
+		u := b.byID[id]
+		for _, name := range pick(u.manifest.Frontend) {
+			base := "/ext/" + url.PathEscape(id) + "/static/" + url.PathEscape(name)
+			// 插件静态资源本身可长缓存；URL 带内容指纹，改 CSS/JS 后自动失效。
+			if data, ok := u.script.StaticAssets[name]; ok {
+				sum := sha256.Sum256(data)
+				base += "?v=" + hex.EncodeToString(sum[:4])
+			}
+			out = append(out, base)
 		}
 	}
 	return out

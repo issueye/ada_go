@@ -132,7 +132,7 @@ const GATEWAY_AUTOBUILD = process.env.ADAGO_GATEWAY_AUTOBUILD !== '0'
 const BUILD_TIMEOUT_MS = 180000
 const SPAWN_TIMEOUT_MS = 15000
 const READY_TIMEOUT_MS = 180000
-const SOURCE_SKIP_DIRS = new Set(['node_modules', '.git', 'bin', 'dist', 'out', 'dist-cache', '.adago'])
+const SOURCE_SKIP_DIRS = new Set(['node_modules', '.git', 'bin', 'out', 'dist-cache', '.adago'])
 const SOURCE_ROOTS = ['go.mod', 'go.sum', 'cmd', 'internal', 'app', 'official', 'products', 'spec', 'plugins']
 const SOURCE_EXTS = new Set(['.go', '.ts', '.tsx', '.js', '.json', '.md'])
 
@@ -745,7 +745,31 @@ function registerIpcHandlers() {
 }
 
 // ── 生命周期 ────────────────────────────────────────────────────────────
-app.on('second-instance', () => showMainWindow())
+// 开发期再次执行 `npm run start`（单实例锁会把新进程挡在门外）时，
+// 让已运行的实例重新检查源码、按需重建网关、清掉渲染进程 HTTP 缓存并重载页面。
+// 这样「再 npm start 一次」就等于拿到最新代码；打包形态仍只聚焦窗口。
+let refreshingToLatest = false
+async function refreshToLatest() {
+  showMainWindow()
+  if (app.isPackaged) return
+  if (refreshingToLatest) return
+  refreshingToLatest = true
+  try {
+    appendLauncherLog('[启动] 已有实例在运行，按最新源码重建并刷新')
+    if (mainWindow) {
+      try { await mainWindow.webContents.session.clearCache() } catch { /* 缓存清理失败不致命 */ }
+    }
+    const report = await restartGatewaySupervisor()
+    appendLauncherLog(`[启动] 刷新完成: alive=${report.core_alive} port=${report.core_port}`)
+    if (mainWindow) await loadSsrUi(mainWindow)
+  } catch (err) {
+    appendLauncherLog(`[启动] 刷新失败: ${err?.message ?? String(err)}`)
+  } finally {
+    refreshingToLatest = false
+  }
+}
+
+app.on('second-instance', () => { void refreshToLatest() })
 app.on('before-quit', () => {
   cleanupChildProcess()
   tray?.destroy()

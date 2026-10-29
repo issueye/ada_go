@@ -279,16 +279,16 @@ func TestBridgeAssetsAndBindings(t *testing.T) {
 	styles := b.Styles()
 	found := false
 	for _, s := range styles {
-		if s == "/ext/ui-task-plan/static/task-plan.css" {
+		if strings.HasPrefix(s, "/ext/ui-task-plan/static/task-plan.css?v=") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("Styles 缺少任务卡样式: %v", styles)
+		t.Fatalf("Styles 缺少任务卡样式（带内容指纹）: %v", styles)
 	}
 	scripts := b.Scripts()
-	if len(scripts) != 1 || scripts[0] != "/ext/provider-admin/static/provider-admin.js" {
-		t.Fatalf("Scripts 应只含 provider-admin 的增强脚本，got %v", scripts)
+	if len(scripts) != 1 || !strings.HasPrefix(scripts[0], "/ext/provider-admin/static/provider-admin.js?v=") {
+		t.Fatalf("Scripts 应只含 provider-admin 的增强脚本（带内容指纹），got %v", scripts)
 	}
 	if data, ok := b.StaticAsset("ui-task-plan", "task-plan.css"); !ok || len(data) == 0 {
 		t.Fatal("StaticAsset 应能取到 task-plan.css")
