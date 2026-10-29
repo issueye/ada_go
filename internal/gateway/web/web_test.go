@@ -1168,7 +1168,7 @@ func TestThreadPageShowsRunError(t *testing.T) {
 		on("thread.get", `{
 		  "thread": {"id":"th_err","workspace":"/tmp/ws","title":"失败会话","createdAt":"2026-10-28T09:00:00Z","updatedAt":"2026-10-28T10:00:00Z","archived":false},
 		  "items": [], "seq": 1,
-		  "run": {"runId":"run_err","status":"terminal","terminal":"error","errorCode":5001,"startedAt":"2026-10-28T10:00:00Z","endedAt":"2026-10-28T10:00:01Z"},
+		  "run": {"runId":"run_err","status":"terminal","terminal":"error","errorCode":5001,"errorDetail":"provider: HTTP 401 invalid api key","startedAt":"2026-10-28T10:00:00Z","endedAt":"2026-10-28T10:00:01Z"},
 		  "interactions": [], "hasMore": false
 		}`).
 		on("thread.entries", `{"entries":[],"hasMore":false}`).
@@ -1180,4 +1180,5 @@ func TestThreadPageShowsRunError(t *testing.T) {
 	wantContains(t, body, "本轮失败")
 	wantContains(t, body, "供应商调用失败")
 	wantContains(t, body, "错误码 5001")
+	wantContains(t, body, "HTTP 401 invalid api key")
 }

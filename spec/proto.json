@@ -156,6 +156,7 @@
         "startedAt": { "type": "string", "format": "date-time" },
         "endedAt": { "type": "string", "format": "date-time" },
         "errorCode": { "type": "integer", "description": "终态为 error 时引用的业务错误码（4 位应用码，8.5）" },
+        "errorDetail": { "type": "string", "maxLength": 400, "description": "终态为 error 时的可读原因（不替代诊断码）" },
         "usage": { "$ref": "#/definitions/Usage", "description": "本轮累计用量；未完成时可为已产生部分" }
       },
       "required": ["runId", "status", "startedAt"]

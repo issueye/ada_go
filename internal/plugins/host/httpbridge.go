@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/adag/ada-go/internal/domain"
@@ -43,6 +44,7 @@ type HTTPBridgeConfig struct {
 // Bridge 实现 host.HTTPBridge（出网唯一出口）。
 type Bridge struct {
 	allowAny bool
+	mu       sync.RWMutex
 	allow    []string
 	connect  time.Duration
 	idle     time.Duration
@@ -107,6 +109,26 @@ func NewHTTPBridge(cfg HTTPBridgeConfig) (*Bridge, error) {
 		},
 	}
 	return b, nil
+}
+
+// AllowHost 动态追加一个 host/host:port 白名单项（用户配置的供应商端点）。
+// 供应商配置可以在运行期新增/修改，因此 allowlist 不能只在装配期算一次。
+func (b *Bridge) AllowHost(host string) {
+	if b == nil {
+		return
+	}
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, entry := range b.allow {
+		if strings.EqualFold(strings.TrimSpace(entry), host) {
+			return
+		}
+	}
+	b.allow = append(b.allow, host)
 }
 
 // Close 释放连接池（测试与 Core 退出时调用）。
@@ -309,7 +331,10 @@ func (b *Bridge) checkURL(u *url.URL) error {
 	}
 	host := strings.ToLower(u.Host)
 	hostname := strings.ToLower(u.Hostname())
-	for _, entry := range b.allow {
+	b.mu.RLock()
+	allow := append([]string(nil), b.allow...)
+	b.mu.RUnlock()
+	for _, entry := range allow {
 		entry = strings.ToLower(strings.TrimSpace(entry))
 		if entry == "" {
 			continue

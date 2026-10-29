@@ -920,3 +920,10 @@ select:focus {
   font-size: var(--ada-text-xs);
   opacity: 0.8;
 }
+
+.ada-run-error__reason {
+  margin: 2px 0 0;
+  font-size: var(--ada-text-xs);
+  line-height: 1.5;
+  word-break: break-word;
+}

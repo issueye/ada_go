@@ -104,6 +104,8 @@ type Session struct {
 	baseScripts []host.Script
 	product     *coreapp.Product
 	appDeps     app.Deps
+	// httpBridge 是插件出网桥；供应商配置变更时动态追加 allowlist。
+	httpBridge httpBridge
 	// hostBase 是装配期宿主上下文模板（CallAction 用）；frontendScripts/IDs 是
 	// M4 前端插件的脚本与「产品声明允许缺席」集合。
 	hostBase        host.Context
@@ -242,6 +244,7 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 	if err != nil {
 		return cleanup(err)
 	}
+	s.httpBridge = httpBridge
 	hc := host.Context{
 		Workspace: abs,
 		Secret:    s.secret,
@@ -1002,6 +1005,9 @@ func (s *Session) applyProviderConfigs(asm *app.Assembly) {
 			s.logWarn("供应商配置首次写入失败: " + err.Error())
 		}
 	}
+	for _, c := range cfgs {
+		s.allowProviderHost(c)
+	}
 	asm.Providers.SetConfigs(cfgs)
 	s.providersMu.Lock()
 	s.providerConfigs = cloneProviderConfigs(cfgs)
@@ -1157,6 +1163,7 @@ func (s *Session) saveProviderFromPlugin(ctx context.Context, in host.ProviderIn
 	if err := s.providerStore.Save(cfgs); err != nil {
 		return host.ProviderInfo{}, fmt.Errorf("保存供应商失败: %w", err)
 	}
+	s.allowProviderHost(cfg)
 	s.providerConfigs = cloneProviderConfigs(cfgs)
 	if asm := s.Assembly(); asm != nil && asm.Providers != nil {
 		asm.Providers.SetConfigs(cfgs)
@@ -1589,7 +1596,29 @@ func buildHTTPBridge(cfg Config) (httpBridge, error) {
 // httpBridge 让调用方能在关闭时释放连接池；领域侧只依赖 host.HTTPBridge。
 type httpBridge interface {
 	host.HTTPBridge
+	AllowHost(host string)
 	Close()
+}
+
+// allowProviderHost 把供应商端点加入出网 allowlist；空 BaseURL 时按协议默认域名。
+func (s *Session) allowProviderHost(c provider.Config) {
+	if s.httpBridge == nil {
+		return
+	}
+	raw := strings.TrimSpace(c.BaseURL)
+	hostName := ""
+	if raw != "" {
+		if h, err := urlHost(raw); err == nil {
+			hostName = h
+		}
+	} else if c.Protocol == provider.ProtocolAnthropic {
+		hostName = "api.anthropic.com"
+	} else {
+		hostName = "api.openai.com"
+	}
+	if hostName != "" {
+		s.httpBridge.AllowHost(hostName)
+	}
 }
 
 func urlHost(raw string) (string, error) {

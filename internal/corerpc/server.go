@@ -84,14 +84,15 @@ type pluginStream struct {
 }
 
 type runInfo struct {
-	threadID  string
-	runID     string
-	status    string // running | terminal
-	terminal  string
-	errorCode int
-	startedAt time.Time
-	endedAt   time.Time
-	cancel    context.CancelFunc
+	threadID    string
+	runID       string
+	status      string // running | terminal
+	terminal    string
+	errorCode   int
+	errorDetail string
+	startedAt   time.Time
+	endedAt     time.Time
+	cancel      context.CancelFunc
 }
 
 // New 创建并注册方法实现；未注册的方法继续走 coreproto 的失败关闭桩。
@@ -1570,6 +1571,9 @@ func runStateJSON(r *runInfo) map[string]any {
 	}
 	if r.errorCode != 0 {
 		out["errorCode"] = r.errorCode
+	}
+	if r.errorDetail != "" {
+		out["errorDetail"] = r.errorDetail
 	}
 	if !r.endedAt.IsZero() {
 		out["endedAt"] = r.endedAt.Format(time.RFC3339Nano)

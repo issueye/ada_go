@@ -222,13 +222,14 @@ type ErrorEvent struct {
 
 // RunState 是某一轮的状态。Terminal 是终态原因，只在 status=terminal 时出现（INV-9）。
 type RunState struct {
-	RunID     string `json:"runId"`
-	Status    string `json:"status"` // running | waiting_input | finishing | terminal
-	Terminal  string `json:"terminal,omitempty"`
-	StartedAt string `json:"startedAt"`
-	EndedAt   string `json:"endedAt,omitempty"`
-	ErrorCode int    `json:"errorCode,omitempty"`
-	Usage     *Usage `json:"usage,omitempty"`
+	RunID       string `json:"runId"`
+	Status      string `json:"status"` // running | waiting_input | finishing | terminal
+	Terminal    string `json:"terminal,omitempty"`
+	ErrorCode   int    `json:"errorCode,omitempty"`
+	ErrorDetail string `json:"errorDetail,omitempty"`
+	StartedAt   string `json:"startedAt"`
+	EndedAt     string `json:"endedAt,omitempty"`
+	Usage       *Usage `json:"usage,omitempty"`
 }
 
 // Interaction 是待处理或已解析的用户交互（03 §5.6、04 interactions 表）。

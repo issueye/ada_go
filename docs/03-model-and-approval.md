@@ -8,7 +8,7 @@
 
 基座只拥有 `ModelClient` 契约与归一化流 DTO；**具体供应商是官方 TS provider 插件**，通过 `agent.registerProvider` 注册，由宿主桥接成 `ModelClient`。基座不知道 OpenAI/Anthropic 的 URL、鉴权头、SSE 细节与工具调用格式。
 
-用户配置的供应商实例保存在数据目录 `providers.json`（0600）。Registry 按 `Protocol` 选择适配器插件，把该实例的 `baseUrl`/`apiKey`/模型清单注入一次流式请求；首次启动从已装配的适配器播种默认实例，之后以配置为准。API Key 不返回给页面，只显示是否配置与尾号。
+用户配置的供应商实例保存在数据目录 `providers.json`（0600）。Registry 按 `Protocol` 选择适配器插件，把该实例的 `baseUrl`/`apiKey`/模型清单注入一次流式请求；首次启动从已装配的适配器播种默认实例，之后以配置为准。API Key 不返回给页面，只显示是否配置与尾号。供应商端点的 host 会在配置加载/保存时加入宿主 HTTP 桥的 allowlist（空 BaseURL 按协议默认域名），改端点不需要重启 Core。
 
 ```go
 type ModelClient interface {

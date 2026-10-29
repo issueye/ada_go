@@ -55,12 +55,13 @@ type itemDTO struct {
 }
 
 type runStateDTO struct {
-	RunID     string `json:"runId"`
-	Status    string `json:"status"`
-	Terminal  string `json:"terminal"`
-	StartedAt string `json:"startedAt"`
-	EndedAt   string `json:"endedAt"`
-	ErrorCode int    `json:"errorCode"`
+	RunID       string `json:"runId"`
+	Status      string `json:"status"`
+	Terminal    string `json:"terminal"`
+	StartedAt   string `json:"startedAt"`
+	EndedAt     string `json:"endedAt"`
+	ErrorCode   int    `json:"errorCode"`
+	ErrorDetail string `json:"errorDetail"`
 }
 
 type interactionDTO struct {
@@ -276,14 +277,15 @@ type threadInfo struct {
 }
 
 type runView struct {
-	Status     string
-	Terminal   string
-	Label      string
-	StartedAt  string
-	EndedAt    string
-	Active     bool
-	ErrorCode  int
-	ErrorLabel string
+	Status      string
+	Terminal    string
+	Label       string
+	StartedAt   string
+	EndedAt     string
+	Active      bool
+	ErrorCode   int
+	ErrorLabel  string
+	ErrorDetail string
 }
 
 type transcriptItem struct {
@@ -447,12 +449,13 @@ type offlineData struct {
 // buildRun 把 Core 的运行状态翻译成界面文案。
 func buildRun(rs runStateDTO) runView {
 	v := runView{
-		Status:     rs.Status,
-		Terminal:   rs.Terminal,
-		StartedAt:  rs.StartedAt,
-		EndedAt:    rs.EndedAt,
-		ErrorCode:  rs.ErrorCode,
-		ErrorLabel: runErrorLabel(rs.Terminal, rs.ErrorCode),
+		Status:      rs.Status,
+		Terminal:    rs.Terminal,
+		StartedAt:   rs.StartedAt,
+		EndedAt:     rs.EndedAt,
+		ErrorCode:   rs.ErrorCode,
+		ErrorLabel:  runErrorLabel(rs.Terminal, rs.ErrorCode),
+		ErrorDetail: rs.ErrorDetail,
 	}
 	switch rs.Status {
 	case "running":

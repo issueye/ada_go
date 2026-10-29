@@ -43,6 +43,12 @@ func TestHTTPBridgeAllowlist(t *testing.T) {
 	if _, err := b.JSON(context.Background(), "GET", srv.URL, nil, "", 1024); err == nil {
 		t.Fatal("allowlist 之外的 host 必须被拒绝")
 	}
+	// 用户配置的供应商端点可以在运行期加入 allowlist。
+	u, _ := url.Parse(srv.URL)
+	b.AllowHost(u.Host)
+	if res, err := b.JSON(context.Background(), "GET", srv.URL, nil, "", 1024); err != nil || res.Status != 200 {
+		t.Fatalf("AllowHost 后请求失败: %v %+v", err, res)
+	}
 
 	ok := bridgeFor(t, srv)
 	res, err := ok.JSON(context.Background(), "GET", srv.URL, nil, "", 1024)

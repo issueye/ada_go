@@ -32,6 +32,7 @@
           <div class="ada-run-error__body">
             <strong class="ada-run-error__title">{{if eq .Run.Terminal "error"}}本轮失败{{else if eq .Run.Terminal "interrupted"}}本轮已中断{{else}}本轮未完成{{end}}</strong>
             <p class="ada-run-error__detail">{{.Run.ErrorLabel}}</p>
+            {{if .Run.ErrorDetail}}<p class="ada-run-error__reason">{{.Run.ErrorDetail}}</p>{{end}}
             {{if .Run.ErrorCode}}<span class="ada-run-error__code">错误码 {{.Run.ErrorCode}}</span>{{end}}
           </div>
         </div>
