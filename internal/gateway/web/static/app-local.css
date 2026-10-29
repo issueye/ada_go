@@ -363,14 +363,6 @@ button:hover {
   white-space: nowrap;
 }
 
-.empty-state {
-  padding: 20px;
-  color: var(--ph-muted);
-  background: var(--ph-code-bg);
-  border-radius: var(--ada-radius-sm);
-  text-align: center;
-}
-
 .pager {
   margin: 12px 0 0;
 }

@@ -97,7 +97,8 @@
         "start": { "type": "integer", "description": "ol 起始编号。" },
         "scope": { "type": "string", "enum": ["row", "col"], "description": "th 作用域。" },
         "colspan": { "type": "integer", "minimum": 1, "maximum": 100 },
-        "rowspan": { "type": "integer", "minimum": 1, "maximum": 100 }
+        "rowspan": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "role": { "type": "string", "pattern": "^[a-z]+$", "description": "ARIA role（可访问性，如 status/alert/region）；只允许小写角色名。" }
       },
       "patternProperties": {
         "^aria-[a-z0-9-]{1,40}$": { "type": ["string", "number"], "description": "无障碍状态（aria-live=\"polite\" 等，§7.8；属性名一律小写规范形）。" },

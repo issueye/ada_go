@@ -59,7 +59,7 @@ var AllowedAttributes = []string{
 	"class", "id", "href", "title", "for", "name", "value", "type", "placeholder",
 	"required", "disabled", "readonly", "checked", "open", "min", "max", "step",
 	"minlength", "maxlength", "cols", "rows", "action", "method", "start", "scope",
-	"colspan", "rowspan",
+	"colspan", "rowspan", "role",
 }
 
 // AllowedInputTypes 是 input[type] 的取值集合，与 Schema 的 enum 一致。

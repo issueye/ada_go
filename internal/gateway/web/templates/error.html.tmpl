@@ -2,12 +2,12 @@
   <div class="ada-scroll">
     <div class="ada-wrap" style="max-width:1040px">
       {{template "flash" .}}
-      <div class="empty-state">
+      <div class="ada-empty">
         <span class="ada-empty__mark">{{icon "i-alert" 20}}</span>
-        <p class="text-sm font-semibold text-ink">{{.Heading}}</p>
-        <p class="mt-1 text-xs text-muted">{{.Message}}</p>
-        {{if .Detail}}<p class="mt-1 text-xs text-faint">{{.Detail}}</p>{{end}}
-        <div class="mt-4 flex gap-2">
+        <h2 class="ada-empty__title">{{.Heading}}</h2>
+        <p class="ada-empty__desc">{{.Message}}</p>
+        {{if .Detail}}<p class="ada-empty__desc">{{.Detail}}</p>{{end}}
+        <div class="ada-empty__action">
           <a class="ada-btn ada-btn--primary ada-btn--sm" href="{{.RetryPath}}">{{.RetryLabel}}</a>
           <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/">返回会话</a>
         </div>
