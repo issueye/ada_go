@@ -153,41 +153,55 @@ function findRepoRoot() {
   return null
 }
 
-function runGoBuild(repoRoot, args) {
+function runLoggedCommand(cwd, command, args, tag, timeoutMs) {
   return new Promise((resolve) => {
     const env = { ...process.env, GOWORK: 'off', CGO_ENABLED: '0' }
     let child
     try {
-      child = spawn('go', args, { cwd: repoRoot, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+      child = spawn(command, args, { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
     } catch (err) {
-      appendLauncherLog(`[自动构建] 无法启动 go: ${err.message}`)
+      appendLauncherLog(`[${tag}] 无法启动 ${command}: ${err.message}`)
       resolve(false)
       return
     }
     const timer = setTimeout(() => {
-      appendLauncherLog(`[自动构建] 超时（${BUILD_TIMEOUT_MS}ms），终止`)
+      appendLauncherLog(`[${tag}] 超时（${timeoutMs}ms），终止`)
       try { child.kill() } catch { /* 已退出 */ }
       resolve(false)
-    }, BUILD_TIMEOUT_MS)
-    const logPipe = (stream, tag) => {
+    }, timeoutMs)
+    const logPipe = (stream, which) => {
       if (!stream) return
       readline.createInterface({ input: stream }).on('line', (line) => {
-        appendLauncherLog(`[自动构建 ${tag}] ${line}`)
+        appendLauncherLog(`[${tag} ${which}] ${line}`)
       })
     }
     logPipe(child.stdout, 'stdout')
     logPipe(child.stderr, 'stderr')
     child.on('error', (err) => {
       clearTimeout(timer)
-      appendLauncherLog(`[自动构建] 失败: ${err.message}`)
+      appendLauncherLog(`[${tag}] 失败: ${err.message}`)
       resolve(false)
     })
     child.on('exit', (code) => {
       clearTimeout(timer)
-      appendLauncherLog(`[自动构建] 退出 code=${code}`)
+      appendLauncherLog(`[${tag}] 退出 code=${code}`)
       resolve(code === 0)
     })
   })
+}
+
+function runGoBuild(repoRoot, args) {
+  return runLoggedCommand(repoRoot, 'go', args, '自动构建', BUILD_TIMEOUT_MS)
+}
+
+// 开发期把官方插件的 index.ts 重新擦成 dist/index.js，保证 go:embed 拿到最新后端代码。
+// 失败不阻断启动：go build 仍会嵌入上一次的 dist，并在日志里给出警告。
+async function runOfficialPluginBuild(repoRoot) {
+  const script = path.join(repoRoot, 'plugins', 'official', 'build.mjs')
+  if (!fs.existsSync(script)) return true
+  const ok = await runLoggedCommand(repoRoot, 'node', [script], '插件构建', 120000)
+  if (!ok) appendLauncherLog('[插件构建] 失败，继续使用现有 dist/index.js（先检查 node 版本是否支持 stripTypeScriptTypes）')
+  return ok
 }
 
 // 返回可用的网关二进制路径；开发检出里每次启动都重新构建。
@@ -204,6 +218,8 @@ async function ensureGatewayBinary(customBin) {
   // 开发模式不依赖 mtime 判断：每次启动都构建，保证二进制与当前源码/嵌入插件一致。
   // go 的构建缓存会让未变化的部分很快；调用方要的是「所见即所得」。
   appendLauncherLog(`[自动构建] 开发模式：每次启动重新构建网关（cwd=${repoRoot}）`)
+  // 先刷新后端插件产物（index.ts → dist/index.js），go build 才能嵌入最新代码。
+  await runOfficialPluginBuild(repoRoot)
 
   let revision = ''
   try {
@@ -729,32 +745,143 @@ function registerIpcHandlers() {
 }
 
 // ── 生命周期 ────────────────────────────────────────────────────────────
-// 开发期再次执行 `npm run start`（单实例锁会把新进程挡在门外）时，
-// 让已运行的实例重新检查源码、按需重建网关、清掉渲染进程 HTTP 缓存并重载页面。
-// 这样「再 npm start 一次」就等于拿到最新代码；打包形态仍只聚焦窗口。
+// 开发期刷新：重复 npm start 或源码变化时，按最新源码重建网关、清缓存并刷新页面。
+// 保留当前页面（例如正在看的会话），只有端口变化或当前是准备页时才回首页。
 let refreshingToLatest = false
-async function refreshToLatest() {
+function sameOriginPageUrl(previousUrl) {
+  try {
+    const prev = new URL(previousUrl)
+    const base = new URL(coreState.endpoint || `http://127.0.0.1:${coreState.port}`)
+    if (!coreState.alive || prev.origin !== base.origin) return null
+    return prev.toString()
+  } catch {
+    return null
+  }
+}
+
+async function refreshToLatest(reason = '重复启动') {
   showMainWindow()
   if (app.isPackaged) return
   if (refreshingToLatest) return
   refreshingToLatest = true
+  const previousUrl = mainWindow ? mainWindow.webContents.getURL() : ''
   try {
-    appendLauncherLog('[启动] 已有实例在运行，按最新源码重建并刷新')
+    appendLauncherLog(`[热更新] ${reason}：按最新源码重建并刷新`)
     if (mainWindow) {
       try { await mainWindow.webContents.session.clearCache() } catch { /* 缓存清理失败不致命 */ }
     }
     const report = await restartGatewaySupervisor()
-    appendLauncherLog(`[启动] 刷新完成: alive=${report.core_alive} port=${report.core_port}`)
-    if (mainWindow) await loadSsrUi(mainWindow)
+    appendLauncherLog(`[热更新] 刷新完成: alive=${report.core_alive} port=${report.core_port}`)
+    if (mainWindow) {
+      const target = sameOriginPageUrl(previousUrl)
+      if (target) await mainWindow.loadURL(target)
+      else await loadSsrUi(mainWindow)
+    }
   } catch (err) {
-    appendLauncherLog(`[启动] 刷新失败: ${err?.message ?? String(err)}`)
+    appendLauncherLog(`[热更新] 刷新失败: ${err?.message ?? String(err)}`)
   } finally {
     refreshingToLatest = false
+    hotIgnoreUntil = Date.now() + 1200
   }
 }
 
-app.on('second-instance', () => { void refreshToLatest() })
+// ── 开发模式热更新（文件监听 → 重建 → 重启网关 → 原地刷新）──────────────
+const DEV_WATCH = !app.isPackaged && process.env.ADAGO_DEV_WATCH !== '0'
+const HOT_WATCH_DIRS = ['cmd', 'internal', 'app', 'plugins', 'products']
+const HOT_WATCH_EXTS = new Set(['.go', '.ts', '.tsx', '.js', '.json', '.css', '.tmpl'])
+const HOT_SKIP_PARTS = new Set(['node_modules', '.git', 'bin', 'out', 'dist-cache', '.adago', 'dist'])
+let devWatchers = []
+let hotTimer = null
+let hotBusy = false
+// 构建/刷新期间及其后 1.2s 的事件属于构建回声（写产物、同一次保存的重复事件），
+// 不再排队，避免一次保存触发两轮重建。
+let hotIgnoreUntil = 0
+
+// 只监听会进入网关（含 go:embed）的源码；dist/、desktop/bin 等构建产物必须排除，
+// 否则 build.mjs / go build 写产物会再次触发 watcher，形成重建循环。
+function isHotSource(rel) {
+  const p = String(rel || '').replace(/\\/g, '/')
+  if (!p || p.startsWith('desktop/')) return false
+  if (!HOT_WATCH_DIRS.some((dir) => p === dir || p.startsWith(dir + '/')) && p !== 'go.mod' && p !== 'go.sum') return false
+  if (p.split('/').some((part) => HOT_SKIP_PARTS.has(part))) return false
+  if (p.endsWith('_test.go')) return false
+  return HOT_WATCH_EXTS.has(path.extname(p)) || p === 'go.mod' || p === 'go.sum'
+}
+
+function scheduleHotReload(filename) {
+  if (!DEV_WATCH) return
+  if (refreshingToLatest || hotBusy) return
+  if (Date.now() < hotIgnoreUntil) return
+  if (hotTimer) clearTimeout(hotTimer)
+  hotTimer = setTimeout(() => {
+    hotTimer = null
+    void runHotReload(filename)
+  }, 700)
+}
+
+async function runHotReload(filename) {
+  if (refreshingToLatest || hotBusy) return
+  hotBusy = true
+  try {
+    appendLauncherLog(`[热更新] 检测到变化: ${filename || '(unknown)'}`)
+    await refreshToLatest('源码变化')
+  } finally {
+    hotBusy = false
+    hotIgnoreUntil = Date.now() + 1200
+  }
+}
+
+function startDevWatcher() {
+  if (!DEV_WATCH) {
+    appendLauncherLog('[热更新] 已关闭（ADAGO_DEV_WATCH=0 或打包形态）')
+    return
+  }
+  const repoRoot = findRepoRoot()
+  if (!repoRoot) {
+    appendLauncherLog('[热更新] 不在源码检出里，跳过')
+    return
+  }
+  const addDir = (dir) => {
+    const full = path.join(repoRoot, dir)
+    try {
+      if (!fs.existsSync(full)) return
+      const watcher = fs.watch(full, { recursive: true }, (_event, filename) => {
+        const rel = path.posix.join(dir, String(filename || '').replace(/\\/g, '/'))
+        if (isHotSource(rel)) scheduleHotReload(rel)
+      })
+      devWatchers.push(watcher)
+    } catch (err) {
+      appendLauncherLog(`[热更新] 无法监听 ${dir}: ${err.message}`)
+    }
+  }
+  for (const dir of HOT_WATCH_DIRS) addDir(dir)
+  // go.mod/go.sum 在仓库根，单独非递归监听（避免把 desktop/node_modules 卷进来）。
+  try {
+    const rootWatcher = fs.watch(repoRoot, {}, (_event, filename) => {
+      const rel = String(filename || '').replace(/\\/g, '/')
+      if (isHotSource(rel)) scheduleHotReload(rel)
+    })
+    devWatchers.push(rootWatcher)
+  } catch (err) {
+    appendLauncherLog(`[热更新] 无法监听仓库根目录: ${err.message}`)
+  }
+  appendLauncherLog(`[热更新] 监听源码目录: ${repoRoot}`)
+}
+
+function stopDevWatcher() {
+  if (hotTimer) {
+    clearTimeout(hotTimer)
+    hotTimer = null
+  }
+  for (const watcher of devWatchers) {
+    try { watcher.close() } catch { /* 已关闭 */ }
+  }
+  devWatchers = []
+}
+
+app.on('second-instance', () => { void refreshToLatest('重复启动') })
 app.on('before-quit', () => {
+  stopDevWatcher()
   cleanupChildProcess()
   tray?.destroy()
   tray = null
@@ -781,6 +908,7 @@ app.whenReady().then(async () => {
     setTimeout(() => app.quit(), 500)
     return
   }
+  startDevWatcher()
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) await createMainWindow()
   })
