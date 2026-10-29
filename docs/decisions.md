@@ -92,7 +92,7 @@ M1 期间若领域层不再需要独立常量，可让 `domain` 改为引用 `di
 | G-11 | `apiVersion` 主/次编码未定义 | 整数即主版本（当前 1），次版本仅宿主内部 | M3 插件开发体验前定名 |
 | G-12 | 交互超时/无 UI 与 `expires_at` 的格式口径混用（RFC3339 vs Unix ms） | RPC 层统一 RFC3339Nano UTC；DB 层仍是 INTEGER | M1-A 前写进 8.2/04 |
 | G-13 | 「同一线程最多一个待处理交互」时第二个请求的行为未定 | 暂按请求失败（不排队），因为 03 §5.6 只承诺「最多一个」 | M1-A 前补文档 |
-| G-14 | [07 §7.6](07-ssr-frontend.md#76-动作桥与路由) 要求动态路由「路径参数原样传入」，`spec/proto.json` 的 `RouteRequest` 只有 `method/path/query/headers/body` | 插件从 `Path` 自行解析；`RouteRequest` 不含 `pathParams` | M3/M4 前补 `pathParams`（先改 07/08） |
+| G-14 | [07 §7.6](07-ssr-frontend.md#76-动作桥与路由) 要求动态路由「路径参数原样传入」，`spec/proto.json` 的 `HTTPAPIRequest` 只有 `method/path/query/body` | 插件从 `Path` 自行解析；`HTTPAPIRequest` 不含 `pathParams` | M3/M4 前补 `pathParams`（先改 07/08） |
 | G-15 | 产品能力位（`capabilities.images`）在 12 端口里没有落点 | 引擎侧暂用 `Params.ImagesAllowed` 表达双门 | M1-E 前定：能力位由 coreapp 注入引擎配置 |
 | G-16 | `evt.interaction.requested` 与 `error` 点位的载荷形状文档未给全 | 事件按 Schema；钩子事件以 JSON 快照透传 | M3（15 钩子真实调用方）前补 |
 

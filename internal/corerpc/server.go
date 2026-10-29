@@ -158,6 +158,7 @@ func (s *Server) register() error {
 		"plugin.list":            s.handlePluginList,
 		"plugin.reload":          s.handlePluginReload,
 		"plugin.setEnabled":      s.handlePluginSetEnabled,
+		"plugin.http":            s.handlePluginHTTP,
 		"action.invoke":          s.handleActionInvoke,
 		"skill.list":             s.handleSkillList,
 		"skill.read":             s.handleSkillRead,
@@ -837,6 +838,67 @@ func (s *Server) handlePluginSetEnabled(ctx context.Context, raw json.RawMessage
 		return nil, rpcError(err)
 	}
 	return map[string]any{"plugin": pluginViewJSON(view)}, nil
+}
+
+// ---- 插件 HTTP API（registerHTTPAPI）----
+
+// handlePluginHTTP 调用插件注册的动态 HTTP 路由。
+// 返回 {ok,result} 或 {ok:false,error,notFound|methodNotAllowed}，由 Gateway 映射 HTTP 状态。
+func (s *Server) handlePluginHTTP(ctx context.Context, raw json.RawMessage) (any, error) {
+	var p struct {
+		PluginID string            `json:"pluginId"`
+		Method   string            `json:"method"`
+		Path     string            `json:"path"`
+		Query    map[string]string `json:"query"`
+		Body     json.RawMessage   `json:"body"`
+		ThreadID string            `json:"threadId"`
+	}
+	if err := decode(raw, &p); err != nil {
+		return nil, invalid("plugin.http: " + err.Error())
+	}
+	pluginID := strings.TrimSpace(p.PluginID)
+	method := strings.ToUpper(strings.TrimSpace(p.Method))
+	path := strings.TrimSpace(p.Path)
+	if pluginID == "" || path == "" || (method != "GET" && method != "POST") {
+		return nil, invalid("plugin.http: 需要 pluginId、method(GET/POST) 与 path")
+	}
+	if !strings.HasPrefix(path, "/") {
+		return nil, invalid("plugin.http: path 必须以 / 开头")
+	}
+	envelope := map[string]any{"method": method, "path": path, "query": p.Query}
+	if len(p.Body) > 0 && string(p.Body) != "null" {
+		var body any
+		if err := json.Unmarshal(p.Body, &body); err != nil {
+			return nil, invalid("plugin.http: body 必须是合法 JSON")
+		}
+		envelope["body"] = body
+	}
+	envRaw, err := json.Marshal(envelope)
+	if err != nil {
+		return nil, invalid("plugin.http: 请求无法编码")
+	}
+	out, err := s.sess.CallHTTPAPI(ctx, pluginID, method, path, envRaw, p.ThreadID)
+	if err != nil {
+		var he *cli.HTTPAPIError
+		if errors.As(err, &he) {
+			res := map[string]any{"ok": false, "error": he.Message}
+			switch he.Status {
+			case 404:
+				res["notFound"] = true
+			case 405:
+				res["methodNotAllowed"] = true
+			}
+			return res, nil
+		}
+		return map[string]any{"ok": false, "error": err.Error()}, nil
+	}
+	var result any
+	if len(out) > 0 && string(out) != "null" {
+		if err := json.Unmarshal(out, &result); err != nil {
+			return map[string]any{"ok": false, "error": "插件返回的不是合法 JSON"}, nil
+		}
+	}
+	return map[string]any{"ok": true, "result": result}, nil
 }
 
 // ---- action（M4：前端动作 → 插件后端动作）----

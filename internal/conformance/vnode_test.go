@@ -108,7 +108,7 @@ func TestVNodeValidator(t *testing.T) {
 			mustErrContains(t, c.attr+"="+c.value, frontend.ValidateNode(n), c.want)
 		}
 		// 允许的链接面（09 §9.3）：相对路径、锚点、http(s)、mailto。
-		for _, ok := range []string{"/ext/task-plan/route/x", "#top", "./rel", "../up",
+		for _, ok := range []string{"/ext/task-plan/api/x", "#top", "./rel", "../up",
 			"https://example.com/a", "http://127.0.0.1:52353/", "mailto:a@b.c"} {
 			mustNoErr(t, "允许链接 "+ok, frontend.ValidateNode(el("a", map[string]any{"href": ok})))
 		}

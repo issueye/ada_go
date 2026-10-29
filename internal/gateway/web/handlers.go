@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -131,6 +132,106 @@ func (s *Server) handleCreateThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirect(w, threadPath(res.Thread.ID))
+}
+
+// handleExtAPI 是插件动态 HTTP API 的 Gateway 入口（registerHTTPAPI）。
+// 请求经 Core RPC plugin.http 转发到插件路由；返回插件结果 JSON。
+// 认证由外部安全中间件负责（cookie/Bearer）；写方法额外要求 CSRF（同一中间件）。
+func (s *Server) handleExtAPI(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeAPIError(w, http.StatusNotFound, "缺少插件 id")
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		w.Header().Set("Allow", "GET, POST")
+		writeAPIError(w, http.StatusMethodNotAllowed, "只支持 GET / POST")
+		return
+	}
+	apiPath := "/" + strings.TrimPrefix(r.PathValue("path"), "/")
+	if len(apiPath) > 1 {
+		apiPath = strings.TrimSuffix(apiPath, "/")
+	}
+	query := map[string]string{}
+	for key, values := range r.URL.Query() {
+		if len(values) > 0 {
+			query[key] = values[0]
+		}
+	}
+	var body any
+	if r.Method == http.MethodPost {
+		r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, "请求体读取失败（上限 1MB）")
+			return
+		}
+		if text := strings.TrimSpace(string(raw)); text != "" {
+			if err := json.Unmarshal(raw, &body); err != nil {
+				writeAPIError(w, http.StatusBadRequest, "请求体必须是合法 JSON")
+				return
+			}
+		}
+	}
+	params := map[string]any{
+		"pluginId": id,
+		"method":   r.Method,
+		"path":     apiPath,
+		"query":    query,
+	}
+	if body != nil {
+		params["body"] = body
+	}
+	raw, err := s.call(r, "plugin.http", params)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "插件接口暂时不可用："+publicReason(err))
+		return
+	}
+	var res struct {
+		Ok               bool            `json:"ok"`
+		Result           json.RawMessage `json:"result"`
+		Error            string          `json:"error"`
+		NotFound         bool            `json:"notFound"`
+		MethodNotAllowed bool            `json:"methodNotAllowed"`
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		writeAPIError(w, http.StatusBadGateway, "Core 返回了无法识别的接口结果")
+		return
+	}
+	if !res.Ok {
+		status := http.StatusBadGateway
+		switch {
+		case res.NotFound:
+			status = http.StatusNotFound
+		case res.MethodNotAllowed:
+			status = http.StatusMethodNotAllowed
+		}
+		msg := strings.TrimSpace(res.Error)
+		if msg == "" {
+			msg = "插件接口调用失败"
+		}
+		writeAPIError(w, status, msg)
+		return
+	}
+	if len(res.Result) == 0 {
+		res.Result = json.RawMessage("null")
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(res.Result)
+}
+
+// writeAPIError 输出与 action.invoke 一致的 JSON 错误形状（前端 fetch 可统一解析）。
+func writeAPIError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error": map[string]any{"message": message},
+	})
 }
 
 // handleTurn 提交用户消息，调用 turn.start，然后 303 回会话页。

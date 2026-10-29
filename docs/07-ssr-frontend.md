@@ -192,7 +192,7 @@ type SlotProps = {
 - 写动作必须用户点击，走 CSRF + 确认；`read: false` 的动作不会在 SSR 时执行。
 - 插件 JS（`scripts`）默认不加载；需要 `frontend.script` 能力且信任级别为 builtin/verified。第三方 JS 同源运行，仍是风险点；v1.1 评估 iframe 隔离，v1 建议优先用 HTMX/表单。
 
-### 7.6 动作桥与路由
+### 7.6 动作桥与动态接口
 
 ```
 浏览器 POST /ext/{id}/action/{binding}
@@ -204,8 +204,30 @@ type SlotProps = {
 ```
 
 - 动作不是工具：不进模型上下文，不受 `tool.beforeCall` 策略约束，但必须在界面上由用户点击确认，且受插件能力与 scope 约束；`exec` 能力不对第三方开放。
-- 动态路由：`/ext/{id}/route/*` 原样转给插件 `route` 处理器；路径参数、query、body、headers 子集；响应 64KB 上限，只允许 JSON/文本。
 - 所有插件 HTTP 响应都带 `Cache-Control: no-store`（静态资源除外），避免跨用户缓存。
+
+#### 7.6.1 插件动态 HTTP API（registerHTTPAPI）
+
+后端插件在加载期登记自己的数据接口，供自己的前端页面/脚本调用：
+
+```ts
+agent.registerHTTPAPI("GET", "/items/*", (req, ctx) => ({ items: [] }));
+agent.registerHTTPAPI({ method: "POST", path: "/items", handler(req, ctx) { return { ok: true }; } });
+agent.route("GET", "/items/*", handler); // 旧名别名，等价于 registerHTTPAPI
+```
+
+```
+浏览器 GET/POST /ext/{id}/api/{path}
+  → Gateway 校验会话、CSRF、Origin、插件状态（请求体上限 1MB）
+  → Core plugin.http { pluginId, method, path, query, body }
+  → 匹配插件登记的精确/前缀路由 → handler(req, ctx) → JSON
+  → 未命中 404；方法不符 405；插件失败 502；错误统一 {"error":{"message":"…"}}
+```
+
+- 只允许 GET/POST，只接受 JSON 请求体与 JSON 返回值；`body` 只对 POST 透传，单次响应上限 64KB（宿主强制）。
+- 路由按插件隔离；同一方法+路径重复登记在加载期报错；`/*` 是前缀匹配，`Path` 保留剩余段由插件自行解析（[G-14](decisions.md)）。
+- 接口不是工具、不进模型上下文；能力位与 scope 仍由插件清单决定，`exec` 等能力不因此放开。
+- 浏览器侧统一用 `window.adaAPI(pluginId, path, { method, body })`（`api.js`，自动带 CSRF），不要手写 `/ext/...` URL。
 
 ### 7.7 UI 与设计元语：直接复用 a_da
 

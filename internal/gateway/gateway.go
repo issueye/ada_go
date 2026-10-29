@@ -59,7 +59,7 @@ type Config struct {
 	// 生命周期也由调用方负责（Gateway.Shutdown 不会关闭它）。测试用于
 	// 在不 spawn Core 的情况下验证鉴权、SSR 与错误页。
 	Supervisor contracts.Supervisor
-	// FrontendScripts 是前端插件（frontend-only）的加载单元（M4，7.5）：
+	// FrontendScripts 是带 frontend 段的插件加载单元（M4，7.5；含统一插件包）：
 	// 非空时组合根构建 web.PluginUI 渲染桥，SSR 填充插槽并提供 /ext 页面。
 	// 脚本由上层组合根注入（app/ 层）——internal/ 不 import official/。
 	FrontendScripts []host.Script

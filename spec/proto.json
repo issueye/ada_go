@@ -371,17 +371,17 @@
       },
       "required": ["pluginId", "action"]
     },
-    "RouteRequest": {
+    "HTTPAPIRequest": {
       "type": "object",
-      "description": "动态路由转发（7.6：/ext/{id}/route/* 原样转给插件 route 处理器；响应 64KB 上限，只允许 JSON/文本）。",
+      "description": "插件动态 HTTP API 调用（7.6：registerHTTPAPI 注册的 GET/POST 路由；JSON 入参/出参）。",
       "additionalProperties": false,
       "properties": {
-        "pluginId": { "type": "string" },
+        "pluginId": { "type": "string", "minLength": 1, "maxLength": 64 },
         "method": { "type": "string", "enum": ["GET", "POST"] },
-        "path": { "type": "string", "description": "插件注册的路径（含路径参数解析结果）" },
-        "query": { "type": "object", "additionalProperties": true, "description": "查询串，宿主原样传入" },
-        "headers": { "type": "object", "additionalProperties": true, "description": "headers 子集" },
-        "body": { "type": "string", "maxLength": 262144, "description": "请求体原文（JSON 或文本）" }
+        "path": { "type": "string", "pattern": "^/", "description": "插件注册的路径；路径参数原样留在字符串里由插件自行解析" },
+        "query": { "type": "object", "additionalProperties": { "type": "string" }, "description": "查询串（同名参数取第一个）" },
+        "body": { "description": "已解析的 JSON 请求体（POST；上限 1MB）" },
+        "threadId": { "type": "string", "description": "可选的线程上下文" }
       },
       "required": ["pluginId", "method", "path"]
     },
@@ -1193,6 +1193,29 @@
       "errors": ["invalid_params", "plugin_denied", "storage_busy", "internal_error"]
     },
     {
+      "name": "plugin.http",
+      "group": "plugin",
+      "summary": "调用插件注册的动态 HTTP API（registerHTTPAPI；GET/POST，JSON 入参/出参）",
+      "direction": "gateway->core",
+      "since": "1.0",
+      "idempotent": false,
+      "requiresReadyInstance": true,
+      "params": { "$ref": "#/definitions/HTTPAPIRequest" },
+      "result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ok": { "type": "boolean" },
+          "result": {},
+          "error": { "type": "string" },
+          "notFound": { "type": "boolean" },
+          "methodNotAllowed": { "type": "boolean" }
+        },
+        "required": ["ok"]
+      },
+      "errors": ["invalid_params", "internal_error"]
+    },
+    {
       "name": "skill.list",
       "group": "skill",
       "summary": "技能元数据（插件目录与工作区目录合并，同名工作区优先）",
@@ -1264,28 +1287,6 @@
         "required": ["ok"]
       },
       "errors": ["invalid_params", "plugin_timeout", "plugin_crashed", "plugin_denied"]
-    },
-    {
-      "name": "route.call",
-      "group": "route",
-      "summary": "动态路由转发（/ext/{id}/route/* 原样转给插件 route 处理器）",
-      "direction": "gateway->core",
-      "since": "1.0",
-      "idempotent": false,
-      "requiresReadyInstance": true,
-      "params": { "$ref": "#/definitions/RouteRequest" },
-      "result": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "status": { "type": "integer", "minimum": 100, "maximum": 599 },
-          "headers": { "type": "object", "additionalProperties": true, "description": "子集；一律叠加 Cache-Control: no-store（静态资源除外）" },
-          "body": { "type": "string", "maxLength": 65536, "description": "JSON 或文本，64KB 上限" },
-          "truncated": { "type": "boolean", "default": false }
-        },
-        "required": ["status", "body"]
-      },
-      "errors": ["invalid_params", "plugin_timeout", "plugin_crashed"]
     },
     {
       "name": "change.list",

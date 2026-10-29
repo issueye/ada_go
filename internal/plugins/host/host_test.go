@@ -396,3 +396,48 @@ export default function (agent) {
 		t.Fatal("插件被误禁用")
 	}
 }
+
+// recordingRoutes 收集 registerHTTPAPI / route 的登记项。
+type recordingRoutes struct{ regs []RouteRegistration }
+
+func (r *recordingRoutes) AddRoute(reg RouteRegistration) error {
+	r.regs = append(r.regs, reg)
+	return nil
+}
+
+// registerHTTPAPI 支持 (method, path, handler) 与对象形式；route 是旧名。
+func TestRegisterHTTPAPIRegistersAndCalls(t *testing.T) {
+	caps := testCaps(t, plugins.TrustBuiltin)
+	src := "export default function (agent) {\n" +
+		"  agent.registerHTTPAPI({ method: 'POST', path: '/echo', handler: function (req) { return { echo: req.body }; } });\n" +
+		"  agent.route('GET', '/ping', function () { return { ok: true }; });\n" +
+		"}"
+	routes := &recordingRoutes{}
+	p, err := Load(context.Background(), testScript(t, caps, src), caps, Context{},
+		Options{Targets: Targets{Routes: routes}})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	defer func() { _ = p.Close(context.Background()) }()
+
+	if len(routes.regs) != 2 {
+		t.Fatalf("HTTP 路由登记数 = %d, want 2: %+v", len(routes.regs), routes.regs)
+	}
+	var echo RouteDef
+	for _, reg := range routes.regs {
+		if reg.Def.Path == "/echo" {
+			echo = reg.Def
+		}
+	}
+	if echo.Method != "POST" || echo.Handler.Slot == 0 {
+		t.Fatalf("对象形式的 registerHTTPAPI 没登记成 POST /echo: %+v", echo)
+	}
+	out, err := p.CallRoute(context.Background(), echo.Handler,
+		json.RawMessage(`{"method":"POST","path":"/echo","body":{"n":2}}`), Context{})
+	if err != nil {
+		t.Fatalf("CallRoute: %v", err)
+	}
+	if !strings.Contains(string(out), `"n":2`) {
+		t.Fatalf("路由结果 = %s", out)
+	}
+}

@@ -45,10 +45,11 @@ func Scripts() ([]host.Script, error) {
 	return loadAll(func(m *plugins.Manifest) bool { return m.Backend != nil })
 }
 
-// FrontendScripts 返回前端插件（frontend-only）的加载单元（按 id 排序）。
-// 清单的 frontend 段已通过与第三方完全相同的校验（LoadManifest + Validate）。
+// FrontendScripts 返回前端插件的加载单元（按 id 排序）。
+// 统一插件包（同时声明 backend 与 frontend）也会出现在这里：后端段进 Scripts()，
+// 前端段交给 Gateway 渲染桥；两条装配路径互不影响。
 func FrontendScripts() ([]host.Script, error) {
-	return loadAll(func(m *plugins.Manifest) bool { return m.Backend == nil })
+	return loadAll(func(m *plugins.Manifest) bool { return m.Frontend != nil })
 }
 
 // loadAll 按 manifest 谓词挑选插件目录。

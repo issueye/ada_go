@@ -224,7 +224,7 @@ M4 同时依赖 M2 的页面宿主与 M3 的完整装配/信任模型。若 M3 �
 > 外壳 DOM 与 12 个插槽宿主已落下，`verify ui` 通过；`turn.steer` 已在工具批次边界
 > 实现安全点排空。剩余：a_da 组件与插槽内容的组件级复用（M4 插件渲染）、
 > 非回环 TLS/配对与限速、relay 自动重连细化、性能阈值；`plugin.*`/`skill.*`/
-> `action.invoke`/`route.call`/`change.*`/`debug.state` 按 M3/M4/M5 排期。
+> `action.invoke`/`plugin.http`/`change.*`/`debug.state` 按 M3/M4/M5 排期。
 
 | 工作包 | 内容 | 估算 |
 |---|---|---:|

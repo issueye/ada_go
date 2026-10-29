@@ -93,9 +93,26 @@ interface AgentAPI {
   registerProvider(def: ProviderDef): void; // 仅 builtin/verified，见 [5.5](03-model-and-approval.md#55-模型适配层)
   registerPrompt(def: { id: string; content: string; priority?: number }): void;
   registerAction(def: ActionDef): void;
-  route(method: "GET" | "POST", path: string, handler: RouteHandler): void;
+  registerHTTPAPI(method: "GET" | "POST", path: string, handler: RouteHandler): void;
+  registerHTTPAPI(def: RouteDef): void; // 对象形式，见 7.6.1
+  route(method: "GET" | "POST", path: string, handler: RouteHandler): void; // 旧名别名
   on<K extends HookPoint>(point: K, fn: HookHandler<K>, opts?: HookOpts): void;
 }
+
+interface RouteDef {
+  method: "GET" | "POST";
+  path: string;                      // 精确路径，或以 /* 结尾的前缀
+  handler: RouteHandler;
+}
+
+interface RouteRequest {
+  method: "GET" | "POST";
+  path: string;                      // 请求路径（前缀匹配时含剩余段）
+  query: Record<string, string>;     // 同名参数取第一个
+  body?: unknown;                    // POST 的 JSON 体
+}
+
+type RouteHandler = (req: RouteRequest, ctx: ToolContext) => unknown;
 
 interface ToolDef {
   name: string;                 // ^[a-z][a-z0-9_]{1,63}$
@@ -157,7 +174,7 @@ interface UIContext {
 
 - **工具**给模型调用，进入工具目录，受 `tool.beforeCall` 策略与 scope 约束。
 - **动作**只给界面调用（`POST /ext/{id}/action/{name}`），不进入模型上下文。读动作可以在 SSR 时预取；写动作必须用户点击，并支持 `confirm` 文案。
-- 动态路由（`route`）给插件自己的 HTTP API 用，路径参数、查询串、请求体由宿主原样传入；返回 JSON 或文本，响应大小上限 64KB。
+- 动态路由（`registerHTTPAPI`，旧名 `route`）给插件自己的 HTTP API 用：`GET/POST /ext/{id}/api/*`，查询串与 JSON 请求体由宿主传入；返回 JSON，响应大小上限 64KB。
 
 ```ts
 interface ActionDef {

@@ -82,10 +82,10 @@ const (
 	MethodPluginList            = "plugin.list"            // 插件、版本、状态、错误
 	MethodPluginReload          = "plugin.reload"          // 重载一个或全部插件（双代原子替换；在途调用用旧代）
 	MethodPluginSetEnabled      = "plugin.setEnabled"      // 启用/禁用插件（产品门禁：禁用唯一策略插件且存在写/执行工具时拒绝）
+	MethodPluginHttp            = "plugin.http"            // 调用插件注册的动态 HTTP API（registerHTTPAPI；GET/POST，JSON 入参/出参）
 	MethodSkillList             = "skill.list"             // 技能元数据（插件目录与工作区目录合并，同名工作区优先）
 	MethodSkillRead             = "skill.read"             // 读取 SKILL.md 正文（模型工具 read_skill 走同一实现）
 	MethodActionInvoke          = "action.invoke"          // 前端动作 → 后端动作（用户点击触发；不进模型、不受 tool.beforeCall 约束）
-	MethodRouteCall             = "route.call"             // 动态路由转发（/ext/{id}/route/* 原样转给插件 route 处理器）
 	MethodChangeList            = "change.list"            // 检查点与变更清单
 	MethodChangeRevert          = "change.revert"          // 回滚卡片/文件/全部；返回恢复/删除/跳过/失效四份清单，不谎报成功
 	MethodUsageGet              = "usage.get"              // 线程/工作区用量（token 与成本聚合）
@@ -173,10 +173,10 @@ var Methods = []MethodMeta{
 	{Name: "plugin.list", Group: "plugin", Summary: "插件、版本、状态、错误", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "plugin.reload", Group: "plugin", Summary: "重载一个或全部插件（双代原子替换；在途调用用旧代）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "plugin.setEnabled", Group: "plugin", Summary: "启用/禁用插件（产品门禁：禁用唯一策略插件且存在写/执行工具时拒绝）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
+	{Name: "plugin.http", Group: "plugin", Summary: "调用插件注册的动态 HTTP API（registerHTTPAPI；GET/POST，JSON 入参/出参）", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "skill.list", Group: "skill", Summary: "技能元数据（插件目录与工作区目录合并，同名工作区优先）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "skill.read", Group: "skill", Summary: "读取 SKILL.md 正文（模型工具 read_skill 走同一实现）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "action.invoke", Group: "action", Summary: "前端动作 → 后端动作（用户点击触发；不进模型、不受 tool.beforeCall 约束）", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
-	{Name: "route.call", Group: "route", Summary: "动态路由转发（/ext/{id}/route/* 原样转给插件 route 处理器）", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "change.list", Group: "change", Summary: "检查点与变更清单", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "change.revert", Group: "change", Summary: "回滚卡片/文件/全部；返回恢复/删除/跳过/失效四份清单，不谎报成功", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "usage.get", Group: "usage", Summary: "线程/工作区用量（token 与成本聚合）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
@@ -306,9 +306,8 @@ var MethodsByGroup = map[string][]string{
 	"debug":       {"debug.state"},
 	"interaction": {"interaction.list", "interaction.respond"},
 	"model":       {"model.list", "model.set"},
-	"plugin":      {"plugin.list", "plugin.reload", "plugin.setEnabled"},
+	"plugin":      {"plugin.list", "plugin.reload", "plugin.setEnabled", "plugin.http"},
 	"provider":    {"provider.list"},
-	"route":       {"route.call"},
 	"skill":       {"skill.list", "skill.read"},
 	"system":      {"system.hello", "system.ping", "system.shutdown"},
 	"thread":      {"thread.create", "thread.list", "thread.get", "thread.entries", "thread.rename", "thread.archive", "thread.branch", "thread.delete"},

@@ -30,7 +30,7 @@ func dtoBindings() map[string]reflect.Type {
 		"ModelInfo":           reflect.TypeOf(proto.ModelInfo{}),
 		"WorkspaceInfo":       reflect.TypeOf(proto.WorkspaceInfo{}),
 		"ChangeSet":           reflect.TypeOf(proto.ChangeSet{}),
-		"RouteRequest":        reflect.TypeOf(proto.RouteRequest{}),
+		"HTTPAPIRequest":      reflect.TypeOf(proto.HTTPAPIRequest{}),
 		"SkillSummary":        reflect.TypeOf(proto.SkillSummary{}),
 		"ProductCapabilities": reflect.TypeOf(proto.ProductCapabilities{}),
 		"ProductPolicy":       reflect.TypeOf(proto.ProductPolicies{}),

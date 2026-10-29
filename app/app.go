@@ -71,6 +71,8 @@ type Assembly struct {
 	Providers *provider.Registry
 	// Actions 是前端动作目录（pluginID → name → ActionDef，M4 的 action.invoke 数据面）。
 	Actions *actionRegistry
+	// Routes 是插件动态 HTTP 路由目录（registerHTTPAPI；Gateway /ext/{id}/api/* 的数据面）。
+	Routes *routeRegistry
 	// FrontendDecls 记录产品声明里被 Gateway 侧装配的前端插件 id（本侧不装配）。
 	FrontendDecls []string
 	// skills 是本次装配的技能快照（6.7：插件贡献 + 工作区，同名工作区优先）。
@@ -265,12 +267,13 @@ func assembleSet(ctx context.Context, p *coreapp.Product, base, extras []host.Sc
 	providers := provider.New(deps.BaseURL)
 	providers.HostContext = deps.Context
 	actions := newActionRegistry()
+	routes := newRouteRegistry()
 	frontend := newFrontendRegistry()
 	prompts := newPromptRegistry()
 	invoker := &toolInvoker{plugins: map[string]*host.Instance{}, base: deps.Context,
 		bases: map[string]BaseTool{}}
 	asm := &Assembly{Product: p, Tools: tools, Hooks: hooks, Providers: providers,
-		Actions: actions, FrontendDecls: frontendDecls, executor: invoker}
+		Actions: actions, Routes: routes, FrontendDecls: frontendDecls, executor: invoker}
 
 	for _, script := range picked {
 		caps, err := host.NewCapabilitySet(script.Manifest, deps.Context.Workspace, deps.HostEnv, deps.Secrets)
@@ -283,7 +286,7 @@ func assembleSet(ctx context.Context, p *coreapp.Product, base, extras []host.Sc
 		hc.Settings = deps.Settings[script.Manifest.ID]
 		inst, err := host.Load(ctx, script, caps, hc, host.Options{
 			Targets: host.Targets{Tools: tools, Hooks: hooks, Providers: providers,
-				Actions: actions, Frontend: frontend, Prompts: prompts},
+				Actions: actions, Routes: routes, Frontend: frontend, Prompts: prompts},
 		})
 		if err != nil {
 			_ = asm.Close(context.Background())
@@ -441,7 +444,7 @@ func isPolicyPlugin(m *plugins.Manifest) bool {
 	return false
 }
 
-// FrontendScripts 返回嵌入官方包的前端插件脚本（M4，frontend-only）。
+// FrontendScripts 返回嵌入官方包的前端脚本（M4；含同时声明 backend 的统一插件）。
 // Gateway 的渲染桥用它们做 TSX→VNode→HTML；Session 只用 id 集合。
 func FrontendScripts() ([]host.Script, error) {
 	return official.FrontendScripts()

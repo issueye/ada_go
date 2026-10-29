@@ -360,18 +360,17 @@ type ActionEnvelope struct {
 	ThreadID string         `json:"threadId,omitempty"`
 }
 
-// RouteRequest 是 route.call 的入参形状（7.6：query、body、headers 子集）。
+// HTTPAPIRequest 是 plugin.http 的入参形状（7.6：插件动态 HTTP API）。
 //
-// 契约缺口：设计 7.6 要求「路径参数由宿主原样传入」，但 spec/proto.json 的
-// RouteRequest 只有 method/path，没有 pathParams。v1 以 Schema 为准（插件从 Path 自行解析），
-// 若要补字段必须先改设计文档再改 spec（见 docs/decisions.md 的开放项）。
-type RouteRequest struct {
+// 路径参数不单独建模：插件拿到的 Path 就是注册时的路径原文
+// （前缀匹配时包含剩余段），由插件自行解析。
+type HTTPAPIRequest struct {
 	PluginID string            `json:"pluginId"`
 	Method   string            `json:"method"`
 	Path     string            `json:"path"`
 	Query    map[string]string `json:"query,omitempty"`
-	Headers  map[string]string `json:"headers,omitempty"`
-	Body     string            `json:"body,omitempty"`
+	Body     any               `json:"body,omitempty"`
+	ThreadID string            `json:"threadId,omitempty"`
 }
 
 // ProductCapabilities 是产品能力位（8.6）。

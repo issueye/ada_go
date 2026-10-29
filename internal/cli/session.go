@@ -728,6 +728,36 @@ func (s *Session) CallAction(ctx context.Context, pluginID, action string, input
 	return inst.CallAction(ctx, def.Handler, input, hc)
 }
 
+// HTTPAPIError 是插件 HTTP 路由的业务状态错误（404/405），供 Core RPC 映射。
+type HTTPAPIError struct {
+	Status  int
+	Message string
+}
+
+func (e *HTTPAPIError) Error() string { return e.Message }
+
+// CallHTTPAPI 调用插件注册的动态 HTTP 路由（registerHTTPAPI）。
+// 路由表与插件实例都在当前装配里；404/405 转换成 HTTPAPIError。
+func (s *Session) CallHTTPAPI(ctx context.Context, pluginID, method, path string, req json.RawMessage, threadID string) (json.RawMessage, error) {
+	s.mu.Lock()
+	asm := s.asm
+	s.mu.Unlock()
+	if asm == nil {
+		return nil, domain.NewError(domain.CodeCoreUnavailable, "插件装配尚未就绪")
+	}
+	out, err := asm.CallHTTPAPI(ctx, pluginID, method, path, req, threadID)
+	if err != nil {
+		switch {
+		case errors.Is(err, app.ErrRouteNotFound):
+			return nil, &HTTPAPIError{Status: 404, Message: "没有匹配的接口"}
+		case errors.Is(err, app.ErrRouteMethodNotAllowed):
+			return nil, &HTTPAPIError{Status: 405, Message: "该路径不支持此方法"}
+		}
+		return nil, err
+	}
+	return out, nil
+}
+
 // Policies 返回当前生效的运行参数（workspace.updatePolicy 覆盖优先，否则用产品声明）。
 func (s *Session) Policies() coreapp.Policies {
 	s.mu.Lock()

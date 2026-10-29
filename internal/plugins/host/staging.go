@@ -181,9 +181,10 @@ type RouteRegistration struct {
 	Def      RouteDef
 }
 
-// RouteRegistry 是路由注册表。
+// RouteRegistry 是路由注册表。方法名刻意不带 Register 前缀：
+// 它不是给插件作者的 Go 注册入口，只是宿主内部的贡献落盘接口（1.5.2）。
 type RouteRegistry interface {
-	RegisterRoute(reg RouteRegistration) error
+	AddRoute(reg RouteRegistration) error
 }
 
 // FrontendRegistration 是前端贡献登记（7.2/7.5；渲染宿主在 Gateway 侧）。
@@ -292,7 +293,7 @@ func (t Targets) commit(c *Contribution, caps *CapabilitySet, hooks func(HookDef
 			undo = append(undo, rollbackAll(pr))
 		}
 		for _, item := range c.Routes {
-			if err := t.Routes.RegisterRoute(RouteRegistration{PluginID: c.PluginID, Def: item}); err != nil {
+			if err := t.Routes.AddRoute(RouteRegistration{PluginID: c.PluginID, Def: item}); err != nil {
 				return fail(fmt.Errorf("host: 插件 %s 注册路由 %s %s 失败: %w", c.PluginID, item.Method, item.Path, err))
 			}
 		}

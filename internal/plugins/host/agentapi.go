@@ -233,25 +233,47 @@ func buildAgentAPI(rt *mojsRuntime, owner func() *Instance) moejs.Value {
 		return moejs.Undefined(), nil
 	})
 
-	put("route", func(_ *engine.Realm, _ engine.Value, args []engine.Value) (engine.Value, error) {
+	// registerHTTPAPI / route：登记一条动态 HTTP 路由（GET/POST）。
+	// 兼容两种调用：
+	//   registerHTTPAPI("GET", "/path", handler)
+	//   registerHTTPAPI({ method: "POST", path: "/path", handler })
+	registerHTTP := func(_ *engine.Realm, _ engine.Value, args []engine.Value) (engine.Value, error) {
 		p, st, err := inst()
 		if err != nil {
 			return moejs.Undefined(), err
 		}
-		if frozen(p, "route") {
+		if frozen(p, "registerHTTPAPI") {
 			return moejs.Undefined(), nil
 		}
-		method := strings.ToUpper(strings.TrimSpace(moejs.Arg(args, 0).String()))
-		path := strings.TrimSpace(moejs.Arg(args, 1).String())
-		handler := moejs.Arg(args, 2)
-		if method != "GET" && method != "POST" {
-			return moejs.Undefined(), r.TypeError("route(method, path, handler): method 只能是 GET 或 POST（7.6）")
+		method := "GET"
+		var path string
+		handler := moejs.Undefined()
+		first := moejs.Arg(args, 0)
+		if first.IsObject() && !engine.IsCallable(first) {
+			if v, gerr := rt.Get(first, "method"); gerr == nil && !v.IsNullish() {
+				method = strings.ToUpper(strings.TrimSpace(v.String()))
+			}
+			if v, gerr := rt.Get(first, "path"); gerr == nil {
+				path = strings.TrimSpace(v.String())
+			}
+			if v, gerr := rt.Get(first, "handler"); gerr == nil && engine.IsCallable(v) {
+				handler = v
+			} else if v, gerr := rt.Get(first, "execute"); gerr == nil && engine.IsCallable(v) {
+				handler = v
+			}
+		} else {
+			method = strings.ToUpper(strings.TrimSpace(first.String()))
+			path = strings.TrimSpace(moejs.Arg(args, 1).String())
+			handler = moejs.Arg(args, 2)
 		}
-		if !strings.HasPrefix(path, "/") {
-			return moejs.Undefined(), r.TypeError("route(method, path, handler): path 必须以 / 开头（7.6）")
+		if method != "GET" && method != "POST" {
+			return moejs.Undefined(), r.TypeError("registerHTTPAPI: method 只能是 GET 或 POST（7.6）")
+		}
+		if !strings.HasPrefix(path, "/") || strings.Contains(path, "..") || strings.Contains(path, "?") {
+			return moejs.Undefined(), r.TypeError("registerHTTPAPI: path 必须以 / 开头，且不能包含 .. 或查询串（7.6）")
 		}
 		if !engine.IsCallable(handler) {
-			return moejs.Undefined(), r.TypeError("route(%s %s): handler 必须是函数", method, path)
+			return moejs.Undefined(), r.TypeError("registerHTTPAPI(%s %s): handler 必须是函数", method, path)
 		}
 		slot, err := st.add(slotKindRoute, routeIdent(method, path), handler)
 		if err != nil {
@@ -259,7 +281,10 @@ func buildAgentAPI(rt *mojsRuntime, owner func() *Instance) moejs.Value {
 		}
 		st.data.Routes = append(st.data.Routes, RouteDef{Method: method, Path: path, Handler: HandlerRef{Slot: slot}})
 		return moejs.Undefined(), nil
-	})
+	}
+	put("registerHTTPAPI", registerHTTP)
+	// route 是 registerHTTPAPI 的旧名，保留兼容。
+	put("route", registerHTTP)
 
 	put("on", func(_ *engine.Realm, _ engine.Value, args []engine.Value) (engine.Value, error) {
 		p, st, err := inst()

@@ -46,10 +46,10 @@
 | plugin | `plugin.list` | 插件、版本、状态、错误 |
 | plugin | `plugin.reload` | 重载一个或全部 |
 | plugin | `plugin.setEnabled` | 启用/禁用 |
+| plugin | `plugin.http` | 调用插件 `registerHTTPAPI` 注册的动态接口 |
 | skill | `skill.list` | 技能元数据 |
 | skill | `skill.read` | 读取正文（模型工具也走同一实现） |
 | action | `action.invoke` | 前端动作 → 后端动作 |
-| route | `route.call` | 动态路由转发 |
 | change | `change.list` | 检查点与变更 |
 | change | `change.revert` | 回滚卡片/文件/全部 |
 | usage | `usage.get` | 线程/工作区用量 |

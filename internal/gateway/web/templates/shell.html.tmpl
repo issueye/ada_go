@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+{{if .CSRF}}<meta name="csrf-token" content="{{.CSRF}}">{{end}}
 {{if .RefreshSeconds}}<meta http-equiv="refresh" content="{{.RefreshSeconds}}">{{end}}
 <title>{{.Title}} · {{.BrandName}}</title>
 <link rel="icon" type="image/png" href="{{asset "logo.png"}}">
@@ -26,6 +27,7 @@
 <script src="{{asset "ada-select.js"}}" defer></script>
 <script src="{{asset "ada-modal.js"}}" defer></script>
 <script src="{{asset "components.js"}}" defer></script>
+<script src="{{asset "api.js"}}" defer></script>
 {{range .PluginScripts}}<script src="{{.}}" defer></script>
 {{end}}</head>
 <body class="ada-body">
