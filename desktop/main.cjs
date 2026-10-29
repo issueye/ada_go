@@ -327,8 +327,17 @@ async function startGatewaySupervisor() {
     saveDesktopConfig({ ...cfg, token })
   }
 
-  // 产品声明：打包后走 resources/products；开发期走仓库 products/。
-  let productPath = cli.product || cfg.product_path || resolveAppPath('products', 'headless.agent.json')
+  // 产品声明：打包后走 resources/products；开发期优先仓库 products/（与源码同步，
+  // 避免 desktop/products 里的旧副本让新插件/导航不出现）。
+  let productPath = cli.product || cfg.product_path || ''
+  if (!productPath) {
+    const repoRoot = findRepoRoot()
+    if (repoRoot) {
+      const repoProduct = path.join(repoRoot, 'products', 'headless.agent.json')
+      if (fs.existsSync(repoProduct)) productPath = repoProduct
+    }
+    if (!productPath) productPath = resolveAppPath('products', 'headless.agent.json') || ''
+  }
   if (productPath && !fs.existsSync(productPath)) productPath = ''
 
   const workspace = (cli.workspace || cfg.workspace || '').trim()
