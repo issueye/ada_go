@@ -262,15 +262,12 @@ const threadGetRunning = `{
   "hasMore": false
 }`
 
-const entriesDescending = `{
+const entriesAscending = `{
   "entries": [
     {
-      "id":"e3","threadId":"th_1","seq":3,"kind":"message","role":"tool",
-      "payload":{"callId":"call_1","tool":"read_file","status":"ok",
-        "content":[{"type":"text","text":"file body"}],
-        "details":{"path":"/tmp/demo.txt"},
-        "receipt":{"status":"ok","durationMs":12,"truncated":true}},
-      "createdAt":"2026-10-28T10:00:03Z"
+      "id":"e1","threadId":"th_1","seq":1,"kind":"message","role":"user",
+      "payload":{"role":"user","parts":[{"type":"text","text":"这是问题"}]},
+      "createdAt":"2026-10-28T10:00:01Z"
     },
     {
       "id":"e2","threadId":"th_1","seq":2,"kind":"message","role":"assistant",
@@ -281,9 +278,12 @@ const entriesDescending = `{
       "createdAt":"2026-10-28T10:00:02Z"
     },
     {
-      "id":"e1","threadId":"th_1","seq":1,"kind":"message","role":"user",
-      "payload":{"role":"user","parts":[{"type":"text","text":"这是问题"}]},
-      "createdAt":"2026-10-28T10:00:01Z"
+      "id":"e3","threadId":"th_1","seq":3,"kind":"message","role":"tool",
+      "payload":{"callId":"call_1","tool":"read_file","status":"ok",
+        "content":[{"type":"text","text":"file body"}],
+        "details":{"path":"/tmp/demo.txt"},
+        "receipt":{"status":"ok","durationMs":12,"truncated":true}},
+      "createdAt":"2026-10-28T10:00:03Z"
     }
   ],
   "hasMore": false
@@ -349,7 +349,7 @@ func TestCreateThreadCallsCoreAndRedirects(t *testing.T) {
 func TestThreadPageRendersTranscriptToolCardAndTray(t *testing.T) {
 	core := newFakeCore().
 		on("thread.get", threadGetRunning).
-		on("thread.entries", entriesDescending)
+		on("thread.entries", entriesAscending)
 	srv, _ := newServer(t, core)
 
 	rec := serve(t, srv, "GET", "/thread/th_1", nil)
@@ -397,7 +397,7 @@ func TestThreadPageRendersTranscriptToolCardAndTray(t *testing.T) {
 func TestThreadPageExposesLiveStreamHooks(t *testing.T) {
 	core := newFakeCore().
 		on("thread.get", threadGetRunning).
-		on("thread.entries", entriesDescending)
+		on("thread.entries", entriesAscending)
 	srv, _ := newServer(t, core)
 
 	rec := serve(t, srv, "GET", "/thread/th_1", nil)
@@ -896,7 +896,7 @@ func slotNamesInOrder(body string) []string {
 func TestAllTwelveSlotsHostedAcrossPages(t *testing.T) {
 	core := newFakeCore().
 		on("thread.get", threadGetRunning).
-		on("thread.entries", entriesDescending).
+		on("thread.entries", entriesAscending).
 		on("thread.list", emptyThreadList).
 		on("plugin.list", `{"plugins":[]}`)
 	srv, _ := newServerWithWorkspaces(t, core, []string{"/tmp/ws-a", "/tmp/ws-b"})
@@ -955,7 +955,7 @@ func TestAllTwelveSlotsHostedAcrossPages(t *testing.T) {
 func TestThreadPageUsesAdaShellAndComponentDOM(t *testing.T) {
 	core := newFakeCore().
 		on("thread.get", threadGetRunning).
-		on("thread.entries", entriesDescending)
+		on("thread.entries", entriesAscending)
 	srv, _ := newServerWithWorkspaces(t, core, []string{"/tmp/ws-a", "/tmp/ws-b"})
 
 	body := serve(t, srv, "GET", "/thread/th_1", nil).Body.String()
@@ -989,6 +989,18 @@ func TestThreadPageUsesAdaShellAndComponentDOM(t *testing.T) {
 	} {
 		wantContains(t, body, class)
 	}
+
+	// 时间顺序：user → assistant → tool，不能反向（EntriesBefore 已是升序）。
+	userAt := strings.Index(body, "这是问题")
+	assistantAt := strings.Index(body, "答案是 42")
+	toolAt := strings.Index(body, "read_file")
+	if userAt < 0 || assistantAt < userAt || toolAt < assistantAt {
+		t.Fatalf("对话顺序不对：user=%d assistant=%d tool=%d", userAt, assistantAt, toolAt)
+	}
+
+	// 思考内容按普通说明文字渲染，不再塞进深色 code panel。
+	wantContains(t, body, `class="ada-thinking"`)
+	wantContains(t, body, "先想一下")
 
 	// 工具卡的展示字段（status / duration / truncated / details）保留。
 	wantContains(t, body, "成功")
@@ -1146,7 +1158,7 @@ func TestThreadDeleteCallsCoreAndRedirects(t *testing.T) {
 func TestThreadComposerShowsModelPicker(t *testing.T) {
 	core := newFakeCore().
 		on("thread.get", threadGetRunning).
-		on("thread.entries", entriesDescending).
+		on("thread.entries", entriesAscending).
 		on("model.list", `{"models":[
 		  {"model":{"providerId":"openai","modelId":"gpt-4o"},"info":{"displayName":"GPT-4o","contextWindow":128000,"supportsTools":true}},
 		  {"model":{"providerId":"custom","modelId":"deepseek"},"info":{"displayName":"DeepSeek","contextWindow":1000000,"supportsTools":true}}

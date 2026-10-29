@@ -516,8 +516,14 @@ select:focus {
   font-weight: 700;
 }
 
-.part-text {
+/* 只有用户气泡里的纯文本需要保留换行；assistant 的 .part-text 里是 Markdown
+   生成的块级元素，pre-wrap 会把标签之间的空白也画成空行，间距被撑大。 */
+.ada-bubble .part-text {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.part-text {
   overflow-wrap: anywhere;
 }
 
@@ -926,4 +932,52 @@ select:focus {
   font-size: var(--ada-text-xs);
   line-height: 1.5;
   word-break: break-word;
+}
+
+/* 对话流更紧凑：消息行与工具/思考之间的间距收一档。 */
+.ada-transcript .ada-msg {
+  margin: 6px 0;
+}
+
+.ada-transcript .ada-disclosure {
+  margin: 1px 0;
+}
+
+/* 思考是普通说明文字，不是代码：不用深色 code panel，也不走等宽字体。 */
+.ada-thinking {
+  padding: 8px 12px;
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-subtle);
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Markdown 正文与容器是同一个元素（class="ada-msg__body markdown-body"），
+   components.css 里的后代选择器命不中；这里用复合选择器收紧段落/列表间距。 */
+.ada-msg__body.markdown-body p,
+.ada-msg__body.markdown-body blockquote,
+.ada-msg__body.markdown-body pre,
+.ada-msg__body.markdown-body table {
+  margin: 0.45em 0;
+}
+
+.ada-msg__body.markdown-body ul,
+.ada-msg__body.markdown-body ol {
+  margin: 0.35em 0;
+  padding-left: 1.4em;
+}
+
+.ada-msg__body.markdown-body li {
+  margin: 0.15em 0;
+}
+
+.ada-msg__body.markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.ada-msg__body.markdown-body > :last-child {
+  margin-bottom: 0;
 }

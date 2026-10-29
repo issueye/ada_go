@@ -101,7 +101,7 @@ func TestPluginSlotsFillAndCount(t *testing.T) {
 	}}
 	core := newFakeCore().
 		on("thread.get", threadGetRunning).
-		on("thread.entries", entriesDescending)
+		on("thread.entries", entriesAscending)
 	srv, _ := newServerWithUI(t, core, ui)
 
 	rec := serve(t, srv, "GET", "/thread/th_1", nil)
@@ -127,7 +127,7 @@ func TestPluginSlotFailureIsolated(t *testing.T) {
 	}
 	core := newFakeCore().
 		on("thread.get", threadGetRunning).
-		on("thread.entries", entriesDescending)
+		on("thread.entries", entriesAscending)
 	srv, _ := newServerWithUI(t, core, ui)
 
 	rec := serve(t, srv, "GET", "/thread/th_1", nil)

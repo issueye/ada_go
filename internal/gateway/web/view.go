@@ -552,7 +552,8 @@ func buildInteractions(in []interactionDTO, threadID, csrf string) []interaction
 // buildTranscript 把 entries（Core 按 seq 降序返回）转成按时间正序的展示项。
 func buildTranscript(entries []entryDTO) []transcriptItem {
 	out := make([]transcriptItem, 0, len(entries))
-	for i := len(entries) - 1; i >= 0; i-- {
+	// EntriesBefore 返回按 seq 升序的窗口（旧→新），这里正向投影，不能再反转。
+	for i := 0; i < len(entries); i++ {
 		e := entries[i]
 		var probe messagePayload
 		_ = json.Unmarshal(e.Payload, &probe)
