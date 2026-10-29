@@ -748,7 +748,6 @@ button:hover {
    .ada-scroll 内旧内容页（threads/error/login）的既有间距。 */
 
 .ada-sidebar__foot {
-  flex-direction: column;
   align-items: stretch;
   gap: 8px;
 }

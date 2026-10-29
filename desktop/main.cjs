@@ -283,6 +283,10 @@ function cleanupChildProcess() {
   }
   childProcess = null
   coreState.alive = false
+  coreState.childPid = null
+  coreState.port = 0
+  coreState.url = ''
+  coreState.endpoint = ''
 }
 
 function randomToken() { return crypto.randomBytes(24).toString('hex') }
@@ -353,6 +357,9 @@ async function startGatewaySupervisor() {
     return child
   }
   const watch = (child, fallbackAddr) => {
+    // 记下自己的网关句柄：before-quit/window-all-closed 才能按 PID 杀掉整棵进程树
+    // （Windows 下 taskkill /T 会连同 Core 子进程一起结束）。
+    childProcess = child
     const pid = child.pid || 0
     coreState.childPid = pid
     appendLauncherLog(`网关进程已拉起, PID: ${pid}`)
@@ -392,6 +399,10 @@ async function startGatewaySupervisor() {
     child.on('exit', (code, signal) => {
       appendLauncherLog(`网关退出, code: ${code}, signal: ${signal}`)
       coreState.alive = false
+      if (childProcess === child) {
+        childProcess = null
+        if (coreState.childPid === pid) coreState.childPid = null
+      }
       if (!isReady) {
         coreState.error = `网关启动失败并在就绪前退出 (code: ${code})`
         resolveReadySignal()
@@ -775,9 +786,12 @@ app.on('before-quit', () => {
   tray?.destroy()
   tray = null
 })
+app.on('will-quit', () => cleanupChildProcess())
 app.on('window-all-closed', () => {
+  // macOS 惯例外：关窗不退出应用，网关继续服务；真正退出时由 before-quit 清理。
+  if (process.platform === 'darwin') return
   cleanupChildProcess()
-  if (process.platform !== 'darwin') app.quit()
+  app.quit()
 })
 
 app.whenReady().then(async () => {

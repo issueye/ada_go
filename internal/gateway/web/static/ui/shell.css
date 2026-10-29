@@ -1162,7 +1162,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 54px;
+  height: 44px;
   flex-shrink: 0;
   padding: 0 14px 0 20px;
   border-bottom: 1px solid var(--ph-line);
