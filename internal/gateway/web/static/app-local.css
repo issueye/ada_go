@@ -879,3 +879,44 @@ select:focus {
 .ada-tray__select {
   min-width: 160px;
 }
+
+/* 终态失败：把 run 的错误原因放在会话流里，不能只留在事件流/日志里。 */
+.ada-run-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--ph-danger-ink);
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-danger-soft);
+  color: var(--ph-danger-ink);
+}
+
+.ada-run-error__icon {
+  display: flex;
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.ada-run-error__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ada-run-error__title {
+  font-size: var(--ada-text-sm);
+}
+
+.ada-run-error__detail {
+  margin: 0;
+  font-size: var(--ada-text-sm);
+  line-height: 1.5;
+}
+
+.ada-run-error__code {
+  font-size: var(--ada-text-xs);
+  opacity: 0.8;
+}

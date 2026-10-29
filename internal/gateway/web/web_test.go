@@ -1162,3 +1162,22 @@ func TestThreadComposerShowsModelPicker(t *testing.T) {
 	wantContains(t, body, `data-select-label`)
 	wantContains(t, body, "管理供应商与模型")
 }
+
+func TestThreadPageShowsRunError(t *testing.T) {
+	core := newFakeCore().
+		on("thread.get", `{
+		  "thread": {"id":"th_err","workspace":"/tmp/ws","title":"失败会话","createdAt":"2026-10-28T09:00:00Z","updatedAt":"2026-10-28T10:00:00Z","archived":false},
+		  "items": [], "seq": 1,
+		  "run": {"runId":"run_err","status":"terminal","terminal":"error","errorCode":5001,"startedAt":"2026-10-28T10:00:00Z","endedAt":"2026-10-28T10:00:01Z"},
+		  "interactions": [], "hasMore": false
+		}`).
+		on("thread.entries", `{"entries":[],"hasMore":false}`).
+		on("thread.list", emptyThreadList).
+		on("model.list", `{"models":[],"current":{"providerId":"","modelId":""}}`)
+	srv, _ := newServer(t, core)
+
+	body := serve(t, srv, "GET", "/thread/th_err", nil).Body.String()
+	wantContains(t, body, "本轮失败")
+	wantContains(t, body, "供应商调用失败")
+	wantContains(t, body, "错误码 5001")
+}

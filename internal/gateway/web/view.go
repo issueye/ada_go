@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/adag/ada-go/internal/domain"
 )
 
 // 展示层裁剪阈值：Core 已对单字段做 32KB 截断（8.3），这里再收一层，
@@ -274,12 +276,14 @@ type threadInfo struct {
 }
 
 type runView struct {
-	Status    string
-	Terminal  string
-	Label     string
-	StartedAt string
-	EndedAt   string
-	Active    bool
+	Status     string
+	Terminal   string
+	Label      string
+	StartedAt  string
+	EndedAt    string
+	Active     bool
+	ErrorCode  int
+	ErrorLabel string
 }
 
 type transcriptItem struct {
@@ -443,10 +447,12 @@ type offlineData struct {
 // buildRun 把 Core 的运行状态翻译成界面文案。
 func buildRun(rs runStateDTO) runView {
 	v := runView{
-		Status:    rs.Status,
-		Terminal:  rs.Terminal,
-		StartedAt: rs.StartedAt,
-		EndedAt:   rs.EndedAt,
+		Status:     rs.Status,
+		Terminal:   rs.Terminal,
+		StartedAt:  rs.StartedAt,
+		EndedAt:    rs.EndedAt,
+		ErrorCode:  rs.ErrorCode,
+		ErrorLabel: runErrorLabel(rs.Terminal, rs.ErrorCode),
 	}
 	switch rs.Status {
 	case "running":
@@ -476,6 +482,22 @@ func buildRun(rs runStateDTO) runView {
 		v.Label = rs.Status
 	}
 	return v
+}
+
+// runErrorLabel 把终态错误映射成给用户看的下一步；详情仍以诊断码为准。
+func runErrorLabel(terminal string, code int) string {
+	switch terminal {
+	case "error":
+		if domain.Code(code) == domain.CodeProviderError {
+			return "供应商调用失败：请检查 Base URL 与 API Key，或切换到其他模型后重试。"
+		}
+		return "本轮执行失败；请检查供应商配置与 Core 日志后重试。"
+	case "interrupted":
+		return "本轮被中断（网关重启或进程退出），可以重新发送。"
+	case "budget_exceeded":
+		return "本轮超出配置的预算；调整预算或缩短任务后重试。"
+	}
+	return ""
 }
 
 // buildThreadList 把线程列表投影成模板行。

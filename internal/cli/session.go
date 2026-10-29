@@ -1168,6 +1168,10 @@ func (s *Session) saveProviderFromPlugin(ctx context.Context, in host.ProviderIn
 // providerInfo 在配置信息上补充「环境变量/secrets 已提供密钥」的状态。
 func (s *Session) providerInfo(c provider.Config) host.ProviderInfo {
 	info := providerInfoOf(c)
+	info.Available = true
+	if asm := s.Assembly(); asm != nil && asm.Providers != nil {
+		info.Available = asm.Providers.ConfigAvailable(c.ID)
+	}
 	if info.HasAPIKey {
 		return info
 	}

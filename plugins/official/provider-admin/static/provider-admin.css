@@ -523,3 +523,13 @@
   flex-wrap: wrap;
   gap: 14px;
 }
+
+/* 适配器插件未启用时的提示（配置还在，但不能用于聊天）。 */
+.pm-notice {
+  padding: 8px 10px;
+  border: 1px solid var(--ph-warn-ink);
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-warn-soft);
+  color: var(--ph-warn-ink);
+  font-size: var(--ada-text-sm);
+}

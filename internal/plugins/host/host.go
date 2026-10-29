@@ -205,6 +205,7 @@ type ProviderInfo struct {
 	Protocol    string          `json:"protocol,omitempty"`
 	BaseURL     string          `json:"baseUrl,omitempty"`
 	Disabled    bool            `json:"disabled,omitempty"`
+	Available   bool            `json:"available"`
 	HasAPIKey   bool            `json:"hasApiKey"`
 	APIKeyHint  string          `json:"apiKeyHint,omitempty"`
 	Models      []ProviderModel `json:"models"`

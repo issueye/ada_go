@@ -311,7 +311,9 @@
     state.providers.forEach(function (p) {
       var item = el("button", "pm-item" + (p.id === state.selectedId ? " is-active" : ""));
       item.type = "button";
-      item.appendChild(el("span", "pm-dot" + (p.disabled ? " is-off" : "")));
+      var unavailable = p.disabled || p.available === false;
+      item.appendChild(el("span", "pm-dot" + (unavailable ? " is-off" : "")));
+      if (p.available === false) item.title = "适配器插件未启用";
       item.appendChild(el("span", "pm-item__name", p.displayName || p.id));
       if (state.current.providerId === p.id) {
         item.appendChild(el("span", "pm-item__badge", "当前"));
@@ -382,6 +384,10 @@
     actions.appendChild(btn("pm-icon-btn", "", "more", removeProvider));
     head.appendChild(actions);
     box.appendChild(head);
+
+    if (p.available === false) {
+      box.appendChild(el("div", "pm-notice", "供应商适配器插件未启用：请到「插件」页启用对应的 provider 插件后使用。"));
+    }
 
     // 连接信息
     var base = input("pm-input", p.baseUrl || "", "https://api.example.com/v1");
@@ -475,7 +481,7 @@
     var provider = selected() || {};
     if (isCurrent) {
       actions.appendChild(el("span", "pm-badge", "当前"));
-    } else if (!m.disabled && !provider.disabled) {
+    } else if (!m.disabled && !provider.disabled && provider.available !== false) {
       actions.appendChild(btn("pm-text-btn", "使用", "", function () { selectModel(m.id); }));
     }
     actions.appendChild(btn("pm-icon-btn", "", "edit", function () {

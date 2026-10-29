@@ -112,7 +112,7 @@ func (r *Registry) Providers() []string {
 	if r.hasConfigs {
 		out := make([]string, 0, len(r.configs))
 		for _, c := range r.configs {
-			if !c.Disabled {
+			if !c.Disabled && r.configAvailableLocked(c) {
 				out = append(out, c.ID)
 			}
 		}
@@ -120,8 +120,10 @@ func (r *Registry) Providers() []string {
 		return out
 	}
 	out := make([]string, 0, len(r.byID))
-	for id := range r.byID {
-		out = append(out, id)
+	for id, reg := range r.byID {
+		if r.bound[reg.pluginID] != nil {
+			out = append(out, id)
+		}
 	}
 	sort.Strings(out)
 	return out
@@ -145,6 +147,25 @@ func (r *Registry) Models(providerID string) []host.ModelInfo {
 		return nil
 	}
 	return append([]host.ModelInfo(nil), reg.def.Models...)
+}
+
+// ConfigAvailable 报告配置对应的适配器插件是否已加载（启用且绑定实例）。
+func (r *Registry) ConfigAvailable(providerID string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	cfg, ok := r.configByID[providerID]
+	if !ok {
+		return false
+	}
+	return r.configAvailableLocked(cfg)
+}
+
+func (r *Registry) configAvailableLocked(c Config) bool {
+	reg, ok := r.byID[c.Protocol.AdapterID()]
+	if !ok {
+		return false
+	}
+	return r.bound[reg.pluginID] != nil
 }
 
 // SetConfigs 用用户配置替换静态目录。传 nil/空切片仍是「已配置」形态

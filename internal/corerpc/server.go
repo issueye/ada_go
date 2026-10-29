@@ -88,6 +88,7 @@ type runInfo struct {
 	runID     string
 	status    string // running | terminal
 	terminal  string
+	errorCode int
 	startedAt time.Time
 	endedAt   time.Time
 	cancel    context.CancelFunc
@@ -589,6 +590,10 @@ func (s *Server) handleTurnStart(ctx context.Context, raw json.RawMessage) (any,
 			cur.cancel = nil
 			if err != nil {
 				cur.terminal = string(domain.TerminalError)
+				var de *domain.Error
+				if errors.As(err, &de) {
+					cur.errorCode = int(de.Code)
+				}
 			}
 		}
 		s.mu.Unlock()
@@ -1562,6 +1567,9 @@ func runStateJSON(r *runInfo) map[string]any {
 	}
 	if r.status == "terminal" {
 		out["terminal"] = r.terminal
+	}
+	if r.errorCode != 0 {
+		out["errorCode"] = r.errorCode
 	}
 	if !r.endedAt.IsZero() {
 		out["endedAt"] = r.endedAt.Format(time.RFC3339Nano)

@@ -26,6 +26,16 @@
           {{slot "transcript.after" .Slots.TranscriptAfter .SlotCounts.TranscriptAfter ""}}
         </div>
         <div id="live-status" class="live-status" role="status" aria-live="polite" hidden></div>
+        {{if .Run.ErrorLabel}}
+        <div class="ada-run-error" role="alert">
+          <span class="ada-run-error__icon">{{icon "i-alert" 16}}</span>
+          <div class="ada-run-error__body">
+            <strong class="ada-run-error__title">{{if eq .Run.Terminal "error"}}本轮失败{{else if eq .Run.Terminal "interrupted"}}本轮已中断{{else}}本轮未完成{{end}}</strong>
+            <p class="ada-run-error__detail">{{.Run.ErrorLabel}}</p>
+            {{if .Run.ErrorCode}}<span class="ada-run-error__code">错误码 {{.Run.ErrorCode}}</span>{{end}}
+          </div>
+        </div>
+        {{end}}
         {{else}}
         <div class="ada-empty ada-empty--newconv">
           <span class="ada-empty__mark"><img class="ada-empty__logo" src="{{asset "logo.png"}}" alt="" width="32" height="32" decoding="async"></span>

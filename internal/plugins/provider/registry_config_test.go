@@ -98,12 +98,18 @@ func TestRegistryUsesConfiguredProviders(t *testing.T) {
 	if err := r.AddProvider(hostProviderRegistration()); err != nil {
 		t.Fatal(err)
 	}
+	if err := r.Bind("adapter", new(host.Instance)); err != nil {
+		t.Fatal(err)
+	}
 	r.SetConfigs([]provider.Config{
 		{ID: "a", Name: "A", Protocol: provider.ProtocolOpenAIChat, Models: []provider.Model{{ID: "m1"}, {ID: "m2", Disabled: true}}},
 		{ID: "b", Name: "B", Protocol: provider.ProtocolOpenAIChat, Disabled: true, Models: []provider.Model{{ID: "m3"}}},
 	})
 	if got := r.Providers(); len(got) != 1 || got[0] != "a" {
 		t.Fatalf("Providers = %v, want [a]", got)
+	}
+	if !r.ConfigAvailable("a") || r.ConfigAvailable("missing") {
+		t.Fatalf("ConfigAvailable(a)=%v missing=%v", r.ConfigAvailable("a"), r.ConfigAvailable("missing"))
 	}
 	if models := r.Models("a"); len(models) != 1 || models[0].ID != "m1" {
 		t.Fatalf("Models(a) = %+v", models)
