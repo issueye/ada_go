@@ -73,12 +73,23 @@
           </details>
           <span class="ada-tool ada-tool--workspace" title="{{.Workspace}}">{{icon "i-git-branch" 14}}<span class="ada-tool__label">{{.WorkspaceName}}</span></span>
           {{if .Models}}
-          <label class="ada-model-picker" title="选择当前模型">
-            <span class="ada-model-picker__label">模型</span>
-            <select class="ada-model-picker__select" data-model-select aria-label="选择当前模型">
-              {{range .Models}}<option value="{{.ProviderID}}|{{.ModelID}}"{{if .Current}} selected{{end}}>{{.Label}}</option>{{end}}
-            </select>
-          </label>
+          <ada-select class="ada-select ada-model-picker" data-model-picker>
+            <button class="ada-select__trigger ada-model-picker__trigger" type="button" data-select-trigger aria-expanded="false" title="选择当前模型">
+              <span class="ada-model-picker__icon">{{icon "i-sparkles" 14}}</span>
+              <span class="ada-select__label ada-model-picker__label" data-select-label>{{.CurrentModelLabel}}</span>
+              <span class="ada-select__caret">{{icon "i-chevron-down" 12}}</span>
+            </button>
+            <div class="ada-select__menu ada-model-picker__menu" data-select-menu hidden>
+              <p class="ada-model-picker__group">模型</p>
+              {{range .Models}}<button class="ada-select__option ada-model-picker__option{{if .Current}} is-selected{{end}}" type="button" data-value="{{.ProviderID}}|{{.ModelID}}" data-label="{{.ShortLabel}}" aria-selected="{{if .Current}}true{{else}}false{{end}}">
+                <span class="ada-model-picker__name">{{.Label}}</span>
+                <span class="ada-model-picker__provider">{{.ProviderID}}</span>
+              </button>
+              {{end}}
+              <div class="ada-model-picker__foot"><a class="ada-model-picker__manage" href="/ext/provider-admin/providers">{{icon "i-plug" 12}}<span>管理供应商与模型</span></a></div>
+            </div>
+            <input type="hidden" name="model" data-select-input value="{{.CurrentModelValue}}">
+          </ada-select>
           {{end}}
           {{slot "composer.left" .Slots.ComposerLeft .SlotCounts.ComposerLeft ""}}
         </div>
@@ -185,7 +196,7 @@
     <form class="ada-tray__form" method="post" action="{{.Action}}">
       {{template "csrf" .}}
       <input type="hidden" name="kind" value="{{.Kind}}">
-      {{if eq .Kind "select"}}<select class="ada-input" name="value" aria-label="选择">{{range .Options}}<option value="{{.}}">{{.}}</option>{{end}}</select>
+      {{if eq .Kind "select"}}{{if .Options}}{{$first := index .Options 0}}<ada-select class="ada-select ada-tray__select"><button class="ada-select__trigger" type="button" data-select-trigger aria-expanded="false" aria-label="选择"><span class="ada-select__label" data-select-label>{{$first}}</span><span class="ada-select__caret">{{icon "i-chevron-down" 12}}</span></button><div class="ada-select__menu" data-select-menu hidden>{{range .Options}}<button class="ada-select__option" type="button" data-value="{{.}}">{{.}}</button>{{end}}</div><input type="hidden" name="value" data-select-input value="{{$first}}"></ada-select>{{end}}
       {{else if eq .Kind "input"}}<input class="ada-input" type="text" name="value" autocomplete="off" aria-label="回答">
       {{end}}
       {{if eq .Kind "confirm"}}

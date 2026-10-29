@@ -134,14 +134,27 @@
 
   /* 输入框旁的模型选择器：改选即切换（线程级；没有会话上下文时工作区级）。
      选择器在发送表单内部，不能嵌套第二个 form，所以用 fetch + CSRF。 */
-  document.addEventListener('change', function (event) {
-    var select = event.target;
-    if (!select || !select.matches || !select.matches('[data-model-select]')) return;
-    var value = String(select.value || "");
+  document.addEventListener('ada:select', function (event) {
+    var picker = event.target;
+    if (!picker || !picker.matches || !picker.matches('[data-model-picker]')) return;
+    var value = String((event.detail && event.detail.value) || "");
     var cut = value.indexOf("|");
     if (cut <= 0) return;
     var providerId = value.slice(0, cut);
     var modelId = value.slice(cut + 1);
+
+    // ada-select 默认把整个 option 文本写进 label；这里换成简短名称。
+    var labelNode = picker.querySelector("[data-select-label]");
+    var chosen = null;
+    var options = picker.querySelectorAll("[data-select-menu] [data-value]");
+    for (var i = 0; i < options.length; i++) {
+      if (options[i].getAttribute("data-value") === value) chosen = options[i];
+    }
+    if (labelNode && chosen) {
+      var shortLabel = chosen.getAttribute("data-label");
+      if (shortLabel) labelNode.textContent = shortLabel;
+    }
+
     var thread = document.querySelector("[data-thread-id]");
     var csrf = document.querySelector('meta[name="csrf-token"]');
     var body = new URLSearchParams();
@@ -150,7 +163,7 @@
     if (thread && thread.getAttribute("data-thread-id")) {
       body.set("threadId", thread.getAttribute("data-thread-id"));
     }
-    select.disabled = true;
+    picker.setAttribute("aria-busy", "true");
     fetch("/model/select", {
       method: "POST",
       credentials: "same-origin",
@@ -169,7 +182,7 @@
         throw new Error(text || ("HTTP " + res.status));
       });
     }).catch(function (err) {
-      select.disabled = false;
+      picker.removeAttribute("aria-busy");
       window.alert("切换模型失败：" + (err && err.message ? err.message : err));
     });
   });

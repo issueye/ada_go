@@ -1154,8 +1154,11 @@ func TestThreadComposerShowsModelPicker(t *testing.T) {
 	srv, _ := newServer(t, core)
 
 	body := serve(t, srv, "GET", "/thread/th_1", nil).Body.String()
-	wantContains(t, body, `data-model-select`)
-	wantContains(t, body, `value="openai|gpt-4o"`)
-	wantContains(t, body, `value="custom|deepseek" selected`)
-	wantContains(t, body, "DeepSeek · deepseek")
+	wantContains(t, body, `data-model-picker`)
+	wantContains(t, body, `<ada-select class="ada-select ada-model-picker"`)
+	wantContains(t, body, `data-value="openai|gpt-4o"`)
+	wantContains(t, body, `data-value="custom|deepseek"`)
+	wantContains(t, body, `data-label="DeepSeek"`)
+	wantContains(t, body, `data-select-label`)
+	wantContains(t, body, "管理供应商与模型")
 }

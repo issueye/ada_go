@@ -797,32 +797,99 @@ button:hover {
   margin: 0;
 }
 
-/* 输入框旁的模型选择器（线程级 / 工作区级切换，由 app.js 提交）。 */
-.ada-model-picker {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 260px;
+/* 输入框旁的模型选择器：ada-select 承载交互，触发器做成工具 chip，
+   菜单加宽以容纳“名称 + 提供商 + 管理入口”。 */
+.ada-select.ada-model-picker {
+  display: inline-block;
+  position: relative;
+  max-width: 280px;
+}
+
+.ada-model-picker__trigger {
   height: 28px;
+  gap: 6px;
   padding: 0 8px;
-  border: 1px solid var(--ph-line);
+  border-color: var(--ph-line);
   border-radius: var(--ada-radius-pill);
   background: var(--ph-surface);
+  font-size: var(--ada-text-xs);
+}
+
+.ada-model-picker__icon {
+  display: flex;
+  flex: 0 0 auto;
+  color: var(--ph-faint);
 }
 
 .ada-model-picker__label {
-  flex: 0 0 auto;
+  flex: 1;
+  min-width: 0;
+  color: var(--ph-ink);
+}
+
+.ada-model-picker__menu {
+  top: auto;
+  bottom: calc(100% + 6px);
+  width: 360px;
+  max-width: calc(100vw - 48px);
+  max-height: 360px;
+  right: auto;
+}
+
+.ada-model-picker__group {
+  margin: 4px 8px 6px;
   font-size: var(--ada-text-xs);
   color: var(--ph-faint);
 }
 
-.ada-model-picker__select {
-  min-width: 0;
-  max-width: 220px;
+.ada-model-picker__option {
+  width: 100%;
   border: 0;
   background: transparent;
-  color: var(--ph-ink);
-  font: inherit;
+  font-family: inherit;
+  text-align: left;
+}
+
+.ada-model-picker__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ada-model-picker__provider {
+  flex: 0 0 auto;
+  color: var(--ph-faint);
   font-size: var(--ada-text-xs);
-  outline: none;
+}
+
+.ada-model-picker__foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-top: 4px;
+  padding: 6px 4px 2px;
+  border-top: 1px solid var(--ph-line);
+  background: var(--ph-elevated);
+}
+
+.ada-model-picker__manage {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: var(--ada-radius-sm);
+  color: var(--ph-brand-ink);
+  font-size: var(--ada-text-sm);
+  text-decoration: none;
+}
+
+.ada-model-picker__manage:hover {
+  background: var(--ph-subtle);
+}
+
+/* 交互托盘里的选择：与模型选择器共用 ada-select，宽度随托盘表单。 */
+.ada-tray__select {
+  min-width: 160px;
 }

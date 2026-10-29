@@ -252,13 +252,16 @@ type threadData struct {
 	Interactions []interactionView
 	TurnKey      string
 	// Models 是当前可选的供应商/模型（model.list 投影，供输入框旁的选择器）。
-	Models []modelOption
+	Models            []modelOption
+	CurrentModelLabel string
+	CurrentModelValue string
 }
 
 type modelOption struct {
 	ProviderID string
 	ModelID    string
 	Label      string
+	ShortLabel string
 	Current    bool
 }
 

@@ -69,6 +69,81 @@
     return window.adaAPI("provider-admin", path, { method: "POST", body: body });
   }
 
+  // 使用基座的确认弹窗（ada-modal），不再弹原生 window.confirm。
+  function confirmAction(message, onConfirm) {
+    var dialog = document.querySelector("[data-confirm-dialog]");
+    if (!dialog || !window.AdaComponents || typeof window.AdaComponents.openModal !== "function") {
+      status("缺少确认弹窗组件，操作已取消。", "error");
+      return;
+    }
+    var messageNode = dialog.querySelector("[data-confirm-message]");
+    if (messageNode) messageNode.textContent = message;
+    var ok = dialog.querySelector("[data-confirm-ok]");
+    if (!ok) {
+      status("确认弹窗缺少确认按钮，操作已取消。", "error");
+      return;
+    }
+    function cleanup() {
+      ok.removeEventListener("click", onOk);
+      dialog.removeEventListener("ada:modal-close", cleanup);
+    }
+    function onOk() {
+      cleanup();
+      onConfirm();
+    }
+    ok.addEventListener("click", onOk);
+    dialog.addEventListener("ada:modal-close", cleanup);
+    window.AdaComponents.openModal("confirm");
+  }
+
+  // 用 ada-select 渲染一个下拉；options 是 [value, label] 数组。
+  function adaSelect(options, currentValue, onChange) {
+    var wrap = document.createElement("ada-select");
+    wrap.className = "ada-select";
+
+    var trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "ada-select__trigger";
+    trigger.setAttribute("data-select-trigger", "");
+    trigger.setAttribute("aria-expanded", "false");
+    var label = el("span", "ada-select__label");
+    var caret = el("span", "ada-select__caret");
+    caret.appendChild(icon("chevron-down", 12));
+    trigger.appendChild(label);
+    trigger.appendChild(caret);
+    wrap.appendChild(trigger);
+
+    var menu = el("div", "ada-select__menu");
+    menu.setAttribute("data-select-menu", "");
+    menu.hidden = true;
+    options.forEach(function (opt) {
+      var selected = opt[0] === currentValue;
+      var item = document.createElement("button");
+      item.type = "button";
+      item.className = "ada-select__option" + (selected ? " is-selected" : "");
+      item.setAttribute("data-value", opt[0]);
+      item.setAttribute("aria-selected", selected ? "true" : "false");
+      item.textContent = opt[1];
+      if (selected) label.textContent = opt[1];
+      menu.appendChild(item);
+    });
+    wrap.appendChild(menu);
+
+    var hidden = document.createElement("input");
+    hidden.type = "hidden";
+    hidden.setAttribute("data-select-input", "");
+    hidden.value = currentValue;
+    wrap.appendChild(hidden);
+    if (!label.textContent) label.textContent = "请选择";
+
+    wrap.addEventListener("ada:select", function (event) {
+      var value = event.detail && event.detail.value;
+      if (!value) return;
+      onChange(value);
+    });
+    return wrap;
+  }
+
   function selected() {
     for (var i = 0; i < state.providers.length; i++) {
       if (state.providers[i].id === state.selectedId) return state.providers[i];
@@ -166,15 +241,16 @@
   function removeProvider() {
     var p = selected();
     if (!p) return;
-    if (!window.confirm("删除供应商「" + (p.displayName || p.id) + "」？其模型配置会一起删除。")) return;
-    api("/remove", { id: p.id })
-      .then(function () {
-        state.providers = state.providers.filter(function (x) { return x.id !== p.id; });
-        state.selectedId = state.providers.length ? state.providers[0].id : "";
-        status("供应商已删除", "success");
-        render();
-      })
-      .catch(fail);
+    confirmAction("删除供应商「" + (p.displayName || p.id) + "」？其模型配置会一起删除。", function () {
+      api("/remove", { id: p.id })
+        .then(function () {
+          state.providers = state.providers.filter(function (x) { return x.id !== p.id; });
+          state.selectedId = state.providers.length ? state.providers[0].id : "";
+          status("供应商已删除", "success");
+          render();
+        })
+        .catch(fail);
+    });
   }
 
   function fetchModels() {
@@ -315,22 +391,15 @@
     base.addEventListener("change", function () { saveProvider({ baseUrl: base.value.trim() }); });
     box.appendChild(field("Base URL", base));
 
-    var protocol = document.createElement("select");
-    protocol.className = "pm-input";
-    [
-      ["openai_chat", "Chat Completions (/chat/completions)"],
-      ["openai_responses", "OpenAI Responses"],
-      ["anthropic", "Anthropic Messages"],
-    ].forEach(function (opt) {
-      var o = document.createElement("option");
-      o.value = opt[0];
-      o.textContent = opt[1];
-      if ((p.protocol || "openai_chat") === opt[0]) o.selected = true;
-      protocol.appendChild(o);
-    });
-    protocol.addEventListener("change", function () {
-      saveProvider({ protocol: protocol.value }, "API 格式已更新");
-    });
+    var protocol = adaSelect(
+      [
+        ["openai_chat", "Chat Completions (/chat/completions)"],
+        ["openai_responses", "OpenAI Responses"],
+        ["anthropic", "Anthropic Messages"],
+      ],
+      p.protocol || "openai_chat",
+      function (value) { saveProvider({ protocol: value }, "API 格式已更新"); }
+    );
     box.appendChild(field("API 格式", protocol));
 
     // API Key：留空保持原值
@@ -349,9 +418,10 @@
     reveal.title = "显示/隐藏密钥";
     var clear = btn("pm-icon-btn", "", "trash", function () {
       if (!p.hasApiKey && !keyInput.value) return;
-      if (!window.confirm("清空这个供应商的 API Key？")) return;
-      keyInput.value = "";
-      saveProvider({ apiKey: "", clearApiKey: true }, "API Key 已清空");
+      confirmAction("清空这个供应商的 API Key？", function () {
+        keyInput.value = "";
+        saveProvider({ apiKey: "", clearApiKey: true }, "API Key 已清空");
+      });
     });
     clear.title = "清空密钥";
     keyRow.appendChild(keyInput);
@@ -424,8 +494,7 @@
       renderDetail();
     }));
     actions.appendChild(btn("pm-icon-btn", "", "trash", function () {
-      if (!window.confirm("删除模型「" + m.id + "」？")) return;
-      removeModel(index);
+      confirmAction("删除模型「" + m.id + "」？", function () { removeModel(index); });
     }));
     var sw = el("label", "pm-switch pm-switch--sm");
     var cb = document.createElement("input");

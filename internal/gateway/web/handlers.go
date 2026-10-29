@@ -95,14 +95,17 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 	}
 	base := s.base(r, "chat", title, threads, id, true)
 	base.TopbarActions = threadTopbarActions(id, run.Active)
+	models, modelLabel, modelValue := s.modelOptions(r, id)
 	data := threadData{
-		baseData:     base,
-		Thread:       buildThreadInfo(get.Thread),
-		Run:          run,
-		Transcript:   transcript,
-		Interactions: buildInteractions(get.Interactions, id, s.csrf(r)),
-		TurnKey:      newIdempotencyKey(),
-		Models:       s.modelOptions(r, id),
+		baseData:          base,
+		Thread:            buildThreadInfo(get.Thread),
+		Run:               run,
+		Transcript:        transcript,
+		Interactions:      buildInteractions(get.Interactions, id, s.csrf(r)),
+		TurnKey:           newIdempotencyKey(),
+		Models:            models,
+		CurrentModelLabel: modelLabel,
+		CurrentModelValue: modelValue,
 	}
 	if run.Active {
 		// 无 JS 轮询：运行中每 2 秒刷新一次，完成即停止（7.8）。
@@ -535,10 +538,10 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 
 // modelOptions 是输入框旁模型选择器的数据（model.list 投影）；失败时返回空列表，
 // 不阻塞会话页渲染。
-func (s *Server) modelOptions(r *http.Request, threadID string) []modelOption {
+func (s *Server) modelOptions(r *http.Request, threadID string) ([]modelOption, string, string) {
 	raw, err := s.call(r, "model.list", map[string]any{"threadId": threadID})
 	if err != nil {
-		return nil
+		return nil, "", ""
 	}
 	var res struct {
 		Models []struct {
@@ -556,28 +559,42 @@ func (s *Server) modelOptions(r *http.Request, threadID string) []modelOption {
 		} `json:"current"`
 	}
 	if err := json.Unmarshal(raw, &res); err != nil {
-		return nil
+		return nil, "", ""
 	}
 	out := make([]modelOption, 0, len(res.Models))
+	currentLabel := ""
 	for _, m := range res.Models {
 		if m.Model.ProviderID == "" || m.Model.ModelID == "" {
 			continue
 		}
-		label := strings.TrimSpace(m.Info.DisplayName)
-		if label == "" {
-			label = m.Model.ModelID
+		short := strings.TrimSpace(m.Info.DisplayName)
+		if short == "" {
+			short = m.Model.ModelID
 		}
-		if label != m.Model.ModelID {
+		label := short
+		if short != m.Model.ModelID {
 			label += " · " + m.Model.ModelID
+		}
+		current := res.Current.ProviderID == m.Model.ProviderID && res.Current.ModelID == m.Model.ModelID
+		if current {
+			currentLabel = short
 		}
 		out = append(out, modelOption{
 			ProviderID: m.Model.ProviderID,
 			ModelID:    m.Model.ModelID,
 			Label:      label,
-			Current:    res.Current.ProviderID == m.Model.ProviderID && res.Current.ModelID == m.Model.ModelID,
+			ShortLabel: short,
+			Current:    current,
 		})
 	}
-	return out
+	value := ""
+	if res.Current.ProviderID != "" && res.Current.ModelID != "" {
+		value = res.Current.ProviderID + "|" + res.Current.ModelID
+	}
+	if currentLabel == "" {
+		currentLabel = "选择模型"
+	}
+	return out, currentLabel, value
 }
 
 // handleCancel 取消当前轮。
