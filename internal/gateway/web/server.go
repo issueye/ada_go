@@ -283,6 +283,7 @@ func (s *Server) base(r *http.Request, page, title string, threads []threadSumma
 		ProductName:         s.cfg.ProductName,
 		BrandName:           s.cfg.BrandName,
 		ProductBadge:        badge,
+		Flash:               flashFromQuery(r),
 		Locale:              s.cfg.Locale,
 		Identity:            s.cfg.Identity,
 		LoginPath:           s.cfg.LoginPath,
@@ -446,6 +447,18 @@ func newIdempotencyKey() string {
 }
 
 var fallbackSeq atomic.Uint64
+
+// flashFromQuery 把 ?error= / ?notice= 转成页面提示条（插件启停等动作的业务回执）。
+func flashFromQuery(r *http.Request) template.HTML {
+	q := r.URL.Query()
+	if msg := strings.TrimSpace(q.Get("error")); msg != "" {
+		return flashHTML("error", clip(msg, 600))
+	}
+	if msg := strings.TrimSpace(q.Get("notice")); msg != "" {
+		return flashHTML("success", clip(msg, 600))
+	}
+	return ""
+}
 
 // productBadge 从“品牌名 + 产品名”里拆出产品徽标（ada-go Headless → Headless）。
 func productBadge(brand, product string) string {

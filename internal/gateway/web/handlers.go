@@ -593,11 +593,12 @@ func (s *Server) collectPlugins(r *http.Request) []pluginRow {
 
 // handleExtensionsReload 重载全部 agent 插件（前端插件在装配期固定，不在此处重载）。
 func (s *Server) handleExtensionsReload(w http.ResponseWriter, r *http.Request) {
+	path := safeReturnPath(r)
 	if _, err := s.call(r, "plugin.reload", map[string]any{}); err != nil {
-		s.renderCoreError(w, r, err, "/extensions")
+		redirect(w, flashRedirect(path, "error", cleanRPCError(err)))
 		return
 	}
-	redirect(w, "/extensions")
+	redirect(w, flashRedirect(path, "notice", "插件已重载"))
 }
 
 // handleAgentPluginsReload 与 handleExtensionsReload 同义（a_da 的两个按钮）。
@@ -615,15 +616,49 @@ func (s *Server) handlePluginDisable(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) setPluginEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
 	id := strings.TrimSpace(r.PathValue("id"))
+	path := safeReturnPath(r)
 	if id == "" {
-		s.renderError(w, r, http.StatusBadRequest, "缺少插件 id", "请从扩展页重新操作。", "", "/extensions", "返回")
+		redirect(w, flashRedirect(path, "error", "缺少插件 id"))
 		return
 	}
 	if _, err := s.call(r, "plugin.setEnabled", map[string]any{"pluginId": id, "enabled": enabled}); err != nil {
-		s.renderCoreError(w, r, err, "/extensions")
+		// 业务拒绝（例如禁用唯一审批策略插件）回到列表用提示条说明，不渲染 502。
+		redirect(w, flashRedirect(path, "error", cleanRPCError(err)))
 		return
 	}
-	redirect(w, safeReturnPath(r))
+	action := "已启用"
+	if !enabled {
+		action = "已停用"
+	}
+	redirect(w, flashRedirect(path, "notice", action+"插件 "+id))
+}
+
+// flashRedirect 给回跳地址加上提示参数。
+func flashRedirect(path, kind, msg string) string {
+	if path == "" {
+		path = "/"
+	}
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	return path + sep + kind + "=" + url.QueryEscape(msg)
+}
+
+// cleanRPCError 去掉 relay 传输前缀，只留 Core 的人话错误。
+func cleanRPCError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.TrimSpace(err.Error())
+	msg = strings.TrimPrefix(msg, "relay: ")
+	if i := strings.Index(msg, "RPC 错误 "); i >= 0 {
+		rest := msg[i+len("RPC 错误 "):]
+		if j := strings.Index(rest, ": "); j >= 0 {
+			msg = rest[j+2:]
+		}
+	}
+	return clip(msg, 600)
 }
 
 // ---- 通用 ----------------------------------------------------------------

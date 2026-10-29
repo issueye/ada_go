@@ -1003,6 +1003,40 @@ func TestPluginsUnifiedListAndDetail(t *testing.T) {
 	}
 }
 
+// 业务拒绝（例如禁用唯一审批策略插件）回到插件页用提示条说明，而不是 502 错误页。
+func TestPluginToggleRejectionShowsFlash(t *testing.T) {
+	core := newFakeCore().
+		on("thread.list", emptyThreadList).
+		on("plugin.list", `{"plugins":[{"id":"policy-default","name":"默认审批策略","enabled":true,"status":"ready","contributions":{"backend":true}}]}`).
+		fail("plugin.setEnabled", errors.New("relay: RPC 错误 3005: plugin policy-default 是审批策略插件，目录里仍有写/执行工具，禁用会被拒绝（失败关闭，5.4）"))
+	srv, _ := newServer(t, core)
+
+	req := httptest.NewRequest(http.MethodPost, "/extensions/policy-default/disable", nil)
+	req.Header.Set("Referer", "http://example.com/extensions")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("停用被拒 = %d, want 303 (body=%s)", rec.Code, rec.Body.String())
+	}
+	loc := rec.Header().Get("Location")
+	if !strings.HasPrefix(loc, "/extensions?error=") {
+		t.Fatalf("Location = %q, want /extensions?error=…", loc)
+	}
+	u, err := url.Parse(loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := u.Query().Get("error")
+	wantContains(t, msg, "审批策略插件")
+	wantNotContains(t, msg, "relay:")
+	wantNotContains(t, msg, "RPC 错误")
+
+	page := serve(t, srv, "GET", loc, nil).Body.String()
+	wantContains(t, page, "审批策略插件")
+	wantContains(t, page, `data-flash="error"`)
+	wantNotContains(t, page, "Core 暂时不可用")
+}
+
 // RenderSlot 是唯一的插槽输出函数：签名固定为 template.HTML，空贡献回退。
 func TestRenderSlotWrapsBodyAndFallsBack(t *testing.T) {
 	// 编译期固定签名：body/fallback 只能是 template.HTML，普通 string 不会通过。
