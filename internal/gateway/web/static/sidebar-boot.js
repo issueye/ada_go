@@ -11,6 +11,17 @@
  */
 (function () {
   "use strict";
+  // 告诉服务端「这个浏览器有 JS」：有 JS 时运行中的会话页走 SSE 增量，不再带
+  // <meta refresh>。那个标签一旦被解析就会排队刷新，JS 之后删掉也取消不了，
+  // 整个运行期会变成每 2 秒整页重载一次。没有 JS 的客户端没有这个 cookie，
+  // 服务端继续发 meta refresh 轮询。
+  try {
+    if (document.cookie.indexOf("adag_js=1") === -1) {
+      document.cookie = "adag_js=1; path=/; max-age=31536000; samesite=lax";
+    }
+  } catch (err) {
+    /* cookie 不可用：退回服务端轮询 */
+  }
   try {
     if (!window.matchMedia("(min-width: 761px)").matches) return;
     if (window.localStorage.getItem("a_da_sidebar_collapsed") !== "1") return;

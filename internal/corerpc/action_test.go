@@ -1,7 +1,7 @@
 package corerpc_test
 
-// action.invoke 的数据面验收：ui-task-plan 的 thread.tray 绑定指向 tools-plan 的
-// plan 读动作； Gateway 渲染桥预取的就是这条路（M4，7.5）。
+// action.invoke 的数据面验收：tools-plan 前端段的 slot_chat_corner 绑定指向自身
+// 的 plan 读动作； Gateway 渲染桥预取的就是这条路（M4，7.5）。
 
 import (
 	"encoding/json"

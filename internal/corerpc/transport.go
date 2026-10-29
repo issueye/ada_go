@@ -72,6 +72,9 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	// 与 Gateway 侧的 relay 同一条上限（08 §8.1：2MB）。库默认 32KB 会让大一点的
+	// tool.result、thread.get 请求把连接读断，页面随后整页退化成「Core 暂时不可用」。
+	conn.SetReadLimit(domain.RPCMessageMaxBytes)
 	c := newClient(conn)
 	s.mu.Lock()
 	s.conns[c] = struct{}{}

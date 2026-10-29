@@ -15,8 +15,8 @@ import (
 var officialPluginIDs = []string{
 	"provider-openai-chat", "provider-anthropic-messages", "provider-openai-responses",
 	"tools-fs", "tools-shell", "tools-git", "tools-plan", "tools-ask", "tools-skill", "tools-subagent",
-	"policy-default", "persona-coding", "ui-todo", "ui-ask-user", "provider-admin", "token-usage",
-	"ui-task-plan", "ui-hello-tsx",
+	"policy-default", "persona-coding", "provider-admin", "token-usage",
+	"ui-hello-tsx",
 }
 
 // TestConformanceBoundary 是 10 §11.1「边界」分层在 M0 能跑的两条：

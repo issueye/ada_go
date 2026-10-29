@@ -1,9 +1,11 @@
 /**
  * 供应商管理（official/provider-admin）：Master-Detail 的模型设置页。
  *
- * 首屏只渲染骨架；数据与操作全部经本插件 route（GET /state、POST /save、
- * /remove、/fetch-models、/select）。API Key 由后端保存，页面只显示
- * “已配置 + 尾号”，输入框留空表示保持原值。
+ * 左侧是供应商列表；右侧详情分「供应商信息」「模型列表」两个页签，由
+ * provider-admin.js 渲染与切换。首屏只渲染骨架；数据与操作全部经本插件
+ * route（GET /state、POST /save、/remove、/fetch-models、/select）。API Key
+ * 由后端保存，页面只显示“已配置 + 尾号”，输入框留空表示保持原值；
+ * 「获取模型」把供应商 /models 的结果放进弹窗里挑，而不是直接摊在页面上。
  */
 export default function Page(_props: any) {
   return (

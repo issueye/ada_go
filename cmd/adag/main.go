@@ -235,9 +235,11 @@ func cmdCore(args []string, stdout io.Writer) error {
 		BaseURL:    *baseURL,
 		AllowHosts: allowHosts,
 		Fake:       *fake,
-		In:         strings.NewReader(""),
-		Out:        io.Discard,
-		Err:        os.Stderr,
+		// Core 由 Gateway 托管：交互由网页里的托盘回答（没有终端 stdin）。
+		HasUI: true,
+		In:    strings.NewReader(""),
+		Out:   io.Discard,
+		Err:   os.Stderr,
 	})
 	if err != nil {
 		return err

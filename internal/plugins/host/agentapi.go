@@ -701,7 +701,7 @@ func (p *Instance) uiObject(rt *mojsRuntime, c *call, hc Context) moejs.Value {
 	_ = ui.SetProp(r, r.KeyFromGoString("available"), engine.Bool(hc.UI != nil))
 	ask := func(kind domain.InteractionKind) engine.NativeFunc {
 		return func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
-			req := UIRequest{Kind: kind, Title: moejs.Arg(args, 0).String()}
+			req := UIRequest{PluginID: p.id, Kind: kind, Title: moejs.Arg(args, 0).String()}
 			switch kind {
 			case domain.InteractionSelect:
 				req.Options = p.stringList(rt, moejs.Arg(args, 1))
@@ -751,6 +751,37 @@ func (p *Instance) uiObject(rt *mojsRuntime, c *call, hc Context) moejs.Value {
 	} {
 		_ = ui.SetProp(r, r.KeyFromGoString(item.name), rt.Function(item.name, 3, ask(item.kind)))
 	}
+	// form：多题分步表单。插件传题目数组的 JSON 串（JSON.stringify(questions)），
+	// 界面按「上一题/下一题/提交」翻阅；回答是 {"answers":[...]} 的 JSON 串。
+	_ = ui.SetProp(r, r.KeyFromGoString("form"), rt.Function("form", 2,
+		func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+			raw := strings.TrimSpace(moejs.Arg(args, 0).String())
+			if raw == "" || !json.Valid([]byte(raw)) {
+				return moejs.Undefined(), r.TypeError("ui.form(questions): 需要题目数组的 JSON 串")
+			}
+			req := UIRequest{PluginID: p.id, Kind: domain.InteractionForm,
+				Title: "请回答以下问题", Payload: json.RawMessage(raw)}
+			if opts := moejs.Arg(args, 1); opts.IsObject() {
+				if v, err := rt.Get(opts, "timeoutMs"); err == nil {
+					if n, ok := jsInt(v); ok && n > 0 {
+						req.TimeoutMS = int(n)
+					}
+				}
+			}
+			return p.hostAsync(c, "ui.form", func(ctx context.Context) (any, error) {
+				if hc.UI == nil {
+					return nil, nil // 未授予：按拒绝处理（INV-4 失败关闭）
+				}
+				res, err := hc.UI(ctx, req)
+				if err != nil {
+					return nil, err
+				}
+				if res.Status != domain.InteractionAccepted {
+					return nil, nil
+				}
+				return res.Value, nil
+			}), nil
+		}))
 	_ = ui.SetProp(r, r.KeyFromGoString("notify"), rt.Function("notify", 2,
 		func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
 			if hc.Log == nil {

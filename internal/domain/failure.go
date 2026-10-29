@@ -1,7 +1,7 @@
 package domain
 
 // InteractionKind 是通用交互的类型，取值来源 04 §5.7 的 interactions.kind 列
-// （confirm|select|input；对应 05 §6.3 UIContext 的 confirm/select/input）。
+// （confirm|select|input|form；对应 05 §6.3 UIContext 的 confirm/select/input/form）。
 // 它是通用交互原语、不含审批语义；审批规则属于“官方默认策略插件”（03 §5.6）。
 type InteractionKind string
 
@@ -9,6 +9,9 @@ const (
 	InteractionConfirm InteractionKind = "confirm" // 是/否。
 	InteractionSelect  InteractionKind = "select"  // 从选项中选一个。
 	InteractionInput   InteractionKind = "input"   // 自由文本输入。
+	// InteractionForm 是多题分步表单：Body 存题目数组（JSON），回答是
+	// {"answers":[...]} 的 JSON 串（与题目同序）。界面用「上一题/下一题/提交」翻阅。
+	InteractionForm InteractionKind = "form"
 )
 
 // InteractionStatus 是用户交互的状态机，取值来源 04 §5.7 的 interactions.status 列

@@ -12,7 +12,7 @@ import (
 )
 
 // codingPlugins 是 08 §8.6 与 development-plan §1.1 冻结的官方插件清单
-// （13 项：10 个后端实例 + 3 个纯前端插件；provider-admin 同时提供 route 后端与页面）。
+// （11 项：10 个后端实例；tools-plan/tools-ask 的后端与卡片同属一个插件，provider-admin 同时提供 route 后端与页面，token-usage 是纯前端）。
 // 只出现在测试代码里：基座源码不认得它们（1.5.5 的硬边界），选择权在产品声明。
 var codingPlugins = []string{
 	"provider-openai-chat",
@@ -24,15 +24,13 @@ var codingPlugins = []string{
 	"tools-skill",
 	"policy-default",
 	"persona-coding",
-	"ui-todo",
-	"ui-ask-user",
 	"provider-admin",
 	"token-usage",
 }
 
 // TestProductDeclarations 断言产品声明这一侧的契约（08 §8.6、M0.3/M0.4 交付物）：
 //
-//   - products/coding.agent.json 用 coreapp.LoadProduct 加载通过，13 项插件、
+//   - products/coding.agent.json 用 coreapp.LoadProduct 加载通过，11 项插件、
 //     能力位与 policies 逐字段对表；
 //   - products/skeleton.agent.json 的 plugins 是空数组（不是缺失字段），
 //     coreapp.Assemble 得到空基座且 EmptyStateNotice() 非空 ——
@@ -47,7 +45,7 @@ func TestProductDeclarations(t *testing.T) {
 		mustNoErr(t, "LoadProduct(coding)", err)
 		mustEqual(t, "产品 id", "coding", p.ID)
 		mustEqual(t, "产品名", "ada-go Coding", p.Name)
-		mustCount(t, "coding 的官方插件数", 13, len(p.Plugins))
+		mustCount(t, "coding 的官方插件数", 11, len(p.Plugins))
 		for i, want := range codingPlugins {
 			if p.Plugins[i] != want {
 				t.Errorf("第 %d 项插件: want=%s got=%s", i+1, want, p.Plugins[i])

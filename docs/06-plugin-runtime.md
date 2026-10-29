@@ -164,14 +164,12 @@ agent.on("tool.beforeCall", async (event, ctx) => {
 | 工具 | `tools-fs` | TS | `read_file` / `write_file` / `edit_file` / `list_files` / `search_files` |
 | 工具 | `tools-shell` | TS | 命令执行与后台任务；进程树管理由宿主能力完成 |
 | 工具 | `tools-git` | TS | 单工具 `git`，按 action 分派 |
-| 工具 | `tools-plan` | TS | `todo`、`finish` |
-| 工具 | `tools-ask` | TS | `ask_user` 工具（提问卡片由 `ui-ask-user` 前端插件渲染） |
+| 工具 + UI | `tools-plan` | TS + TSX | `update_plan`/`read_plan` 工具，以及 `chat.corner` 的 Todo 卡片（同一插件的前端段，取自己的 `plan` 只读动作） |
+| 工具 + UI | `tools-ask` | TS + TSX | `ask_user` 工具，以及 `thread.tray` 的提问卡片（同一插件的前端段，数据来自线程交互投影） |
 | 工具 | `tools-skill` | TS | `read_skill` |
 | 工具 | `tools-subagent` | TS | `invoke_subagent`（v1.5） |
 | 策略 | `policy-default` | TS | `tool.beforeCall` + `ctx.ui`；readonly/ask/auto/full；角色 `tool-policy` |
 | 提示词 | `persona-coding` | TS | `registerPrompt`：编码助手人格与领域规则 |
-| UI | `ui-todo` | TSX | 把 `tools-plan` 的计划投影成 `chat.corner` 的 Todo 卡片（真实动作数据，无示例回退） |
-| UI | `ui-ask-user` | TSX | `thread.tray` 的待答交互卡片（数据来自线程交互投影，提交回基座路由） |
 | UI | `provider-admin` | TS + TSX + JS | 模型设置：Master-Detail 管理供应商/端点/API 格式/密钥/模型清单，拉取 `/models`，切换当前模型；页面经插件 route 调用，密钥只显示尾号 |
 | UI | `token-usage` | TSX | 工作区/线程 Token 用量页面与概览卡片（`usage.get`） |
 | UI | `ui-hello-tsx` | TSX | 示例：页面、仪表盘、API、插槽 |

@@ -318,9 +318,77 @@
     }
   });
 
+  // 打开会话先落到最新一条：不置底的话实时输出在视口外，用户看到的是
+  // “发完消息什么也没发生”。同步赋值，不加平滑（见 .ada-scroll 的注释）。
+  function scrollChatToBottom() {
+    var scroller = document.getElementById('chat-scroll');
+    if (!scroller) return;
+    scroller.scrollTop = scroller.scrollHeight;
+  }
+
+  /* ── 分步表单（ask_user 一次问多个）：上一题 / 下一题 / 提交 ─────────────
+     没有 JS 时所有题目一起展开、直接提交也能用（字段名 q0、q1…，基座按序拼成
+     answers）；这里只做翻阅与按钮显隐，答案仍由表单本身提交。 */
+  function bindAskWizards(root) {
+    var forms = (root || document).querySelectorAll('[data-ask-form]');
+    for (var i = 0; i < forms.length; i += 1) {
+      var form = forms[i];
+      if (form.getAttribute('data-ask-bound') === '1') continue;
+      form.setAttribute('data-ask-bound', '1');
+      setupAskWizard(form);
+    }
+  }
+
+  function setupAskWizard(form) {
+    var steps = form.querySelectorAll('[data-ask-step]');
+    if (!steps.length) return;
+    var prev = form.querySelector('[data-ask-prev]');
+    var next = form.querySelector('[data-ask-next]');
+    var submit = form.querySelector('[data-ask-submit]');
+    var counter = form.querySelector('[data-ask-current]');
+    var index = 0;
+
+    function render() {
+      var last = steps.length - 1;
+      for (var i = 0; i < steps.length; i += 1) {
+        steps[i].hidden = i !== index;
+      }
+      if (prev) prev.disabled = index === 0;
+      if (next) next.hidden = index === last;
+      if (submit) submit.hidden = index !== last;
+      if (counter) counter.textContent = String(index + 1);
+      var field = steps[index].querySelector('input, select, [data-select-trigger]');
+      if (field && field.focus) {
+        try {
+          field.focus({ preventScroll: true });
+        } catch (err) {
+          field.focus();
+        }
+      }
+    }
+
+    if (next) {
+      next.addEventListener('click', function () {
+        if (index >= steps.length - 1) return;
+        index += 1;
+        render();
+      });
+    }
+    if (prev) {
+      prev.addEventListener('click', function () {
+        if (index <= 0) return;
+        index -= 1;
+        render();
+      });
+    }
+    render();
+  }
+
   function boot() {
     wireDialog();
     autoDismissFlashes();
+    scrollChatToBottom();
+    bindAskWizards(document);
     // 恢复上次的折叠偏好（宽屏）并让按钮文案与真实状态一致
     onBreakpointChange();
   }

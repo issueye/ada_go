@@ -106,6 +106,39 @@ var iconDefs = []iconDef{
 	{"i-wave", `<path d="M2 12h2M7 7v10M12 3v18M17 7v10M22 12h-2"/>`},
 }
 
+// toolIcon 给工具折叠行挑图标：文件、目录、终端、git、计划各自可辨，
+// 认不出来的退回扳手。工具名来自插件（第三方也会有），所以按关键字归类，
+// 顺序即优先级（"skill_search" 要落在 skill，而不是 search）。
+func toolIcon(name string) string {
+	n := strings.ToLower(strings.TrimSpace(name))
+	switch {
+	case n == "":
+		return "i-wrench"
+	case strings.Contains(n, "git"):
+		return "i-git-branch"
+	case strings.Contains(n, "skill"):
+		return "i-sparkles"
+	case strings.Contains(n, "plan"), strings.Contains(n, "todo"), strings.Contains(n, "task"):
+		return "i-list"
+	case strings.Contains(n, "ask"), strings.Contains(n, "question"):
+		return "i-bot"
+	case strings.Contains(n, "search"), strings.Contains(n, "grep"), strings.Contains(n, "find"):
+		return "i-search"
+	case strings.Contains(n, "list"), strings.Contains(n, "glob"), strings.Contains(n, "dir"):
+		return "i-folder"
+	case strings.Contains(n, "write"), strings.Contains(n, "edit"), strings.Contains(n, "patch"):
+		return "i-edit"
+	case strings.Contains(n, "read"), strings.Contains(n, "file"), strings.Contains(n, "cat"):
+		return "i-file"
+	case strings.Contains(n, "run"), strings.Contains(n, "shell"), strings.Contains(n, "exec"),
+		strings.Contains(n, "command"), strings.Contains(n, "bash"), strings.Contains(n, "terminal"):
+		return "i-terminal"
+	case strings.Contains(n, "fetch"), strings.Contains(n, "http"), strings.Contains(n, "web"):
+		return "i-cloud"
+	}
+	return "i-wrench"
+}
+
 func iconHTML(key string, size int) template.HTML {
 	for _, def := range iconDefs {
 		if def.key == key {

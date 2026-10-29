@@ -79,11 +79,13 @@ func (f *sessionFlags) open(ctx context.Context, interactive bool) (*cli.Session
 		AllowHosts:  f.allowHosts,
 		Fake:        f.fake,
 		Interactive: interactive,
-		ThreadID:    f.thread,
-		In:          os.Stdin,
-		Out:         os.Stdout,
-		Err:         os.Stderr,
-		EventsPath:  f.events,
+		// 交互模式的终端就是界面；print 模式没有界面，ask 类工具按失败关闭。
+		HasUI:      interactive,
+		ThreadID:   f.thread,
+		In:         os.Stdin,
+		Out:        os.Stdout,
+		Err:        os.Stderr,
+		EventsPath: f.events,
 	})
 }
 

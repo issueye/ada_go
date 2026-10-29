@@ -1,7 +1,7 @@
 {
   "id": "headless",
   "name": "ada-go Headless",
-  "description": "M1 无头内核的可运行产品：OpenAI Chat provider + 文件/命令/计划/提问工具 + 默认审批策略，以及 Todo/提问/供应商/Token 用量四个官方前端插件。",
+  "description": "M1 无头内核的可运行产品：OpenAI Chat provider + 文件/命令/计划/提问工具（计划与提问的卡片随各自的工具插件一起提供）+ 默认审批策略，以及供应商管理/Token 用量两个独立前端插件。",
   "plugins": [
     "provider-openai-chat",
     "tools-fs",
@@ -9,8 +9,6 @@
     "tools-plan",
     "tools-ask",
     "policy-default",
-    "ui-todo",
-    "ui-ask-user",
     "provider-admin",
     "token-usage"
   ],

@@ -1,5 +1,5 @@
 /**
- * 提问卡片（official/ui-ask-user）：thread.tray 插槽。
+ * 提问卡片（official/tools-ask 的前端段）：thread.tray 插槽。
  *
  * 数据来自 props.data.interactions（线程待答交互的只读投影）；提交仍走基座
  * 交互路由 /threads/{id}/interaction/{requestId}，因此审批/提问的安全语义
@@ -13,6 +13,11 @@ export default function Slot(props: any) {
   const thread = data && data.thread ? data.thread : null;
   const csrf = props && props.app && props.app.csrf ? props.app.csrf : "";
   if (!interactions.length || !thread || !thread.id) return null;
+  // 多题分步表单（kind=form）由基座托盘渲染：它带「上一题/下一题/提交」的翻页，
+  // 这里不重复实现；同一线程同时只有一个待答项，让位给基座即可。
+  for (let i = 0; i < interactions.length; i += 1) {
+    if (interactions[i] && interactions[i].kind === "form") return null;
+  }
 
   return (
     <div class="aq-list">

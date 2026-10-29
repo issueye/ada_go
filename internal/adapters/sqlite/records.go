@@ -293,7 +293,7 @@ func (st *Store) CreateInteraction(ctx context.Context, req ports.InteractionReq
 		return invalidInput("交互缺少 threadId")
 	}
 	switch req.Kind {
-	case domain.InteractionConfirm, domain.InteractionSelect, domain.InteractionInput:
+	case domain.InteractionConfirm, domain.InteractionSelect, domain.InteractionInput, domain.InteractionForm:
 	default:
 		return invalidInput(fmt.Sprintf("交互 kind %q 不在 04 §5.7 的枚举里", req.Kind))
 	}

@@ -188,7 +188,7 @@ func TestManifestFixtures(t *testing.T) {
 		mustNoErr(t, "CheckCapabilitySites", plugins.CheckCapabilitySites())
 		mustCount(t, "插槽数量", 12, len(plugins.Slots()))
 		mustCount(t, "钩子点位数量", 15, len(plugins.HookPoints()))
-		mustCount(t, "后端能力位数量", 8, len(plugins.BackendCapabilities()))
+		mustCount(t, "后端能力位数量", 9, len(plugins.BackendCapabilities()))
 		mustCount(t, "前端能力位数量", 2, len(plugins.FrontendCapabilities()))
 		mustCount(t, "角色集合", 1, len(plugins.Roles()))
 	})

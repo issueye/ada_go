@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// EventKind 是领域事件名，照 08 §8.2 事件表的 12 个 evt.* 名字。
+// EventKind 是领域事件名，照 08 §8.2 事件表的 13 个 evt.* 名字。
 // 事件是 JSON-RPC notification（无 id），方法带 evt. 前缀（08 §8.1）。
 type EventKind string
 
@@ -34,6 +34,8 @@ const (
 	EvtUsage EventKind = "evt.usage"
 	// EvtPluginChanged：插件状态/贡献变化（工作区级，用 WorkspaceSeq，08 §8.2）。
 	EvtPluginChanged EventKind = "evt.plugin.changed"
+	// EvtPluginStream：插件 route 的 SSE 数据帧与终止帧（工作区级，streamId 关联）。
+	EvtPluginStream EventKind = "evt.plugin.stream"
 	// EvtError：可恢复错误 + 诊断码（08 §8.2；诊断码 ADG-<AREA>-<NNN>）。
 	EvtError EventKind = "evt.error"
 )

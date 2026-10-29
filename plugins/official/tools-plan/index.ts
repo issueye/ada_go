@@ -80,7 +80,7 @@ function render(steps: PlanStep[]): string {
   return `当前计划（${done}/${steps.length} 完成）：\n` + lines.join("\n");
 }
 
-// planView 是给前端（ui-task-plan）的结构化视图：total=0 表示当前没有计划。
+// planView 是本插件前端段（Todo 卡片）的结构化视图：total=0 表示当前没有计划。
 function planView(steps: PlanStep[]): { done: number; total: number; steps: PlanStep[] } {
   const done = steps.filter((s) => s.status === "done").length;
   return { done, total: steps.length, steps };
@@ -148,7 +148,7 @@ export default function (agent: AgentAPI): void {
     },
   });
 
-  // 只读动作 plan：给 ui-task-plan 的 thread.tray 卡片取数（7.5 的 action.invoke 桥）。
+  // 只读动作 plan：给本插件前端段的 Todo 卡片取数（7.5 的 action.invoke 桥）。
   // 返回 { plan }；total=0 表示当前线程没有计划（前端据此不画卡）。
   agent.registerAction({
     name: "plan",

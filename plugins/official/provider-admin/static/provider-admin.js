@@ -12,9 +12,19 @@
     current: { providerId: "", modelId: "" },
     selectedId: "",
     editingIndex: -1,
+    tab: "info",
     busy: false,
   };
   var root = null;
+
+  // 拉取弹窗的独立状态：它是一次性的远端快照，不混进供应商配置里。
+  var fetchState = {
+    loading: false,
+    error: "",
+    models: [],
+    existing: {},
+    seq: 0,
+  };
 
   // ── 小工具 ─────────────────────────────────────────────────────────────
 
@@ -58,8 +68,18 @@
     else node.removeAttribute("data-tone");
   }
 
+  // 宿主会把插件 route 的 reject 包成
+  // 「host: 插件 X 的 route 被 reject：TypeError: host: providers.y 失败: <原因>」。
+  // 前缀对用户没有意义，界面上只留最后那句原因。
+  function errorText(err) {
+    var message = err && err.message ? String(err.message) : String(err);
+    var cut = message.indexOf("失败: ");
+    if (cut >= 0) message = message.slice(cut + "失败: ".length);
+    return message || "操作失败";
+  }
+
   function fail(err) {
-    status((err && err.message ? err.message : String(err)) || "操作失败", "error");
+    status(errorText(err), "error");
   }
 
   function api(path, body) {
@@ -229,6 +249,7 @@
       .then(function (info) {
         state.providers.push(info);
         state.selectedId = info.id;
+        state.tab = "info"; // 新供应商先填端点与密钥，模型清单等拉取后再看
         status("已添加供应商，填写端点与密钥后即可使用。", "success");
         render();
       })
@@ -251,33 +272,192 @@
     });
   }
 
-  function fetchModels() {
+  // 从供应商拉取模型清单：结果先在弹窗里过一遍再落库，避免把几百个模型
+  // 一次性塞进列表。
+  function openFetchModal() {
     var p = selected();
     if (!p) return;
-    status("正在从供应商拉取模型列表…", "");
+    buildFetchModal();
+    if (!window.AdaComponents) {
+      status("缺少弹窗组件，无法展示模型列表。", "error");
+      return;
+    }
+    var existing = {};
+    (p.models || []).forEach(function (m) { existing[m.id] = true; });
+    fetchState.existing = existing;
+    fetchState.models = [];
+    fetchState.error = "";
+    fetchState.loading = true;
+    fetchState.seq += 1;
+    var seq = fetchState.seq;
+
+    var title = document.querySelector("[data-pm-fetch-title]");
+    if (title) title.textContent = "从「" + (p.displayName || p.id) + "」获取模型";
+    var hint = document.querySelector("[data-pm-fetch-hint]");
+    if (hint) hint.textContent = "已配置的模型不可重复添加；取消勾选可跳过。";
+    var search = document.querySelector("[data-remote-search]");
+    if (search) search.value = "";
+    var all = document.querySelector("[data-pm-fetch-all]");
+    if (all) { all.checked = false; all.disabled = true; }
+    renderFetchBody();
+    window.AdaComponents.openModal("pm-fetch");
+
     api("/fetch-models", { id: p.id })
       .then(function (models) {
-        var existing = {};
-        (p.models || []).forEach(function (m) { existing[m.id] = true; });
-        var merged = (p.models || []).slice();
-        (models || []).forEach(function (m) {
-          if (!existing[m.id]) {
-            merged.push({
-              id: m.id,
-              displayName: m.displayName || "",
-              contextWindow: m.contextWindow || 0,
-              maxOutput: m.maxOutput || 0,
-              input: m.input || ["text"],
-              supportsTools: m.supportsTools !== false,
-              supportsThinking: !!m.supportsThinking,
-              disabled: false,
-            });
-            existing[m.id] = true;
-          }
-        });
-        return saveProvider({ models: merged }, "已拉取 " + (models || []).length + " 个模型");
+        if (seq !== fetchState.seq) return;
+        fetchState.loading = false;
+        fetchState.models = Array.isArray(models) ? models : [];
+        renderFetchBody();
       })
-      .catch(fail);
+      .catch(function (err) {
+        if (seq !== fetchState.seq) return;
+        fetchState.loading = false;
+        fetchState.error = errorText(err);
+        renderFetchBody();
+      });
+  }
+
+  function fetchAllBox() {
+    return document.querySelector("[data-pm-fetch-all]");
+  }
+
+  function fetchItems() {
+    return document.querySelectorAll("[data-pm-fetch-item]");
+  }
+
+  function selectedFetchModels() {
+    var byId = {};
+    fetchState.models.forEach(function (m) { byId[m.id] = m; });
+    var out = [];
+    var items = fetchItems();
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].checked && byId[items[i].value]) out.push(byId[items[i].value]);
+    }
+    return out;
+  }
+
+  // 勾选变化后同步「添加所选（n）」与全选框，避免每次点击都重绘整个列表。
+  function syncFetchSelection() {
+    var chosen = selectedFetchModels().length;
+    var confirm = document.querySelector("[data-pm-fetch-confirm]");
+    if (confirm) {
+      confirm.disabled = chosen === 0;
+      confirm.textContent = chosen ? "添加所选（" + chosen + "）" : "添加所选";
+    }
+    var all = fetchAllBox();
+    if (!all) return;
+    var items = fetchItems();
+    var total = 0;
+    var checked = 0;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].disabled) continue;
+      total += 1;
+      if (items[i].checked) checked += 1;
+    }
+    all.disabled = total === 0;
+    all.checked = total > 0 && checked === total;
+    all.indeterminate = checked > 0 && checked < total;
+  }
+
+  function renderFetchBody() {
+    var list = document.querySelector("[data-pm-fetch-list]");
+    var count = document.querySelector("[data-remote-count]");
+    var all = fetchAllBox();
+    if (!list) return;
+    list.textContent = "";
+    if (all) { all.checked = false; all.indeterminate = false; all.disabled = true; }
+    if (count) count.textContent = "";
+
+    if (fetchState.loading) {
+      list.appendChild(el("p", "pm-fetch__state", "正在从供应商拉取模型列表…"));
+      syncFetchSelection();
+      return;
+    }
+    if (fetchState.error) {
+      var box = el("div", "pm-fetch__state pm-fetch__state--error");
+      box.appendChild(el("span", "", fetchState.error));
+      var retry = btn("pm-text-btn", "重试", "", function () {
+        var p = selected();
+        if (!p) return;
+        fetchState.loading = true;
+        fetchState.error = "";
+        fetchState.seq += 1;
+        var seq = fetchState.seq;
+        renderFetchBody();
+        api("/fetch-models", { id: p.id })
+          .then(function (models) {
+            if (seq !== fetchState.seq) return;
+            fetchState.loading = false;
+            fetchState.models = Array.isArray(models) ? models : [];
+            renderFetchBody();
+          })
+          .catch(function (err) {
+            if (seq !== fetchState.seq) return;
+            fetchState.loading = false;
+            fetchState.error = errorText(err);
+            renderFetchBody();
+          });
+      });
+      box.appendChild(retry);
+      list.appendChild(box);
+      syncFetchSelection();
+      return;
+    }
+    if (!fetchState.models.length) {
+      list.appendChild(el("p", "pm-fetch__state", "供应商没有返回任何模型。"));
+      syncFetchSelection();
+      return;
+    }
+
+    if (count) count.textContent = fetchState.models.length + " 个模型";
+    fetchState.models.forEach(function (m) {
+      var added = !!fetchState.existing[m.id];
+      var row = document.createElement("label");
+      row.className = "ada-remote__row pm-fetch__row" + (added ? " is-added" : "");
+      row.setAttribute("data-remote-row", "");
+      row.setAttribute("data-name", m.id.toLowerCase());
+      var cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.setAttribute("data-pm-fetch-item", "");
+      cb.value = m.id;
+      cb.checked = !added;
+      cb.disabled = added;
+      row.appendChild(cb);
+      row.appendChild(el("span", "ada-remote__id", m.id));
+      var tags = el("span", "pm-model__tags");
+      modelTags(m).forEach(function (t) { tags.appendChild(el("span", "pm-tag", t)); });
+      row.appendChild(tags);
+      if (added) row.appendChild(el("span", "ada-remote__added", "已添加"));
+      list.appendChild(row);
+    });
+    syncFetchSelection();
+  }
+
+  function commitFetch() {
+    var p = selected();
+    if (!p) return;
+    var picked = selectedFetchModels();
+    if (!picked.length) {
+      window.AdaComponents.closeModal("pm-fetch");
+      return;
+    }
+    var models = (p.models || []).slice();
+    picked.forEach(function (m) {
+      if (fetchState.existing[m.id]) return;
+      models.push({
+        id: m.id,
+        displayName: m.displayName || "",
+        contextWindow: m.contextWindow || 0,
+        maxOutput: m.maxOutput || 0,
+        input: Array.isArray(m.input) && m.input.length ? m.input : ["text"],
+        supportsTools: m.supportsTools !== false,
+        supportsThinking: !!m.supportsThinking,
+        disabled: false,
+      });
+    });
+    fetchState.seq += 1;
+    window.AdaComponents.closeModal("pm-fetch");
+    saveProvider({ models: models }, "已添加 " + picked.length + " 个模型");
   }
 
   function selectModel(modelId) {
@@ -358,7 +538,30 @@
       return;
     }
 
-    // 头部：名称 + 当前标记 + 启用开关 + 更多
+    box.appendChild(renderDetailHead(p));
+
+    if (p.available === false) {
+      box.appendChild(el("div", "pm-notice", "供应商适配器插件未启用：请到「插件」页启用对应的 provider 插件后使用。"));
+    }
+
+    box.appendChild(renderTabs(p));
+
+    var panel = el("div", "pm-panel");
+    panel.setAttribute("role", "tabpanel");
+    if (state.tab === "models") {
+      panel.id = "pm-panel-models";
+      panel.setAttribute("aria-labelledby", "pm-tab-models");
+      renderModelsPanel(panel, p);
+    } else {
+      panel.id = "pm-panel-info";
+      panel.setAttribute("aria-labelledby", "pm-tab-info");
+      renderInfoPanel(panel, p);
+    }
+    box.appendChild(panel);
+  }
+
+  // 头部：名称 + 当前标记 + 启用开关 + 删除。它与页签无关，切换页签时保持可见。
+  function renderDetailHead(p) {
     var head = el("div", "pm-detail__head");
     var titleWrap = el("div", "pm-detail__title");
     var name = input("pm-name", p.displayName || p.id, "供应商名称");
@@ -383,16 +586,69 @@
     actions.appendChild(switchLabel);
     actions.appendChild(btn("pm-icon-btn", "", "more", removeProvider));
     head.appendChild(actions);
-    box.appendChild(head);
+    return head;
+  }
 
-    if (p.available === false) {
-      box.appendChild(el("div", "pm-notice", "供应商适配器插件未启用：请到「插件」页启用对应的 provider 插件后使用。"));
+  // 页签：沿用基座的 .ada-tabs 外观，但由本插件自己切换（详情区整块是 JS 渲染的，
+  // 没有服务端 ?tab= 可回退）。
+  function renderTabs(p) {
+    var bar = el("div", "ada-tabs__list pm-tabs");
+    bar.setAttribute("role", "tablist");
+    bar.setAttribute("aria-label", "供应商配置");
+
+    var items = [
+      { key: "info", label: "供应商信息" },
+      { key: "models", label: "模型列表", count: (p.models || []).length },
+    ];
+
+    function selectTab(key, focus) {
+      if (state.tab === key) return;
+      state.tab = key;
+      render();
+      if (focus) {
+        var next = root.querySelector('[data-pm-tab="' + key + '"]');
+        if (next) next.focus();
+      }
     }
 
-    // 连接信息
+    items.forEach(function (item) {
+      var active = state.tab === item.key;
+      var tab = el("button", "ada-tabs__tab", item.label);
+      tab.type = "button";
+      tab.id = "pm-tab-" + item.key;
+      tab.setAttribute("role", "tab");
+      tab.setAttribute("data-pm-tab", item.key);
+      tab.setAttribute("aria-selected", active ? "true" : "false");
+      tab.setAttribute("aria-controls", "pm-panel-" + item.key);
+      tab.setAttribute("tabindex", active ? "0" : "-1");
+      if (item.count !== undefined) tab.appendChild(el("span", "ada-tabs__count", item.count));
+      tab.addEventListener("click", function () { selectTab(item.key, false); });
+      bar.appendChild(tab);
+    });
+
+    bar.addEventListener("keydown", function (event) {
+      var index = -1;
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].key === state.tab) index = i;
+      }
+      if (index < 0) return;
+      var next = -1;
+      if (event.key === "ArrowRight") next = (index + 1) % items.length;
+      else if (event.key === "ArrowLeft") next = (index - 1 + items.length) % items.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = items.length - 1;
+      else return;
+      event.preventDefault();
+      selectTab(items[next].key, true);
+    });
+    return bar;
+  }
+
+  // 页签一：连接与鉴权。
+  function renderInfoPanel(panel, p) {
     var base = input("pm-input", p.baseUrl || "", "https://api.example.com/v1");
     base.addEventListener("change", function () { saveProvider({ baseUrl: base.value.trim() }); });
-    box.appendChild(field("Base URL", base));
+    panel.appendChild(field("Base URL", base));
 
     var protocol = adaSelect(
       [
@@ -403,7 +659,7 @@
       p.protocol || "openai_chat",
       function (value) { saveProvider({ protocol: value }, "API 格式已更新"); }
     );
-    box.appendChild(field("API 格式", protocol));
+    panel.appendChild(field("API 格式", protocol));
 
     // API Key：留空保持原值
     var keyRow = el("div", "pm-key");
@@ -433,25 +689,37 @@
     keyInput.addEventListener("change", function () {
       if (keyInput.value.trim()) saveProvider({ apiKey: keyInput.value.trim() }, "API Key 已保存");
     });
-    box.appendChild(field("API Key", keyRow));
+    panel.appendChild(field("API Key", keyRow));
 
-    // 模型列表
-    var modelsHead = el("div", "pm-models__head");
-    modelsHead.appendChild(el("span", "pm-models__title", "模型列表"));
+    var models = p.models || [];
+    var enabled = models.filter(function (m) { return !m.disabled; }).length;
+    panel.appendChild(
+      el("p", "pm-hint", "模型清单在「模型列表」页签维护：当前 " + models.length + " 个模型，其中 " + enabled + " 个已启用。")
+    );
+  }
+
+  // 页签二：模型清单。
+  function renderModelsPanel(panel, p) {
+    var models = p.models || [];
+    var enabled = models.filter(function (m) { return !m.disabled; }).length;
+
+    var head = el("div", "pm-models__head");
+    head.appendChild(el("span", "pm-models__hint", "共 " + models.length + " 个模型，其中 " + enabled + " 个已启用"));
     var tools = el("div", "pm-models__actions");
-    tools.appendChild(btn("pm-icon-btn", "", "refresh", fetchModels)).title = "从供应商 /models 拉取";
-    tools.appendChild(btn("ada-btn ada-btn--secondary ada-btn--sm", "添加模型", "plus", addModel));
-    modelsHead.appendChild(tools);
-    box.appendChild(modelsHead);
+    tools.appendChild(btn("ada-btn ada-btn--secondary ada-btn--sm", "获取模型", "refresh", openFetchModal)).title =
+      "从供应商 /models 拉取，弹窗里挑选要添加的模型";
+    tools.appendChild(btn("ada-btn ada-btn--primary ada-btn--sm", "添加模型", "plus", addModel));
+    head.appendChild(tools);
+    panel.appendChild(head);
 
-    var models = el("div", "pm-models");
-    (p.models || []).forEach(function (m, index) {
-      models.appendChild(renderModelRow(m, index));
+    var list = el("div", "pm-models");
+    models.forEach(function (m, index) {
+      list.appendChild(renderModelRow(m, index));
     });
-    if (!(p.models || []).length) {
-      models.appendChild(el("p", "pm-empty", "还没有模型。可以手动添加，或点刷新从 /models 拉取。"));
+    if (!models.length) {
+      list.appendChild(el("p", "pm-empty", "还没有模型。可以手动添加，或点「获取模型」从供应商 /models 拉取。"));
     }
-    box.appendChild(models);
+    panel.appendChild(list);
   }
 
   function modelTags(m) {
@@ -558,6 +826,60 @@
     });
   }
 
+  // 拉取结果弹窗：远端可能有上百个模型，所以按「搜索框 + 自己滚的列表」摆，
+  // 不把整份清单摊到页面上。
+  function buildFetchModal() {
+    if (document.getElementById("pm-fetch-modal")) return;
+    var modal = document.createElement("ada-modal");
+    modal.id = "pm-fetch-modal";
+    modal.className = "ada-modal";
+    modal.setAttribute("data-modal", "pm-fetch");
+    modal.hidden = true;
+    modal.innerHTML =
+      '<div class="ada-modal__backdrop" data-modal-close></div>' +
+      '<div class="ada-modal__panel ada-modal__panel--wide pm-fetch" role="dialog" aria-modal="true" aria-labelledby="pm-fetch-title">' +
+      '<h2 class="ada-modal__title" id="pm-fetch-title" data-pm-fetch-title>从供应商获取模型</h2>' +
+      '<p class="pm-fetch__hint" data-pm-fetch-hint></p>' +
+      '<div class="ada-remote">' +
+      '<div class="ada-remote__bar">' +
+      '<input class="ada-remote__search" type="search" data-remote-search placeholder="筛选模型（按 ID 搜索）" autocomplete="off">' +
+      '<span class="ada-remote__count" data-remote-count></span>' +
+      "</div>" +
+      '<div class="ada-remote__body" data-pm-fetch-list></div>' +
+      "</div>" +
+      '<label class="pm-check pm-fetch__all"><input type="checkbox" data-pm-fetch-all><span>全选</span></label>' +
+      '<div class="ada-modal__actions">' +
+      '<button class="ada-btn ada-btn--secondary ada-btn--sm" type="button" data-modal-close>取消</button>' +
+      '<button class="ada-btn ada-btn--primary ada-btn--sm" type="button" data-pm-fetch-confirm disabled>添加所选</button>' +
+      "</div></div>";
+    document.body.appendChild(modal);
+
+    modal.addEventListener("change", function (event) {
+      var target = event.target;
+      if (!target) return;
+      if (target.matches("[data-pm-fetch-all]")) {
+        var items = fetchItems();
+        for (var i = 0; i < items.length; i++) {
+          if (!items[i].disabled) items[i].checked = target.checked;
+        }
+        syncFetchSelection();
+        return;
+      }
+      if (target.matches("[data-pm-fetch-item]")) syncFetchSelection();
+    });
+
+    var confirm = modal.querySelector("[data-pm-fetch-confirm]");
+    if (confirm) confirm.addEventListener("click", commitFetch);
+
+    // 关闭（取消、Esc、点遮罩）后让在途请求作废。
+    modal.addEventListener("ada:modal-close", function () {
+      fetchState.seq += 1;
+      fetchState.loading = false;
+      fetchState.error = "";
+      fetchState.models = [];
+    });
+  }
+
   function openModelModal(model, index) {
     buildModelModal();
     if (!window.AdaComponents) {
@@ -621,6 +943,7 @@
     root = document.querySelector("[data-provider-admin]");
     if (!root) return;
     buildModelModal();
+    buildFetchModal();
     var refresh = root.querySelector("[data-pm-refresh]");
     if (refresh) refresh.addEventListener("click", load);
     var add = root.querySelector("[data-pm-add]");

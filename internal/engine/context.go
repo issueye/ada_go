@@ -186,12 +186,16 @@ func (r *run) appendAssistant(m domain.Message) {
 	}
 }
 
-// appendToolResult 落工具结果 entry：content 给模型，details 只给界面（INV-10）。
+// appendToolResult 落工具结果 entry：content 给模型，details/input 只给界面（INV-10）。
+//
+// input 是这一次调用的入参原文：界面的工具行要显示「调了什么」，展开面板也要能看
+// 完整参数。它不进模型上下文（模型只看到 content 与自己的 tool_call）。
 func (r *run) appendToolResult(call domain.ToolCall, res domain.Result) {
 	payload := mustJSON(map[string]any{
 		"callId":  call.CallID,
 		"tool":    call.Tool,
 		"status":  string(res.Receipt.Status),
+		"input":   json.RawMessage(nonEmptyArgs(call.Args)),
 		"content": res.Content,
 		"receipt": res.Receipt,
 	})

@@ -3,8 +3,11 @@ package web
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -311,6 +314,7 @@ type toolView struct {
 	DurationMS  int64
 	Truncated   bool
 	Args        string
+	ArgsHint    string
 	Output      string
 	Details     string
 	Reason      string
@@ -325,6 +329,16 @@ type interactionView struct {
 	Options []string
 	Action  string
 	CSRF    string
+	// Questions 只在 kind=form 时有值：多题分步表单的题目（body 里的 JSON）。
+	Questions []interactionQuestion
+}
+
+// interactionQuestion 是分步表单里的一题；Index 用于表单字段名 q0、q1…
+type interactionQuestion struct {
+	Index    int
+	Question string
+	Kind     string // confirm | select | input
+	Options  []string
 }
 
 type errorData struct {
@@ -535,7 +549,7 @@ func buildInteractions(in []interactionDTO, threadID, csrf string) []interaction
 		if x.Status != "" && x.Status != "pending" {
 			continue
 		}
-		out = append(out, interactionView{
+		view := interactionView{
 			ID:      x.ID,
 			Kind:    x.Kind,
 			Title:   x.Title,
@@ -544,6 +558,36 @@ func buildInteractions(in []interactionDTO, threadID, csrf string) []interaction
 			Options: append([]string(nil), x.Options...),
 			Action:  threadPath(threadID) + "/interaction/" + url.PathEscape(x.ID),
 			CSRF:    csrf,
+		}
+		if x.Kind == string(domain.InteractionForm) {
+			// 题目存在 body 里（interactions 表没有 payload 列）；解析失败就当空表单，
+			// 让用户至少能取消，而不是看到一段裸 JSON。
+			view.Questions = parseInteractionQuestions(x.Body)
+			view.Body = ""
+		}
+		out = append(out, view)
+	}
+	return out
+}
+
+// parseInteractionQuestions 解析 form 交互 body 里的题目数组。
+func parseInteractionQuestions(raw string) []interactionQuestion {
+	var items []struct {
+		Question string   `json:"question"`
+		Kind     string   `json:"kind"`
+		Options  []string `json:"options"`
+	}
+	if json.Unmarshal([]byte(raw), &items) != nil {
+		return nil
+	}
+	out := make([]interactionQuestion, 0, len(items))
+	for i, it := range items {
+		kind := strings.TrimSpace(it.Kind)
+		if kind != "confirm" && kind != "select" && kind != "input" {
+			kind = "input"
+		}
+		out = append(out, interactionQuestion{
+			Index: i, Question: it.Question, Kind: kind, Options: it.Options,
 		})
 	}
 	return out
@@ -567,7 +611,11 @@ func buildTranscript(entries []entryDTO) []transcriptItem {
 				out = append(out, transcriptItem{Kind: "tool", Key: "tool:" + tv.CallID, At: e.CreatedAt, Tool: tv})
 			}
 		case role == "user" || role == "assistant":
-			out = append(out, messageItem(e.Payload, role, e.CreatedAt))
+			// 只带工具调用的助手消息没有任何可显示内容：不画空头像行。
+			if item := messageItem(e.Payload, role, e.CreatedAt); len(item.Parts) > 0 {
+				item.Key = e.ID // 供浏览器端按行复用（实时换行时不重画整份对话流）
+				out = append(out, item)
+			}
 		case e.Kind == "compaction":
 			out = append(out, transcriptItem{Kind: "notice", Level: "info", At: e.CreatedAt, Text: "上下文已压缩。"})
 		}
@@ -587,7 +635,10 @@ func transcriptFromItems(items []itemDTO) []transcriptItem {
 			if role == "" {
 				role = "assistant"
 			}
-			out = append(out, messageItem(it.Payload, role, it.At))
+			if item := messageItem(it.Payload, role, it.At); len(item.Parts) > 0 {
+				item.Key = it.Key
+				out = append(out, item)
+			}
 		case "tool":
 			if tv := toolViewFromPayload(it.Payload, it.Truncated); tv != nil {
 				out = append(out, transcriptItem{Kind: "tool", Key: it.Key, At: it.At, Tool: tv})
@@ -631,10 +682,17 @@ func messageItem(raw json.RawMessage, role, at string) transcriptItem {
 	for _, p := range m.Parts {
 		switch p.Type {
 		case "thinking":
+			// 只有空白的思考块渲染出来就是孤零零一个「思考」，纯噪音。
+			if strings.TrimSpace(p.Text) == "" {
+				continue
+			}
 			parts = append(parts, partView{Type: "thinking", Text: clip(p.Text, maxPartBytes)})
 		case "image":
 			parts = append(parts, partView{Type: "image"})
 		default:
+			if strings.TrimSpace(p.Text) == "" {
+				continue
+			}
 			parts = append(parts, partView{Type: "text", Text: clip(p.Text, maxPartBytes)})
 		}
 	}
@@ -681,18 +739,77 @@ func toolViewFromPayload(raw json.RawMessage, itemTruncated bool) *toolView {
 		DurationMS:  p.Receipt.DurationMS,
 		Truncated:   p.Receipt.Truncated || itemTruncated,
 		Args:        prettyJSON(args),
+		ArgsHint:    compactArgs(args),
 		Output:      clip(strings.Join(texts, "\n"), maxToolOutput),
 		Details:     prettyJSON(p.Details),
 		Reason:      p.Receipt.Reason,
 	}
 }
 
+// compactArgs 把入参压成一行给工具行看（"path=\".\" recursive=true"）。
+//
+// 展开后的「输入参数」仍是完整 JSON；这里只解决「不展开就不知道它调了什么」。
+// 单值超过 24 字符截断，整体超过 96 字符截断。
+func compactArgs(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var obj map[string]any
+	if json.Unmarshal(raw, &obj) != nil || len(obj) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+compactValue(obj[k]))
+	}
+	return shorten(strings.Join(parts, " "), 96)
+}
+
+// shorten 是给行内摘要用的截断：只补一个省略号，不带「已截断」这类整句提示。
+func shorten(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "…"
+}
+
+// compactValue 把单个参数值压成可读短串。
+func compactValue(v any) string {
+	switch value := v.(type) {
+	case string:
+		return `"` + shorten(value, 24) + `"`
+	case bool:
+		if value {
+			return "true"
+		}
+		return "false"
+	case nil:
+		return "null"
+	case json.Number:
+		return value.String()
+	case float64:
+		return strconv.FormatFloat(value, 'f', -1, 64)
+	case []any:
+		return "[" + strconv.Itoa(len(value)) + "]"
+	case map[string]any:
+		return "{…}"
+	default:
+		return shorten(fmt.Sprint(value), 24)
+	}
+}
+
+// toolStatusLabel 只给需要文字的异常态一个标签：成功和失败靠行样式表达
+// （失败用红色左条 + 红色工具名），不再多一个徽标占位。
 func toolStatusLabel(status string) string {
 	switch status {
-	case "ok":
-		return "成功"
-	case "error":
-		return "失败"
+	case "ok", "error":
+		return ""
 	case "denied":
 		return "已拒绝"
 	case "timeout":

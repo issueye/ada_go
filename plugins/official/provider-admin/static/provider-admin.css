@@ -52,7 +52,10 @@
 .pm-layout {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
-  min-height: 520px;
+  /* 高度跟着视口走，而不是跟着模型数量走：面板本身不随清单增长，
+     超出的部分由左右两列各自滚动（--pm-chrome 是顶栏 + 页头 + 上下留白）。 */
+  --pm-chrome: 226px;
+  height: clamp(360px, calc(100dvh - var(--pm-chrome)), 1400px);
   border: 1px solid var(--ph-line);
   border-radius: var(--ada-radius-lg);
   background: var(--ph-surface);
@@ -143,6 +146,7 @@
   gap: 16px;
   padding: 20px 24px;
   min-width: 0;
+  min-height: 0;
 }
 
 .pm-detail__head {
@@ -197,6 +201,29 @@
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
+}
+
+/* ── 详情页签（供应商信息 / 模型列表）────────────────────────────────── */
+
+/* 沿用基座 .ada-tabs__list 的外观；这里只负责让它不随详情列宽拉伸。 */
+.pm-tabs {
+  align-self: flex-start;
+}
+
+.pm-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  /* 撑满详情列剩余高度，好让里面的模型清单自己滚（而不是把页面撑长）。 */
+  flex: 1;
+  min-height: 0;
+}
+
+.pm-hint {
+  margin: 0;
+  font-size: var(--ada-text-sm);
+  color: var(--ph-muted);
 }
 
 .pm-field {
@@ -353,10 +380,9 @@
   gap: 12px;
 }
 
-.pm-models__title {
-  font-size: var(--ada-text-md);
-  font-weight: 600;
-  color: var(--ph-ink);
+.pm-models__hint {
+  font-size: var(--ada-text-sm);
+  color: var(--ph-muted);
 }
 
 .pm-models__actions {
@@ -369,6 +395,13 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* 预留滚动条位：列表长到跨过滚动阈值时行不会左右跳。 */
+  scrollbar-gutter: stable;
+  padding-right: 2px;
 }
 
 .pm-model {
@@ -487,12 +520,24 @@
 
   .pm-layout {
     grid-template-columns: 1fr;
+    /* 窄屏是上下堆叠，固定视口高度会把两块都挤扁：回到由内容决定高度，
+       只给模型清单一个自己的滚动上限。 */
+    height: auto;
   }
 
   .pm-list {
     border-right: 0;
     border-bottom: 1px solid var(--ph-line);
     max-height: 220px;
+  }
+
+  .pm-panel {
+    flex: none;
+  }
+
+  .pm-models {
+    flex: none;
+    max-height: 60dvh;
   }
 
   .pm-detail {
@@ -522,6 +567,59 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 14px;
+}
+
+/* 拉取模型弹窗（ada-modal + 基座 .ada-remote 列表） */
+.pm-fetch__hint {
+  margin: 0 0 10px;
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
+}
+
+.pm-fetch__all {
+  margin-top: 10px;
+}
+
+.pm-fetch__state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 14px 12px;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-sm);
+}
+
+.pm-fetch__state--error {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--ph-danger-ink);
+}
+
+/* 每行是「勾选框 + 模型 ID + 标签」，默认的 space-between 会把标签推到右边。 */
+.pm-fetch__row {
+  justify-content: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.pm-fetch__row[hidden] {
+  display: none;
+}
+
+.pm-fetch__row input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin: 0;
+  cursor: pointer;
+}
+
+.pm-fetch__row .ada-remote__id {
+  flex: 1;
+}
+
+.pm-fetch__row.is-added {
+  cursor: default;
 }
 
 /* 适配器插件未启用时的提示（配置还在，但不能用于聊天）。 */

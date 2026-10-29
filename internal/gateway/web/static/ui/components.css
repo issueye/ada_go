@@ -355,8 +355,8 @@ details:not([open]) > :not(summary) {
   align-items: center;
   gap: 8px;
   min-height: var(--ada-row-h);
-  padding: 2px 10px;
-  border-left: 2px solid transparent;
+  padding: 2px 4px 2px 0;
+  border-left: 0px solid transparent;
   border-radius: var(--ada-radius-sm);
   color: var(--ph-faint);
   font-size: var(--ada-text-sm);
@@ -418,8 +418,10 @@ details:not([open]) > :not(summary) {
   flex-shrink: 0;
   color: var(--ph-muted);
   font-weight: 500;
+  line-height: 20px;
 }
 .ada-disclosure__detail {
+  line-height: 20px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -433,6 +435,13 @@ details:not([open]) > :not(summary) {
   font-family: inherit;
   font-size: var(--ada-text-sm);
   font-style: italic;
+}
+/* 工具行的入参摘要：一行、可截断，不展开也能看出调了什么。 */
+.ada-disclosure__detail--args {
+  flex: 0 1 auto;
+  max-width: 46%;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-xs);
 }
 .ada-disclosure__sub {
   min-width: 0;
@@ -468,7 +477,7 @@ details:not([open]) > :not(summary) {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin: 4px 0 12px 12px;
+  margin: 4px 0 12px 6px;
   padding-left: 10px;
   border-left: 1px solid var(--ph-line);
 }
@@ -493,10 +502,13 @@ details:not([open]) > :not(summary) {
 }
 
 /* 语义阶段：色条常亮；只有"执行中"会呼吸——其余状态是稳定事实，不需要动。
-   行内文字不跟着变色：色条 + 底色 + 尾标已经够了，整行染红反而吵。 */
+   失败用红色表达：红色左条 + 红色工具名，不铺红底、也不挂「失败」徽标。 */
 .ada-disclosure[data-phase="danger"] > .ada-disclosure__summary {
   border-left-color: var(--ph-danger-ink);
-  background: var(--ph-danger-soft);
+}
+.ada-disclosure[data-phase="danger"] > .ada-disclosure__summary .ada-disclosure__label,
+.ada-disclosure[data-phase="danger"] > .ada-disclosure__summary .ada-disclosure__icon {
+  color: var(--ph-danger-ink);
 }
 .ada-disclosure[data-phase="warn"] > .ada-disclosure__summary {
   border-left-color: var(--ph-warn-ink);
@@ -657,6 +669,11 @@ details:not([open]) > :not(summary) {
 .ada-transcript__item:last-child > .ada-msg {
   margin-bottom: 0;
 }
+/* 工具行属于助手那一条消息：缩到正文左栏（头像 28 + 间距 12）。
+   不缩进的话折叠行的左色条比正文更靠左，读起来像两个并列层级。 */
+.ada-transcript > .ada-disclosure[data-kind="tool"] {
+  margin-left: 40px;
+}
 .ada-msg--user {
   justify-content: flex-end;
 }
@@ -761,7 +778,6 @@ details:not([open]) > :not(summary) {
 .ada-msg__body {
   min-width: 0;
   flex: 1;
-  padding-top: 2px;
   color: var(--ph-ink);
   font-size: var(--ada-text-base);
   line-height: 1.72;

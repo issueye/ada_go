@@ -62,10 +62,10 @@ const (
 	// RPCMessageMaxBytes 是 Gateway↔Core 单条 WebSocket 消息上限（08 §8.1：2MB）。
 	RPCMessageMaxBytes = 2 << 20
 
-	// LoopRepeatLimit 是“相同工具+相同参数+相同回执”连续次数阈值：达到后回 loop_detected
-	// 错误回执提示模型换方法（02 §5.3：连续 3 次；repeatable 工具不计数，新消息重置）。
+	// LoopRepeatLimit 是“相同工具+相同参数+相同回执”在同一轮内的累计次数阈值：达到后回
+	// loop_detected 错误回执提示模型换方法（02 §5.3：3 次；按指纹累计，repeatable 不计数）。
 	LoopRepeatLimit = 3
-	// LoopAbortLimit 是连续重复调用按 error 结束轮次的阈值（02 §5.3：连续 5 次）。
+	// LoopAbortLimit 是同一指纹累计调用按 error 结束轮次的阈值（02 §5.3：5 次）。
 	LoopAbortLimit = 5
 
 	// ContextReserveTokens 是压缩预留：估算 token 超过 contextWindow-reserve 即触发压缩

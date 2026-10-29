@@ -135,7 +135,7 @@
 {{define "thinking"}}
 <details class="ada-disclosure" data-kind="thinking" data-state="closed">
   <summary class="ada-disclosure__summary">
-    <span class="ada-disclosure__icon">{{icon "i-brain" 12}}</span>
+    <span class="ada-disclosure__icon">{{icon "i-bulb" 14}}</span>
     <span class="ada-disclosure__caret">{{icon "i-chevron" 12}}</span>
     <span class="ada-disclosure__label">思考</span>
   </summary>
@@ -145,24 +145,25 @@
 
 {{define "row"}}
 {{if eq .Kind "user"}}
-<div class="ada-msg ada-msg--user"><div class="ada-bubble">{{template "parts_user" .}}</div></div>
+<div class="ada-msg ada-msg--user" data-item-key="{{.Key}}"><div class="ada-bubble">{{template "parts_user" .}}</div></div>
 {{else if eq .Kind "assistant"}}
-<div class="ada-msg ada-msg--assistant"><span class="ada-avatar" title="助手">{{icon "i-bot" 14}}</span><div class="ada-msg__body markdown-body ada-markdown">{{template "parts_assistant" .}}</div></div>
+<div class="ada-msg ada-msg--assistant" data-item-key="{{.Key}}"><span class="ada-avatar" title="助手">{{icon "i-bot" 14}}</span><div class="ada-msg__body markdown-body ada-markdown">{{template "parts_assistant" .}}</div></div>
 {{else if eq .Kind "tool"}}
 {{template "tool" .Tool}}
 {{else if eq .Kind "notice"}}
 <div class="ada-notice ada-notice--{{if eq .Level "error"}}danger{{else if eq .Level "warn"}}warn{{else}}brand{{end}}"><div class="ada-notice__row">{{icon "i-alert" 14}}<span>{{.Text}}</span></div></div>
 {{else}}
-<div class="ada-msg ada-msg--plain"><div class="ada-plain">{{.Text}}</div></div>
+<div class="ada-msg ada-msg--plain" data-item-key="{{.Key}}"><div class="ada-plain">{{.Text}}</div></div>
 {{end}}
 {{end}}
 
 {{define "tool"}}
-<details class="ada-disclosure" data-kind="tool" data-state="closed"{{if .CallID}} data-key="{{.CallID}}"{{end}}{{if eq .Status "error"}} data-phase="danger"{{else if eq .Status "denied"}} data-phase="warn"{{end}}>
+<details class="ada-disclosure" data-kind="tool" data-state="closed"{{if .CallID}} data-key="{{.CallID}}" data-item-key="tool:{{.CallID}}"{{end}}{{if eq .Status "error"}} data-phase="danger"{{else if eq .Status "denied"}} data-phase="warn"{{end}}>
   <summary class="ada-disclosure__summary">
-    <span class="ada-disclosure__icon">{{icon "i-terminal" 12}}</span>
+    <span class="ada-disclosure__icon">{{icon (toolIcon .Tool) 14}}</span>
     <span class="ada-disclosure__caret">{{icon "i-chevron" 12}}</span>
     <span class="ada-disclosure__label">{{.Tool}}</span>
+    {{if .ArgsHint}}<span class="ada-disclosure__detail ada-disclosure__detail--args" title="{{.ArgsHint}}">{{.ArgsHint}}</span>{{end}}
     {{if .StatusLabel}}<span class="ada-badge ada-badge--{{statusTone .Status}}">{{.StatusLabel}}</span>{{end}}
     {{if .DurationMS}}<span class="ada-disclosure__meta">{{.DurationMS}} ms</span>{{end}}
     {{if .Truncated}}<span class="ada-badge ada-badge--warn">已截断</span>{{end}}
@@ -200,10 +201,13 @@
 <div class="ada-tray ada-tray--approval" aria-label="待处理交互">
   <div class="ada-tray__head"><span class="ada-tray__icon">{{icon "i-alert" 14}}</span><span class="ada-tray__title">待答复 · {{len .}} 条</span></div>
   {{range .}}
-  <div class="ada-tray__row">
+  <div class="ada-tray__row{{if eq .Kind "form"}} ada-tray__row--form{{end}}">
     <div class="ada-tray__text">
       <strong>{{.Title}}</strong>{{if .Body}} — {{.Body}}{{end}}
     </div>
+    {{if eq .Kind "form"}}
+    {{template "ask-form" .}}
+    {{else}}
     <form class="ada-tray__form" method="post" action="{{.Action}}">
       {{template "csrf" .}}
       <input type="hidden" name="kind" value="{{.Kind}}">
@@ -219,7 +223,41 @@
       {{end}}
       <button class="ada-btn ada-btn--ghost ada-btn--sm" type="submit" name="decision" value="cancel">取消</button>
     </form>
+    {{end}}
   </div>
   {{end}}
 </div>
+{{end}}
+
+{{/* 多题分步表单：一题一步，「上一题/下一题/提交」。没有 JS 时所有题目同时展开、
+     直接提交也能用（题目名 q0、q1…，基座按序拼成 answers）。 */}}
+{{define "ask-form"}}
+<form class="ada-tray__form ask-wizard" method="post" action="{{.Action}}" data-ask-form>
+  {{template "csrf" .}}
+  <input type="hidden" name="kind" value="form">
+  <div class="ask-wizard__bar">
+    <span class="ask-wizard__counter">第 <span data-ask-current>1</span> / {{len .Questions}} 题</span>
+  </div>
+  {{range .Questions}}
+  <div class="ask-wizard__step" data-ask-step="{{.Index}}">
+    <p class="ask-wizard__question">{{.Question}}</p>
+    {{if eq .Kind "select"}}
+      {{if .Options}}<ada-select class="ada-select ask-wizard__select"><button class="ada-select__trigger" type="button" data-select-trigger aria-expanded="false" aria-label="选择"><span class="ada-select__label" data-select-label>{{index .Options 0}}</span><span class="ada-select__caret">{{icon "i-chevron-down" 12}}</span></button><div class="ada-select__menu" data-select-menu hidden>{{range .Options}}<button class="ada-select__option" type="button" data-value="{{.}}">{{.}}</button>{{end}}</div><input type="hidden" name="q{{.Index}}" data-select-input value="{{index .Options 0}}"></ada-select>{{end}}
+    {{else if eq .Kind "confirm"}}
+      <div class="ask-wizard__choices">
+        <label class="ask-wizard__choice"><input type="radio" name="q{{.Index}}" value="yes" checked><span>是</span></label>
+        <label class="ask-wizard__choice"><input type="radio" name="q{{.Index}}" value="no"><span>否</span></label>
+      </div>
+    {{else}}
+      <input class="ada-input ask-wizard__input" type="text" name="q{{.Index}}" autocomplete="off" aria-label="回答">
+    {{end}}
+  </div>
+  {{end}}
+  <div class="ask-wizard__nav">
+    <button class="ada-btn ada-btn--secondary ada-btn--sm" type="button" data-ask-prev disabled>上一题</button>
+    <button class="ada-btn ada-btn--secondary ada-btn--sm" type="button" data-ask-next>下一题</button>
+    <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit" name="decision" value="accept" data-ask-submit>提交</button>
+    <button class="ada-btn ada-btn--ghost ada-btn--sm" type="submit" name="decision" value="cancel">取消</button>
+  </div>
+</form>
 {{end}}

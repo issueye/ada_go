@@ -216,6 +216,33 @@ func TestLoopDetectionWarnThenAbort(t *testing.T) {
 	}
 }
 
+// TestLoopDetectionCountsInterleaved 验证按指纹累计：两次相同调用之间插一条别的
+// 工具，也不会把重复计数打散（A,B,A,B,A → A 第 3 次就触发 loop_detected）。
+func TestLoopDetectionCountsInterleaved(t *testing.T) {
+	t.Parallel()
+	turns := make([][]testkit.ScriptStep, 0, 6)
+	for i := 0; i < 3; i++ {
+		turns = append(turns, testkit.ToolTurn(fmt.Sprintf("a%d", i), "tool_a", `{"path":"."}`))
+		turns = append(turns, testkit.ToolTurn(fmt.Sprintf("b%d", i), "tool_b", `{"path":"."}`))
+	}
+	h := newHarness(t, testkit.NewScriptedModel(turns...),
+		testkit.Descriptor("tool_a", "tools-x", domain.AccessRead),
+		testkit.Descriptor("tool_b", "tools-x", domain.AccessRead),
+	)
+	th, _ := h.store.CreateThread(context.Background(), h.workspace, "interleave")
+	_ = h.run(t, context.Background(), th.ID, "别转圈")
+
+	found := false
+	for _, e := range h.store.Entries(th.ID) {
+		if strings.Contains(string(e.Payload), "loop_detected") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("交替重复的相同调用也应触发 loop_detected")
+	}
+}
+
 // TestRepeatableToolNotCounted 验证 repeatable 工具不参与循环检测（02 §5.4）。
 func TestRepeatableToolNotCounted(t *testing.T) {
 	t.Parallel()

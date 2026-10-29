@@ -105,35 +105,8 @@ func uiGet(t *testing.T, srv *web.Server, target string) *httptest.ResponseRecor
 	return rec
 }
 
-// 动作预取失败（Core 桩）时任务卡回退内置示例，整页 200 且其余部分照常。
-func TestUITaskPlanSlotInThreadPage(t *testing.T) {
-	core := &uiFakeCore{}
-	srv := newUIServer(t, core)
-
-	rec := uiGet(t, srv, "/thread/th_1?stub=1")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /thread/th_1 = %d\n%s", rec.Code, rec.Body.String())
-	}
-	body := rec.Body.String()
-	for _, want := range []string{
-		`data-slot="thread.tray" data-contributors="1"`,
-		`<details class="tp-card" data-state="collapsed" id="task-plan-card">`,
-		`<span class="tp-card__count">2/3</span>`,
-		`class="ada-todo__step is-done"`,
-		`<link rel="stylesheet" href="/ext/ui-task-plan/static/task-plan.css">`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("会话页缺少 %q", want)
-		}
-	}
-	// 动作预取走了既有 action.invoke（协议合规，未新增 RPC 方法）。
-	if core.count() == 0 {
-		t.Fatal("任务卡渲染应尝试 action.invoke 预取")
-	}
-}
-
-// 动作预取成功：真实动作结果取代内置示例数据。
-func TestUITaskPlanSlotWithActionResult(t *testing.T) {
+// 计划卡片（tools-plan 的前端段）挂在 chat.corner：动作成功时用真实计划渲染。
+func TestTaskPlanCardInChatCorner(t *testing.T) {
 	core := &uiFakeCore{invokeOK: true, result: json.RawMessage(
 		`{"plan":{"done":4,"total":6,"steps":[{"step":" golden ","status":"done"},{"step":"待办","status":"pending"}]}}`)}
 	srv := newUIServer(t, core)
@@ -143,15 +116,40 @@ func TestUITaskPlanSlotWithActionResult(t *testing.T) {
 		t.Fatalf("GET /thread/th_1 = %d", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `<span class="tp-card__count">4/6</span>`) {
-		t.Fatalf("任务卡没有用上动作结果:\n%s", body)
-	}
-	if strings.Contains(body, "示例数据") {
-		t.Fatalf("动作成功时不应出现内置示例:\n%s", body)
+	for _, want := range []string{
+		`data-slot="chat.corner" data-contributors="1"`,
+		`<details class="todo-card"`,
+		`<span class="todo-card__count">4/6</span>`,
+		`class="ada-todo__step is-done"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("会话页缺少 %q", want)
+		}
 	}
 	// 文本由 Go 侧转义：动作结果里的空格保留、HTML 特殊字符不可能逃逸。
 	if !strings.Contains(body, "<span> golden </span>") {
 		t.Fatalf("步骤标题渲染不对:\n%s", body)
+	}
+	// 动作预取走了既有 action.invoke（协议合规，未新增 RPC 方法）。
+	if core.count() == 0 {
+		t.Fatal("计划卡渲染应尝试 action.invoke 预取")
+	}
+}
+
+// 动作预取失败时插槽贡献为空：没有示例数据兜底，整页仍 200。
+func TestTaskPlanCardHiddenWithoutAction(t *testing.T) {
+	core := &uiFakeCore{}
+	srv := newUIServer(t, core)
+
+	rec := uiGet(t, srv, "/thread/th_1?stub=1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /thread/th_1 = %d\n%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "todo-card") {
+		t.Fatal("取不到计划时不应画卡（不允许示例数据兜底）")
+	}
+	if core.count() == 0 {
+		t.Fatal("计划卡渲染应尝试 action.invoke 预取")
 	}
 }
 
@@ -180,11 +178,11 @@ func TestUIExtRoutes(t *testing.T) {
 	if rec := uiGet(t, srv, "/ext/no-such-plugin/hello"); rec.Code != http.StatusNotFound {
 		t.Fatalf("未知插件 = %d, want 404", rec.Code)
 	}
-	rec = uiGet(t, srv, "/ext/ui-task-plan/static/task-plan.css")
+	rec = uiGet(t, srv, "/ext/tools-plan/static/todo.css")
 	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "text/css; charset=utf-8" {
 		t.Fatalf("插件样式 = %d %q", rec.Code, rec.Header().Get("Content-Type"))
 	}
-	if rec := uiGet(t, srv, "/ext/ui-task-plan/static/evil.exe"); rec.Code != http.StatusNotFound {
+	if rec := uiGet(t, srv, "/ext/tools-plan/static/evil.exe"); rec.Code != http.StatusNotFound {
 		t.Fatalf("扩展名 allowlist 之外的资源 = %d, want 404", rec.Code)
 	}
 }

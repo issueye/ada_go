@@ -290,7 +290,7 @@ ada-go 的界面不是“参考 a_da 风格”，而是**直接使用 a_da 的 U
 | `ui/icons.rs` | `internal/gateway/web/ui.go` | 同一组线性 SVG path、同一 stroke 1.75 与尺寸档位；模板经 `{{icon "…"}}` 或 sprite `<use>` 引用 |
 | `ui/components.rs` / `rows.rs` | `internal/gateway/web/ui.go` + `templates/` | Go 组件函数与模板输出 a_da **相同的 `ada-*` 标签、class 与 `data-*` 状态** |
 | `templates/*.html`、`partials/transcript.html` | `web/templates/` | 手写 Go 模板，DOM 层级与 class 不变；Askama 语法换成 `html/template` |
-| `plugins/task-plan/` | `plugins/official/ui-todo/` | 同一张 Todo 卡片（真实计划来自只读动作；无计划时不占位） |
+| `plugins/task-plan/` | `plugins/official/tools-plan`（前端段） | 同一张 Todo 卡片（真实计划来自只读动作；无计划时不占位） |
 
 上游固定到 a_da 的一个 commit。`web/static/` 中的副本在文件头记录来源与 SHA-256；`adag verify ui` 比对 token 名/值、CSS 层顺序、组件 class 基线与图标集，任何漂移先改文档与基线再改实现。运行时链接顺序为 `app.css` → `tokens.css` → `components/layout/widgets/shell/pages.css`：后加载的 `tokens.css` 覆盖 `app.css` 内联的编译副本，保证颜色仍只有一个可读真源。模板引用静态资源统一走 `{{asset "name"}}`，输出带内容指纹的 `/static/name?v=<hash>`；静态资源本身仍可长缓存，改 CSS/JS 后新 URL 会自动失效旧缓存（桌面壳的 Electron HTTP 缓存也在内）。
 
@@ -352,7 +352,7 @@ Go 组件库按 a_da 的组件清单实现，名字与输出对齐：
 
 #### 7.7.5 任务规划卡片
 
-Todo 卡片是前端插件，不是基座组件：`plugins/official/ui-todo` 默认挂 `chat.corner`（会话区右上角），数据来自只读动作 `tools-plan` 的 `plan`（没有计划时不渲染）；提问卡片 `ui-ask-user` 挂 `thread.tray`，待答项来自 `data.interactions` 投影，插件让位时基座托盘自动接手。供应商管理（`provider-admin`）与 Token 用量（`token-usage`）分别提供页面与侧栏导航。
+Todo 卡片是插件的前端段，不是基座组件：`plugins/official/tools-plan` 的 `slot.tsx` 挂在 `chat.corner`（会话区右上角），数据来自同一插件后端注册的只读动作 `plan`（没有计划时不渲染）；`tools-ask` 的提问卡片挂 `thread.tray`，待答项来自 `data.interactions` 投影，插件让位时基座托盘自动接手。供应商管理（`provider-admin`）与 Token 用量（`token-usage`）分别提供页面与侧栏导航。
 
 - 收起态：胶囊 = 列表图标 + “任务规划” + `3/12` + 当前步骤标题。
 - 展开态：320px 卡片，头部（标题 + `3 / 12 已完成` + 复制 + 收起）+ 备注 + 步骤清单（最大 256px 内滚）。

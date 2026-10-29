@@ -10,7 +10,7 @@ import (
 	"github.com/adag/ada-go/internal/proto"
 )
 
-// domainEventKinds 是 internal/domain/event.go 里的 12 个 evt.* 常量。
+// domainEventKinds 是 internal/domain/event.go 里的 13 个 evt.* 常量。
 // domain 包没有导出集合函数（M0 契约缺口，见汇报），所以这里逐条列出：
 // 新增常量不写进来就会在「集合一致」子测试里失败（缺一侧）。
 func domainEventKinds() []string {
@@ -26,13 +26,14 @@ func domainEventKinds() []string {
 		string(domain.EvtNotice),
 		string(domain.EvtUsage),
 		string(domain.EvtPluginChanged),
+		string(domain.EvtPluginStream),
 		string(domain.EvtError),
 	}
 }
 
 // TestEventNamesAlignWithProto 断言事件名的两处真源一致（08 §8.2 与生成的 proto）：
 //
-//   - domain/event.go 的 12 个常量 ⇔ proto.AllEventNames() 的 12 个常量，集合相同；
+//   - domain/event.go 的 13 个常量 ⇔ proto.AllEventNames() 的 13 个常量，集合相同；
 //   - 每个名字都能在 proto.LookupEvent 里查到，且 scope 与 testkit 记录器的
 //     序号分配规则一致（线程级用 Seq、工作区级用 WorkspaceSeq，08 §8.1）；
 //   - 事件名一律 evt. 前缀（08 §8.1）；
@@ -43,8 +44,8 @@ func TestEventNamesAlignWithProto(t *testing.T) {
 	dom := domainEventKinds()
 	gen := proto.AllEventNames()
 
-	mustCount(t, "domain 事件常量数", 12, len(dom))
-	mustCount(t, "proto 事件名数", 12, len(gen))
+	mustCount(t, "domain 事件常量数", 13, len(dom))
+	mustCount(t, "proto 事件名数", 13, len(gen))
 
 	set := func(in []string) map[string]bool {
 		m := make(map[string]bool, len(in))

@@ -261,11 +261,15 @@ type StateOp struct {
 
 // UIRequest 是一次通用用户交互（05 §6.3 UIContext）。
 type UIRequest struct {
+	// PluginID 是发起交互的插件：交互账目与事件载荷都要它（谁问的、谁负责）。
+	PluginID  string
 	Kind      domain.InteractionKind
 	Title     string
 	Message   string
 	Options   []string
 	TimeoutMS int
+	// Payload 是 kind=form 的题目数组（JSON）；其它形态为空。
+	Payload json.RawMessage
 }
 
 // UIResolution 是交互结果；调用方必须把 timeout/unavailable 当作拒绝（INV-4）。

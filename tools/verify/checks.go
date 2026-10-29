@@ -661,8 +661,9 @@ func checkProducts(root string) error {
 	if coding, err := coreapp.LoadProduct(filepath.Join(root, "products", "coding.agent.json")); err != nil {
 		problems = append(problems, err.Error())
 	} else {
-		if len(coding.Plugins) != 13 {
-			problems = append(problems, fmt.Sprintf("coding 的官方插件清单是 %d 项，设计 8.6 示例是 13 项", len(coding.Plugins)))
+		// 11 项 = 设计 8.6 的 13 项减去并入 tools-plan / tools-ask 的两个 UI 插件。
+		if len(coding.Plugins) != 11 {
+			problems = append(problems, fmt.Sprintf("coding 的官方插件清单是 %d 项，期望 11 项", len(coding.Plugins)))
 		}
 		if !coding.Capabilities.Images || !coding.Capabilities.Skills {
 			problems = append(problems, "coding 应启用 skills 与 images（8.6 示例）")

@@ -1,12 +1,18 @@
 {
   "id": "tools-ask",
-  "name": "提问工具",
-  "version": "0.1.0",
+  "name": "提问",
+  "version": "0.2.0",
   "apiVersion": 1,
-  "description": "ask_user：用 ctx.ui 向用户提问（confirm/select/input），UI 不可用或用户拒绝时失败关闭",
+  "description": "ask_user：用 ctx.ui 向用户提问（confirm/select/input，一次可问多个），并把待答项渲染成交互托盘里的提问卡片；UI 不可用或用户拒绝时失败关闭。",
   "trust": "builtin",
   "backend": {
     "entry": "index.ts",
     "capabilities": ["ui.ask"]
+  },
+  "frontend": {
+    "capabilities": ["backend.read"],
+    "slots": [{ "slot": "thread.tray", "template": "slot.tsx", "order": 10 }],
+    "styles": ["ask-user.css"],
+    "assets": "static"
   }
 }

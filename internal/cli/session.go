@@ -56,6 +56,10 @@ type Config struct {
 	ThreadID string
 	// Interactive 为 true 时把审批/提问转到终端（y/n）；false 时按无 UI 失败关闭。
 	Interactive bool
+	// HasUI 表示「这个会话背后有界面可以回答交互」：CLI 交互模式是终端，
+	// Gateway 是网页里的交互托盘。它决定 ctx.ui.available 与 broker 的 HasUI，
+	// 与 Interactive（是否在终端读 stdin）分开——Core 进程没有终端，但有网页。
+	HasUI bool
 	// Scripts 是官方插件包（由 cmd 注入）。
 	Scripts []host.Script
 	// FrontendScripts 是前端插件（M4）：产品声明允许它们缺席本侧装配，
@@ -251,6 +255,11 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 		Log:       cfg.Log,
 		HTTP:      httpBridge,
 	}
+	// ctx.ui：把插件的 confirm/select/input 接到交互桥上（05 §6.3 UIContext）。
+	// 只有确实有界面时才装上——nil 时 ctx.ui.available=false，ask 类工具按失败关闭。
+	if cfg.HasUI {
+		hc.UI = s.uiAsk
+	}
 	hc.State = s.stateOp
 	// 给插件的只读技能通道（6.7）：官方的技能搜索工具用它做匹配；
 	// 快照随每次装配更新，调用时读当前值。
@@ -311,7 +320,7 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 		Clock: clock,
 		IDs:   ids,
 		Store: interactionStore{st: store},
-		HasUI: func(context.Context, string) bool { return cfg.Interactive },
+		HasUI: func(context.Context, string) bool { return cfg.HasUI },
 	})
 	if err != nil {
 		return cleanup(err)
@@ -1484,6 +1493,39 @@ func (s *Session) onEvent(evt domain.Event) {
 	if body.PartKind == "text" && body.Text != "" {
 		fmt.Fprint(s.cfg.Out, body.Text)
 	}
+}
+
+// uiAsk 是 host.Context.UI 的实现：把插件的 ctx.ui 请求转成交互桥上的一次交互，
+// 由界面（终端或网页托盘）回答。没有界面时 broker 会立即解析成 unavailable，
+// 调用方按失败关闭处理（INV-4）。
+func (s *Session) uiAsk(ctx context.Context, req host.UIRequest) (host.UIResolution, error) {
+	if s.broker == nil {
+		return host.UIResolution{Status: domain.InteractionUnavailable}, nil
+	}
+	threadID := threadFrom(ctx)
+	if threadID == "" {
+		threadID = s.CurrentThread()
+	}
+	// form 的题目要能跟着 interactions 行一起持久化：表里没有 payload 列，
+	// 题目就放在 body（view 侧按 kind=form 解析 body 的 JSON）。
+	body := req.Message
+	if req.Kind == domain.InteractionForm {
+		body = string(req.Payload)
+	}
+	res, err := s.broker.Request(ctx, ports.InteractionRequest{
+		ThreadID: threadID,
+		RunID:    runFrom(ctx),
+		PluginID: req.PluginID,
+		Kind:     req.Kind,
+		Title:    req.Title,
+		Body:     body,
+		Options:  req.Options,
+		Payload:  req.Payload,
+	})
+	if err != nil {
+		return host.UIResolution{}, err
+	}
+	return host.UIResolution{Status: res.Status, Value: res.Value}, nil
 }
 
 // onInteraction 是 CLI 的终端替身界面：确认 y/n、选择序号、输入文本。

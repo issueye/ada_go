@@ -346,6 +346,25 @@ func TestCreateThreadCallsCoreAndRedirects(t *testing.T) {
 	}
 }
 
+// 已经在跑脚本的浏览器（adag_js=1）不再拿 meta refresh：运行中的页面由
+// chat-live.js 吃 SSE 增量。Chromium 里删掉已解析的 meta 不会取消排队的刷新，
+// 发了就等于整个运行期每 2 秒整页重载一次。
+func TestThreadPageSkipsMetaRefreshForJSClient(t *testing.T) {
+	core := newFakeCore().
+		on("thread.get", threadGetRunning).
+		on("thread.entries", entriesAscending)
+	srv, _ := newServer(t, core)
+
+	rec := serveWithCookies(t, srv, "GET", "/thread/th_1", nil,
+		&http.Cookie{Name: web.JSClientCookieName, Value: "1"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /thread/th_1 = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); strings.Contains(body, `http-equiv="refresh"`) {
+		t.Fatal("有 JS 的浏览器不该拿到 meta refresh")
+	}
+}
+
 func TestThreadPageRendersTranscriptToolCardAndTray(t *testing.T) {
 	core := newFakeCore().
 		on("thread.get", threadGetRunning).
@@ -369,11 +388,12 @@ func TestThreadPageRendersTranscriptToolCardAndTray(t *testing.T) {
 	wantContains(t, body, "先想一下")
 	wantContains(t, body, "答案是 42")
 
-	// 工具卡字段。
+	// 工具卡字段。工具按名字挑图标：read_file 是文件图标，不是统一的终端。
 	wantContains(t, body, "read_file")
 	wantContains(t, body, "call_1")
 	wantContains(t, body, "12 ms")
 	wantContains(t, body, "已截断")
+	wantContains(t, body, `M14 3H7a2 2 0 0 0-2 2v14`) // i-file 的第一段路径
 
 	// 交互托盘：select 表单与选项。
 	wantContains(t, body, "批准操作")
@@ -1002,8 +1022,11 @@ func TestThreadPageUsesAdaShellAndComponentDOM(t *testing.T) {
 	wantContains(t, body, `class="ada-thinking"`)
 	wantContains(t, body, "先想一下")
 
-	// 工具卡的展示字段（status / duration / truncated / details）保留。
-	wantContains(t, body, "成功")
+	// 工具卡的展示字段（duration / truncated / details）保留；成功的工具不再挂
+	// 「成功」徽标——成功由行样式默认表达，失败才用红色左条与红色工具名。
+	if strings.Contains(body, ">成功<") {
+		t.Fatal("成功的工具不应再显示「成功」徽标")
+	}
 	wantContains(t, body, "12 ms")
 
 	// 折叠偏好必须在侧栏 DOM 之前同步应用，否则每次导航都会“展开→收起”闪一下。

@@ -18,7 +18,7 @@
 - Node API 形状子集：按能力安装模块，E-1/E-4/E-5 上游缺口闭环，Node 20 双跑语料通过。
 - 官方 provider：OpenAI Chat、Anthropic Messages、OpenAI Responses；OpenAI 兼容端点复用 Chat 插件。
 - 官方工具与策略：`tools-fs`、`tools-shell`、`tools-git`、`tools-plan`、`tools-ask`、`tools-skill`、`policy-default`、`persona-coding`。
-- 官方前端插件：`ui-todo`（Todo 列表）、`ui-ask-user`（待答交互）、`provider-admin`（供应商/模型）、`token-usage`（Token 用量）。
+- 官方前端插件：`provider-admin`（供应商/模型）、`token-usage`（Token 用量）；计划卡与提问卡分别并入 `tools-plan`、`tools-ask` 的前端段。
 - Gateway：鉴权、工作区监督、JSON-RPC relay、SSE、SSR、前端动作与动态路由。
 - SSR 前端：直接复用 a_da 的 token、CSS、DOM、组件与交互；12 个插槽；无 JS 可用；前端插件通过页面/插槽/导航贡献 UI。
 - 安全与运维：scope、能力位、交互失败关闭、审计、诊断、`doctor`、`verify`、备份恢复与升级。
@@ -112,7 +112,7 @@ M4 同时依赖 M2 的页面宿主与 M3 的完整装配/信任模型。若 M3 �
 **M4 前端插件 —— 已交付**：
 
 - [x] golden HTML 与转义基线：`internal/gateway/frontend/render_test.go`（TestGolden*）。
-- [x] 示例插件真实生效：`ui-todo` 插槽与动作链路（`app/ui_pipeline_test.go`）。
+- [x] 示例插件真实生效：`tools-plan` 的 Todo 插槽与动作链路（`app/ui_pipeline_test.go`）。
 - [x] 无 JS 降级：无 JS 可读可操作（`internal/gateway/web/web_test.go`）。
 - [x] 插件失败隔离：失败插槽为空、页面其余正常（web/pluginui 测试矩阵）。
 - [x] 12 插槽同名同位：`verify slots`（插槽 ↔ 宿主位置双向覆盖）+ `verify ui`（a_da 基线）。
@@ -266,7 +266,7 @@ M4 同时依赖 M2 的页面宿主与 M3 的完整装配/信任模型。若 M3 �
 | VNode 渲染 | 标签/属性/组件白名单、转义、深度/节点/输出限制、错误隔离 | 3–4 |
 | 组件与插槽 | Go 组件输出 a_da DOM；12 插槽、顺序、空贡献回退、状态恢复 | 4–5 |
 | 页面与动作 | `/ext` 页面、nav/dashboard、只读预取、写动作 CSRF、动态路由/API | 4–5 |
-| 示例插件 | `ui-todo`、`ui-ask-user`、`provider-admin`、`token-usage`、`hello-tsx` | 2–3 |
+| 示例插件 | `provider-admin`、`token-usage`、`hello-tsx`（计划/提问卡片已并入 `tools-plan`/`tools-ask`） | 2–3 |
 | UI 验收 | golden HTML、截图基线、无 JS、响应式、对比度、插件失败回退矩阵 | 2–3 |
 
 **退出标准**：示例插件在真实页面生效；插件 TSX 无 hooks/事件/副作用；失败插槽为空且页面其余正常；任务卡与 a_da 形态一致，数据仍来自通用只读动作。

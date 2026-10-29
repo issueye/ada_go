@@ -443,6 +443,20 @@ select:focus {
   border-left: 2px solid var(--ph-line-strong);
   color: var(--ph-muted);
   font-size: 13px;
+}
+
+/* 实时思考的头部与落库后的「思考」折叠行同构：同一个图标 + 同一个标签。 */
+.live-thinking__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-xs);
+  font-weight: 500;
+}
+
+.live-thinking__text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -886,6 +900,98 @@ select:focus {
   min-width: 160px;
 }
 
+/* 分步表单（ask_user 一次问多个）：一题一步，底部「上一题 / 下一题 / 提交」。 */
+.ada-tray__row--form {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.ada-tray__row--form .ada-tray__text {
+  overflow: visible;
+  white-space: normal;
+}
+
+.ask-wizard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 280px;
+}
+
+/* display:flex / inline-flex 会覆盖 UA 的 [hidden]，这里统一兜底。 */
+.ask-wizard [hidden] {
+  display: none;
+}
+
+.ask-wizard__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-xs);
+}
+
+.ask-wizard__counter {
+  color: var(--ph-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ask-wizard__step {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* display:flex 会覆盖 UA 的 [hidden]，这里显式兜底。 */
+.ask-wizard__step[hidden] {
+  display: none;
+}
+
+.ask-wizard__question {
+  margin: 0;
+  color: var(--ph-ink);
+  font-size: var(--ada-text-base);
+  line-height: 1.6;
+}
+
+.ask-wizard__input {
+  width: 100%;
+}
+
+.ask-wizard__select {
+  min-width: 160px;
+}
+
+.ask-wizard__choices {
+  display: flex;
+  gap: 14px;
+}
+
+.ask-wizard__choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
+  cursor: pointer;
+}
+
+.ask-wizard__nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ask-wizard__nav [data-ask-submit] {
+  margin-left: auto;
+}
+
+.ask-wizard__nav [data-ask-prev][disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* 终态失败：把 run 的错误原因放在会话流里，不能只留在事件流/日志里。 */
 .ada-run-error {
   display: flex;
@@ -953,6 +1059,8 @@ select:focus {
   line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  max-height: 300px;
+  overflow: auto;
 }
 
 /* Markdown 正文与容器是同一个元素（class="ada-msg__body markdown-body"），

@@ -23,6 +23,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/adag/ada-go/internal/domain"
 	"github.com/adag/ada-go/internal/gateway/contracts"
 	"github.com/adag/ada-go/internal/proto"
 )
@@ -121,6 +122,9 @@ func Dial(ctx context.Context, endpoint, token string) (contracts.CoreClient, er
 	if err != nil {
 		return nil, fmt.Errorf("relay: 连接 Core 失败: %w", err)
 	}
+	// coder/websocket 默认只读 32KB，而单条 JSON-RPC 消息允许 2MB（08 §8.1）。
+	// 不放开的话，带工具输出的 thread.get 响应就会把连接直接读断。
+	conn.SetReadLimit(domain.RPCMessageMaxBytes)
 
 	connCtx, cancel := context.WithCancel(context.Background())
 	c := &Client{

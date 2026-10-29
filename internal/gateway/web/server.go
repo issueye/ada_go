@@ -144,6 +144,9 @@ func New(cfg Config) (*Server, error) {
 				return "neutral"
 			}
 		},
+		// toolIcon 给工具行挑一个能一眼认出来的图标：文件、目录、终端、git、计划……
+		// 认不出来的工具退回扳手，而不是所有工具都画成终端。
+		"toolIcon": toolIcon,
 		// lineCount 统计文本行数（工具输出的“共 N 行”）。
 		"lineCount": func(s string) int {
 			if s == "" {
@@ -225,6 +228,12 @@ const WorkspaceCookieName = "adag_workspace"
 
 // WorkspaceCookieMaxAge 是工作区选择 cookie 的有效期（30 天，单位秒）。
 const WorkspaceCookieMaxAge = 30 * 24 * 60 * 60
+
+// JSClientCookieName 标记「这个浏览器已经在跑脚本」（sidebar-boot.js 首屏种下）。
+// 它只用来二选一：有 JS 走实时增量，没有 JS 才退到 meta refresh 轮询。
+// 有 JS 时不能再发 meta refresh——Chromium 里删掉 meta 并不会取消已经排队的
+// 刷新，运行中的页面会变成每 2 秒整页重载一次。
+const JSClientCookieName = "adag_js"
 
 // acquire 按当前请求的工作区取一次 Core 客户端，返回成对的释放函数。
 func (s *Server) acquire(ctx context.Context, r *http.Request) (contracts.CoreClient, func(), error) {

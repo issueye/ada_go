@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/adag/ada-go/internal/cli"
 	"github.com/adag/ada-go/internal/conformance/testkit"
@@ -120,6 +121,96 @@ func TestSessionScriptedToolTurn(t *testing.T) {
 	}
 	if fake.RequestCount() < 2 {
 		t.Fatalf("模型请求数 = %d，期望至少 2（工具轮 + 收尾）", fake.RequestCount())
+	}
+}
+
+// ask_user 的提问必须真的走到界面：HasUI=true 时经交互桥等待答案并回填工具结果。
+func TestSessionAskUserRoundTripsThroughUI(t *testing.T) {
+	scripts, err := official.Scripts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := testkit.NewFakeProvider(testkit.NewScriptedModel(
+		testkit.ToolTurn("call_ask", "ask_user", `{"question":"你叫什么名字？","kind":"input"}`),
+		testkit.TextTurn("好的"),
+	))
+	cfg := cli.Config{
+		Workspace:   t.TempDir(),
+		DataDir:     t.TempDir(),
+		Product:     productPath(t),
+		Scripts:     scripts,
+		ModelClient: fake,
+		In:          strings.NewReader(""),
+		HasUI:       true,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	sess, err := cli.Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer sess.Close(ctx)
+
+	// 模拟界面：等交互出现，按 input 回答。
+	go func() {
+		for i := 0; i < 400; i++ {
+			threadID := sess.CurrentThread()
+			if threadID != "" {
+				if list, err := sess.PendingInteractions(ctx, threadID); err == nil && len(list) > 0 {
+					_, _ = sess.RespondInteraction(ctx, threadID, list[0].ID, domain.InteractionAccepted, "Ada")
+					return
+				}
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	if term, err := sess.Run(ctx, "问我名字"); err != nil || term != domain.TerminalCompleted {
+		t.Fatalf("Run = %s / %v", term, err)
+	}
+	var jsonl strings.Builder
+	if _, err := cli.ExportThread(ctx, cfg.Workspace, cfg.DataDir, sess.CurrentThread(), "jsonl", &jsonl); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if !strings.Contains(jsonl.String(), "用户的回答（input）：Ada") {
+		t.Fatalf("工具结果里没有界面给出的答案:\n%s", jsonl.String())
+	}
+}
+
+// 没有界面（HasUI=false）时 ask_user 必须失败关闭，而不是挂住等一个不会来的答案。
+func TestSessionAskUserFailsClosedWithoutUI(t *testing.T) {
+	scripts, err := official.Scripts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := testkit.NewFakeProvider(testkit.NewScriptedModel(
+		testkit.ToolTurn("call_ask", "ask_user", `{"question":"你叫什么名字？","kind":"input"}`),
+		testkit.TextTurn("好的"),
+	))
+	cfg := cli.Config{
+		Workspace:   t.TempDir(),
+		DataDir:     t.TempDir(),
+		Product:     productPath(t),
+		Scripts:     scripts,
+		ModelClient: fake,
+		In:          strings.NewReader(""),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	sess, err := cli.Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer sess.Close(ctx)
+	if term, err := sess.Run(ctx, "问我名字"); err != nil || term != domain.TerminalCompleted {
+		t.Fatalf("Run = %s / %v（工具失败不应拖垮整轮）", term, err)
+	}
+	var jsonl strings.Builder
+	if _, err := cli.ExportThread(ctx, cfg.Workspace, cfg.DataDir, sess.CurrentThread(), "jsonl", &jsonl); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if !strings.Contains(jsonl.String(), "用户界面") {
+		t.Fatalf("无界面时应报失败关闭原因:\n%s", jsonl.String())
 	}
 }
 

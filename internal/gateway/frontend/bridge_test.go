@@ -134,30 +134,18 @@ func request(t *testing.T, target string) *http.Request {
 	return r
 }
 
-// 动作预取失败（Core 尚未实现 action.invoke 的注册）时，插槽渲染成功：
-// 模板回退到内置示例数据（M4→tools-plan 接线点，见 slot.tsx 注释）。
-func TestBridgeTaskPlanSlotWithFallbackSample(t *testing.T) {
+// 动作预取失败（Core 尚未实现 action.invoke 的注册）时插槽贡献为空：
+// 计划卡片和工具在同一个插件里，取不到计划就不画卡（没有示例数据兜底）。
+func TestBridgeTaskPlanSlotWithoutAction(t *testing.T) {
 	core := newFakeCore().failOn("action.invoke", errors.New("core: action.invoke 尚未实现"))
 	b := testBridge(t, core)
 
-	html, count, err := b.Slot("thread.tray", request(t, "/thread/th_1"))
+	html, _, err := b.Slot("chat.corner", request(t, "/thread/th_1"))
 	if err != nil {
-		t.Fatalf("Slot(thread.tray): %v", err)
+		t.Fatalf("Slot(chat.corner): %v", err)
 	}
-	if count != 1 || html == "" {
-		t.Fatalf("插槽贡献数 = %d，内容为空: %q", count, html)
-	}
-	for _, want := range []string{
-		`<details class="tp-card" data-state="collapsed" id="task-plan-card">`,
-		`class="tp-card__summary" title="点击展开任务规划步骤"`,
-		`<span class="tp-card__count">2/3</span>`,
-		`<div class="ada-todo__list-wrap"><p class="ada-todo__notes"><span>备注：</span>`,
-		`<li class="ada-todo__step is-done">`,
-		`<li class="ada-todo__step is-pending">`,
-	} {
-		if !strings.Contains(string(html), want) {
-			t.Fatalf("任务卡缺少 %s\n--- html ---\n%s", want, html)
-		}
+	if html != "" {
+		t.Fatalf("预取失败时不应画卡: %q", html)
 	}
 	// 动作预取确实发生了（协议合规：既有 action.invoke）。
 	if got := core.count("action.invoke"); got != 1 {
@@ -173,31 +161,26 @@ func TestBridgeTaskPlanSlotWithFallbackSample(t *testing.T) {
 	}
 }
 
-// 动作预取成功：真实动作结果取代内置示例。
+// 动作预取成功：计划卡用真实动作结果渲染。
 func TestBridgeTaskPlanSlotWithActionResult(t *testing.T) {
 	core := newFakeCore().on("action.invoke",
 		`{"ok":true,"result":{"plan":{"done":1,"total":2,"steps":[{"step":"真数据","status":"done"},{"step":"待办","status":"pending"}]}}}`)
 	b := testBridge(t, core)
 
-	html, count, err := b.Slot("thread.tray", request(t, "/thread/th_1?x=1"))
+	html, count, err := b.Slot("chat.corner", request(t, "/thread/th_1?x=1"))
 	if err != nil || count != 1 {
 		t.Fatalf("Slot: %v (%d)", err, count)
 	}
 	wantContains := func(h, want string) {
 		t.Helper()
 		if !strings.Contains(h, want) {
-			t.Fatalf("任务卡缺少 %q\n%s", want, h)
+			t.Fatalf("计划卡缺少 %q\n%s", want, h)
 		}
 	}
-	wantContains(string(html), `<span class="tp-card__count">1/2</span>`)
+	wantContains(string(html), `<details class="todo-card"`)
+	wantContains(string(html), `<span class="todo-card__count">1/2</span>`)
 	wantContains(string(html), "<span>真数据</span>")
-	wantNotContains := func(h, unwanted string) {
-		t.Helper()
-		if strings.Contains(h, unwanted) {
-			t.Fatalf("任务卡不应包含 %q（示例数据必须被真实动作结果取代）\n%s", unwanted, h)
-		}
-	}
-	wantNotContains(string(html), "示例数据")
+	wantContains(string(html), `<li class="ada-todo__step is-done">`)
 }
 
 // 页面路由：hello 页面 200；未知插件/页面是 ErrExtNotFound（web 层给 404）。
@@ -242,18 +225,22 @@ func TestBridgeSlotFailureIsolation(t *testing.T) {
 		"apiVersion": 1,
 		"trust": "builtin",
 		"frontend": {
-			"slots": [{ "slot": "thread.tray", "template": "broken.tsx", "order": 1 }]
+			"slots": [{ "slot": "chat.corner", "template": "broken.tsx", "order": 1 }]
 		}
 	}`), Bundle: map[string]string{"broken.tsx": "export default function () { throw new Error('插槽炸了'); }"}}
-	b, err := frontend.NewBridge(frontend.BridgeOptions{Scripts: append(scripts, broken), ProductName: "ada-go"})
+	core := newFakeCore().on("action.invoke",
+		`{"ok":true,"result":{"plan":{"done":1,"total":2,"steps":[{"step":"步骤","status":"pending"}]}}}`)
+	b, err := frontend.NewBridge(frontend.BridgeOptions{
+		Scripts: append(scripts, broken), Supervisor: &fakeSup{core: core}, ProductName: "ada-go",
+	})
 	if err != nil {
 		t.Fatalf("NewBridge: %v", err)
 	}
-	html, count, err := b.Slot("thread.tray", request(t, "/thread/th_1"))
+	html, count, err := b.Slot("chat.corner", request(t, "/thread/th_1"))
 	if err != nil {
 		t.Fatalf("单贡献失败不应拖垮插槽: %v", err)
 	}
-	if count != 1 || !strings.Contains(string(html), "task-plan-card") {
+	if count != 1 || !strings.Contains(string(html), `id="todo-card"`) {
 		t.Fatalf("好插件的贡献应照常渲染 (count=%d): %s", count, html)
 	}
 	// 全部贡献都失败时才报错给 web（回退基座占位）。
@@ -279,31 +266,31 @@ func TestBridgeAssetsAndBindings(t *testing.T) {
 	styles := b.Styles()
 	found := false
 	for _, s := range styles {
-		if strings.HasPrefix(s, "/ext/ui-task-plan/static/task-plan.css?v=") {
+		if strings.HasPrefix(s, "/ext/tools-plan/static/todo.css?v=") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("Styles 缺少任务卡样式（带内容指纹）: %v", styles)
+		t.Fatalf("Styles 缺少计划卡样式（带内容指纹）: %v", styles)
 	}
 	scripts := b.Scripts()
 	if len(scripts) != 1 || !strings.HasPrefix(scripts[0], "/ext/provider-admin/static/provider-admin.js?v=") {
 		t.Fatalf("Scripts 应只含 provider-admin 的增强脚本（带内容指纹），got %v", scripts)
 	}
-	if data, ok := b.StaticAsset("ui-task-plan", "task-plan.css"); !ok || len(data) == 0 {
-		t.Fatal("StaticAsset 应能取到 task-plan.css")
+	if data, ok := b.StaticAsset("tools-plan", "todo.css"); !ok || len(data) == 0 {
+		t.Fatal("StaticAsset 应能取到 todo.css")
 	}
-	if _, ok := b.StaticAsset("ui-task-plan", "../plugin.json"); ok {
+	if _, ok := b.StaticAsset("tools-plan", "../plugin.json"); ok {
 		t.Fatal("路径穿越必须拒绝")
 	}
 	if _, ok := b.StaticAsset("nope", "x"); ok {
 		t.Fatal("未知插件必须拒绝")
 	}
-	ab, ok := b.ActionBinding("ui-task-plan", "slot_thread_tray")
+	ab, ok := b.ActionBinding("tools-plan", "slot_chat_corner")
 	if !ok || ab.BackendID != "tools-plan" || ab.Action != "plan" || ab.Mode != "read" {
 		t.Fatalf("ActionBinding 解析不对: %+v ok=%v", ab, ok)
 	}
-	if _, ok := b.ActionBinding("ui-task-plan", "missing"); ok {
+	if _, ok := b.ActionBinding("tools-plan", "missing"); ok {
 		t.Fatal("未知绑定必须拒绝")
 	}
 	// 绑定名约定：非 [a-z0-9] 字符编码为下划线。
@@ -347,13 +334,13 @@ func bridgeWithOnly(t *testing.T, core *fakeCore, id, csrf string) *frontend.Bri
 	return b
 }
 
-// ui-ask-user：待答交互来自 thread.get 的只读投影，表单提交回基座交互路由。
+// 提问（tools-ask 的前端段）：待答交互来自 thread.get 的只读投影，表单提交回基座交互路由。
 func TestBridgeAskUserSlotUsesInteractionProjection(t *testing.T) {
 	core := newFakeCore().
 		on("thread.get", `{"thread":{"id":"th_1"},"interactions":[{"id":"ir_1","threadId":"th_1","kind":"select","title":"选择环境","body":"请选择部署环境","options":["staging","prod"],"status":"pending"}]}`).
 		on("provider.list", `{"providers":[]}`).
 		on("usage.get", `{"thread":{},"workspace":{}}`)
-	b := bridgeWithOnly(t, core, "ui-ask-user", "csrf-x")
+	b := bridgeWithOnly(t, core, "tools-ask", "csrf-x")
 
 	html, count, err := b.Slot("thread.tray", request(t, "/threads/th_1"))
 	if err != nil || count != 1 {

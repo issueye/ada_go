@@ -46,7 +46,7 @@ ada-go/
       provider-openai-chat/ provider-anthropic-messages/ provider-openai-responses/
       tools-fs/ tools-shell/ tools-git/ tools-plan/ tools-ask/ tools-skill/ tools-subagent/
       policy-default/
-      persona-coding/ ui-todo/ ui-ask-user/ provider-admin/ token-usage/ ui-hello-tsx/
+      persona-coding/ provider-admin/ token-usage/ ui-hello-tsx/
     hello-tsx/ task-plan/ ask-user/   第三方示例（装时编译）
   web/
     templates/             layout、chat、workspaces、overview、extensions、plugin、error（DOM 与 a_da 同构）

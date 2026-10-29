@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:dfee21207b833ab9) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:3b8d0a6cdf855dde) by plugins/official/build.mjs — do not edit
 // tools-fs —— 官方插件：工作区内的文件读写（05 §6.3、02 §5.4 的 tools-fs）。
 //
 // 边界不在这一层：真正的根、只读、symlink 落点、16MB/10k 上限与审计都由宿主的
@@ -263,7 +263,9 @@ export default function (agent          )       {
       },
     },
     execute: async (args     , ctx             ) => {
-      const root = normalizePath(args?.path ?? ".", ctx.workspace);
+      // 空串与缺省同义，都指工作区根：模型很常传 path: ""，按错误处理会让它反复重试。
+      const rawPath = typeof args?.path === "string" ? args.path.trim() : "";
+      const root = normalizePath(rawPath || ".", ctx.workspace);
       const recursive = args?.recursive === true;
       const fs = requireFs(ctx);
 
@@ -323,7 +325,9 @@ export default function (agent          )       {
     execute: async (args     , ctx             ) => {
       const pattern = typeof args?.pattern === "string" ? args.pattern : "";
       if (pattern.length === 0) fail("ERR_INVALID_ARG_TYPE", "pattern 必须是非空字符串");
-      const root = normalizePath(args?.path ?? ".", ctx.workspace);
+      // 空串与缺省同义，都指工作区根。
+      const rawPath = typeof args?.path === "string" ? args.path.trim() : "";
+      const root = normalizePath(rawPath || ".", ctx.workspace);
       let maxResults = args?.maxResults === undefined ? 100 : Math.trunc(Number(args.maxResults)) || 0;
       if (maxResults <= 0 || maxResults > 500) maxResults = 500;
 

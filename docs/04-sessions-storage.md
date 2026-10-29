@@ -57,7 +57,7 @@ CREATE TABLE runs (
 CREATE TABLE interactions (
   id TEXT PRIMARY KEY, thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
   run_id TEXT NOT NULL, call_id TEXT, plugin_id TEXT NOT NULL,
-  kind TEXT NOT NULL, -- confirm|select|input
+  kind TEXT NOT NULL, -- confirm|select|input|form（form 的题目在 body 里，JSON）
   title TEXT NOT NULL, body TEXT NOT NULL, options_json TEXT,
   status TEXT NOT NULL, -- pending|accepted|denied|cancelled|timeout|unavailable
   response_json TEXT, created_at INTEGER NOT NULL, resolved_at INTEGER, expires_at INTEGER

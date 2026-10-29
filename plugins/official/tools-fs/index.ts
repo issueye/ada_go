@@ -262,7 +262,9 @@ export default function (agent: AgentAPI): void {
       },
     },
     execute: async (args: any, ctx: ToolContext) => {
-      const root = normalizePath(args?.path ?? ".", ctx.workspace);
+      // 空串与缺省同义，都指工作区根：模型很常传 path: ""，按错误处理会让它反复重试。
+      const rawPath = typeof args?.path === "string" ? args.path.trim() : "";
+      const root = normalizePath(rawPath || ".", ctx.workspace);
       const recursive = args?.recursive === true;
       const fs = requireFs(ctx);
 
@@ -322,7 +324,9 @@ export default function (agent: AgentAPI): void {
     execute: async (args: any, ctx: ToolContext) => {
       const pattern = typeof args?.pattern === "string" ? args.pattern : "";
       if (pattern.length === 0) fail("ERR_INVALID_ARG_TYPE", "pattern 必须是非空字符串");
-      const root = normalizePath(args?.path ?? ".", ctx.workspace);
+      // 空串与缺省同义，都指工作区根。
+      const rawPath = typeof args?.path === "string" ? args.path.trim() : "";
+      const root = normalizePath(rawPath || ".", ctx.workspace);
       let maxResults = args?.maxResults === undefined ? 100 : Math.trunc(Number(args.maxResults)) || 0;
       if (maxResults <= 0 || maxResults > 500) maxResults = 500;
 

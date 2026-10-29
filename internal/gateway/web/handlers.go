@@ -107,11 +107,19 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 		CurrentModelLabel: modelLabel,
 		CurrentModelValue: modelValue,
 	}
-	if run.Active {
+	if run.Active && !jsClient(r) {
 		// 无 JS 轮询：运行中每 2 秒刷新一次，完成即停止（7.8）。
+		// 有 JS 的浏览器由 chat-live.js 吃 SSE 增量，绝不能再发 meta refresh。
 		data.RefreshSeconds = 2
 	}
 	s.render(w, http.StatusOK, "chat", data)
+}
+
+// jsClient 判断这个浏览器是否已经在跑脚本（sidebar-boot.js 首屏种的 cookie）。
+// 判断错了只会影响「用轮询还是用增量」，两边的兜底都在：cookie 缺失时退到轮询。
+func jsClient(r *http.Request) bool {
+	c, err := r.Cookie(JSClientCookieName)
+	return err == nil && c.Value == "1"
 }
 
 // handleCreateThread 创建线程并 303 到会话页。
@@ -632,9 +640,14 @@ func (s *Server) handleInteraction(w http.ResponseWriter, r *http.Request) {
 		"decision":  decision,
 	}
 	if decision == "accept" {
-		value := strings.TrimSpace(r.PostFormValue("value"))
-		if value != "" {
-			params["value"] = interactionValue(r.PostFormValue("kind"), value)
+		if strings.TrimSpace(r.PostFormValue("kind")) == "form" {
+			// 分步表单：题目字段是 q0、q1…，按序拼成 answers 交给插件校验。
+			params["value"] = map[string]any{"answers": formAnswers(r)}
+		} else {
+			value := strings.TrimSpace(r.PostFormValue("value"))
+			if value != "" {
+				params["value"] = interactionValue(r.PostFormValue("kind"), value)
+			}
 		}
 	}
 	if _, err := s.call(r, "interaction.respond", params); err != nil {
@@ -687,6 +700,20 @@ func interactionValue(kind, value string) any {
 		return true
 	default:
 		return map[string]any{"text": value}
+	}
+}
+
+// formAnswers 按 q0、q1… 的顺序取出分步表单的全部答案；遇到断号就停
+// （题目编号由服务端按序渲染，不会跳号）。
+func formAnswers(r *http.Request) []string {
+	form := r.PostForm
+	out := make([]string, 0, len(form))
+	for i := 0; ; i++ {
+		values, ok := form["q"+strconv.Itoa(i)]
+		if !ok || len(values) == 0 {
+			return out
+		}
+		out = append(out, strings.TrimSpace(values[0]))
 	}
 }
 
