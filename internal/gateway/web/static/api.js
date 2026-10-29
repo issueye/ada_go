@@ -6,6 +6,8 @@
  *   await window.adaAPI("provider-admin", "/providers/save", { method: "POST", body: {...} });
  *
  * - 路径相对于 /ext/<pluginId>/api；
+ * - 线程页自动带 threadId（query），插件 route 的 ctx.state 因此落在正确线程；
+ *   可用 options.threadId 覆盖，传 null 表示不带；
  * - POST 自动带 X-CSRF-Token（来自页面 <meta name="csrf-token">）；
  * - 非 2xx 抛 Error（带 status 与 data），错误形状与基座 JSON API 一致。
  */
@@ -17,12 +19,30 @@
     return meta && meta.getAttribute("content") ? meta.getAttribute("content") : "";
   }
 
+  function pageThreadId() {
+    var match = /^\/threads?\/([^/?#]+)/.exec(window.location.pathname || "");
+    if (!match) return "";
+    try {
+      return decodeURIComponent(match[1]);
+    } catch (err) {
+      return match[1];
+    }
+  }
+
+  function withThread(target, options) {
+    var threadId = options.threadId !== undefined ? options.threadId : pageThreadId();
+    if (!threadId) return target;
+    var sep = target.indexOf("?") === -1 ? "?" : "&";
+    return target + sep + "threadId=" + encodeURIComponent(String(threadId));
+  }
+
   window.adaAPI = async function (pluginId, path, options) {
     if (!pluginId) throw new Error("adaAPI: 缺少 pluginId");
     options = options || {};
     var method = String(options.method || "GET").toUpperCase();
     var target = String(path || "/");
     if (target.charAt(0) !== "/") target = "/" + target;
+    target = withThread(target, options);
 
     var headers = Object.assign({ Accept: "application/json" }, options.headers || {});
     var body;

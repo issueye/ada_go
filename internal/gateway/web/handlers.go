@@ -134,6 +134,53 @@ func (s *Server) handleCreateThread(w http.ResponseWriter, r *http.Request) {
 	redirect(w, threadPath(res.Thread.ID))
 }
 
+// ThreadIDFromRequest 从 query threadId、页面路径（/threads/{id}、/thread/{id}）
+// 或 Referer 推断请求所属线程。插件 route 用它把 ctx.state / 交互类数据收敛到
+// 当前会话；无法确定的请求返回空串（工作区级）。
+func ThreadIDFromRequest(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if v := strings.TrimSpace(r.URL.Query().Get("threadId")); v != "" {
+		return sanitizeThreadID(v)
+	}
+	if id := threadIDFromPath(r.URL.Path); id != "" {
+		return id
+	}
+	if ref := strings.TrimSpace(r.Header.Get("Referer")); ref != "" {
+		if u, err := url.Parse(ref); err == nil {
+			return threadIDFromPath(u.Path)
+		}
+	}
+	return ""
+}
+
+func threadIDFromPath(p string) string {
+	for _, prefix := range []string{"/threads/", "/thread/"} {
+		rest, ok := strings.CutPrefix(p, prefix)
+		if !ok {
+			continue
+		}
+		seg, _, _ := strings.Cut(rest, "/")
+		id, err := url.PathUnescape(seg)
+		if err != nil {
+			continue
+		}
+		if id = sanitizeThreadID(id); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+func sanitizeThreadID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" || strings.ContainsAny(id, `/\`+"\x00") {
+		return ""
+	}
+	return id
+}
+
 // handleExtAPI 是插件动态 HTTP API 的 Gateway 入口（route）。
 // 请求经 Core RPC plugin.http 转发到插件路由；返回插件结果 JSON。
 // 认证由外部安全中间件负责（cookie/Bearer）；写方法额外要求 CSRF（同一中间件）。
@@ -178,6 +225,11 @@ func (s *Server) handleExtAPI(w http.ResponseWriter, r *http.Request) {
 		"method":   r.Method,
 		"path":     apiPath,
 		"query":    query,
+	}
+	// 线程上下文：显式 query 优先；否则从页面路径/Referer 推断。
+	// 插件 route 的 ctx.state 按这个线程命名空间读写（见 host.StateOp.ThreadID）。
+	if threadID := ThreadIDFromRequest(r); threadID != "" {
+		params["threadId"] = threadID
 	}
 	if body != nil {
 		params["body"] = body

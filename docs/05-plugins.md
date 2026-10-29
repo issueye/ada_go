@@ -137,7 +137,7 @@ interface ToolReturn {
 ```ts
 interface ToolContext {
   workspace: string;
-  threadId: string;                  // 当前线程；插件状态按线程命名空间隔离
+  threadId: string;                  // 当前线程；route 调用由 Gateway 透传，插件状态按它隔离
   now: string;                       // RFC3339
   signal: AbortSignal;
   log(level: "debug" | "info" | "warn" | "error", msg: string, fields?: object): void;

@@ -472,25 +472,10 @@ func (b *Bridge) workspace(r *http.Request) string {
 	return b.workspaceFor(r)
 }
 
-// threadIDFromRequest 从路径（/thread/{id}）或 query（threadId）取会话上下文。
+// threadIDFromRequest 从 query、页面路径或 Referer 取会话上下文。
+// 具体规则与插件 route 共用 web.ThreadIDFromRequest，避免两套解析漂移。
 func threadIDFromRequest(r *http.Request) string {
-	if v := strings.TrimSpace(r.URL.Query().Get("threadId")); v != "" {
-		return v
-	}
-	// 页面路由是 /threads/{id}（a_da 同形）；/thread/{id} 是 M2 旧路径的兼容别名。
-	for _, prefix := range []string{"/threads/", "/thread/"} {
-		rest, ok := strings.CutPrefix(r.URL.Path, prefix)
-		if !ok {
-			continue
-		}
-		seg, _, _ := strings.Cut(rest, "/")
-		if id, err := url.PathUnescape(seg); err == nil {
-			if id = strings.TrimSpace(id); id != "" {
-				return id
-			}
-		}
-	}
-	return ""
+	return web.ThreadIDFromRequest(r)
 }
 
 // SlotBindingName 是插槽取数动作的绑定名约定（7.5 的规范名编码）：

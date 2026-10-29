@@ -1093,7 +1093,10 @@ func (s *Session) ask(kind, title, body string, options []string) (domain.Intera
 
 // stateOp 把插件 KV 落到 SQLite，键按线程命名空间（t:<threadID>/<key>）。
 func (s *Session) stateOp(ctx context.Context, op host.StateOp) (json.RawMessage, error) {
-	thread := threadFrom(ctx)
+	thread := strings.TrimSpace(op.ThreadID)
+	if thread == "" {
+		thread = threadFrom(ctx)
+	}
 	if thread == "" {
 		thread = s.CurrentThread()
 	}

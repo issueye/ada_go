@@ -75,3 +75,43 @@ func TestPluginHTTPAPIRouteDispatch(t *testing.T) {
 		t.Fatalf("未知插件 = %v, want ErrRouteNotFound", err)
 	}
 }
+
+// route 调用携带的 threadId 要一路传到 ctx.state 的 StateOp，
+// 否则线程级 KV 会落回会话的“当前线程”，在并发/后台调用里读错数据。
+func TestPluginRouteCarriesThreadIntoState(t *testing.T) {
+	ctx := context.Background()
+	var seen string
+	hc := host.Context{
+		Workspace: t.TempDir(),
+		State: func(_ context.Context, op host.StateOp) (json.RawMessage, error) {
+			seen = op.ThreadID
+			return json.RawMessage(`{"thread":"` + op.ThreadID + `"}`), nil
+		},
+	}
+	src := "export default function (agent) {\n" +
+		"  agent.route('GET', '/state', function (req, ctx) { return ctx.state.get('k'); });\n" +
+		"}"
+	m := &plugins.Manifest{
+		ID: "route-state", Name: "状态路由夹具", Version: "0.1.0",
+		APIVersion: plugins.APIVersionMajor, Trust: plugins.TrustBuiltin,
+		Backend: &plugins.Backend{Entry: "index.js", Capabilities: []plugins.Capability{plugins.CapState}},
+	}
+	script := host.Script{Manifest: m, EntryName: host.EntryScheme + "://route-state/index.js", Source: src}
+	asm, err := app.Assemble(ctx, testProduct(t, "route-state"), []host.Script{script}, app.Deps{Context: hc})
+	if err != nil {
+		t.Fatalf("app.Assemble: %v", err)
+	}
+	t.Cleanup(func() { _ = asm.Close(context.Background()) })
+
+	out, err := asm.CallHTTPAPI(ctx, "route-state", "GET", "/state",
+		json.RawMessage(`{"method":"GET","path":"/state"}`), "th_42")
+	if err != nil {
+		t.Fatalf("GET /state: %v", err)
+	}
+	if seen != "th_42" {
+		t.Fatalf("StateOp.ThreadID = %q, want th_42", seen)
+	}
+	if !strings.Contains(string(out), `"thread":"th_42"`) {
+		t.Fatalf("路由结果 = %s", out)
+	}
+}

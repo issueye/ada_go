@@ -31,7 +31,7 @@ func TestExtAPIForwardsToPluginHTTP(t *testing.T) {
 		`{"ok":true,"result":{"echo":{"n":2},"plugin":"tools-fs"}}`)
 	srv, _ := newServer(t, core)
 
-	rec := serveExt(t, srv, http.MethodPost, "/ext/tools-fs/api/echo?path=a%20b", `{"n":2}`)
+	rec := serveExt(t, srv, http.MethodPost, "/ext/tools-fs/api/echo?path=a%20b&threadId=th_9", `{"n":2}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("状态 = %d, want 200；body=%s", rec.Code, rec.Body.String())
 	}
@@ -54,6 +54,35 @@ func TestExtAPIForwardsToPluginHTTP(t *testing.T) {
 	body, _ := call.Params["body"].(map[string]any)
 	if body["n"] != float64(2) {
 		t.Fatalf("body = %+v", body)
+	}
+	if call.Params["threadId"] != "th_9" {
+		t.Fatalf("threadId = %v", call.Params["threadId"])
+	}
+}
+
+// 没有显式 query 时，从 Referer 的会话页路径推断线程。
+func TestExtAPIThreadFromReferer(t *testing.T) {
+	core := newFakeCore().on("plugin.http", `{"ok":true,"result":null}`)
+	srv, _ := newServer(t, core)
+
+	req := httptest.NewRequest(http.MethodGet, "/ext/tools-fs/api/ping", nil)
+	req.Header.Set("Referer", "http://127.0.0.1:52353/threads/th_7?tab=chat")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("状态 = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	call, ok := core.lastCall("plugin.http")
+	if !ok || call.Params["threadId"] != "th_7" {
+		t.Fatalf("Referer 没有带出 threadId: %+v", call.Params)
+	}
+
+	// 非法线程 id（含路径分隔符）不作为上下文传下去。
+	req = httptest.NewRequest(http.MethodGet, "/ext/tools-fs/api/ping?threadId=th%2Fbad", nil)
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if call, _ := core.lastCall("plugin.http"); call.Params["threadId"] != nil {
+		t.Fatalf("非法 threadId 被接受: %+v", call.Params)
 	}
 }
 

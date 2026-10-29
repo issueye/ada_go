@@ -214,6 +214,9 @@ type CheckpointMeta struct {
 type StateOp struct {
 	// PluginID 是发起访问的插件；宿主在调用前补齐，存储层用它做命名空间（04 §5.7）。
 	PluginID string
+	// ThreadID 是本次调用归属的线程（工具/路由上下文）；为空时由宿主回退到当前线程。
+	// 它让 route 这类没有轮次 ctx 的调用也能读写正确的线程命名空间。
+	ThreadID string
 	Kind     string // get | set | delete | list
 	Key      string
 	Value    json.RawMessage

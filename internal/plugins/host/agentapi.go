@@ -467,7 +467,9 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 					value = raw
 				}
 				return p.hostAsync(c, "state."+kind, func(ctx context.Context) (any, error) {
-					return hc.State(ctx, StateOp{PluginID: p.id, Kind: kind, Key: key, Value: value})
+					return hc.State(ctx, StateOp{
+						PluginID: p.id, ThreadID: hc.ThreadID, Kind: kind, Key: key, Value: value,
+					})
 				}), nil
 			}
 		}

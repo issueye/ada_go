@@ -381,7 +381,7 @@
         "path": { "type": "string", "pattern": "^/", "description": "插件注册的路径；路径参数原样留在字符串里由插件自行解析" },
         "query": { "type": "object", "additionalProperties": { "type": "string" }, "description": "查询串（同名参数取第一个）" },
         "body": { "description": "已解析的 JSON 请求体（POST；上限 1MB）" },
-        "threadId": { "type": "string", "description": "可选的线程上下文" }
+        "threadId": { "type": "string", "description": "可选的线程上下文；Gateway 从 query threadId 或会话页 Referer 推断，插件 ctx.state 按它读写" }
       },
       "required": ["pluginId", "method", "path"]
     },
