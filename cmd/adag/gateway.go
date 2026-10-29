@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/adag/ada-go/app"
+	"github.com/adag/ada-go/internal/corerpc"
 	"github.com/adag/ada-go/internal/gateway"
 )
 
@@ -31,6 +32,7 @@ func runGateway(args []string, stdout io.Writer) error {
 	model := fs.String("model", "gpt-4o", "模型 id")
 	baseURL := fs.String("base-url", "", "OpenAI 兼容端点")
 	fake := fs.Bool("fake", false, "Core 使用确定性回显模型")
+	parentPID := fs.Int("parent-pid", 0, "父进程 pid（父进程消失时网关自行退出；桌面壳/测试用）")
 	maxCores := fs.Int("max-cores", 8, "同时存活的 Core 上限")
 	idle := fs.Duration("idle-reap", gateway.DefaultIdle, "空闲 Core 回收时间")
 	var allowHosts stringList
@@ -64,6 +66,14 @@ func runGateway(args []string, stdout io.Writer) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if *parentPID > 0 {
+		// 桌面壳/测试进程被强杀时，网关不能变成孤儿；WatchParent 会取消 ctx，
+		// 触发 HTTP server 退出与 Supervisor 回收 Core。
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		go corerpc.WatchParent(ctx, *parentPID, cancel)
+	}
 	gw, err := gateway.New(ctx, cfg)
 	if err != nil {
 		return err

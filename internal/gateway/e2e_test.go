@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -145,6 +146,7 @@ func startGateway(t *testing.T, bin, repo, workspace, dataDir string) *gatewayPr
 	t.Helper()
 	cmd := exec.Command(bin,
 		"gateway",
+		"--parent-pid", strconv.Itoa(os.Getpid()),
 		"--workspace", workspace,
 		"--data-dir", dataDir,
 		"--fake",

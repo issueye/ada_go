@@ -338,7 +338,8 @@ async function startGatewaySupervisor() {
 
   const baseEnv = { ...process.env, ADAG_GATEWAY_TOKEN: token }
   const attempt = (addr) => {
-    const args = ['gateway', '--addr', addr]
+    // 父进程 watchdog：Electron 被强杀时网关自行退出（再触发 Core 的 parent-pid）。
+    const args = ['gateway', '--parent-pid', String(process.pid), '--addr', addr]
     if (productPath) args.push('--product', productPath)
     if (workspace) args.push('--workspace', workspace)
     appendLauncherLog(`拉起网关: ${gatewayBin} ${args.join(' ')}`)
