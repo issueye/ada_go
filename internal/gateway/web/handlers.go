@@ -102,6 +102,7 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 		Transcript:   transcript,
 		Interactions: buildInteractions(get.Interactions, id, s.csrf(r)),
 		TurnKey:      newIdempotencyKey(),
+		Models:       s.modelOptions(r, id),
 	}
 	if run.Active {
 		// 无 JS 轮询：运行中每 2 秒刷新一次，完成即停止（7.8）。
@@ -530,6 +531,53 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirect(w, flashRedirect(next, "notice", "会话已删除"))
+}
+
+// modelOptions 是输入框旁模型选择器的数据（model.list 投影）；失败时返回空列表，
+// 不阻塞会话页渲染。
+func (s *Server) modelOptions(r *http.Request, threadID string) []modelOption {
+	raw, err := s.call(r, "model.list", map[string]any{"threadId": threadID})
+	if err != nil {
+		return nil
+	}
+	var res struct {
+		Models []struct {
+			Model struct {
+				ProviderID string `json:"providerId"`
+				ModelID    string `json:"modelId"`
+			} `json:"model"`
+			Info struct {
+				DisplayName string `json:"displayName"`
+			} `json:"info"`
+		} `json:"models"`
+		Current struct {
+			ProviderID string `json:"providerId"`
+			ModelID    string `json:"modelId"`
+		} `json:"current"`
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil
+	}
+	out := make([]modelOption, 0, len(res.Models))
+	for _, m := range res.Models {
+		if m.Model.ProviderID == "" || m.Model.ModelID == "" {
+			continue
+		}
+		label := strings.TrimSpace(m.Info.DisplayName)
+		if label == "" {
+			label = m.Model.ModelID
+		}
+		if label != m.Model.ModelID {
+			label += " · " + m.Model.ModelID
+		}
+		out = append(out, modelOption{
+			ProviderID: m.Model.ProviderID,
+			ModelID:    m.Model.ModelID,
+			Label:      label,
+			Current:    res.Current.ProviderID == m.Model.ProviderID && res.Current.ModelID == m.Model.ModelID,
+		})
+	}
+	return out
 }
 
 // handleCancel 取消当前轮。

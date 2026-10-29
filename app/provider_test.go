@@ -319,3 +319,54 @@ func TestOpenAIChatProviderRejectsNonRetryable(t *testing.T) {
 		t.Fatalf("401 被重试了 %d 次", calls.Load())
 	}
 }
+
+// 用户配置的供应商：Registry 用配置里的模型、BaseURL 与 API Key，而不是全局值。
+func TestConfiguredProviderUsesBaseURLAndKey(t *testing.T) {
+	var gotPath, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}))
+	defer srv.Close()
+
+	asm := providerAssembly(t, "")
+	asm.Providers.SetConfigs([]provider.Config{{
+		ID: "custom", Name: "自定义", Protocol: provider.ProtocolOpenAIChat,
+		BaseURL: srv.URL, APIKey: "sk-custom",
+		Models: []provider.Model{{ID: "m-custom", ContextWindow: 1000, SupportsTools: true}},
+	}})
+	ref := asm.Providers.Models("custom")
+	if len(ref) != 1 || ref[0].ID != "m-custom" {
+		t.Fatalf("配置模型 = %+v", ref)
+	}
+	stream, err := asm.Providers.Stream(context.Background(), ports.Request{
+		Model:    ports.ModelRef{ProviderID: "custom", ModelID: "m-custom", SupportsTools: true},
+		Messages: []domain.Message{{Role: domain.RoleUser, Parts: []domain.Part{{Type: domain.PartText, Text: "hi"}}}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	defer stream.Close()
+	for {
+		if _, err := stream.Recv(); err != nil {
+			break
+		}
+	}
+	if gotPath != "/chat/completions" {
+		t.Fatalf("路径 = %q", gotPath)
+	}
+	if gotAuth != "Bearer sk-custom" {
+		t.Fatalf("Authorization = %q, want 配置里的 key", gotAuth)
+	}
+}

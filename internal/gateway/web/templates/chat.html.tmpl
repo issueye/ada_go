@@ -72,6 +72,14 @@
             </div>
           </details>
           <span class="ada-tool ada-tool--workspace" title="{{.Workspace}}">{{icon "i-git-branch" 14}}<span class="ada-tool__label">{{.WorkspaceName}}</span></span>
+          {{if .Models}}
+          <label class="ada-model-picker" title="选择当前模型">
+            <span class="ada-model-picker__label">模型</span>
+            <select class="ada-model-picker__select" data-model-select aria-label="选择当前模型">
+              {{range .Models}}<option value="{{.ProviderID}}|{{.ModelID}}"{{if .Current}} selected{{end}}>{{.Label}}</option>{{end}}
+            </select>
+          </label>
+          {{end}}
           {{slot "composer.left" .Slots.ComposerLeft .SlotCounts.ComposerLeft ""}}
         </div>
         <div class="ada-composer__group ada-composer__group--right">

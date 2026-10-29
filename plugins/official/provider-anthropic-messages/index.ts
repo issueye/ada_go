@@ -31,6 +31,7 @@ interface ProviderRequest {
     extra?: unknown;
   };
   baseUrl?: string;
+  apiKey?: string;
 }
 
 interface ProviderMessage {
@@ -244,10 +245,10 @@ function buildBody(req: ProviderRequest): Record<string, unknown> {
 
 function streamOnce(req: ProviderRequest, ctx: ProviderContext): Promise<void> {
   const url = endpointOf(req.baseUrl);
-  const key = ctx.secret(SECRET_NAME);
+  const key = String(req.apiKey || "").trim() || ctx.secret(SECRET_NAME);
   if (!key) {
     // 没有密钥是配置错误，不是可重试的网络错误：明确说出来。
-    fail(`缺少 ${SECRET_NAME}：请通过环境变量 ADAG_SECRET_ANTHROPIC_API_KEY 或 secrets.toml 配置`);
+    fail(`缺少 ${SECRET_NAME}：请在供应商管理页填写 API Key，或通过环境变量/secrets.toml 配置`);
   }
   const headers: Record<string, string> = {
     "Content-Type": "application/json",

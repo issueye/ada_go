@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -111,6 +112,10 @@ type Session struct {
 	discovered      []discovery.Plugin
 	failedPlugins   map[string]string
 	reloadMu        sync.Mutex // 串行化热重载（plugin.reload / plugin.setEnabled）
+	// 供应商配置（管理页）：文件在数据目录，改动后直接更新当前装配的 Registry。
+	providerStore   *provider.Store
+	providersMu     sync.Mutex
+	providerConfigs []provider.Config
 
 	mu           sync.Mutex
 	threadID     string
@@ -217,9 +222,10 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 	}
 	s := &Session{
 		cfg: cfg, store: store, ids: ids, clock: clock, secrets: secrets,
-		steerQueues: map[string][]domain.Message{},
-		turnActive:  map[string]int{},
-		in:          bufio.NewReader(cfg.In),
+		providerStore: provider.NewStore(filepath.Join(dataDir, "providers.json")),
+		steerQueues:   map[string][]domain.Message{},
+		turnActive:    map[string]int{},
+		in:            bufio.NewReader(cfg.In),
 	}
 	cleanup := func(e error) (*Session, error) {
 		_ = s.Close(context.Background())
@@ -249,6 +255,9 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 	// 供应商管理（model.admin）：目录只读、不含密钥；切换复用 model.set 的解析。
 	hc.Providers = s.providerCatalog
 	hc.SelectModel = s.selectModelFromPlugin
+	hc.SaveProvider = s.saveProviderFromPlugin
+	hc.RemoveProvider = s.removeProviderFromPlugin
+	hc.FetchProviderModels = s.fetchModelsFromPlugin
 	// M5 检查点：宿主 fs 写入前把被覆盖文件备份进持久化账目（changes/）。
 	s.changes = toolkit.NewChangeQueue()
 	s.changeStore = newChangeStore(dataDir)
@@ -943,18 +952,14 @@ func (s *Session) ModelRefFor(threadID string) ports.ModelRef {
 }
 
 // providerCatalog 实现 host.Context.Providers（capability: model.admin）。
-// 目录与 provider.list 一致：不含密钥，BaseURL 是当前生效的兼容端点。
+// 返回所有配置（含停用项，页面需要展示开关）；API Key 只给「是否配置 + 尾号」。
 func (s *Session) providerCatalog() host.ProviderCatalog {
-	cat := host.ProviderCatalog{Providers: []host.ProviderInfo{}}
-	if asm := s.Assembly(); asm != nil && asm.Providers != nil {
-		for _, pid := range asm.Providers.Providers() {
-			cat.Providers = append(cat.Providers, host.ProviderInfo{
-				ID:          pid,
-				DisplayName: pid,
-				BaseURL:     s.BaseURL(),
-				Models:      asm.Providers.Models(pid),
-			})
-		}
+	s.providersMu.Lock()
+	cfgs := cloneProviderConfigs(s.providerConfigs)
+	s.providersMu.Unlock()
+	cat := host.ProviderCatalog{Providers: make([]host.ProviderInfo, 0, len(cfgs))}
+	for _, c := range cfgs {
+		cat.Providers = append(cat.Providers, s.providerInfo(c))
 	}
 	cur := s.ModelRef()
 	cat.Current = host.ModelRef{ProviderID: cur.ProviderID, ModelID: cur.ModelID}
@@ -977,6 +982,405 @@ func (s *Session) selectModelFromPlugin(ctx context.Context, providerID, modelID
 		s.SetWorkspaceModel(ref)
 	}
 	return host.ModelRef{ProviderID: ref.ProviderID, ModelID: ref.ModelID}, nil
+}
+
+// applyProviderConfigs 把 providers.json 注入当前装配的 Registry。
+// 文件不存在时从适配器插件播种（保留旧产品开箱即用的行为）。
+// 配置读取/写入失败只记警告：供应商配置坏掉不应该让整个 Core 起不来。
+func (s *Session) applyProviderConfigs(asm *app.Assembly) {
+	if asm == nil || asm.Providers == nil {
+		return
+	}
+	cfgs, exists, err := s.providerStore.Load()
+	if err != nil {
+		s.logWarn("供应商配置读取失败，沿用插件默认: " + err.Error())
+		return
+	}
+	if !exists {
+		cfgs = seedProviderConfigs(asm, s.BaseURL())
+		if err := s.providerStore.Save(cfgs); err != nil {
+			s.logWarn("供应商配置首次写入失败: " + err.Error())
+		}
+	}
+	asm.Providers.SetConfigs(cfgs)
+	s.providersMu.Lock()
+	s.providerConfigs = cloneProviderConfigs(cfgs)
+	s.providersMu.Unlock()
+	s.ensureCurrentModel(asm)
+}
+
+// seedProviderConfigs 用已装配的适配器声明播种默认供应商。
+func seedProviderConfigs(asm *app.Assembly, baseURL string) []provider.Config {
+	out := make([]provider.Config, 0, len(asm.Providers.AdapterIDs()))
+	for _, id := range asm.Providers.AdapterIDs() {
+		models := asm.Providers.AdapterModels(id)
+		if len(models) == 0 {
+			continue
+		}
+		protocol := provider.ProtocolForAdapter(id)
+		cfgBase := baseURL
+		if protocol == provider.ProtocolAnthropic {
+			if cfgBase == "" {
+				cfgBase = "https://api.anthropic.com/v1"
+			}
+		} else if cfgBase == "" {
+			cfgBase = "https://api.openai.com/v1"
+		}
+		cfg := provider.Config{
+			ID: id, Name: providerDisplayName(id), Protocol: protocol,
+			BaseURL: cfgBase, Models: make([]provider.Model, 0, len(models)),
+		}
+		for _, m := range models {
+			cfg.Models = append(cfg.Models, provider.Model{
+				ID: m.ID, DisplayName: m.DisplayName,
+				ContextWindow: m.ContextWindow, MaxOutput: m.MaxOutput,
+				Input: m.Input, SupportsTools: m.SupportsTools,
+				SupportsThinking: m.SupportsThinking,
+			})
+		}
+		out = append(out, cfg)
+	}
+	return out
+}
+
+func providerDisplayName(adapterID string) string {
+	switch adapterID {
+	case "openai":
+		return "OpenAI Chat（兼容端点）"
+	case "openai-responses":
+		return "OpenAI Responses"
+	case "anthropic":
+		return "Anthropic Messages"
+	default:
+		return adapterID
+	}
+}
+
+// ensureCurrentModel 在供应商/模型被删改后保证当前选择仍然有效；无效时选第一个可用模型。
+func (s *Session) ensureCurrentModel(asm *app.Assembly) {
+	if asm == nil || asm.Providers == nil || s.cfg.Fake || s.cfg.ModelClient != nil {
+		return
+	}
+	cur := s.ModelRef()
+	if modelUsable(asm, cur.ProviderID, cur.ModelID) {
+		return
+	}
+	for _, pid := range asm.Providers.Providers() {
+		models := asm.Providers.Models(pid)
+		if len(models) == 0 {
+			continue
+		}
+		m := models[0]
+		s.SetWorkspaceModel(ports.ModelRef{
+			ProviderID: pid, ModelID: m.ID,
+			ContextWindow: int64(m.ContextWindow), MaxOutput: int64(m.MaxOutput),
+			SupportsTools: m.SupportsTools,
+		})
+		return
+	}
+}
+
+func modelUsable(asm *app.Assembly, providerID, modelID string) bool {
+	for _, pid := range asm.Providers.Providers() {
+		if pid != providerID {
+			continue
+		}
+		for _, m := range asm.Providers.Models(pid) {
+			if m.ID == modelID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// saveProviderFromPlugin 实现 host.Context.SaveProvider。
+// APIKey 留空表示保留旧值；ClearAPIKey 才清空。
+func (s *Session) saveProviderFromPlugin(ctx context.Context, in host.ProviderInput) (host.ProviderInfo, error) {
+	s.providersMu.Lock()
+	defer s.providersMu.Unlock()
+	cfgs := cloneProviderConfigs(s.providerConfigs)
+
+	id := strings.TrimSpace(in.ID)
+	if id == "" {
+		generated, err := s.ids.NewULID(ctx)
+		if err != nil {
+			return host.ProviderInfo{}, fmt.Errorf("生成供应商 id 失败: %w", err)
+		}
+		id = "p_" + strings.ToLower(generated)
+	}
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		name = id
+	}
+	protocol := provider.Protocol(strings.TrimSpace(in.Protocol))
+	if !protocol.Valid() {
+		return host.ProviderInfo{}, fmt.Errorf("未知 API 格式: %s", in.Protocol)
+	}
+	baseURL := strings.TrimSpace(in.BaseURL)
+	if baseURL != "" {
+		u, err := url.Parse(baseURL)
+		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return host.ProviderInfo{}, errors.New("Base URL 必须是 http(s) 地址")
+		}
+	}
+	models, err := normalizeProviderModels(in.Models)
+	if err != nil {
+		return host.ProviderInfo{}, err
+	}
+
+	idx := -1
+	for i := range cfgs {
+		if cfgs[i].ID == id {
+			idx = i
+			break
+		}
+	}
+	key := ""
+	if idx >= 0 {
+		key = cfgs[idx].APIKey
+	}
+	if in.ClearAPIKey {
+		key = ""
+	} else if v := strings.TrimSpace(in.APIKey); v != "" {
+		key = v
+	}
+	cfg := provider.Config{
+		ID: id, Name: name, Protocol: protocol, BaseURL: baseURL,
+		APIKey: key, Disabled: in.Disabled, Models: models,
+	}
+	if idx >= 0 {
+		cfgs[idx] = cfg
+	} else {
+		cfgs = append(cfgs, cfg)
+	}
+	if err := s.providerStore.Save(cfgs); err != nil {
+		return host.ProviderInfo{}, fmt.Errorf("保存供应商失败: %w", err)
+	}
+	s.providerConfigs = cloneProviderConfigs(cfgs)
+	if asm := s.Assembly(); asm != nil && asm.Providers != nil {
+		asm.Providers.SetConfigs(cfgs)
+		s.ensureCurrentModel(asm)
+	}
+	return s.providerInfo(cfg), nil
+}
+
+// providerInfo 在配置信息上补充「环境变量/secrets 已提供密钥」的状态。
+func (s *Session) providerInfo(c provider.Config) host.ProviderInfo {
+	info := providerInfoOf(c)
+	if info.HasAPIKey {
+		return info
+	}
+	name := "openai_api_key"
+	if c.Protocol == provider.ProtocolAnthropic {
+		name = "anthropic_api_key"
+	}
+	if _, ok := s.secret(name); ok {
+		info.HasAPIKey = true
+		info.APIKeyHint = "环境变量/secrets"
+	}
+	return info
+}
+
+// removeProviderFromPlugin 实现 host.Context.RemoveProvider。
+func (s *Session) removeProviderFromPlugin(_ context.Context, providerID string) error {
+	s.providersMu.Lock()
+	defer s.providersMu.Unlock()
+	providerID = strings.TrimSpace(providerID)
+	if providerID == "" {
+		return errors.New("缺少供应商 id")
+	}
+	cfgs := cloneProviderConfigs(s.providerConfigs)
+	out := cfgs[:0]
+	for _, c := range cfgs {
+		if c.ID != providerID {
+			out = append(out, c)
+		}
+	}
+	if len(out) == len(cfgs) {
+		return nil // 幂等
+	}
+	if err := s.providerStore.Save(out); err != nil {
+		return fmt.Errorf("删除供应商失败: %w", err)
+	}
+	s.providerConfigs = cloneProviderConfigs(out)
+	if asm := s.Assembly(); asm != nil && asm.Providers != nil {
+		asm.Providers.SetConfigs(out)
+		s.ensureCurrentModel(asm)
+	}
+	return nil
+}
+
+// fetchModelsFromPlugin 实现 host.Context.FetchProviderModels：服务端用已保存的
+// 端点与密钥调用 /models，密钥不经过前端。
+func (s *Session) fetchModelsFromPlugin(ctx context.Context, providerID string) ([]host.ProviderModel, error) {
+	s.providersMu.Lock()
+	var cfg provider.Config
+	found := false
+	for _, c := range s.providerConfigs {
+		if c.ID == providerID {
+			cfg, found = c.Clone(), true
+			break
+		}
+	}
+	s.providersMu.Unlock()
+	if !found {
+		return nil, fmt.Errorf("没有供应商 %s", providerID)
+	}
+
+	baseURL := strings.TrimSpace(cfg.BaseURL)
+	if baseURL == "" {
+		switch cfg.Protocol {
+		case provider.ProtocolAnthropic:
+			baseURL = "https://api.anthropic.com/v1"
+		default:
+			baseURL = "https://api.openai.com/v1"
+		}
+	}
+	key := strings.TrimSpace(cfg.APIKey)
+	if key == "" {
+		name := "openai_api_key"
+		if cfg.Protocol == provider.ProtocolAnthropic {
+			name = "anthropic_api_key"
+		}
+		if v, ok := s.secret(name); ok {
+			key = strings.TrimSpace(v)
+		}
+	}
+	if key == "" {
+		return nil, errors.New("请先填写 API Key（或配置对应的 secrets.toml/环境变量）")
+	}
+
+	endpoint := strings.TrimRight(baseURL, "/") + "/models"
+	reqCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("模型列表地址非法: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	if cfg.Protocol == provider.ProtocolAnthropic {
+		req.Header.Set("x-api-key", key)
+		req.Header.Set("anthropic-version", "2023-06-01")
+	} else {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	res, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("拉取模型列表失败: %w", err)
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(res.Body, 4<<20))
+	if err != nil {
+		return nil, fmt.Errorf("读取模型列表失败: %w", err)
+	}
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return nil, fmt.Errorf("拉取模型列表失败：HTTP %d", res.StatusCode)
+	}
+
+	var payload struct {
+		Data []struct {
+			ID            string `json:"id"`
+			DisplayName   string `json:"display_name"`
+			ContextWindow int    `json:"context_window"`
+			MaxOutput     int    `json:"max_output"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, errors.New("模型列表不是预期的 JSON 形状")
+	}
+	out := make([]host.ProviderModel, 0, len(payload.Data))
+	seen := map[string]bool{}
+	for _, m := range payload.Data {
+		id := strings.TrimSpace(m.ID)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, host.ProviderModel{
+			ID: id, DisplayName: m.DisplayName,
+			ContextWindow: m.ContextWindow, MaxOutput: m.MaxOutput,
+			Input: []string{"text"}, SupportsTools: true,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+func normalizeProviderModels(in []host.ProviderModel) ([]provider.Model, error) {
+	out := make([]provider.Model, 0, len(in))
+	seen := map[string]bool{}
+	for _, m := range in {
+		id := strings.TrimSpace(m.ID)
+		if id == "" {
+			return nil, errors.New("模型 id 不能为空")
+		}
+		if len(id) > 200 {
+			return nil, errors.New("模型 id 太长")
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		input := m.Input
+		if len(input) == 0 {
+			input = []string{"text"}
+		}
+		allowed := input[:0]
+		for _, v := range input {
+			if v == "text" || v == "image" {
+				allowed = append(allowed, v)
+			}
+		}
+		if m.ContextWindow < 0 || m.MaxOutput < 0 {
+			return nil, fmt.Errorf("模型 %s 的窗口/输出上限不能为负数", id)
+		}
+		out = append(out, provider.Model{
+			ID: id, DisplayName: strings.TrimSpace(m.DisplayName),
+			ContextWindow: m.ContextWindow, MaxOutput: m.MaxOutput,
+			Input: allowed, SupportsTools: m.SupportsTools,
+			SupportsThinking: m.SupportsThinking, Disabled: m.Disabled,
+		})
+	}
+	return out, nil
+}
+
+func providerInfoOf(c provider.Config) host.ProviderInfo {
+	info := host.ProviderInfo{
+		ID: c.ID, DisplayName: c.Name, Protocol: string(c.Protocol),
+		BaseURL: c.BaseURL, Disabled: c.Disabled,
+		HasAPIKey:  strings.TrimSpace(c.APIKey) != "",
+		APIKeyHint: maskAPIKey(c.APIKey),
+		Models:     make([]host.ProviderModel, 0, len(c.Models)),
+	}
+	for _, m := range c.Models {
+		info.Models = append(info.Models, host.ProviderModel{
+			ID: m.ID, DisplayName: m.DisplayName,
+			ContextWindow: m.ContextWindow, MaxOutput: m.MaxOutput,
+			Input: m.Input, SupportsTools: m.SupportsTools,
+			SupportsThinking: m.SupportsThinking, Disabled: m.Disabled,
+		})
+	}
+	return info
+}
+
+func maskAPIKey(key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	if len(key) <= 8 {
+		return "已配置"
+	}
+	return "••••" + key[len(key)-4:]
+}
+
+func cloneProviderConfigs(in []provider.Config) []provider.Config {
+	out := make([]provider.Config, 0, len(in))
+	for _, c := range in {
+		out = append(out, c.Clone())
+	}
+	return out
 }
 
 func (s *Session) threadOverrideLocked(threadID string) *ports.ModelRef {
@@ -1279,6 +1683,7 @@ func (s *Session) installAssembly(asm *app.Assembly) error {
 	if err != nil {
 		return fmt.Errorf("cli: 建工具执行器失败: %w", err)
 	}
+	s.applyProviderConfigs(asm)
 	model, modelErr := s.pickModel(asm)
 	prompts := assemblyPromptSource{frags: promptFragmentsOf(asm)}
 	var skillSrc engine.SkillSource

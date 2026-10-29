@@ -378,12 +378,9 @@ func TestBridgeAskUserSlotUsesInteractionProjection(t *testing.T) {
 	}
 }
 
-// provider-admin：首屏读 provider.list + model.list 投影；交互走插件 route（基座路由是无 JS 回落）。
-func TestBridgeProviderAdminPageUsesProviderProjection(t *testing.T) {
-	core := newFakeCore().
-		on("provider.list", `{"providers":[{"id":"openai","displayName":"OpenAI","baseUrl":"https://api.openai.com/v1","active":true,"models":[{"id":"gpt-4o","displayName":"GPT-4o","contextWindow":128000,"maxOutput":16384,"supportsTools":true},{"id":"gpt-4o-mini","displayName":"GPT-4o mini","contextWindow":128000,"maxOutput":16384,"supportsTools":true}]}]}`).
-		on("model.list", `{"models":[],"current":{"providerId":"openai","modelId":"gpt-4o"}}`).
-		on("usage.get", `{"thread":{},"workspace":{}}`)
+// provider-admin：页面是 Master-Detail 骨架，数据由插件 route（provider-admin.js）加载。
+func TestBridgeProviderAdminPageRendersSkeleton(t *testing.T) {
+	core := newFakeCore()
 	b := bridgeWithOnly(t, core, "provider-admin", "csrf-y")
 
 	html, err := b.Page("provider-admin", "providers", request(t, "/ext/provider-admin/providers"))
@@ -391,10 +388,8 @@ func TestBridgeProviderAdminPageUsesProviderProjection(t *testing.T) {
 		t.Fatalf("Page(provider-admin): %v", err)
 	}
 	for _, want := range []string{
-		"当前模型", "openai / gpt-4o", "gpt-4o-mini", "设为当前",
-		`action="/model/select"`, `name="csrf_token"`, `value="csrf-y"`,
-		`name="providerId"`, `value="openai"`, `name="modelId"`, `value="gpt-4o-mini"`,
-		`data-provider-admin`, `data-pa-select`, `data-pa-current`, `data-current="false"`,
+		`data-provider-admin`, "模型设置", "管理自定义模型供应商", "添加供应商",
+		`data-pm-refresh`, `data-pm-list`, `data-pm-detail`, `data-pm-status`,
 	} {
 		if !strings.Contains(string(html), want) {
 			t.Fatalf("供应商页缺少 %q\n%s", want, html)

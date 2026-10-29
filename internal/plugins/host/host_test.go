@@ -507,7 +507,7 @@ func TestModelAdminRoutes(t *testing.T) {
 	hc := Context{
 		Providers: func() ProviderCatalog {
 			return ProviderCatalog{
-				Providers: []ProviderInfo{{ID: "openai", Models: []ModelInfo{{ID: "gpt-4o", ContextWindow: 128000}}}},
+				Providers: []ProviderInfo{{ID: "openai", Models: []ProviderModel{{ID: "gpt-4o", ContextWindow: 128000}}}},
 				Current:   ModelRef{ProviderID: "openai", ModelID: "gpt-4o"},
 			}
 		},

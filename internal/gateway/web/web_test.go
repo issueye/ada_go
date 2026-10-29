@@ -1142,3 +1142,20 @@ func TestThreadDeleteCallsCoreAndRedirects(t *testing.T) {
 		t.Fatalf("当前会话回跳 = %q, want /?notice=…", loc)
 	}
 }
+
+func TestThreadComposerShowsModelPicker(t *testing.T) {
+	core := newFakeCore().
+		on("thread.get", threadGetRunning).
+		on("thread.entries", entriesDescending).
+		on("model.list", `{"models":[
+		  {"model":{"providerId":"openai","modelId":"gpt-4o"},"info":{"displayName":"GPT-4o","contextWindow":128000,"supportsTools":true}},
+		  {"model":{"providerId":"custom","modelId":"deepseek"},"info":{"displayName":"DeepSeek","contextWindow":1000000,"supportsTools":true}}
+		],"current":{"providerId":"custom","modelId":"deepseek"}}`)
+	srv, _ := newServer(t, core)
+
+	body := serve(t, srv, "GET", "/thread/th_1", nil).Body.String()
+	wantContains(t, body, `data-model-select`)
+	wantContains(t, body, `value="openai|gpt-4o"`)
+	wantContains(t, body, `value="custom|deepseek" selected`)
+	wantContains(t, body, "DeepSeek · deepseek")
+}

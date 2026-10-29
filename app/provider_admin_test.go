@@ -21,7 +21,7 @@ func TestProviderAdminRoutesUseModelAdmin(t *testing.T) {
 			return host.ProviderCatalog{
 				Providers: []host.ProviderInfo{{
 					ID: "openai", DisplayName: "openai",
-					Models: []host.ModelInfo{{ID: "gpt-4o", ContextWindow: 128000, SupportsTools: true}},
+					Models: []host.ProviderModel{{ID: "gpt-4o", ContextWindow: 128000, SupportsTools: true}},
 				}},
 				Current: host.ModelRef{ProviderID: "openai", ModelID: "gpt-4o"},
 			}

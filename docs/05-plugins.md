@@ -157,6 +157,9 @@ interface ToolContext {
   };
   providers?: {                      // capability: model.admin，仅 builtin
     list(): Promise<{ providers: ProviderInfo[]; current: ModelRef }>;
+    save(input: ProviderInput): Promise<ProviderInfo>;   // apiKey 留空=保持原值
+    remove(providerId: string): Promise<{ removed: boolean }>;
+    fetchModels(providerId: string): Promise<ProviderModel[]>; // 服务端拉 /models
     select(providerId: string, modelId: string): Promise<ModelRef>;
   };
   sse?: {                            // 仅 sse:true 的 route 处理器内存在
@@ -181,6 +184,7 @@ interface UIContext {
 - **工具**给模型调用，进入工具目录，受 `tool.beforeCall` 策略与 scope 约束。
 - **动作**只给界面调用（`POST /ext/{id}/action/{name}`），不进入模型上下文。读动作可以在 SSR 时预取；写动作必须用户点击，并支持 `confirm` 文案。
 - 动态路由（`route`）给插件自己的 HTTP API 用：`GET/POST /ext/{id}/api/*`，查询串与 JSON 请求体由宿主传入；返回 JSON，响应大小上限 64KB。`sse: true` 的路由只允许 GET，处理器用 `ctx.sse.send(data, event?)` 推帧（见 [7.6.2](07-ssr-frontend.md#762-sse-路由)）。
+- `model.admin` 的供应商配置保存在数据目录 `providers.json`（0600）；`list()` 不含密钥，只给 `hasApiKey` 与尾号，`save()` 的 `apiKey` 留空表示保留原值。
 
 ```ts
 interface ActionDef {

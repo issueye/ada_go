@@ -177,6 +177,13 @@ type Context struct {
 	// SelectModel 切换当前模型（capability: model.admin）。
 	// threadID 为空表示工作区级；否则先校验线程存在再写线程级覆盖。
 	SelectModel func(ctx context.Context, providerID, modelID, threadID string) (ModelRef, error)
+	// SaveProvider 新建/更新一个供应商（capability: model.admin）。
+	// APIKey 为空表示保留原值；ClearAPIKey 明确清空。
+	SaveProvider func(ctx context.Context, input ProviderInput) (ProviderInfo, error)
+	// RemoveProvider 删除供应商（capability: model.admin）。
+	RemoveProvider func(ctx context.Context, providerID string) error
+	// FetchProviderModels 用已保存的端点/密钥拉取 /models（capability: model.admin）。
+	FetchProviderModels func(ctx context.Context, providerID string) ([]ProviderModel, error)
 }
 
 // ModelRef 是当前模型的引用。
@@ -193,10 +200,38 @@ type ProviderCatalog struct {
 
 // ProviderInfo 是单个供应商的只读投影。
 type ProviderInfo struct {
-	ID          string      `json:"id"`
-	DisplayName string      `json:"displayName,omitempty"`
-	BaseURL     string      `json:"baseUrl,omitempty"`
-	Models      []ModelInfo `json:"models"`
+	ID          string          `json:"id"`
+	DisplayName string          `json:"displayName,omitempty"`
+	Protocol    string          `json:"protocol,omitempty"`
+	BaseURL     string          `json:"baseUrl,omitempty"`
+	Disabled    bool            `json:"disabled,omitempty"`
+	HasAPIKey   bool            `json:"hasApiKey"`
+	APIKeyHint  string          `json:"apiKeyHint,omitempty"`
+	Models      []ProviderModel `json:"models"`
+}
+
+// ProviderModel 是可编辑的模型配置（含启用状态）。
+type ProviderModel struct {
+	ID               string   `json:"id"`
+	DisplayName      string   `json:"displayName,omitempty"`
+	ContextWindow    int      `json:"contextWindow,omitempty"`
+	MaxOutput        int      `json:"maxOutput,omitempty"`
+	Input            []string `json:"input,omitempty"`
+	SupportsTools    bool     `json:"supportsTools"`
+	SupportsThinking bool     `json:"supportsThinking,omitempty"`
+	Disabled         bool     `json:"disabled,omitempty"`
+}
+
+// ProviderInput 是保存供应商的入参（页面只传用户改过的密钥）。
+type ProviderInput struct {
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Protocol    string          `json:"protocol"`
+	BaseURL     string          `json:"baseUrl,omitempty"`
+	APIKey      string          `json:"apiKey,omitempty"`
+	ClearAPIKey bool            `json:"clearApiKey,omitempty"`
+	Disabled    bool            `json:"disabled,omitempty"`
+	Models      []ProviderModel `json:"models"`
 }
 
 // CheckpointMeta 是一次检查点登记的归属（M5）。

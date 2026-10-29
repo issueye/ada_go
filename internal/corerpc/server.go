@@ -782,15 +782,36 @@ func (s *Server) handleProviderList(context.Context, json.RawMessage) (any, erro
 	asm := s.sess.Assembly()
 	out := []map[string]any{}
 	if asm.Providers != nil {
-		for _, pid := range asm.Providers.Providers() {
-			models := []proto.ModelInfo{}
-			for _, m := range asm.Providers.Models(pid) {
-				models = append(models, modelInfo(m))
+		cfgs := asm.Providers.Configs()
+		if len(cfgs) > 0 {
+			cur := s.sess.ModelRef()
+			for _, c := range cfgs {
+				models := []proto.ModelInfo{}
+				for _, m := range c.Models {
+					if !m.Disabled {
+						models = append(models, modelInfo(m.Info()))
+					}
+				}
+				baseURL := c.BaseURL
+				if baseURL == "" {
+					baseURL = s.sess.BaseURL()
+				}
+				out = append(out, map[string]any{
+					"id": c.ID, "displayName": c.Name, "baseUrl": baseURL,
+					"active": cur.ProviderID == c.ID, "models": models,
+				})
 			}
-			out = append(out, map[string]any{
-				"id": pid, "displayName": pid, "baseUrl": s.sess.BaseURL(),
-				"active": true, "models": models,
-			})
+		} else {
+			for _, pid := range asm.Providers.Providers() {
+				models := []proto.ModelInfo{}
+				for _, m := range asm.Providers.Models(pid) {
+					models = append(models, modelInfo(m))
+				}
+				out = append(out, map[string]any{
+					"id": pid, "displayName": pid, "baseUrl": s.sess.BaseURL(),
+					"active": true, "models": models,
+				})
+			}
 		}
 	}
 	return map[string]any{"providers": out}, nil

@@ -34,6 +34,11 @@ type Registry struct {
 	BaseURL string
 	// HostContext 是给 provider 调用的宿主上下文（日志、密钥、HTTP 桥、设置）。
 	HostContext host.Context
+
+	// configs 是用户配置的供应商实例；hasConfigs 为 false 时退回静态 provider 登记。
+	configs    []Config
+	configByID map[string]Config
+	hasConfigs bool
 }
 
 type registration struct {
@@ -99,8 +104,77 @@ func (r *Registry) Unbind(pluginID string) {
 	r.mu.Unlock()
 }
 
-// Providers 返回已登记的 provider id（稳定排序）。
+// Providers 返回可供模型选择使用的 provider id（稳定排序）。
+// 有用户配置时只看启用项；否则退回插件静态登记（兼容旧装配/测试）。
 func (r *Registry) Providers() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.hasConfigs {
+		out := make([]string, 0, len(r.configs))
+		for _, c := range r.configs {
+			if !c.Disabled {
+				out = append(out, c.ID)
+			}
+		}
+		sort.Strings(out)
+		return out
+	}
+	out := make([]string, 0, len(r.byID))
+	for id := range r.byID {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Models 返回某个 provider 的可用模型能力（诊断与 model.list 用）。
+func (r *Registry) Models(providerID string) []host.ModelInfo {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if cfg, ok := r.configByID[providerID]; ok {
+		out := make([]host.ModelInfo, 0, len(cfg.Models))
+		for _, m := range cfg.Models {
+			if !m.Disabled {
+				out = append(out, m.Info())
+			}
+		}
+		return out
+	}
+	reg, ok := r.byID[providerID]
+	if !ok {
+		return nil
+	}
+	return append([]host.ModelInfo(nil), reg.def.Models...)
+}
+
+// SetConfigs 用用户配置替换静态目录。传 nil/空切片仍是「已配置」形态
+// （用户可能删光了供应商，不能悄悄退回插件默认值）。
+func (r *Registry) SetConfigs(configs []Config) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.configs = make([]Config, 0, len(configs))
+	r.configByID = make(map[string]Config, len(configs))
+	for _, c := range configs {
+		cc := c.Clone()
+		r.configs = append(r.configs, cc)
+		r.configByID[c.ID] = cc
+	}
+	r.hasConfigs = true
+}
+
+// Configs 返回配置副本（含 API Key；只在 Core 内部使用，不进脚本/浏览器）。
+func (r *Registry) Configs() []Config {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]Config, 0, len(r.configs))
+	for _, c := range r.configs {
+		out = append(out, c.Clone())
+	}
+	return out
+}
+
+// AdapterIDs 返回已登记的适配器 plugin def.id（播种默认供应商用）。
+func (r *Registry) AdapterIDs() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make([]string, 0, len(r.byID))
@@ -111,11 +185,11 @@ func (r *Registry) Providers() []string {
 	return out
 }
 
-// Models 返回某个 provider 的模型能力（诊断与 model.list 用）。
-func (r *Registry) Models(providerID string) []host.ModelInfo {
+// AdapterModels 返回适配器声明的静态模型（播种用）。
+func (r *Registry) AdapterModels(adapterID string) []host.ModelInfo {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	reg, ok := r.byID[providerID]
+	reg, ok := r.byID[adapterID]
 	if !ok {
 		return nil
 	}
@@ -127,7 +201,7 @@ func (r *Registry) Models(providerID string) []host.ModelInfo {
 // 「等到首个增量」是重试语义的前提：只有建连阶段（首个增量之前）的错误才能被
 // 基座包装层重试；一旦交付过内容，重试会造成重复文本（03 §5.5）。
 func (r *Registry) Stream(ctx context.Context, req ports.Request) (ports.Stream, error) {
-	reg, inst, model, err := r.resolve(req)
+	reg, inst, model, cfg, err := r.resolve(req)
 	if err != nil {
 		return nil, err
 	}
@@ -136,13 +210,18 @@ func (r *Registry) Stream(ctx context.Context, req ports.Request) (ports.Stream,
 			fmt.Sprintf("模型 %s 不支持工具调用", model.ID))
 	}
 
+	baseURL, apiKey := r.BaseURL, ""
+	if cfg != nil {
+		baseURL, apiKey = cfg.BaseURL, cfg.APIKey
+	}
 	payload, err := json.Marshal(providerRequest{
 		Model:    req.Model.ModelID,
 		System:   req.System,
 		Messages: req.Messages,
 		Tools:    req.Tools,
 		Params:   req.Params,
-		BaseURL:  r.BaseURL,
+		BaseURL:  baseURL,
+		APIKey:   apiKey,
 	})
 	if err != nil {
 		return nil, domain.WrapError(domain.NewError(domain.CodeProviderError, "provider 请求无法序列化"), err)
@@ -210,9 +289,34 @@ func (r *Registry) Stream(ctx context.Context, req ports.Request) (ports.Stream,
 	}
 }
 
-func (r *Registry) resolve(req ports.Request) (registration, *host.Instance, host.ModelInfo, error) {
+func (r *Registry) resolve(req ports.Request) (registration, *host.Instance, host.ModelInfo, *Config, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if cfg, ok := r.configByID[req.Model.ProviderID]; ok {
+		if cfg.Disabled {
+			return registration{}, nil, host.ModelInfo{}, nil, domain.NewError(domain.CodeProviderError,
+				"供应商已停用: "+cfg.Name)
+		}
+		adapter := cfg.Protocol.AdapterID()
+		reg, ok := r.byID[adapter]
+		if !ok {
+			return registration{}, nil, host.ModelInfo{}, nil, domain.NewError(domain.CodeCoreUnavailable,
+				"供应商 "+cfg.Name+" 需要的适配器 "+adapter+" 未加载")
+		}
+		inst := r.bound[reg.pluginID]
+		if inst == nil {
+			return registration{}, nil, host.ModelInfo{}, nil, domain.NewError(domain.CodeCoreUnavailable,
+				"provider 插件 "+reg.pluginID+" 未加载")
+		}
+		for _, m := range cfg.Models {
+			if !m.Disabled && m.ID == req.Model.ModelID {
+				return reg, inst, m.Info(), &cfg, nil
+			}
+		}
+		return registration{}, nil, host.ModelInfo{}, nil, domain.NewError(domain.CodeProviderError,
+			fmt.Sprintf("供应商 %s 没有启用模型 %q", cfg.Name, req.Model.ModelID))
+	}
+
 	reg, ok := r.byID[req.Model.ProviderID]
 	if !ok {
 		// 允许产品配置直接写 provider 插件 id，而不是 provider def.id。
@@ -221,20 +325,20 @@ func (r *Registry) resolve(req ports.Request) (registration, *host.Instance, hos
 		}
 	}
 	if !ok {
-		return registration{}, nil, host.ModelInfo{}, domain.NewError(domain.CodeProviderError,
+		return registration{}, nil, host.ModelInfo{}, nil, domain.NewError(domain.CodeProviderError,
 			"没有可用的 provider: "+req.Model.ProviderID)
 	}
 	inst := r.bound[reg.pluginID]
 	if inst == nil {
-		return registration{}, nil, host.ModelInfo{}, domain.NewError(domain.CodeCoreUnavailable,
+		return registration{}, nil, host.ModelInfo{}, nil, domain.NewError(domain.CodeCoreUnavailable,
 			"provider 插件 "+reg.pluginID+" 未加载")
 	}
 	for _, m := range reg.def.Models {
 		if m.ID == req.Model.ModelID {
-			return reg, inst, m, nil
+			return reg, inst, m, nil, nil
 		}
 	}
-	return registration{}, nil, host.ModelInfo{}, domain.NewError(domain.CodeProviderError,
+	return registration{}, nil, host.ModelInfo{}, nil, domain.NewError(domain.CodeProviderError,
 		fmt.Sprintf("provider %s 没有声明模型 %q", req.Model.ProviderID, req.Model.ModelID))
 }
 
@@ -246,6 +350,8 @@ type providerRequest struct {
 	Tools    []ports.ToolSchema `json:"tools,omitempty"`
 	Params   ports.Params       `json:"params,omitempty"`
 	BaseURL  string             `json:"baseUrl,omitempty"`
+	// APIKey 是用户配置里针对该供应商的密钥；空时插件回退到 ctx.secret。
+	APIKey string `json:"apiKey,omitempty"`
 }
 
 type streamEvent struct {

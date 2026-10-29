@@ -251,6 +251,15 @@ type threadData struct {
 	Transcript   []transcriptItem
 	Interactions []interactionView
 	TurnKey      string
+	// Models 是当前可选的供应商/模型（model.list 投影，供输入框旁的选择器）。
+	Models []modelOption
+}
+
+type modelOption struct {
+	ProviderID string
+	ModelID    string
+	Label      string
+	Current    bool
 }
 
 type threadInfo struct {

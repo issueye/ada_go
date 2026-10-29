@@ -553,6 +553,49 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 					return hc.SelectModel(ctx, providerID, modelID, hc.ThreadID)
 				}), nil
 			}))
+		_ = providers.SetProp(r, r.KeyFromGoString("save"), rt.Function("providers.save", 1,
+			func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+				if hc.SaveProvider == nil {
+					return moejs.Undefined(), r.TypeError("providers.save: 宿主没有提供供应商保存")
+				}
+				raw, err := rt.AppendJSON(nil, moejs.Arg(args, 0))
+				if err != nil {
+					return moejs.Undefined(), r.TypeError("providers.save(input): input 不可 JSON 序列化: %v", err)
+				}
+				var input ProviderInput
+				if err := json.Unmarshal(raw, &input); err != nil {
+					return moejs.Undefined(), r.TypeError("providers.save(input): input 形状非法: %v", err)
+				}
+				return p.hostAsync(c, "providers.save", func(ctx context.Context) (any, error) {
+					return hc.SaveProvider(ctx, input)
+				}), nil
+			}))
+		_ = providers.SetProp(r, r.KeyFromGoString("remove"), rt.Function("providers.remove", 1,
+			func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+				if hc.RemoveProvider == nil {
+					return moejs.Undefined(), r.TypeError("providers.remove: 宿主没有提供供应商删除")
+				}
+				id := strings.TrimSpace(moejs.Arg(args, 0).String())
+				if id == "" {
+					return moejs.Undefined(), r.TypeError("providers.remove(providerId): providerId 不能为空")
+				}
+				return p.hostAsync(c, "providers.remove", func(ctx context.Context) (any, error) {
+					return map[string]any{"removed": true}, hc.RemoveProvider(ctx, id)
+				}), nil
+			}))
+		_ = providers.SetProp(r, r.KeyFromGoString("fetchModels"), rt.Function("providers.fetchModels", 1,
+			func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+				if hc.FetchProviderModels == nil {
+					return moejs.Undefined(), r.TypeError("providers.fetchModels: 宿主没有提供模型拉取")
+				}
+				id := strings.TrimSpace(moejs.Arg(args, 0).String())
+				if id == "" {
+					return moejs.Undefined(), r.TypeError("providers.fetchModels(providerId): providerId 不能为空")
+				}
+				return p.hostAsync(c, "providers.fetchModels", func(ctx context.Context) (any, error) {
+					return hc.FetchProviderModels(ctx, id)
+				}), nil
+			}))
 		set("providers", engine.ObjectValue(providers))
 	}
 

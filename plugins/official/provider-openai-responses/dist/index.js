@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:d1af9654614c046f) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:4e8fb448ec29ad81) by plugins/official/build.mjs — do not edit
 // provider-openai-responses —— 官方插件：OpenAI Responses API 的流式协议映射（03 §5.5）。
 //
 // 与 Chat Completions 的差别：system 走顶层 instructions；历史用 Responses 的消息形状
@@ -32,6 +32,7 @@
                     
     
                    
+                  
  
 
                            
@@ -208,10 +209,10 @@ function buildBody(req                 )                          {
 
 function streamOnce(req                 , ctx                 )                {
   const url = endpointOf(req.baseUrl);
-  const key = ctx.secret(SECRET_NAME);
+  const key = String(req.apiKey || "").trim() || ctx.secret(SECRET_NAME);
   if (!key) {
     // 没有密钥是配置错误，不是可重试的网络错误：明确说出来。
-    fail(`缺少 ${SECRET_NAME}：请通过环境变量 ADAG_SECRET_OPENAI_API_KEY 或 secrets.toml 配置`);
+    fail(`缺少 ${SECRET_NAME}：请在供应商管理页填写 API Key，或通过环境变量/secrets.toml 配置`);
   }
   const headers                         = {
     "Content-Type": "application/json",

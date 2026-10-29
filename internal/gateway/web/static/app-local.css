@@ -796,3 +796,33 @@ button:hover {
   display: flex;
   margin: 0;
 }
+
+/* 输入框旁的模型选择器（线程级 / 工作区级切换，由 app.js 提交）。 */
+.ada-model-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-pill);
+  background: var(--ph-surface);
+}
+
+.ada-model-picker__label {
+  flex: 0 0 auto;
+  font-size: var(--ada-text-xs);
+  color: var(--ph-faint);
+}
+
+.ada-model-picker__select {
+  min-width: 0;
+  max-width: 220px;
+  border: 0;
+  background: transparent;
+  color: var(--ph-ink);
+  font: inherit;
+  font-size: var(--ada-text-xs);
+  outline: none;
+}

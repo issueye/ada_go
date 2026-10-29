@@ -371,12 +371,12 @@ Todo 卡片是前端插件，不是基座组件：`plugins/official/ui-todo` 默
 | `GET /workspaces` | 工作区选择（目录浏览限制在当前工作区子树内） | Gateway 配置 + `os.ReadDir` |
 | `GET /extensions` | 插件列表（全部随包/已安装插件合并成一张表，不分区；产品未声明的随包插件显示为「未启用 / unused」，不误报 failed） | `PluginLister`、`plugin.list`、`extensions.list` 插槽 |
 | `GET /extensions/{id}` | 插件详情（前端/后端归属、能力计数、启停、打开插件页面） | 同上 |
-| `GET/POST /ext/provider-admin/api/*` | 供应商管理插件的 route：`GET /state` 读目录，`POST /select` 切当前模型 | Core `plugin.http` → 插件 `ctx.providers` |
-| `POST /model/select` | 切换当前模型（工作区级；供应商管理页无 JS 时的回落入口） | `model.set` |
+| `GET/POST /ext/provider-admin/api/*` | 模型设置插件的 route：`/state` 读配置，`/save`、`/remove`、`/fetch-models`、`/select` 管理供应商与当前模型 | Core `plugin.http` → 插件 `ctx.providers` |
+| `POST /model/select` | 切换当前模型（线程级/工作区级；输入框模型选择器也走这里） | `model.set` |
 | `GET /ext/{id}/{slug}` | 插件页 | `PluginUI.Page` |
 | `GET /login`、离线页、错误页 | 外壳页面 | — |
 
-二级页与聊天页共用侧栏，内容最大宽度 1040px，表格横向滚动。供应商管理是**统一官方插件**（backend `route` + TSX 页面）：首屏由只读投影渲染，交互走插件自己的 `route`；无 JS 时“设为当前”回落到 `POST /model/select`。端点与密钥只来自配置，页面不回显也不编辑。
+二级页与聊天页共用侧栏，内容最大宽度 1040px，表格横向滚动。供应商管理是**统一官方插件**（backend `route` + TSX 骨架 + JS）：Master-Detail 管理供应商、端点、API 格式、API Key 与模型清单，可拉取 `/models`、启停供应商/模型；密钥由后端保存，页面只显示尾号。输入框旁的模型选择器通过 `POST /model/select` 切换线程级/工作区级模型，列表来自 `model.list`。供应商页与选择器依赖 JS；基座仍保留 `POST /model/select` 作为无 JS 的兼容入口。
 
 与 a_da 的已知差异（如实声明）：工作区集合在 Gateway 启动时固定，目录选择器只能选用已配置的工作区（浏览子目录用于查看，不新增工作区）；前端插件在装配期加载，扩展页只提供 agent 插件的启用/停用与重载，前端插件变更需重启 Gateway。
 

@@ -172,7 +172,7 @@ agent.on("tool.beforeCall", async (event, ctx) => {
 | 提示词 | `persona-coding` | TS | `registerPrompt`：编码助手人格与领域规则 |
 | UI | `ui-todo` | TSX | 把 `tools-plan` 的计划投影成 `chat.corner` 的 Todo 卡片（真实动作数据，无示例回退） |
 | UI | `ui-ask-user` | TSX | `thread.tray` 的待答交互卡片（数据来自线程交互投影，提交回基座路由） |
-| UI | `provider-admin` | TS + TSX | 统一插件：后端 `route` 提供供应商目录与切换当前模型，页面经 `/ext/provider-admin/api/*` 调用（密钥与端点不进页面） |
+| UI | `provider-admin` | TS + TSX + JS | 模型设置：Master-Detail 管理供应商/端点/API 格式/密钥/模型清单，拉取 `/models`，切换当前模型；页面经插件 route 调用，密钥只显示尾号 |
 | UI | `token-usage` | TSX | 工作区/线程 Token 用量页面与概览卡片（`usage.get`） |
 | UI | `ui-hello-tsx` | TSX | 示例：页面、仪表盘、API、插槽 |
 

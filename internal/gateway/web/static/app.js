@@ -132,6 +132,48 @@
     if (field.form) field.form.submit();
   });
 
+  /* 输入框旁的模型选择器：改选即切换（线程级；没有会话上下文时工作区级）。
+     选择器在发送表单内部，不能嵌套第二个 form，所以用 fetch + CSRF。 */
+  document.addEventListener('change', function (event) {
+    var select = event.target;
+    if (!select || !select.matches || !select.matches('[data-model-select]')) return;
+    var value = String(select.value || "");
+    var cut = value.indexOf("|");
+    if (cut <= 0) return;
+    var providerId = value.slice(0, cut);
+    var modelId = value.slice(cut + 1);
+    var thread = document.querySelector("[data-thread-id]");
+    var csrf = document.querySelector('meta[name="csrf-token"]');
+    var body = new URLSearchParams();
+    body.set("providerId", providerId);
+    body.set("modelId", modelId);
+    if (thread && thread.getAttribute("data-thread-id")) {
+      body.set("threadId", thread.getAttribute("data-thread-id"));
+    }
+    select.disabled = true;
+    fetch("/model/select", {
+      method: "POST",
+      credentials: "same-origin",
+      redirect: "manual",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-CSRF-Token": csrf ? csrf.getAttribute("content") : ""
+      },
+      body: body.toString()
+    }).then(function (res) {
+      if (res.type === "opaqueredirect" || res.ok) {
+        window.location.reload();
+        return null;
+      }
+      return res.text().then(function (text) {
+        throw new Error(text || ("HTTP " + res.status));
+      });
+    }).catch(function (err) {
+      select.disabled = false;
+      window.alert("切换模型失败：" + (err && err.message ? err.message : err));
+    });
+  });
+
   /* ── 3. 侧栏：≤760px 是抽屉，>760px 是 56px 窄轨 ───────────────────────
      两套形态共用一个按钮（data-sidebar-toggle），但状态不同：
        · 窄屏：.ada-sidebar.is-open + 遮罩，点遮罩/Esc 关闭；
