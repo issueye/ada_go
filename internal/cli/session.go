@@ -208,6 +208,11 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 	if cfg.Err == nil {
 		cfg.Err = os.Stderr
 	}
+	// 工作区本地数据目录：TODO 等插件状态放在 .adag/ 下。
+	// 只读工作区不阻塞启动；真正需要写入时会给出明确错误。
+	if mkErr := os.MkdirAll(filepath.Join(abs, ".adag"), 0o755); mkErr != nil {
+		fmt.Fprintf(cfg.Err, "adag: 创建 %s 失败（TODO 等插件状态可能需要它）: %v\n", filepath.Join(abs, ".adag"), mkErr)
+	}
 	var debugLog *host.DebugLog
 	if cfg.Debug {
 		debugLog = host.NewDebugLog(cfg.Err)
@@ -2176,8 +2181,10 @@ type PluginView struct {
 	LastError   string
 	// Source 是发现来源：""＝随包（官方）；workspace | global。
 	Source string
-	Tools  []string
-	Hooks  []string
+	// Path 是插件所在的绝对目录（第三方或 Electron resources 里的官方插件）。
+	Path  string
+	Tools []string
+	Hooks []string
 	// Skills 是随包技能名（6.7 的 contributions.skills 计数来源）。
 	Skills []string
 	// Frontend / Backend 标明清单段；统一插件包可以两者都为真。
@@ -2267,7 +2274,13 @@ func (s *Session) pluginViews(ctx context.Context, detailID string) []PluginView
 				front = &f
 			}
 			baseScript := sc
-			v.Files = pluginFiles(&baseScript, front, "")
+			// 开发/源码或 Electron resources 运行时，官方插件有真实目录。
+			if dir := officialPluginDir(id); dir != "" {
+				v.Path = dir
+				v.Files = walkPluginFiles(dir)
+			} else {
+				v.Files = pluginFiles(&baseScript, front, "")
+			}
 			v.Readme = pluginReadme("", &baseScript)
 		}
 		if !productIDs[id] {
@@ -2312,7 +2325,12 @@ func (s *Session) pluginViews(ctx context.Context, detailID string) []PluginView
 			Enabled: enabled, Frontend: true, Status: status,
 		}
 		if detailID != "" && detailID == id {
-			v.Files = pluginFiles(nil, &frontScript, "")
+			if dir := officialPluginDir(id); dir != "" {
+				v.Path = dir
+				v.Files = walkPluginFiles(dir)
+			} else {
+				v.Files = pluginFiles(nil, &frontScript, "")
+			}
 			v.Readme = pluginReadme("", &frontScript)
 		}
 		out = append(out, v)
@@ -2327,6 +2345,13 @@ func (s *Session) pluginViews(ctx context.Context, detailID string) []PluginView
 		v := pluginViewOf(p.Script, p.Source, &p, rec, hasRec, asm)
 		v.Backend = true
 		v.Frontend = p.Script.Manifest != nil && p.Script.Manifest.Frontend != nil
+		if p.Dir != "" {
+			if abs, absErr := filepath.Abs(p.Dir); absErr == nil {
+				v.Path = abs
+			} else {
+				v.Path = p.Dir
+			}
+		}
 		if detailID != "" && detailID == id {
 			v.Files = pluginFiles(nil, nil, p.Dir)
 			v.Readme = pluginReadme(p.Dir, &p.Script)
@@ -2356,10 +2381,46 @@ const (
 	pluginReadmeDoc = "README.md"
 )
 
+// officialPluginDir 在开发/源码或 Electron resources 布局里定位官方插件目录
+// （绝对路径）；找不到时返回空。
+func officialPluginDir(id string) string {
+	// 与加载器共用同一份解析（ADAG_OFFICIAL_PLUGINS_DIR / resources / 源码检出）。
+	if root, err := app.OfficialRoot(); err == nil && root != "" {
+		dir := filepath.Join(root, id)
+		if st, statErr := os.Stat(filepath.Join(dir, "plugin.json")); statErr == nil && !st.IsDir() {
+			if abs, absErr := filepath.Abs(dir); absErr == nil {
+				return abs
+			}
+			return filepath.Clean(dir)
+		}
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	exeDir := filepath.Dir(exe)
+	candidates := []string{
+		// desktop/bin/adag.exe 与 bin/release/adag-* 都向上两级到仓库根。
+		filepath.Join(exeDir, "..", "..", "plugins", "official", id),
+		filepath.Join(exeDir, "..", "plugins", "official", id),
+		filepath.Join(exeDir, "plugins", "official", id),
+	}
+	for _, dir := range candidates {
+		manifest := filepath.Join(dir, "plugin.json")
+		if st, statErr := os.Stat(manifest); statErr == nil && !st.IsDir() {
+			if abs, absErr := filepath.Abs(dir); absErr == nil {
+				return abs
+			}
+			return filepath.Clean(dir)
+		}
+	}
+	return ""
+}
+
 // pluginFiles 生成插件包内的文件清单（详情页「插件目录」）。
 //
-// 第三方插件有真实目录，直接走文件系统；随包官方插件只有嵌入的加载单元，
-// 用 manifest + Source + Bundle + StaticAssets 还原出等价的包内路径。
+// 第三方插件有真实目录，直接走文件系统；官方插件在源码/Electron resources
+// 布局里也有真实目录，找不到目录时才用加载单元还原（测试/异常路径）。
 func pluginFiles(base, front *host.Script, dir string) []PluginFile {
 	if dir != "" {
 		return walkPluginFiles(dir)

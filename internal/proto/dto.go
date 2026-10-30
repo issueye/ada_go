@@ -294,6 +294,8 @@ type PluginSummary struct {
 	LastError   string `json:"lastError,omitempty"`
 	// Source 是第三方插件的来源（workspace|global）；随包插件省略（M3 安装/发现）。
 	Source string `json:"source,omitempty"`
+	// Path 是第三方插件的绝对目录；随包插件为空（内嵌于二进制）。
+	Path string `json:"path,omitempty"`
 	// Readme 是插件 README 正文（随包插件无 README 时回退为清单说明）。
 	Readme string `json:"readme,omitempty"`
 	// Files 是插件包内的文件清单（相对路径，不含宿主绝对路径）。

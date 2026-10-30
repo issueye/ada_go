@@ -110,6 +110,7 @@ cross:
 release:
 	@mkdir -p $(RELEASE_DIR)
 	@rm -f $(RELEASE_DIR)/adag-* $(RELEASE_DIR)/sha256sums.txt
+	@rm -rf $(RELEASE_DIR)/plugins
 	@echo "release version = $(RELEASE_VERSION)"
 	@for t in linux/amd64 darwin/amd64 darwin/arm64 windows/amd64; do \
 		os=$${t%/*}; arch=$${t#*/}; ext=""; \
@@ -123,6 +124,7 @@ release:
 			echo "WARN: $$os/$$arch cross-compile failed (non-blocking; CI release matrix is authoritative)"; \
 		fi; \
 	done
+	@mkdir -p $(RELEASE_DIR)/plugins && cp -R plugins/official $(RELEASE_DIR)/plugins/official
 	@files=$$(ls $(RELEASE_DIR)/adag-* 2>/dev/null); \
 	if [ -z "$$files" ]; then \
 		echo "ERROR: release produced no binaries"; exit 1; \
@@ -156,6 +158,7 @@ desktop-dev: $(DESKTOP_EXE) $(DESKTOP_PROD)/headless.agent.json
 	cd $(DESKTOP_DIR) && npx --yes electron@33.2.1 .
 
 desktop-pack: $(DESKTOP_EXE) $(DESKTOP_PROD)/headless.agent.json
+	$(NODE) plugins/official/build.mjs
 	cd $(DESKTOP_DIR) && npm install --no-fund --no-audit && npx electron-builder --win dir
 
 FORCE:

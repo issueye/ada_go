@@ -1456,7 +1456,7 @@ func TestPluginDetailShowsReadmeAndFiles(t *testing.T) {
 		on("thread.list", emptyThreadList).
 		on("plugin.list", `{"plugins":[{
 			"id":"tools-fs","name":"文件工具","version":"1.2.0","apiVersion":1,"trust":"builtin",
-			"enabled":true,"status":"ready",
+			"enabled":true,"status":"ready","source":"workspace","path":"/tmp/plugins/tools-fs",
 			"readme":"# 文件工具\n\n读写工作区文件。",
 			"files":[
 				{"path":"plugin.json","size":120},
@@ -1479,6 +1479,7 @@ func TestPluginDetailShowsReadmeAndFiles(t *testing.T) {
 		`ada-plugin-stat__value">3`, // 插槽
 		"README",
 		"<h1>文件工具</h1>",
+		"/tmp/plugins/tools-fs",
 		"static/todo.css",
 		"2.0 KB",
 		"readmeNodes",

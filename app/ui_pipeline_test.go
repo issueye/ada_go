@@ -2,7 +2,7 @@ package app_test
 
 // M4 前端插件管线的组合根验收（垂直切片）：
 //
-//	官方前端插件（embedded）→ frontend.Bridge（TSX→VNode→HTML）→ web.Server（12 插槽 / /ext）
+//	官方前端插件（磁盘 plugins/official）→ frontend.Bridge（TSX→VNode→HTML）→ web.Server（12 插槽 / /ext）
 //
 // 本文件是测试，允许出现官方插件 id（1.5.5 的边界只约束非测试源码）。
 

@@ -73,6 +73,8 @@ launcher.log 位置语义（`~/.adago/launcher.log`）、网关不可用时的�
 - `adag-desktop.exe`（Electron 主程序）
 - `resources/bin/adag.exe`（Go 二进制，来自 `make desktop` 拷贝）
 - `resources/products/headless.agent.json`
+- `resources/plugins/official/`（官方插件源目录与 `dist/`；Core 启动时优先从
+  `resources/bin/../plugins/official` 加载；目录不存在时拒绝启动，二进制不含内嵌副本）
 
 NSIS 安装包把 `--win dir` 换成 `--win nsis`（`npm run dist`）。注意
 `mingw32-make` 的 recipe 字符串必须全 ASCII（Windows 代码页会把中文引号打碎，

@@ -112,7 +112,7 @@ func TestCodingProductAssembles(t *testing.T) {
 	if persona == nil {
 		t.Fatal("coding 产品里没有 persona-coding 实例")
 	}
-	if persona.Priority != 10 || !strings.Contains(persona.Content, "先读后改") {
+	if persona.Priority != 10 || !strings.Contains(persona.Content, "先读后改") || !strings.Contains(persona.Content, "AGENTS.md") {
 		t.Fatalf("persona 片段形状不对: %+v", persona)
 	}
 	// persona-coding 随包技能进入贡献（origin=plugin）。

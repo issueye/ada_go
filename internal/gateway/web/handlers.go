@@ -28,6 +28,7 @@ type pluginSummaryDTO struct {
 	APIVersion    int             `json:"apiVersion"`
 	Trust         string          `json:"trust"`
 	Source        string          `json:"source"`
+	Path          string          `json:"path"`
 	Enabled       bool            `json:"enabled"`
 	Status        string          `json:"status"`
 	LastError     string          `json:"lastError"`
@@ -1299,6 +1300,7 @@ func (s *Server) collectPlugins(r *http.Request, detailID string) []pluginRow {
 					row.Version = p.Version
 				}
 				row.Source = pluginScope(p.Source, p.Trust)
+				row.Path = p.Path
 				row.Trust = p.Trust
 				row.APIVersion = p.APIVersion
 				row.Status = p.Status

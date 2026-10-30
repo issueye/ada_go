@@ -495,13 +495,15 @@ type extensionsState struct {
 // pluginRow 是插件列表/详情的一行：同一个 id 的前端与后端能力合并成一条。
 // 前端/后端归属（Frontend/Backend）只在详情页展示，列表里不分区。
 type pluginRow struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Version      string `json:"version"`
-	APIVersion   int    `json:"apiVersion,omitempty"`
-	Trust        string `json:"trust,omitempty"`
-	Description  string `json:"description"`
-	Source       string `json:"source"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	APIVersion  int    `json:"apiVersion,omitempty"`
+	Trust       string `json:"trust,omitempty"`
+	Description string `json:"description"`
+	Source      string `json:"source"`
+	// Path 是第三方插件的绝对目录；随包插件为空。
+	Path         string `json:"path,omitempty"`
 	Status       string `json:"status"`
 	StatusLabel  string `json:"statusLabel"`
 	StatusTone   string `json:"statusTone"`

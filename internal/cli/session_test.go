@@ -44,6 +44,20 @@ func productPath(t *testing.T) string {
 	return filepath.Join(root, "products", "headless.agent.json")
 }
 
+// 工作区根目录启动时就有 .adag（TODO 等插件状态的宿主目录）。
+func TestSessionCreatesAdagDir(t *testing.T) {
+	cfg := testConfig(t, "")
+	ctx := context.Background()
+	sess, err := cli.Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer sess.Close(ctx)
+	if st, err := os.Stat(filepath.Join(cfg.Workspace, ".adag")); err != nil || !st.IsDir() {
+		t.Fatalf(".adag 目录未创建: %v", err)
+	}
+}
+
 func TestSessionFakeRunAndExport(t *testing.T) {
 	cfg := testConfig(t, "")
 	var out strings.Builder
@@ -173,6 +187,9 @@ func TestPluginViewDetailFilesAndReadme(t *testing.T) {
 	}
 	if !strings.Contains(view.Readme, "# 任务计划") {
 		t.Fatalf("详情视图没有读到插件 README: %q", view.Readme)
+	}
+	if !strings.Contains(filepath.ToSlash(view.Path), "plugins/official/tools-plan") {
+		t.Fatalf("详情视图的插件路径不对: %q", view.Path)
 	}
 	paths := map[string]bool{}
 	for _, f := range view.Files {

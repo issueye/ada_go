@@ -44,7 +44,7 @@ for (const id of pluginDirs()) {
   const srcPath = join(here, id, "index.ts");
   const outPath = join(here, id, "dist", "index.js");
   const source = readFileSync(srcPath, "utf8");
-  // 擦除类型；source map 关掉（产物要进 go:embed，保持单文件）。
+  // 擦除类型；source map 关掉（产物随 Electron resources 发布，保持单文件）。
   const js = stripTypeScriptTypes(source, { mode: "strip" });
   const want = banner(id, source) + js;
   if (check) {

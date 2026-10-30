@@ -1,4 +1,4 @@
-// Package app 是组合根：唯一同时知道「产品声明」与「嵌入的官方插件包」的地方
+// Package app 是组合根：唯一同时知道「产品声明」与「官方插件目录」的地方
 // （设计 5.1、1.5.5、11 §13 的 app/）。
 //
 // internal/ 不得 import official/，也不得在非测试源码里出现官方插件 id；因此
@@ -37,7 +37,7 @@ type Deps struct {
 	Settings map[string]map[string]any
 	// OnWarning 接收装配期非致命警告（技能解析失败/同名冲突等）；nil 时丢弃。
 	OnWarning func(string)
-	// Scripts 为空时用嵌入的官方插件；测试可以注入替身。
+	// Scripts 为空时从官方插件目录加载；测试可以注入替身。
 	Scripts []host.Script
 	// BaseURL 是 OpenAI 兼容端点的覆盖（M1 的 provider 插件读取它）。
 	BaseURL string
@@ -120,7 +120,7 @@ func (a *Assembly) ActionDef(pluginID, name string) (host.ActionDef, bool) {
 	return a.Actions.Lookup(pluginID, name)
 }
 
-// Load 从产品声明文件装配（官方插件来自嵌入包）。
+// Load 从产品声明文件装配（官方插件来自磁盘目录）。
 func Load(ctx context.Context, productPath string, deps Deps) (*Assembly, error) {
 	p, err := coreapp.LoadProduct(productPath)
 	if err != nil {
@@ -128,13 +128,13 @@ func Load(ctx context.Context, productPath string, deps Deps) (*Assembly, error)
 	}
 	scripts := deps.Scripts
 	if scripts == nil {
-		// 由调用方注入官方包，避免 app 依赖具体打包方式（cmd 侧做 embed）。
+		// 由调用方注入官方插件脚本，避免 app 依赖具体打包方式。
 		return nil, fmt.Errorf("app: 没有插件包可装配（Deps.Scripts 为空；官方包由调用方注入）")
 	}
 	return Assemble(ctx, p, scripts, deps)
 }
 
-// LoadOfficial 从产品声明文件装配，插件脚本来自嵌入的官方包。
+// LoadOfficial 从产品声明文件装配，插件脚本来自官方插件目录。
 //
 // 这是「官方插件只经由组合根进入基座」的唯一入口：cmd/ 与 internal/ 都不 import
 // official/（设计 01 §3.3、11 §13）。
@@ -147,17 +147,24 @@ func LoadOfficial(ctx context.Context, productPath string, deps Deps) (*Assembly
 	return Load(ctx, productPath, deps)
 }
 
-// OfficialScripts 返回嵌入官方包的全部插件脚本（按 id 排序）。
+// OfficialScripts 返回官方插件脚本（按 id 排序）。
 //
+// 官方插件只从磁盘目录加载（Electron resources 或源码检出）；找不到目录直接
+// 返回错误，二进制不内嵌副本。
 // M3 会话热重载需要在 Open 时冻结这份 base，之后每次重载都以它为合并基准；
 // internal/ 不得 import official/，所以经由组合根转手（01 §3.3）。
 func OfficialScripts() ([]host.Script, error) {
 	return official.Scripts()
 }
 
+// OfficialRoot 返回官方插件目录；详情页的路径/文件清单与加载器共用这份解析。
+func OfficialRoot() (string, error) {
+	return official.Root()
+}
+
 // AssembleWithExtras 在产品声明的插件之外追加第三方插件脚本（M3 插件平台的装配入口）。
 //
-//   - base 为 nil 时取嵌入官方包；否则原样使用（测试注入替身）。
+//   - base 为 nil 时取官方插件目录；否则原样使用（测试注入替身）。
 //   - extras 是 discovery 层产出的第三方脚本；启用状态由调用方按 plugin_meta 过滤，
 //     官方同 id 的冲突也由调用方剥掉（官方不可被磁盘同名包覆盖，6.9）。
 //   - disabled 列出本次不装配的产品插件 id（plugin_meta.enabled=false）。禁用唯一
@@ -483,7 +490,8 @@ func isPolicyPlugin(m *plugins.Manifest) bool {
 	return false
 }
 
-// FrontendScripts 返回嵌入官方包的前端脚本（M4；含同时声明 backend 的统一插件）。
+// FrontendScripts 返回官方前端脚本（M4；含同时声明 backend 的统一插件）。
+// 与 OfficialScripts 一样从磁盘 plugins/official 加载；找不到目录直接报错。
 // Gateway 的渲染桥用它们做 TSX→VNode→HTML；Session 只用 id 集合。
 func FrontendScripts() ([]host.Script, error) {
 	return official.FrontendScripts()

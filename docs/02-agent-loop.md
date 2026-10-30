@@ -123,7 +123,7 @@ type Receipt struct {
 | `tools-skill` | `read_skill` | 按需读取 SKILL.md 正文 |
 | `tools-subagent` | `invoke_subagent` | v1.5；委派子智能体 |
 
-这些是 TS 实现的官方插件（`trust=builtin`），构建期由 esbuild 预编译并嵌入二进制；运行时与第三方插件走同一个 moejs 宿主、同一份描述符注册表与同一套装配。信任级别只决定可用能力与钩子等级，不改变注册方式。禁用 `tools-fs` 后 `read_file` 必须从模型工具表中消失，基座不能偷偷补一个同名实现。
+这些是 TS 实现的官方插件（`trust=builtin`），构建期预编译成 `dist/`，桌面打包随 Electron `resources` 发布；运行时与第三方插件走同一个 moejs 宿主、同一份描述符注册表与同一套装配。信任级别只决定可用能力与钩子等级，不改变注册方式。禁用 `tools-fs` 后 `read_file` 必须从模型工具表中消失，基座不能偷偷补一个同名实现。
 
 ---
 

@@ -142,7 +142,7 @@ func TestToolsPlan(t *testing.T) {
 	}
 
 	// 数据必须落在按会话命名的文件里，并由工具自己读写。
-	todo := filepath.Join(ws, "TODO_th_test_plan.json")
+	todo := filepath.Join(ws, ".adag", "todo", "TODO_th_test_plan.json")
 	raw, err := os.ReadFile(todo)
 	if err != nil {
 		t.Fatalf("TODO 文件未写出（%s）: %v", todo, err)
@@ -170,7 +170,7 @@ func TestToolsPlan(t *testing.T) {
 	}
 }
 
-// 旧版本线程级 state KV 里的计划：首次读文件时迁移到 TODO_<threadId>.json。
+// 旧版本线程级 state KV 里的计划：首次读文件时迁移到 .adag/todo/TODO_<threadId>.json。
 func TestToolsPlanMigratesLegacyState(t *testing.T) {
 	ws := tempDir(t)
 	hc := host.Context{
@@ -190,7 +190,7 @@ func TestToolsPlanMigratesLegacyState(t *testing.T) {
 	if !strings.Contains(text, "1/1 完成") || !strings.Contains(text, "旧计划") {
 		t.Fatalf("read_plan 没读到旧 KV 计划: %q", text)
 	}
-	raw, err := os.ReadFile(filepath.Join(ws, "TODO_th_legacy_plan.json"))
+	raw, err := os.ReadFile(filepath.Join(ws, ".adag", "todo", "TODO_th_legacy_plan.json"))
 	if err != nil {
 		t.Fatalf("旧计划没有迁移到 TODO 文件: %v", err)
 	}

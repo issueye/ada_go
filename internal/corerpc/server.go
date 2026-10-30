@@ -1686,7 +1686,7 @@ func pluginViewJSON(v cli.PluginView) proto.PluginSummary {
 		ID: v.ID, Name: v.Name, Version: v.Version, APIVersion: v.APIVersion,
 		Trust: v.Trust, Enabled: v.Enabled, Status: v.Status,
 		Fingerprint: v.Fingerprint, LastError: v.LastError, Source: v.Source,
-		Readme: v.Readme, Files: files,
+		Path: v.Path, Readme: v.Readme, Files: files,
 		Contributions: map[string]any{
 			"tools": v.Tools, "hooks": v.Hooks, "skills": v.Skills,
 			"frontend": v.Frontend, "backend": v.Backend,

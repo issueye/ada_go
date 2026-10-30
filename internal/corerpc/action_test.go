@@ -60,9 +60,12 @@ func TestActionInvokePlanAction(t *testing.T) {
 		t.Fatalf("空计划 total = %d", res.Result.Plan.Total)
 	}
 
-	// 计划文件按会话命名：写入 TODO_<threadId>.json 后，plan 动作应读到它。
-	todo := filepath.Join(sess.Workspace(), "TODO_"+created.Thread.ID+".json")
+	// 计划文件按会话命名：写入 .adag/todo/TODO_<threadId>.json 后，plan 动作应读到它。
+	todo := filepath.Join(sess.Workspace(), ".adag", "todo", "TODO_"+created.Thread.ID+".json")
 	body := fmt.Sprintf(`{"threadId":%q,"steps":[{"step":"写文件","status":"done"},{"step":"读卡片","status":"pending"}]}`, created.Thread.ID)
+	if err := os.MkdirAll(filepath.Dir(todo), 0o755); err != nil {
+		t.Fatalf("建 TODO 目录: %v", err)
+	}
 	if err := os.WriteFile(todo, []byte(body), 0o644); err != nil {
 		t.Fatalf("写 TODO 文件: %v", err)
 	}

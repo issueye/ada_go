@@ -1,13 +1,13 @@
-// generated from index.ts (sha256:c8a289b4f77673cb) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:e7238ba94164ebfd) by plugins/official/build.mjs — do not edit
 // tools-plan —— 官方插件：维护当前线程的任务计划（05 §6.3、02 §5.4 的 tools-plan）。
 //
-// 计划不写进会话 entry：插件自己把每个会话的计划保存到工作区根目录的
-// TODO_<threadId>.json。工具调用与前端只读动作都从 ctx.threadId 取对应会话的
+// 计划不写进会话 entry：插件自己把每个会话的计划保存到工作区 `.adag/todo/`
+// 下的 TODO_<threadId>.json。工具调用与前端只读动作都从 ctx.threadId 取对应会话的
 // ID，读写同一个文件；结构化步骤只走 details 给界面（INV-10），模型只拿到一段
 // 渲染好的文本。旧版本留在线程级 state KV 里的计划会在首次读文件时迁移一次，
 // 之后文件是唯一真源。
 //
-// 为什么 access=read：TODO_<threadId>.json 是本插件自己的会话状态文件（与原先
+// 为什么 access=read：.adag/todo/TODO_<threadId>.json 是本插件自己的会话状态文件（与原先
 // 线程级 KV 同一语义），不是用户文件编辑，不应触发写/执行审批。
 
                                                      
@@ -133,13 +133,13 @@ function requireThreadID(ctx             )         {
   return id;
 }
 
-// TODO_<threadId>.json：文件名带会话 ID，插件自己读写；目录由宿主挂载为
+// .adag/todo/TODO_<threadId>.json：文件名带会话 ID，插件自己读写；目录由宿主挂载为
 // /workspace（ctx.workspace）。ID 里的非法文件名字符做保守替换。
 function todoPath(ctx             )         {
   const threadID = requireThreadID(ctx);
   const safe = threadID.replace(/[^A-Za-z0-9_-]/g, "_");
   const workspace = String(ctx.workspace || "/workspace").replace(/\/+$/, "");
-  return workspace + "/TODO_" + safe + ".json";
+  return workspace + "/.adag/todo/TODO_" + safe + ".json";
 }
 
 async function loadSteps(ctx             )                      {
@@ -199,7 +199,7 @@ export default function (agent          )       {
     name: "update_plan",
     description:
       "创建或更新当前会话的任务计划。传入完整步骤列表（会整体替换），每步标 pending/in_progress/done。适合把多步工作显式化并在推进中更新。",
-    access: "read", // 只写插件自己的 TODO_<threadId>.json（会话状态，不是用户文件编辑）
+    access: "read", // 只写插件自己的 .adag/todo/TODO_<threadId>.json（会话状态，不是用户文件编辑）
     parameters: {
       type: "object",
       properties: {

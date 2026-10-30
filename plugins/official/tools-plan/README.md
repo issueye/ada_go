@@ -22,11 +22,11 @@
 | `read_plan` | 工具 | `read` | 读取当前会话的计划 |
 | `plan` | 只读动作 | — | 给 Todo 卡片取数，返回 `{ plan: { done, total, steps } }` |
 
-`update_plan` 标 `access=read` 是刻意的：它只写插件自己的会话状态文件 `TODO_<threadId>.json`，不是用户文件编辑，不应触发写/执行审批。
+`update_plan` 标 `access=read` 是刻意的：它只写插件自己的会话状态文件 `.adag/todo/TODO_<threadId>.json`，不是用户文件编辑，不应触发写/执行审批。
 
 ## 存储
 
-- 每个会话一份计划，文件位于工作区根目录：`TODO_<threadId>.json`。
+- 每个会话一份计划，文件位于工作区 `.adag/todo/` 下：`.adag/todo/TODO_<threadId>.json`。
 - 文件内容：`{ threadId, steps: [{ step, status }], updatedAt }`；`status` 为 `pending` / `in_progress` / `done`。
 - 会话 ID 中的非法文件名字符会替换为 `_`。
 - 旧版本曾把计划放在线程级 state KV；首次读文件时迁移一次，之后文件是唯一真源。

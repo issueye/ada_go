@@ -424,6 +424,7 @@
     plugin.apiVersionLabel = plugin.apiVersion ? String(plugin.apiVersion) : '—';
     plugin.trustLabel = plugin.trust || '—';
     plugin.sourceLabel = plugin.source || '随包';
+    plugin.pathLabel = plugin.path || '—';
     plugin.showDescription = !!plugin.description && plugin.description !== plugin.readme;
     plugin.readmeNodes = Array.isArray(plugin.readmeNodes) ? plugin.readmeNodes : [];
     plugin.files = Array.isArray(plugin.files) ? plugin.files : [];
@@ -478,6 +479,7 @@
         '<div><dt>API 版本</dt><dd>{{ plugin.apiVersionLabel }}</dd></div>' +
         '<div><dt>信任级别</dt><dd>{{ plugin.trustLabel }}</dd></div>' +
         '<div><dt>来源</dt><dd>{{ plugin.sourceLabel }}</dd></div>' +
+        '<div class="ada-plugin-meta__wide"><dt>插件路径</dt><dd class="ada-plugin-meta__mono">{{ plugin.pathLabel }}</dd></div>' +
         '<div v-if="plugin.hooks"><dt>钩子</dt><dd>{{ plugin.hooks }}</dd></div>' +
         '<div v-if="plugin.skills"><dt>技能</dt><dd>{{ plugin.skills }}</dd></div>' +
         '<div v-if="plugin.nav"><dt>导航</dt><dd>{{ plugin.nav }}</dd></div>' +

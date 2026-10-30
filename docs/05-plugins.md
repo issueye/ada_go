@@ -27,7 +27,7 @@ plugins/my-plugin/
 - 后端入口导出默认工厂函数 `export default function (agent: AgentAPI) {}`。
 - 前端模板导出 `export function Slot(props)` / `export function Page(props)`。
 - 一个包可以只声明 backend、只声明 frontend，或两者都有；两者由不同宿主加载（Core / Gateway），但共享同一个插件 id 与版本。
-- 官方插件与第三方同形：`plugin.json` + `index.ts` + 可选的 TSX；官方在构建期产出 `dist/` 并嵌入二进制，不存在平行的 Go 插件包或 Go 注册入口。
+- 官方插件与第三方同形：`plugin.json` + `index.ts` + 可选的 TSX；官方在构建期产出 `dist/`，桌面打包随 `resources/plugins/official` 发布，不存在平行的 Go 插件包或 Go 注册入口。
 - 发现路径：`<workspace>/.adago/plugins/<id>/`（工作区）与 `~/.adago/plugins/<id>/`（全局）。工作区优先；同 id 冲突时工作区覆盖全局并给出警告。
 - v1 只从本地目录或 zip 安装；不做在线市场，不做运行时 npm 解析。插件依赖必须在构建时打进产物，或使用宿主提供的模块。宿主提供的 Node 内置模块是一个有明确边界的子集，见 [12](12-node-compat.md)。
 
@@ -69,14 +69,14 @@ plugins/my-plugin/
 
 规则：
 
-- 后端部分（可选）：`backend.entry` 默认 `index.ts`，所有后端插件（官方与第三方）都必须提供入口。官方插件在构建期由 esbuild 预编译、嵌入二进制，运行时与第三方一样由 moejs 宿主执行；第三方在安装或加载时编译。`backend.capabilities` 是可安装能力的白名单；`backend.hooks` 声明使用哪些点位与最高动作等级（未声明的点位在调用时拒绝）。不声明 `backend` 即纯前端插件。
+- 后端部分（可选）：`backend.entry` 默认 `index.ts`，所有后端插件（官方与第三方）都必须提供入口。官方插件在构建期预编译成 `dist/`，桌面打包随 `resources/plugins/official` 发布，运行时与第三方一样由 moejs 宿主执行；第三方在安装或加载时编译。`backend.capabilities` 是可安装能力的白名单；`backend.hooks` 声明使用哪些点位与最高动作等级（未声明的点位在调用时拒绝）。不声明 `backend` 即纯前端插件。
 - `backend.env` 是环境变量白名单：只有列出的名字出现在 `process.env`，值在装配期冻结；宿主环境里不存在的名字不注入（`undefined`），不伪造空串。密钥不得写入环境变量，仍走 `secret`。
 - Node 内置模块同样由能力位安装：`node:fs` 需要 `fs.read`/`fs.write`，`node:child_process` 需要 `exec`，`node:os` 始终受限安装；`node:path`/`node:crypto`/`node:buffer` 等纯计算模块无需能力。未安装的模块在链接期报 `ERR_ACCESS_DENIED`；`node:http(s)`/`node:net`/`node:dns`/`node:worker_threads`/`node:vm` 不安装。完整矩阵见 [6.12](12-node-compat.md#612-node-兼容原生库)。
 - `backend.roles` 声明插件角色；v1 只定义 `tool-policy`（审批策略）。它只用于产品装配校验与“无策略时失败关闭”，基座不解释具体规则。
 - `capabilities` 里的 `ui.ask` 只授予 builtin/verified：它允许插件发起通用用户交互（confirm/select/input），不授予任何工具或文件权限。`net.sse` 同样只授予 builtin/verified，供官方 provider 做流式模型协议；`subagent.invoke` 只授予 builtin，供 `tools-subagent` 使用；`model.admin` 只授予 builtin，供供应商管理插件读取目录并切换当前模型（不含密钥）。
 - `apiVersion` 主版本不匹配直接拒绝加载；次版本兼容，宿主忽略未知字段并记录。
 - `id` 必须匹配 `^[a-z][a-z0-9-]{1,63}$`，且等于目录名。
-- `trust`：`builtin`（预编译后嵌入二进制，只能启用/禁用）、`verified`（签名有效）、`third-party`（默认，受限）。
+- `trust`：`builtin`（预编译后随 resources 发布，只能启用/禁用）、`verified`（签名有效）、`third-party`（默认，受限）。
 - 后端 `capabilities` 是**可安装能力**的白名单；前端 `capabilities` 控制预取、脚本、静态资源等。
 - 动作绑定的 `backend` 可以指向另一个插件的后端动作；目标插件/动作必须存在，跨插件只传 JSON 结果，不共享内存。
 - 清单的每个字段都必须有真实消费者；`adag verify` 逐字段核对，否则构建失败。
@@ -223,7 +223,7 @@ interface HookContext {
 
 **官方与第三方共用同一 TS 插件面**：`plugins/official/*` 不提供 Go 注册入口，也不再存在平行的 Go SDK。官方插件与第三方一样导出 `export default function (agent: AgentAPI)`，通过同一份 `AgentAPI` 注册工具、provider、提示词、动作、路由与钩子。差别只在构建与信任：
 
-- 官方插件在构建期由 esbuild 预编译成 `dist/index.js`，用 `go:embed` 嵌入二进制，运行时直接交给 moejs；仓库保留 `index.ts` 作为源码与类型检查入口。
+- 官方插件在构建期由 `build.mjs` 预编译成 `dist/index.js`；桌面打包把整个 `plugins/official/` 放进 Electron `resources`，Core 启动时从 `resources/bin/../plugins/official` 加载；目录不存在直接拒绝启动，二进制不再内嵌副本。仓库保留 `index.ts` 作为源码与类型检查入口。
 - 第三方插件在安装/首次加载时编译，产物按内容指纹缓存。
 - 两条路径最终都归约成同一份 `Contribution`，经过同一套重名、能力、钩子等级与插槽校验后原子提交；引擎不区分贡献来自官方还是第三方，只看信任级别授予的能力。
 

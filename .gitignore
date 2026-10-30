@@ -14,6 +14,8 @@
 
 # 本地工作区状态与缓存
 .adago/
+# 工作区本地数据（TODO 等插件状态）
+.adag/
 node_modules/
 coverage.*
 

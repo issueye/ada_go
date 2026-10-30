@@ -69,6 +69,10 @@
                 <dt>来源</dt>
                 <dd>{{if .Plugin.Source}}{{.Plugin.Source}}{{else}}随包{{end}}</dd>
               </div>
+              <div class="ada-plugin-meta__wide">
+                <dt>插件路径</dt>
+                <dd class="ada-plugin-meta__mono">{{if .Plugin.Path}}{{.Plugin.Path}}{{else}}—{{end}}</dd>
+              </div>
               {{if .Plugin.Hooks}}<div><dt>钩子</dt><dd>{{.Plugin.Hooks}}</dd></div>{{end}}
               {{if .Plugin.Skills}}<div><dt>技能</dt><dd>{{.Plugin.Skills}}</dd></div>{{end}}
               {{if .Plugin.Nav}}<div><dt>导航</dt><dd>{{.Plugin.Nav}}</dd></div>{{end}}

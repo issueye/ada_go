@@ -32,7 +32,7 @@
 
 ### A.2 `tools-plan`（后端，官方 TS）
 
-官方插件与第三方使用同一个入口；区别只有 `trust=builtin` 与随包发布。构建期把 `index.ts` 编成 `dist/index.js` 并嵌入二进制，运行时仍由 moejs 执行。
+官方插件与第三方使用同一个入口；区别只有 `trust=builtin` 与随包发布。构建期把 `index.ts` 编成 `dist/index.js`，桌面打包随 Electron `resources` 发布，运行时仍由 moejs 执行。
 
 `plugin.json`：
 

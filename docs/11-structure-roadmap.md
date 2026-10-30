@@ -13,7 +13,7 @@ ada-go/
   go.mod                   ada-go 唯一 Go module；发布依赖版本仍在这里锁定
   go.sum
   cmd/adag/                main：gateway / core / plugin / doctor / verify
-  app/                     组合根：产品声明 + 嵌入的 plugins/official/ → coreapp
+  app/                     组合根：产品声明 + 磁盘 plugins/official/ → coreapp
   sdk/                     TS 插件类型：agent.d.ts、ssr.d.ts、node.d.ts（Node 兼容子集）、tsconfig
   internal/
     domain/                消息、Part、工具描述符/回执、事件、错误、失败方向
@@ -37,12 +37,12 @@ ada-go/
     diag/                  诊断码词汇表
     conformance/           端口契约、不变量、golden、nodecompat、ui（token/class/DOM 基线）
   plugins/                 插件源码（官方与第三方同一 TS 契约）
-    official/              官方插件包（trust=builtin；源码可见可改，构建期 go:embed 进二进制）
+    official/              官方插件包（trust=builtin；源码可见可改，桌面打包放进 Electron resources）
       <id>/
         plugin.json
         index.ts             后端入口（构建期预编译）
         slot.tsx/page.tsx    前端模板（可选）
-        dist/                构建产物，go:embed 进二进制
+        dist/                构建产物，随 Electron resources 发布
       provider-openai-chat/ provider-anthropic-messages/ provider-openai-responses/
       tools-fs/ tools-shell/ tools-git/ tools-plan/ tools-ask/ tools-skill/ tools-subagent/
       policy-default/
@@ -82,7 +82,7 @@ ada-go/
     plugin-api.md          从类型定义生成的插件 API 参考（后续）
   tools/
     genproto/              生成 methods_gen.go
-    bundle-plugins/official/       esbuild 预编译 plugins/official/* → dist/，供 go:embed
+    bundle-plugins/official/       预编译 plugins/official/* → dist/，供 Electron resources
     verify/                接线/能力/插槽/文档/边界门禁
 ```
 
@@ -92,7 +92,7 @@ ada-go/
 - `internal/` 不 import `plugins/official/` 下的代码或资源；`plugins/official/` 只使用 `agent:*` / `ssr:*` 虚拟模块与公开 TS 类型，不 import 基座 Go 包。基座源码不出现任何官方插件 id。
 - 基座不提供平行的 Go 插件注册 API；官方与第三方必须走同一个 TS 入口、同一个 moejs 宿主与同一套贡献校验。
 - Gateway 与 Core 不共享可变内存；共享的只有 `proto` DTO 与 `diag` 码。
-- 所有模板/静态资源通过 `embed.FS`；官方插件的 `dist/` 也在 `embed.FS` 中，开发模式可切换磁盘源码热编译。
+- 网关模板/静态资源通过 `embed.FS`；官方插件从磁盘 `plugins/official` 读取（Electron resources/仓库），不进入二进制。
 
 ### 13.1 Go workspace
 
@@ -167,7 +167,7 @@ use (
 | TSX 在 moejs 中渲染的稳定性/性能 | 页面慢或白块 | 预编译、Runtime 池、100ms 超时、失败隔离、只读插槽缓存 |
 | esbuild 依赖体积/行为变化 | 构建复杂 | 固定在 go.mod；只使用 transform/build 的稳定子集；保留“纯 JS 插件”路径 |
 | SQLite 在 Windows/多进程下的锁竞争 | 写入失败、第二个 Core 抢写、备份不一致 | 工作区独占锁保证单写者；WAL + busy_timeout + 单写者协程；CLI 只读；备份走 Online Backup/`VACUUM INTO`；`doctor` 检查网络盘与锁持有者 |
-| 官方插件全部走 moejs | provider 流式开销、内存占用、长任务被脚本超时误杀 | 官方预编译并嵌入；每插件独立 Runtime；长调用由宿主异步与独立期限；provider 增量批量回投；真实 SSE 夹具压测；内存与启动门禁 |
+| 官方插件全部走 moejs | provider 流式开销、内存占用、长任务被脚本超时误杀 | 官方预编译并随 resources 发布；每插件独立 Runtime；长调用由宿主异步与独立期限；provider 增量批量回投；真实 SSE 夹具压测；内存与启动门禁 |
 | Node 兼容预期过高 | 插件用了未支持的模块或语义，安装后才失败；作者以为“就是 Node” | 模块矩阵与偏差表；链接期失败；`adag verify nodecompat`；Node 20 双跑语料；文档与报错直接指向缺失能力 |
 | moejs 的 Node 兼容缺口 | 模块白名单、fs 错误码、shell 开关等未补齐，M1 无法按矩阵交付 | E-1/E-4/E-5 作为阻断项先提交上游；adapter 层做窄包装；未补齐的能力在文档与清单中保持“不可用”，不以近似实现冒充 |
 | 轮次不设步数上限 | 模型原地打转、成本失控、长尾轮次占住线程 | 连续重复调用检测（3 次回执、5 次结束）；provider 空闲/总时长与单工具超时；压缩控制上下文；可选墙钟/token 上限；全程可取消且事件实时可见 |

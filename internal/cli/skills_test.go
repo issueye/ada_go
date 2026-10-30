@@ -96,6 +96,10 @@ func TestSessionCodingSkillsInjection(t *testing.T) {
 	if !strings.Contains(system, "先读后改") {
 		t.Fatal("系统提示缺少 persona-coding 的提示词片段")
 	}
+	// .adag 归属写进不可移除的安全前言。
+	if !strings.Contains(system, ".adag/") || !strings.Contains(system, "宿主与插件") {
+		t.Fatalf("安全前言缺少 .adag 归属说明: %.400s", system)
+	}
 	if strings.Index(system, "安全边界") > strings.Index(system, "先读后改") {
 		t.Fatal("安全前言必须在 persona 片段之前")
 	}

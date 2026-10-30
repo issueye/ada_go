@@ -120,7 +120,7 @@ ada-go 的取舍：保留双层消息、统一流、树形会话、steering、co
 - Gateway 是唯一的公开监听者；Core 只监听 `127.0.0.1` 的临时端口，握手时用一次性 token。
 - 一个 Gateway 默认绑定一个工作区，也可以注册多个工作区；线程 id 形如 `th_<workspaceHash>_<ulid>`，自带工作区前缀，URL 不需要额外前缀。
 - 侧栏线程列表按**当前工作区**展示；跨工作区通过切换器重建，不维护全局线程索引。
-- 打包时模板、静态资源、官方插件通过 `go:embed` 进二进制；第三方插件在工作区/用户目录。官方插件仍按插件装配，可禁用。
+- 打包时模板与网关静态资源通过 `go:embed` 进二进制；官方插件放进 Electron `resources/plugins/official`，第三方插件在工作区/用户目录。官方插件仍按插件装配，可禁用。
 
 ### 3.2 为什么 Gateway 与 Core 分进程
 
@@ -147,13 +147,13 @@ domain（消息/工具/事件/错误）
              ▲
              ├── coreapp（通用装配器：插件集合 → 目录/引擎）
              │      ▲
-             │      └── app（组合根：产品声明 + 嵌入的 plugins/official/*）
+             │      └── app（组合根：产品声明 + 磁盘 plugins/official/*）
              ├── coreproto（JSON-RPC 服务端）
              └── cmd/adag core
 
 plugins/official/*（官方 TS 插件包：provider、fs、shell、git、plan…；只用 agent:* 虚拟模块）
    ▲
-   └── app（唯一嵌入与装配点）
+   └── app（唯一加载与装配点）
 
 gateway
    ├── registry / supervisor / relay
@@ -298,7 +298,7 @@ Core 的 WebSocket 使用独立的一次性 token（环境变量传入，不出�
 ### 5.1 分层
 
 ```
-app             组合根：产品声明 + 嵌入的官方插件包 → coreapp；唯一知道 plugins/official/ 的包
+app             组合根：产品声明 + 磁盘 plugins/official → coreapp；唯一知道 plugins/official/ 的包
 coreapp         通用装配器：接收插件集合 → 工具目录 / 引擎 / 存储（不 import plugins/official/）
   ├── coreproto JSON-RPC 服务端、事件发射、状态投影
   ├── engine    RunTurn（唯一多轮循环）、钩子编排、工具前策略、终止条件

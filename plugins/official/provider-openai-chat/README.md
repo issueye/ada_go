@@ -52,7 +52,7 @@ OpenAI Chat Completions 的流式协议适配器。OpenAI 兼容端点（DeepSee
 
 ## 构建
 
-`index.ts` 是源码，`dist/index.js` 由 `node plugins/official/build.mjs` 生成并被 `go:embed` 进二进制。不要手改 `dist/`。
+`index.ts` 是源码，`dist/index.js` 由 `node plugins/official/build.mjs` 生成，桌面打包随 `resources/plugins/official` 发布（不再进二进制）。不要手改 `dist/`。
 
 ## 相关文档
 

@@ -76,7 +76,7 @@ if _, err := ret.Await(ctx); err != nil { // Await 对非 thenable 原样返回�
 加载流程（两阶段）：
 
 ```
-扫描来源（嵌入的 plugins/official/ 或磁盘插件目录） → 解析/校验 manifest
+扫描来源（磁盘 plugins/official：Electron resources 或仓库目录） → 解析/校验 manifest
    → 官方取预编译 bundle；第三方编译 TS
    → 创建 Runtime → 执行入口
    → 工厂调用 register* 收集到 staging
@@ -183,7 +183,7 @@ agent.on("tool.beforeCall", async (event, ctx) => {
 - `third-party`：加载前在插件页显示能力清单；默认禁止 `exec`、禁止控制面钩子、禁止前端脚本。
 - 安装：`adag plugin install ./dir` 或 `.zip`，校验路径穿越、大小上限（50MB）、文件类型；复制到目标目录后原子替换。
 - 热重载：`POST /plugins/{id}/reload` → Gateway 通知 Core → Core 重载后端 → Gateway 重载前端；两侧都成功后状态变为 `ready`；任一侧失败保留旧代并显示错误。
-- 版本：插件 id + 版本 + 文件指纹写入 `plugin_meta`；官方包指纹取嵌入 bundle 的哈希，第三方指纹变化才重新编译，编译缓存在 `~/.adago/cache/plugins/<id>/<fingerprint>/`。
+- 版本：插件 id + 版本 + 文件指纹写入 `plugin_meta`；官方包指纹取磁盘 bundle 的哈希，第三方指纹变化才重新编译，编译缓存在 `~/.adago/cache/plugins/<id>/<fingerprint>/`。
 
 ---
 

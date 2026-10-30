@@ -454,6 +454,10 @@ func ctxFSMember(st *capsState, hc Context) moejs.NativeFunc {
 					if hc.Checkpoint != nil {
 						hc.Checkpoint(checkpointMetaOf(hc), virtual)
 					}
+					// 父目录由宿主补建（如 .adag/todo/）；real 已过工作区根校验。
+					if err := os.MkdirAll(filepath.Dir(real), 0o755); err != nil {
+						return moejs.Undefined(), err
+					}
 					if err := os.WriteFile(real, []byte(text), 0o644); err != nil {
 						return moejs.Undefined(), err
 					}
