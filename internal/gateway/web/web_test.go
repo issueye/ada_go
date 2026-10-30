@@ -702,6 +702,32 @@ func TestCoreErrorRendersPageInsteadOfPanicking(t *testing.T) {
 	wantContains(t, rec.Body.String(), "Core 暂时不可用")
 }
 
+// 未匹配的路径渲染带外壳的 404，而不是裸文本 page not found。
+func TestNotFoundRendersNavigablePage(t *testing.T) {
+	core := newFakeCore().on("thread.list", emptyThreadList)
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "GET", "/no/such/page", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("未知路径 = %d, want 404", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"页面不存在",
+		"请求路径",
+		"/no/such/page",
+		`href="/"`,
+		`href="/extensions"`,
+		`href="/overview"`,
+		`class="ada-shell"`,
+		`class="ada-sidebar`,
+	} {
+		wantContains(t, body, want)
+	}
+	// 不再出现 Go 默认的裸文本 404。
+	wantNotContains(t, body, "404 page not found")
+}
+
 func TestTemplateEscapesMessageContent(t *testing.T) {
 	payload, err := json.Marshal(map[string]any{
 		"role":  "user",

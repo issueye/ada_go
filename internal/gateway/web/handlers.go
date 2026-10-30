@@ -1755,6 +1755,14 @@ func (s *Server) renderCoreError(w http.ResponseWriter, r *http.Request, err err
 	s.renderError(w, r, status, heading, message, err.Error(), retryPath, "重试")
 }
 
+// handleNotFound 渲染带完整外壳的 404 页：未匹配的路径最后都走到这里，
+// 用户可以直接回到会话/插件/概览，而不是停在裸文本 404。
+func (s *Server) handleNotFound(w http.ResponseWriter, r *http.Request) {
+	threads, err := s.listThreads(r, 50)
+	base := s.base(r, "", "页面不存在", threads, "", err == nil)
+	s.render(w, http.StatusNotFound, "not_found", notFoundData{baseData: base, Path: r.URL.Path})
+}
+
 func (s *Server) renderError(w http.ResponseWriter, r *http.Request, status int, heading, message, detail, retryPath, retryLabel string) {
 	if retryPath == "" {
 		retryPath = "/"

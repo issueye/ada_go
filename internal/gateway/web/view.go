@@ -380,6 +380,12 @@ type errorData struct {
 	RetryLabel string
 }
 
+// notFoundData 是 404 页：保留完整外壳与导航，避免用户落到裸文本 404。
+type notFoundData struct {
+	baseData
+	Path string
+}
+
 type loginData struct {
 	baseData
 }

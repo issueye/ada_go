@@ -225,6 +225,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /login", s.handleLoginPage)
 	mux.HandleFunc("POST /login", s.handleLoginSubmit)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
+	// 未匹配的路径：渲染带外壳的 404（放最后；更具体的模式优先匹配）。
+	mux.HandleFunc("/{path...}", s.handleNotFound)
 	return mux
 }
 

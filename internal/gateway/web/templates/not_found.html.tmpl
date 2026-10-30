@@ -1,0 +1,17 @@
+{{define "not_found"}}{{template "doc_head" .}}{{template "shell_start" .}}
+  <div class="ada-scroll">
+    <div class="ada-wrap ada-wrap--page">
+      <div class="ada-empty">
+        <span class="ada-empty__mark">{{icon "i-alert" 20}}</span>
+        <h2 class="ada-empty__title">页面不存在</h2>
+        <p class="ada-empty__desc">这个地址没有对应的页面，可能链接已失效或输错了。</p>
+        {{if .Path}}<p class="ada-empty__desc ada-notfound__path">请求路径：<code>{{.Path}}</code></p>{{end}}
+        <div class="ada-empty__action">
+          <a class="ada-btn ada-btn--primary ada-btn--sm" href="/">回到会话</a>
+          <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/extensions">插件</a>
+          <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/overview">概览</a>
+        </div>
+      </div>
+    </div>
+  </div>
+{{template "shell_end" .}}{{end}}
