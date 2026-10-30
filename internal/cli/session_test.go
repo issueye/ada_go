@@ -157,6 +157,45 @@ func viewOf(sess *cli.Session, ctx context.Context, id string) (cli.PluginView, 
 	return cli.PluginView{}, false
 }
 
+// 插件工具必须能从 ctx.threadId 拿到会话 ID（tools-plan 按会话读写 TODO 文件）。
+// 这里跑完整引擎/执行器路径，防止归属只在 Rollback 工具上注入的回归。
+func TestSessionPluginToolReceivesThreadID(t *testing.T) {
+	ws := t.TempDir()
+	data := t.TempDir()
+	scripts, err := official.Scripts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := testkit.NewFakeProvider(testkit.NewScriptedModel(
+		testkit.ToolTurn("call_plan", "read_plan", `{}`),
+		testkit.TextTurn("没有计划"),
+	))
+	cfg := cli.Config{
+		Workspace: ws, DataDir: data, Product: productPath(t), Scripts: scripts,
+		ModelClient: fake, In: strings.NewReader(""),
+	}
+	ctx := context.Background()
+	sess, err := cli.Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer sess.Close(ctx)
+
+	if term, err := sess.Run(ctx, "看看计划"); err != nil || term != domain.TerminalCompleted {
+		t.Fatalf("Run = %s / %v", term, err)
+	}
+	var jsonl strings.Builder
+	if _, err := cli.ExportThread(ctx, cfg.Workspace, cfg.DataDir, sess.CurrentThread(), "jsonl", &jsonl); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if strings.Contains(jsonl.String(), "ctx.threadId 为空") {
+		t.Fatalf("工具没有拿到会话 ID:\n%s", jsonl.String())
+	}
+	if !strings.Contains(jsonl.String(), "计划已清空") {
+		t.Fatalf("read_plan 没有正常返回:\n%s", jsonl.String())
+	}
+}
+
 func TestSessionScriptedToolTurn(t *testing.T) {
 	ws := t.TempDir()
 	data := t.TempDir()

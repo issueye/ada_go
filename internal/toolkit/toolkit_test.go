@@ -66,6 +66,47 @@ func TestEmptyCatalogHasNoTools(t *testing.T) {
 	}
 }
 
+// 归属（threadId/runId/callId）对所有工具都要注入，不是只有 Rollback 工具。
+// 插件工具（如 tools-plan）靠 ctx.threadId 定位会话文件；漏注入会让只读工具也失败。
+func TestExecuteAttachesMetaForNonRollbackTool(t *testing.T) {
+	t.Parallel()
+	cat := toolkit.NewCatalog()
+	if err := cat.Register(descriptorRO("read_file")); err != nil {
+		t.Fatal(err)
+	}
+	cat.Freeze()
+
+	var got toolkit.CheckpointMeta
+	ex, err := toolkit.NewExecutor(toolkit.ExecutorConfig{
+		Catalog: cat,
+		Clock:   fakeClock{},
+		CtxMeta: func(context.Context) (string, string) { return "th_1", "run_1" },
+		Invoker: stubInvoker{func(ctx context.Context, _, _ string, _ json.RawMessage) (domain.Result, error) {
+			meta, ok := toolkit.MetaFrom(ctx)
+			if !ok {
+				t.Error("非 Rollback 工具的 ctx 没有归属信息")
+			}
+			got = meta
+			return domain.Result{
+				Content: []domain.Part{{Type: domain.PartText, Text: "ok"}},
+				Receipt: domain.Receipt{Status: domain.ReceiptOK},
+			}, nil
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewExecutor: %v", err)
+	}
+	res := ex.Execute(context.Background(), domain.ToolCall{
+		CallID: "call_1", Tool: "read_file", Args: json.RawMessage(`{"path":"x"}`),
+	})
+	if res.Receipt.Status != domain.ReceiptOK {
+		t.Fatalf("Execute = %+v", res.Receipt)
+	}
+	if got.ThreadID != "th_1" || got.RunID != "run_1" || got.CallID != "call_1" || got.Tool != "read_file" {
+		t.Fatalf("归属 = %+v", got)
+	}
+}
+
 // TestRegisterRejectsBadDescriptors 验证装配期校验（05 §6.3、02 §5.4）。
 func TestRegisterRejectsBadDescriptors(t *testing.T) {
 	t.Parallel()

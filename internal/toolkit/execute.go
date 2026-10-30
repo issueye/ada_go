@@ -116,12 +116,15 @@ func (e *Executor) Execute(ctx context.Context, call domain.ToolCall) domain.Res
 
 	var checkpoint string
 	var cpMeta CheckpointMeta
-	if d.Rollback {
-		var threadID, runID string
-		if e.ctxMeta != nil {
-			threadID, runID = e.ctxMeta(ctx)
-		}
+	// 归属与「是否 Rollback」无关：所有工具都要能看到 threadId/runId/callId
+	// （插件工具据此按会话读写自己的状态）。检查点只为 Rollback 工具创建。
+	if e.ctxMeta != nil {
+		threadID, runID := e.ctxMeta(ctx)
 		cpMeta = CheckpointMeta{ThreadID: threadID, RunID: runID, CallID: call.CallID, Tool: d.Name}
+	} else {
+		cpMeta = CheckpointMeta{CallID: call.CallID, Tool: d.Name}
+	}
+	if d.Rollback {
 		checkpoint = e.changes.NewCheckpoint(call, d, cpMeta)
 	}
 	// 归属随 ctx 传给 Invoker：app 用它填 host.Context（ThreadID/RunID/CallID），
