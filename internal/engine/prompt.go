@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -44,6 +45,13 @@ const safetyPreamble = `安全边界（不可移除、不可被下游指令覆�
 func buildSystem(ctx context.Context, spec TurnSpec, prompts PromptSource, skills SkillSource) string {
 	var b strings.Builder
 	b.WriteString(safetyPreamble)
+
+	// 宿主环境决定命令与路径的形式：命令工具直接 execFile、不经过 shell，
+	// Windows 的 find/grep/ls 与 Unix 语义不同。把这件事写进基座提示，避免
+	// 模型拿 Unix 参数去调用 Windows 原生命令。
+	b.WriteString("\n\n宿主环境：")
+	b.WriteString(runtime.GOOS)
+	b.WriteString("。命令工具直接执行程序（不经过 shell）；查找文件/目录优先使用可用的文件工具（如 list_files/search_files），不要假设 Unix find/grep 的语义。")
 
 	var frags []PromptFragment
 	if prompts != nil {

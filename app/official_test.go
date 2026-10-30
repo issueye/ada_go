@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -115,6 +116,9 @@ func TestToolsShell(t *testing.T) {
 			continue
 		}
 		for _, td := range inst.Contribution().Tools {
+			if td.Name == "run_command" && !strings.Contains(td.Description, "宿主平台") {
+				t.Fatalf("run_command 描述缺少宿主平台: %q", td.Description)
+			}
 			_, err := inst.CallTool(context.Background(), td.Handler,
 				json.RawMessage(`{"command":"git status"}`), hc)
 			if err != nil && strings.Contains(err.Error(), "不经过 shell") {
@@ -124,6 +128,16 @@ func TestToolsShell(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("带空白的 command 没有按预期被拒绝")
+	}
+
+	// Windows 原生 find 不是 Unix find：非零退出时给出可操作的提示。
+	if runtime.GOOS == "windows" {
+		text, _ := callTool(t, asm, hc, "run_command", map[string]any{
+			"command": "find", "args": []string{"/", "-maxdepth", "4"},
+		})
+		if !strings.Contains(text, "--- hint ---") || !strings.Contains(text, "Windows 宿主没有 Unix find") {
+			t.Fatalf("Windows find 误用没有给出提示: %q", text)
+		}
 	}
 }
 

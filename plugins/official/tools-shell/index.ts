@@ -33,6 +33,14 @@ const MAX_BYTES = 50 * 1024;
 const MAX_LINES = 2000;
 const MAX_TIMEOUT_MS = 600000;
 
+// 宿主平台（win32/darwin/linux）：命令是直接 execFile 的，没有 shell；
+// Windows 自带的 find/grep/ls 与 Unix 语义不同，需要提前告诉模型。
+const PLATFORM = String((globalThis as any).process?.platform || "");
+const UNIX_ONLY = new Set([
+  "find", "grep", "ls", "cat", "sed", "awk", "rm", "cp", "mv", "chmod",
+  "which", "head", "tail", "wc", "xargs", "touch", "pwd", "env", "test",
+]);
+
 function fail(code: string, message: string): never {
   const e = new Error(message);
   (e as any).code = code;
@@ -83,6 +91,8 @@ export default function (agent: AgentAPI): void {
     name: "run_command",
     description:
       "执行一条命令并返回退出码与输出。命令与参数必须分开传（不经过 shell：没有管道、通配符、变量展开）。" +
+      `当前宿主平台：${PLATFORM || "未知"}；Windows 原生 find/grep/ls 与 Unix 语义不同，` +
+      "查找文件优先用 list_files/search_files。" +
       "cwd 只能是工作区内的路径；非零退出码不会抛错，会原样回给你判断。",
     access: "exec",
     parameters: {
@@ -150,6 +160,14 @@ export default function (agent: AgentAPI): void {
       if (stdout.text.length > 0) parts.push(stdout.text.replace(/\n$/, ""));
       if (stderr.text.length > 0) parts.push("--- stderr ---", stderr.text.replace(/\n$/, ""));
       if (stdout.truncated || stderr.truncated) parts.push("... (truncated)");
+      // Windows 上最常见的误用：把 Unix find/grep/ls 的参数交给同名原生命令。
+      if (res.code !== 0 && PLATFORM === "win32" && UNIX_ONLY.has(command)) {
+        parts.push(
+          "--- hint ---",
+          `Windows 宿主没有 Unix ${command} 的语义；查找文件/目录请用 list_files/search_files，` +
+            "或使用 PowerShell/cmd 的等价命令。",
+        );
+      }
 
       ctx.log("info", "command finished", { command, code: res.code, ms: Date.now() - started });
       return {

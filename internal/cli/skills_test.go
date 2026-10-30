@@ -100,6 +100,10 @@ func TestSessionCodingSkillsInjection(t *testing.T) {
 	if !strings.Contains(system, ".adag/") || !strings.Contains(system, "宿主与插件") {
 		t.Fatalf("安全前言缺少 .adag 归属说明: %.400s", system)
 	}
+	// 宿主平台/命令语义写进基座提示（Windows 原生 find/grep 与 Unix 不同）。
+	if !strings.Contains(system, "宿主环境：") || !strings.Contains(system, "不经过 shell") {
+		t.Fatalf("系统提示缺少宿主环境说明: %.400s", system)
+	}
 	if strings.Index(system, "安全边界") > strings.Index(system, "先读后改") {
 		t.Fatal("安全前言必须在 persona 片段之前")
 	}
