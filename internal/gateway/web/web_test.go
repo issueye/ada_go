@@ -1050,6 +1050,43 @@ func TestAllTwelveSlotsHostedAcrossPages(t *testing.T) {
 	}
 }
 
+// 工作区与插件详情也是 AdaUI 岛：服务端标记 + 初始状态 + 资源按页加载。
+func TestWorkspacesAndPluginDetailUseAdaUI(t *testing.T) {
+	core := newFakeCore().
+		on("thread.list", emptyThreadList).
+		on("plugin.list", `{"plugins":[{"id":"tools-fs","name":"文件工具","version":"1.2.0","enabled":true,"status":"ready","contributions":{"tools":["read"],"frontend":false,"backend":true}}]}`)
+	srv, _ := newServerWithWorkspaces(t, core, []string{"/tmp/ws-a", "/tmp/ws-b"})
+
+	body := serve(t, srv, "GET", "/workspaces", nil).Body.String()
+	for _, want := range []string{
+		`data-ada-island="workspaces"`,
+		`data-ada-state=`,
+		`ada-render.js`,
+		`ada-ui.js`,
+		`islands.js`,
+		`ada-ui.css`,
+		`action="/workspaces/select"`,
+		`name="path"`,
+		"ws-a",
+	} {
+		wantContains(t, body, want)
+	}
+
+	detail := serve(t, srv, "GET", "/extensions/tools-fs", nil).Body.String()
+	for _, want := range []string{
+		`data-ada-island="plugin-detail"`,
+		`data-ada-state=`,
+		`文件工具`,
+		`ada-render.js`,
+		`ada-ui.js`,
+		`islands.js`,
+		`ada-ui.css`,
+		`action="/extensions/tools-fs/disable"`,
+	} {
+		wantContains(t, detail, want)
+	}
+}
+
 // 概览页是第一个 AdaUI 客户端岛：SSR 回退仍在，同时暴露 JSON 状态与轮询接口。
 func TestOverviewIslandAndDashboardJSON(t *testing.T) {
 	core := newFakeCore().on("thread.list", `{

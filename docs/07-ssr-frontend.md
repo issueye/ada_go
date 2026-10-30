@@ -370,9 +370,9 @@ Todo 卡片是插件的前端段，不是基座组件：`plugins/official/tools-
 |---|---|---|
 | `GET /`、`GET /threads`、`GET /threads/{id}` | 对话页 / 会话页 | `thread.list`、`thread.get`、`thread.entries` |
 | `GET /overview`、`GET /partials/dashboard.json` | 概览（统计卡、最近会话、插件卡片；AdaUI 岛每 5 秒轮询 JSON） | `thread.list`、`plugin.list`、`dashboard.widgets` 插槽 |
-| `GET /workspaces` | 工作区选择（目录浏览限制在当前工作区子树内） | Gateway 配置 + `os.ReadDir` |
-| `GET /extensions` | 插件列表（全部随包/已安装插件合并成一张表，不分区；产品未声明的随包插件显示为「未启用 / unused」，不误报 failed） | `PluginLister`、`plugin.list`、`extensions.list` 插槽 |
-| `GET /extensions/{id}` | 插件详情（前端/后端归属、能力计数、启停、打开插件页面） | 同上 |
+| `GET /workspaces` | 工作区选择（AdaUI 岛 + SSR 回退；目录浏览限制在当前工作区子树内） | Gateway 配置 + `os.ReadDir` |
+| `GET /extensions` | 插件列表（AdaUI 岛 + SSR 回退；全部随包/已安装插件合并成一张表，不分区；产品未声明的随包插件显示为「未启用 / unused」，不误报 failed） | `PluginLister`、`plugin.list`、`extensions.list` 插槽 |
+| `GET /extensions/{id}` | 插件详情（AdaUI 岛 + SSR 回退；前端/后端归属、能力计数、启停、打开插件页面） | 同上 |
 | `GET/POST /ext/provider-admin/api/*` | 模型设置插件的 route：`/state` 读配置，`/save`、`/remove`、`/fetch-models`、`/select` 管理供应商与当前模型 | Core `plugin.http` → 插件 `ctx.providers` |
 | `POST /model/select` | 切换当前模型（线程级/工作区级；输入框模型选择器也走这里） | `model.set` |
 | `GET /ext/{id}/{slug}` | 插件页 | `PluginUI.Page` |

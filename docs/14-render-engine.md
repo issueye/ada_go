@@ -384,13 +384,14 @@ make test-js
 | 阶段 | 内容 | 验收 |
 |---|---|---|
 | P0（已完成） | 引入引擎、组件层与测试 | Node 测试 + 浏览器冒烟通过 |
-| P1（已完成） | `/overview`、`/extensions` 改为 AdaUI 客户端岛：SSR 回退 + `islands.js` mount | 无 JS 行为不变；有 JS 时用组件渲染，接口走 JSON 轮询 |
+| P1（已完成） | `/overview`、`/extensions`、`/extensions/{id}`、`/workspaces` 改为 AdaUI 客户端岛：SSR 回退 + `islands.js` mount | 无 JS 行为不变；有 JS 时用组件渲染，概览/插件列表走 JSON，其余用初始状态 |
 | P2 | 把实时对话流从“fetch 整页 + outerHTML 比较”切到 VNode patch | 不再整段重画；滚动/焦点稳定 |
 | P3 | 把 `ui.go` 的字符串拼接改为 VNode 构造（先侧栏，后工具卡） | golden HTML 不变 |
 | P4 | 评估 moejs 服务端执行同一份 JS 组件 | 页面渲染预算内；无重复 DOM 代码 |
 
 每一步都可以独立回滚：引擎是增量层，Go SSR 始终是可用的基线。当前落地为
-P0 + P1：概览与插件页已是“SSR 回退 + 客户端岛”，其它页面仍走原 SSR。
+P0 + P1：概览、插件列表、插件详情、工作区页已是“SSR 回退 + 客户端岛”，
+`/threads/{id}` 仍走原 SSR + SSE。
 
 ## 13. 已知限制
 

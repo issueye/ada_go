@@ -204,6 +204,21 @@ test('component：props 更新、$emit 与默认 slot', async () => {
   assert.deepEqual(picked, ['A', 'B']);
 });
 
+test('component：空 default slot 回退到模板 fallback', () => {
+  const Box = {
+    template: '<span><slot>fallback</slot></span>'
+  };
+  const empty = createApp({ components: { Box }, template: '<div><box></box></div>' });
+  const emptyRoot = container();
+  empty.mount(emptyRoot);
+  assert.equal(domText(emptyRoot), 'fallback');
+
+  const filled = createApp({ components: { Box }, template: '<div><box>body</box></div>' });
+  const filledRoot = container();
+  filled.mount(filledRoot);
+  assert.equal(domText(filledRoot), 'body');
+});
+
 test('component：setup 返回渲染函数与 ref 自动解包', () => {
   const Counter = {
     setup() {

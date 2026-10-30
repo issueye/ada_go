@@ -10,6 +10,7 @@
         <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/extensions">返回插件列表</a>
       </div>
 
+      <div id="plugin-detail-island" data-ada-island="plugin-detail" data-ada-state="{{.StateJSON}}">
       <div class="card p-4">
         <div class="flex flex-wrap items-center gap-2">
           {{if .Plugin.Frontend}}<span class="badge badge-brand">前端插件</span>{{end}}
@@ -79,6 +80,7 @@
         {{if .Plugin.FirstPage}}
         <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/ext/{{.Plugin.ID}}/{{.Plugin.FirstPage}}">{{icon "i-external" 13}}打开插件页面</a>
         {{end}}
+      </div>
       </div>
     </div>
   </div>

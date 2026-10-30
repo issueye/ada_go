@@ -402,28 +402,44 @@ type workspacesData struct {
 	BindThread string
 	// Selectable 表示当前浏览目录正好是某个已配置工作区，可以设为当前工作区。
 	Selectable bool
+	// StateJSON 是给浏览器岛的初始状态；无 JS 时仍渲染上面的字段。
+	StateJSON string
+}
+
+// workspacesState 是工作区岛与后续 JSON 刷新共用的数据形态。
+type workspacesState struct {
+	Roots      []workspaceRoot   `json:"roots"`
+	Recent     []workspaceRecent `json:"recent"`
+	Current    string            `json:"current"`
+	Parent     string            `json:"parent"`
+	ParentHref string            `json:"parentHref"`
+	Entries    []workspaceEntry  `json:"entries"`
+	Truncated  bool              `json:"truncated"`
+	Omitted    int               `json:"omitted"`
+	Selectable bool              `json:"selectable"`
+	CSRF       string            `json:"csrf"`
 }
 
 type workspaceRoot struct {
-	Label string
-	Path  string
-	Href  string
-	Kind  string
+	Label string `json:"label"`
+	Path  string `json:"path"`
+	Href  string `json:"href"`
+	Kind  string `json:"kind"`
 }
 
 type workspaceRecent struct {
-	Path     string
-	Name     string
-	Sessions int
-	Active   bool
+	Path     string `json:"path"`
+	Name     string `json:"name"`
+	Sessions int    `json:"sessions"`
+	Active   bool   `json:"active"`
 	// Known 表示该工作区的会话数已知（只有当前工作区查询过）。
-	Known bool
+	Known bool `json:"known"`
 }
 
 type workspaceEntry struct {
-	Name string
-	Path string
-	Href string
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Href string `json:"href"`
 }
 
 // extensionsData 是插件页（/extensions）：统一列表（不再按前端/后端分区）。
@@ -471,6 +487,14 @@ type pluginRow struct {
 type pluginDetailData struct {
 	baseData
 	Plugin pluginRow
+	// StateJSON 是给浏览器岛的初始状态；无 JS 时仍渲染 Plugin。
+	StateJSON string
+}
+
+// pluginDetailState 是插件详情岛的数据形态。
+type pluginDetailState struct {
+	Plugin pluginRow `json:"plugin"`
+	CSRF   string    `json:"csrf"`
 }
 
 // offlineData 是二级页的离线壳：保留页面外壳，内容区如实说“未连接”。

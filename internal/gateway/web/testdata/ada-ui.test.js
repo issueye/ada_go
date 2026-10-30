@@ -78,6 +78,14 @@ test('Button：变体、尺寸、点击与禁用', async () => {
   assert.equal(clicks, 1);
 });
 
+test('Button / Badge：label 在空 slot 时作为 fallback 渲染', () => {
+  const { root } = mount({
+    template: '<div><ui-button label="保存"></ui-button><ui-badge tone="success" label="OK"></ui-badge></div>'
+  });
+  assert.equal(text(q(root, 'button')), '保存');
+  assert.equal(text(q(root, '.badge')), 'OK');
+});
+
 test('Button：href 渲染链接并阻止禁用导航', async () => {
   const { root } = mount({
     template: '<ui-button href="/next" icon="i-plus" label="下一步" disabled></ui-button>'

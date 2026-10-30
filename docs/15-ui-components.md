@@ -347,7 +347,7 @@ AdaUI.toast.warn('网络较慢');
 ## 7. 测试
 
 ```bash
-# 33 个 Node 用例：引擎 18 + 组件 15
+# 35 个 Node 用例：引擎 19 + 组件 16
 mingw32-make test-js
 # 或
 node --test internal/gateway/web/testdata/ada-render.test.js internal/gateway/web/testdata/ada-ui.test.js
@@ -357,15 +357,16 @@ node --test internal/gateway/web/testdata/ada-render.test.js internal/gateway/we
 `ada-ui smoke: PASS`，`#log` 全为 PASS。该页是 `file://` 冒烟页，使用了内联脚本与
 演示 CSS，不适用于网关 CSP。
 
-概览/插件岛另有独立冒烟页：
+整页岛另有独立冒烟页：
 
 - `tools/render-demo/overview.html` → `overview island smoke: PASS`
 - `tools/render-demo/extensions.html` → `extensions island smoke: PASS`
+- `tools/render-demo/pages.html` → `pages island smoke: PASS`（工作区 + 插件详情）
 
 Go 侧用例：
 
 ```bash
-go test ./internal/gateway/web -run 'TestOverviewIslandAndDashboardJSON|TestExtensionsIslandAndJSON' -v
+go test ./internal/gateway/web -run 'TestOverviewIslandAndDashboardJSON|TestExtensionsIslandAndJSON|TestWorkspacesAndPluginDetailUseAdaUI' -v
 ```
 
 ### 7.1 当前项目接入状态
@@ -374,14 +375,16 @@ go test ./internal/gateway/web -run 'TestOverviewIslandAndDashboardJSON|TestExte
 |---|---|---|---|
 | `/overview` | `data-ada-island="overview"`，`islands.js` 挂载 | 统计卡/最近会话的 `overview_partial` SSR | `GET /partials/dashboard.json`，5s 轮询 |
 | `/extensions` | `data-ada-island="extensions"` | 原有插件表格 SSR | `GET /partials/extensions.json` |
-| `/threads/{id}`、`/workspaces` 等 | 保持原 SSR + 现有 JS | — | — |
+| `/extensions/{id}` | `data-ada-island="plugin-detail"` | 原有详情卡/操作 SSR | 初始 `data-ada-state`，无轮询 |
+| `/workspaces` | `data-ada-island="workspaces"` | 原有工作区选择器 SSR | 初始 `data-ada-state`，无轮询 |
+| `/threads/{id}` | 保持原 SSR + `chat-live.js` | — | — |
 
-- `shell.html.tmpl` 只在 `NeedsUI` 页面加载引擎/组件资源；目前由 `overviewData` 与
-  `handleExtensions` 显式置位，插件详情页不会额外加载。
+- `shell.html.tmpl` 只在 `NeedsUI` 页面加载引擎/组件资源；目前由
+  `overviewData`、`handleExtensions`、`handleWorkspaces`、`handlePluginDetail` 显式置位。
 - 概览岛的插件贡献区仍在岛外，由服务端 `dashboard.widgets` 插槽渲染；客户端岛只接管
   统计卡与最近会话。
-- 插件岛的启用/停用表单由客户端渲染，但仍是普通 `POST` 表单，带 CSRF 隐藏字段；
-  没有 JS 时使用服务端回退表格。
+- 插件/工作区/详情岛的启用、停用、选择、新建目录仍是普通 `POST` 表单，带 CSRF
+  隐藏字段；没有 JS 时使用服务端回退 HTML。
 - 概览页原来的 htmx `every 5s` 已移除，避免服务端片段替换掉客户端 DOM；轮询改由
   `islands.js` 调 JSON 接口。
 

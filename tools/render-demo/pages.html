@@ -1,0 +1,107 @@
+<!doctype html>
+<!--
+  工作区 / 插件详情岛冒烟页：模拟两个页面的 SSR 容器与 data-ada-state。
+  直接以 file:// 打开；生产页面由 Go 模板输出同样的容器。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pages island smoke</title>
+<link rel="stylesheet" href="../../internal/gateway/web/static/tokens.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/app.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/components.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/layout.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/widgets.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/shell.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/pages.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/app-local.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ada-ui.css">
+<style>
+  body { padding: 24px; }
+  #log { margin-top: 16px; background: var(--ph-subtle); padding: 12px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<svg class="ada-sprite" aria-hidden="true" focusable="false" width="0" height="0">
+  <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></symbol>
+  <symbol id="i-x-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6M9 9l6 6"/></symbol>
+</svg>
+
+<main class="ada-main">
+  <div class="ada-scroll"><div class="ada-wrap ada-wrap--page">
+    <h1 class="page-title">工作区</h1>
+    <div id="workspaces-island" data-ada-island="workspaces" data-ada-state='{"roots":[{"label":"ws-a","path":"/tmp/ws-a","href":"/workspaces?path=%2Ftmp%2Fws-a","kind":"project"},{"label":"ws-b","path":"/tmp/ws-b","href":"/workspaces?path=%2Ftmp%2Fws-b","kind":"project"}],"recent":[{"path":"/tmp/ws-a","name":"ws-a","sessions":3,"active":true,"known":true},{"path":"/tmp/ws-b","name":"ws-b","sessions":0,"active":false,"known":false}],"current":"/tmp/ws-a","parent":"","parentHref":"","entries":[{"name":"alpha","path":"/tmp/ws-a/alpha","href":"/workspaces?path=%2Ftmp%2Fws-a%2Falpha"},{"name":"beta","path":"/tmp/ws-a/beta","href":"/workspaces?path=%2Ftmp%2Fws-a%2Fbeta"}],"truncated":false,"omitted":0,"selectable":true,"csrf":"csrf-token"}'>
+      <div class="empty-state"><p class="text-sm font-medium text-ink">SSR 回退</p></div>
+    </div>
+
+    <h1 class="page-title mt-4">插件详情</h1>
+    <div id="plugin-detail-island" data-ada-island="plugin-detail" data-ada-state='{"plugin":{"id":"tools-fs","name":"文件工具","version":"1.2.0","description":"读写工作区文件","source":"bundled","status":"ready","statusLabel":"就绪","statusTone":"success","enabled":true,"frontend":false,"backend":true,"tools":2,"hooks":1,"skills":0,"slots":0,"pages":0,"nav":0,"firstPage":"","hasDashboard":false},"csrf":"csrf-token"}'>
+      <div class="empty-state"><p class="text-sm font-medium text-ink">SSR 回退</p></div>
+    </div>
+  </div></div>
+</main>
+<pre id="log"></pre>
+
+<script src="../../internal/gateway/web/static/ada-render.js"></script>
+<script src="../../internal/gateway/web/static/ada-select.js"></script>
+<script src="../../internal/gateway/web/static/ada-modal.js"></script>
+<script src="../../internal/gateway/web/static/ada-ui.js"></script>
+<script src="../../internal/gateway/web/static/islands.js"></script>
+<script>
+  (async function () {
+    const log = [];
+    let failed = 0;
+    function check(name, fn) {
+      try { fn(); log.push("PASS " + name); }
+      catch (error) { failed += 1; log.push("FAIL " + name + ": " + (error && error.message ? error.message : error)); }
+    }
+    function assert(condition, message) { if (!condition) throw new Error(message || "assertion failed"); }
+    function q(selector) { return document.querySelector(selector); }
+    function qa(selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)); }
+    function text(node) { return node ? node.textContent : ""; }
+
+    await new Promise((resolve) => {
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", resolve);
+      else resolve();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    check("workspaces mounted", function () { assert(q("#workspaces-island").getAttribute("data-ada-mounted") === "1"); });
+    check("workspaces current path", function () { assert(text(q("#workspaces-island .ada-picker-current__path")) === "/tmp/ws-a"); });
+    check("workspaces roots", function () { assert(qa("#workspaces-island .ada-picker__root").length === 2); });
+    check("workspaces entries", function () { assert(qa("#workspaces-island .ada-picker__entry").length === 2); });
+    check("workspaces recent csrf", function () {
+      const form = q("#workspaces-island .ada-picker__recent-form");
+      assert(form);
+      assert(form.querySelector("input[name='csrf_token']").value === "csrf-token");
+    });
+    check("workspaces mkdir form", function () {
+      const form = q("#workspaces-island form[action='/workspaces/mkdir']");
+      assert(form);
+      assert(form.querySelector("input[name='csrf_token']").value === "csrf-token");
+    });
+    check("workspaces select button", function () {
+      assert(q("#workspaces-island form[action='/workspaces/select'] button[type='submit']"));
+    });
+
+    check("plugin detail mounted", function () { assert(q("#plugin-detail-island").getAttribute("data-ada-mounted") === "1"); });
+    check("plugin detail card", function () { assert(q("#plugin-detail-island .card")); });
+    check("plugin detail name", function () {
+      assert(qa("#plugin-detail-island .badge").some((node) => text(node).includes("后端插件")));
+    });
+    check("plugin detail counts", function () { assert(qa("#plugin-detail-island dd").length >= 4); });
+    check("plugin detail disable form", function () {
+      const form = q("#plugin-detail-island form[action='/extensions/tools-fs/disable']");
+      assert(form);
+      assert(form.querySelector("input[name='csrf_token']").value === "csrf-token");
+    });
+
+    document.getElementById("log").textContent = log.join("\n");
+    window.__PAGES_RESULT__ = { failed: failed, log: log };
+    document.title = failed === 0 ? "pages island smoke: PASS" : "pages island smoke: FAIL";
+  })();
+</script>
+</body>
+</html>

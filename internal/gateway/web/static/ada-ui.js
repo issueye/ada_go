@@ -109,10 +109,11 @@
     props: {
       tone: { default: 'neutral' },
       mono: BOOL,
-      label: { default: '' }
+      label: { default: '' },
+      title: { default: '' }
     },
     template:
-      '<span class="badge" :class="[\'badge-\' + tone, mono ? \'badge-mono\' : \'\']">' +
+      '<span class="badge" :class="[\'badge-\' + tone, mono ? \'badge-mono\' : \'\']" :title="title || null">' +
       '<slot>{{ label }}</slot></span>'
   });
 

@@ -1683,7 +1683,9 @@
     var slot = instance && instance.slots && instance.slots[name];
     if (slot) {
       var rendered = slot(slotProps);
-      return rendered && rendered.length ? rendered : null;
+      // 显式写了 <ui-badge ...></ui-badge> 时 default slot 存在但为空；
+      // 这种情况必须回退到组件模板里的 fallback（例如 {{ label }}）。
+      if (rendered && rendered.length) return rendered;
     }
     return renderChildren(descriptor.children, scope, instance);
   }

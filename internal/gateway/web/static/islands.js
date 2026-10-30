@@ -227,11 +227,153 @@
     app.mount(element);
   }
 
+  function mountWorkspaces(element) {
+    if (element.getAttribute('data-ada-mounted') === '1') return;
+    var initial = parseState(element);
+    // 状态缺失/损坏时保留服务端回退，不要用空选择器覆盖它。
+    if (!initial.current) return;
+    element.setAttribute('data-ada-mounted', '1');
+
+    var app = AdaUI.createApp({
+      data: function () {
+        return {
+          roots: Array.isArray(initial.roots) ? initial.roots : [],
+          recent: Array.isArray(initial.recent) ? initial.recent : [],
+          entries: Array.isArray(initial.entries) ? initial.entries : [],
+          current: typeof initial.current === 'string' ? initial.current : '',
+          parentHref: typeof initial.parentHref === 'string' ? initial.parentHref : '',
+          truncated: !!initial.truncated,
+          omitted: initial.omitted || 0,
+          selectable: !!initial.selectable,
+          csrf: typeof initial.csrf === 'string' ? initial.csrf : ''
+        };
+      },
+      template:
+        '<div>' +
+        '<div v-if="current" class="ada-picker-current">' +
+        '<div class="min-w-0"><p class="ada-eyebrow">当前浏览目录</p>' +
+        '<p class="ada-picker-current__path" :title="current">{{ current }}</p></div>' +
+        '<form v-if="selectable" method="post" action="/workspaces/select">' +
+        '<input type="hidden" name="csrf_token" :value="csrf">' +
+        '<input type="hidden" name="path" :value="current">' +
+        '<ui-button type="submit" variant="primary" size="sm" label="使用此目录"></ui-button>' +
+        '</form>' +
+        '<ui-badge v-else tone="neutral" label="非配置工作区" title="Gateway 的工作区在启动时固定"></ui-badge>' +
+        '</div>' +
+        '<div class="ada-picker">' +
+        '<aside class="card ada-picker__side">' +
+        '<div class="ada-picker__section"><p class="ada-eyebrow">磁盘与常用位置</p>' +
+        '<template v-if="roots.length">' +
+        '<a v-for="root in roots" :key="root.path" class="ada-picker__root" ' +
+        ':class="[\'ada-picker__root--\' + root.kind, root.path === current ? \'is-active\' : \'\']" ' +
+        ':href="root.href" :title="root.path">' +
+        '<ui-icon name="i-folder" :size="13"></ui-icon>' +
+        '<span class="ada-picker__root-label">{{ root.label }}</span>' +
+        '<span class="ada-picker__root-path">{{ root.path }}</span></a>' +
+        '</template>' +
+        '<p v-else class="ada-picker__empty">没有可用的根目录</p></div>' +
+        '<div class="ada-picker__section"><p class="ada-eyebrow">最近工作区</p>' +
+        '<template v-if="recent.length">' +
+        '<form v-for="item in recent" :key="item.path" method="post" action="/workspaces/select" class="ada-picker__recent-form">' +
+        '<input type="hidden" name="csrf_token" :value="csrf">' +
+        '<input type="hidden" name="path" :value="item.path">' +
+        '<button class="ada-picker__recent" :class="{ \'is-active\': item.path === current }" type="submit" :title="item.path">' +
+        '<span class="ada-picker__recent-name">{{ item.name }}</span>' +
+        '<span class="ada-picker__recent-meta">{{ item.known ? item.sessions + " 会话" : "会话数未加载" }}{{ item.path === current ? " · 当前" : "" }}</span>' +
+        '</button></form>' +
+        '</template>' +
+        '<p v-else class="ada-picker__empty">还没有带会话的工作区</p></div>' +
+        '</aside>' +
+        '<section class="card ada-picker__main">' +
+        '<div class="ada-picker__crumbs">' +
+        '<ui-button v-if="parentHref" :href="parentHref" variant="ghost" size="sm" label="上一级"></ui-button>' +
+        '<span class="ada-picker__path">{{ current }}</span></div>' +
+        '<form method="post" action="/workspaces/mkdir" class="ada-picker__mkdir">' +
+        '<input type="hidden" name="csrf_token" :value="csrf">' +
+        '<input type="hidden" name="parent" :value="current">' +
+        '<input class="input" name="name" placeholder="新建文件夹名称" required autocomplete="off">' +
+        '<ui-button type="submit" variant="secondary" size="sm" label="新建目录"></ui-button></form>' +
+        '<p v-if="truncated" class="ada-picker__notice">目录项过多，已省略 {{ omitted }} 项；可用上方路径直接进入更深的目录。</p>' +
+        '<div v-if="entries.length" class="ada-picker__body"><ul class="ada-picker__list">' +
+        '<li v-for="entry in entries" :key="entry.path">' +
+        '<a class="ada-picker__entry" :href="entry.href" :title="entry.path">' +
+        '<ui-icon name="i-folder" :size="14"></ui-icon><span>{{ entry.name }}</span></a></li>' +
+        '</ul></div>' +
+        '<div v-else class="empty-state"><p class="text-sm font-medium text-ink">这个目录下没有子目录</p>' +
+        '<p class="mt-1 text-xs leading-5 text-faint">可以直接选择当前工作区，或在上面新建一个文件夹。</p></div>' +
+        '</section></div></div>'
+    });
+
+    app.mount(element);
+  }
+
+  function mountPluginDetail(element) {
+    if (element.getAttribute('data-ada-mounted') === '1') return;
+    var initial = parseState(element);
+    if (!initial.plugin || !initial.plugin.id) return;
+    element.setAttribute('data-ada-mounted', '1');
+    var plugin = initial.plugin;
+
+    var app = AdaUI.createApp({
+      data: function () {
+        return {
+          plugin: plugin,
+          csrf: typeof initial.csrf === 'string' ? initial.csrf : ''
+        };
+      },
+      template:
+        '<div>' +
+        '<template v-if="plugin && plugin.id">' +
+        '<ui-card>' +
+        '<div class="flex flex-wrap items-center gap-2">' +
+        '<ui-badge v-if="plugin.frontend" tone="brand" label="前端插件"></ui-badge>' +
+        '<ui-badge v-if="plugin.backend" tone="neutral" label="后端插件"></ui-badge>' +
+        '<ui-badge :tone="plugin.statusTone || \'neutral\'" :label="plugin.statusLabel || plugin.status || \'—\'"></ui-badge>' +
+        '<ui-badge v-if="plugin.status" tone="neutral" mono :label="plugin.status"></ui-badge>' +
+        '</div>' +
+        '<p v-if="plugin.status === \'unused\'" class="mt-2 text-xs text-muted">当前产品没有声明这个插件，因此未装配；随包保留，可在产品声明里启用。</p>' +
+        '<p v-if="plugin.description" class="mt-2 text-sm leading-6 text-muted">{{ plugin.description }}</p>' +
+        '<dl class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">' +
+        '<div v-if="plugin.source"><dt class="text-xs text-muted">来源</dt><dd class="mt-1 text-sm text-ink">{{ plugin.source }}</dd></div>' +
+        '<template v-if="plugin.frontend">' +
+        '<div><dt class="text-xs text-muted">页面</dt><dd class="mt-1 text-sm text-ink">{{ plugin.pages }}</dd></div>' +
+        '<div><dt class="text-xs text-muted">插槽</dt><dd class="mt-1 text-sm text-ink">{{ plugin.slots }}</dd></div>' +
+        '<div><dt class="text-xs text-muted">导航</dt><dd class="mt-1 text-sm text-ink">{{ plugin.nav }}</dd></div>' +
+        '</template>' +
+        '<template v-if="plugin.backend">' +
+        '<div><dt class="text-xs text-muted">工具</dt><dd class="mt-1 text-sm text-ink">{{ plugin.tools }}</dd></div>' +
+        '<div><dt class="text-xs text-muted">钩子</dt><dd class="mt-1 text-sm text-ink">{{ plugin.hooks }}</dd></div>' +
+        '<div><dt class="text-xs text-muted">技能</dt><dd class="mt-1 text-sm text-ink">{{ plugin.skills }}</dd></div>' +
+        '</template>' +
+        '</dl>' +
+        '<p v-if="plugin.error" class="mt-3 text-xs text-danger-ink">{{ plugin.error }}</p>' +
+        '</ui-card>' +
+        '<div class="mt-4 flex flex-wrap items-center gap-2">' +
+        '<form v-if="plugin.backend && plugin.status !== \'unused\'" method="post" ' +
+        ':action="plugin.enabled ? \'/extensions/\' + plugin.id + \'/disable\' : \'/extensions/\' + plugin.id + \'/enable\'">' +
+        '<input type="hidden" name="csrf_token" :value="csrf">' +
+        '<ui-button type="submit" :variant="plugin.enabled ? \'secondary\' : \'primary\'" size="sm" ' +
+        ':label="plugin.enabled ? \'停用\' : \'启用\'"></ui-button>' +
+        '</form>' +
+        '<ui-button v-if="plugin.firstPage" :href="\'/ext/\' + plugin.id + \'/\' + plugin.firstPage" ' +
+        'variant="secondary" size="sm" icon="i-external" label="打开插件页面"></ui-button>' +
+        '</div>' +
+        '</template>' +
+        '</div>'
+    });
+
+    app.mount(element);
+  }
+
   function boot() {
     var overview = document.querySelectorAll('[data-ada-island="overview"]');
     for (var i = 0; i < overview.length; i += 1) mountOverview(overview[i]);
     var extensions = document.querySelectorAll('[data-ada-island="extensions"]');
     for (var j = 0; j < extensions.length; j += 1) mountExtensions(extensions[j]);
+    var workspaces = document.querySelectorAll('[data-ada-island="workspaces"]');
+    for (var k = 0; k < workspaces.length; k += 1) mountWorkspaces(workspaces[k]);
+    var detail = document.querySelectorAll('[data-ada-island="plugin-detail"]');
+    for (var l = 0; l < detail.length; l += 1) mountPluginDetail(detail[l]);
   }
 
   if (document.readyState === 'loading') {
@@ -240,5 +382,10 @@
     boot();
   }
 
-  window.AdaIslands = { mountOverview: mountOverview, mountExtensions: mountExtensions };
+  window.AdaIslands = {
+    mountOverview: mountOverview,
+    mountExtensions: mountExtensions,
+    mountWorkspaces: mountWorkspaces,
+    mountPluginDetail: mountPluginDetail
+  };
 })();

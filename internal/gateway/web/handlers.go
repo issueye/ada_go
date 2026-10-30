@@ -884,21 +884,42 @@ func (s *Server) handleWorkspaces(w http.ResponseWriter, r *http.Request) {
 			parent = up
 		}
 	}
-
-	data := workspacesData{
-		baseData:   s.base(r, "workspaces", "工作区", threads, "", true),
+	parentHref := ""
+	if parent != "" {
+		parentHref = "/workspaces?path=" + urlQueryEscape(parent)
+	}
+	selectable := workspaceIndexFolded(s.cfg.Workspaces, browse) >= 0
+	state := workspacesState{
 		Roots:      roots,
 		Recent:     recent,
 		Current:    browse,
 		Parent:     parent,
+		ParentHref: parentHref,
+		Entries:    entries,
+		Truncated:  truncated,
+		Omitted:    omitted,
+		Selectable: selectable,
+		CSRF:       s.csrf(r),
+	}
+	raw, err := json.Marshal(state)
+	if err != nil {
+		raw = []byte(`{"roots":[],"recent":[],"entries":[]}`)
+	}
+	base := s.base(r, "workspaces", "工作区", threads, "", true)
+	base.NeedsUI = true
+	data := workspacesData{
+		baseData:   base,
+		Roots:      roots,
+		Recent:     recent,
+		Current:    browse,
+		Parent:     parent,
+		ParentHref: parentHref,
 		Entries:    entries,
 		Truncated:  truncated,
 		Omitted:    omitted,
 		BindThread: strings.TrimSpace(r.URL.Query().Get("bind")),
-		Selectable: workspaceIndexFolded(s.cfg.Workspaces, browse) >= 0,
-	}
-	if parent != "" {
-		data.ParentHref = "/workspaces?path=" + urlQueryEscape(parent)
+		Selectable: selectable,
+		StateJSON:  string(raw),
 	}
 	s.render(w, http.StatusOK, "workspaces", data)
 }
@@ -1076,9 +1097,17 @@ func (s *Server) handlePluginDetail(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		threads, err := s.listThreads(r, 50)
+		state := pluginDetailState{Plugin: p, CSRF: s.csrf(r)}
+		raw, marshalErr := json.Marshal(state)
+		if marshalErr != nil {
+			raw = []byte(`{"plugin":{},"csrf":""}`)
+		}
+		base := s.base(r, "extensions", p.Name, threads, "", err == nil)
+		base.NeedsUI = true
 		s.render(w, http.StatusOK, "plugin_detail", pluginDetailData{
-			baseData: s.base(r, "extensions", p.Name, threads, "", err == nil),
-			Plugin:   p,
+			baseData:  base,
+			Plugin:    p,
+			StateJSON: string(raw),
 		})
 		return
 	}
