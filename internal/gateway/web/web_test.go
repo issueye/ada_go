@@ -404,6 +404,13 @@ func TestThreadPageRendersTranscriptToolCardAndTray(t *testing.T) {
 	wantContains(t, body, `ada-select__fallback`)
 	wantContains(t, body, `data-select-input value="允许一次" disabled`)
 	wantContains(t, body, `/threads/th_1/abort`)
+	// 两个中止入口（顶栏「停止」与输入区「中止」）都必须带 CSRF 字段，
+	// 否则 POST /abort 会被安全中间件以 csrf_invalid 拒绝。
+	wantContains(t, body, `id="abort-form"`)
+	wantContains(t, body, `form="abort-form"`)
+	if got := strings.Count(body, `action="/threads/th_1/abort" data-confirm="确定中止当前轮次吗？"><input type="hidden" name="csrf_token"`); got != 2 {
+		t.Fatalf("带 CSRF 的中止表单 = %d，期望 2（顶栏 + 输入区）", got)
+	}
 
 	// Composer 表单。
 	wantContains(t, body, `action="/threads/th_1/send"`)
@@ -461,6 +468,14 @@ func TestStaticAppJSServed(t *testing.T) {
 	live := serve(t, srv, "GET", "/static/chat-live.js", nil).Body.String()
 	wantContains(t, live, "EventSource")
 	wantContains(t, live, "evt.message.delta")
+	// 实时块必须保存思考文本节点：handleDelta 通过 entry.thinkingText 追加增量，
+	// 漏存时每个思考事件都会抛 TypeError，界面只剩正文没有实时思考。
+	wantContains(t, live, "thinkingText: thinkingText")
+	wantContains(t, live, "entry.thinkingText.textContent")
+	// 实时思考与落库后的详情卡共用一套结构，不再保留第二种 .live-thinking 样式。
+	wantContains(t, live, "ada-disclosure__summary")
+	wantContains(t, live, "ada-thinking")
+	wantNotContains(t, live, "live-thinking")
 }
 
 func TestTurnStartUsesTextAndIdempotencyKey(t *testing.T) {
@@ -924,6 +939,25 @@ func TestStaticBaselineAssetsServed(t *testing.T) {
 	wantContains(t, body, "SHA-256")
 }
 
+// 运行状态条是「弱化表面」，不能借用深色代码面板 token：浅色主题下
+// --ph-code-bg 是近黑色（.markdown-body pre 的底色），收尾时状态条会闪成黑块。
+func TestLiveStatusUsesSubtleSurface(t *testing.T) {
+	srv, _ := newServer(t, newFakeCore())
+	css := serve(t, srv, "GET", "/static/app-local.css", nil).Body.String()
+
+	start := strings.Index(css, ".live-status {")
+	if start < 0 {
+		t.Fatal("app-local.css 缺少 .live-status 规则")
+	}
+	end := strings.Index(css[start:], "}")
+	if end < 0 {
+		t.Fatal(".live-status 规则没有闭合")
+	}
+	rule := css[start : start+end]
+	wantContains(t, rule, "var(--ph-subtle)")
+	wantNotContains(t, rule, "var(--ph-code-bg)")
+}
+
 // 静态服务只暴露 embed FS 内的普通文件，不因 .. 或目录路径泄漏仓库文件。
 func TestStaticRejectsTraversalAndMissing(t *testing.T) {
 	srv, _ := newServer(t, newFakeCore())
@@ -1191,6 +1225,79 @@ func TestExtensionsIslandAndJSON(t *testing.T) {
 	}
 }
 
+// 对话流岛：首屏继续 SSR，浏览器拿 key + 服务端行 HTML 做 keyed patch。
+func TestThreadTranscriptIslandAndJSON(t *testing.T) {
+	core := newFakeCore().
+		on("thread.get", threadGetRunning).
+		on("thread.entries", entriesAscending)
+	srv, _ := newServer(t, core)
+
+	body := serve(t, srv, "GET", "/threads/th_1", nil).Body.String()
+	for _, want := range []string{
+		`id="transcript-island"`,
+		`data-ada-island="transcript"`,
+		`data-ada-state=`,
+		`ada-render.js`,
+		`ada-ui.js`,
+		`islands.js`,
+		`ada-ui.css`,
+		`data-thread-id="th_1"`,
+		`data-item-key="e1"`,
+	} {
+		wantContains(t, body, want)
+	}
+
+	rec := serve(t, srv, "GET", "/partials/transcript/th_1", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /partials/transcript/th_1 = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
+		t.Fatalf("transcript Content-Type = %q", got)
+	}
+	var payload struct {
+		ThreadID  string `json:"threadId"`
+		RunStatus string `json:"runStatus"`
+		Rows      []struct {
+			Key   string `json:"key"`
+			Kind  string `json:"kind"`
+			HTML  string `json:"html"`
+			Parts []struct {
+				Type  string          `json:"type"`
+				Text  string          `json:"text"`
+				Nodes json.RawMessage `json:"nodes"`
+			} `json:"parts"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("transcript 不是合法 JSON: %v\n%s", err, rec.Body.String())
+	}
+	if payload.ThreadID != "th_1" || payload.RunStatus != "running" {
+		t.Fatalf("thread/run = %q/%q", payload.ThreadID, payload.RunStatus)
+	}
+	if len(payload.Rows) != 3 {
+		t.Fatalf("rows = %d, want 3", len(payload.Rows))
+	}
+	if payload.Rows[0].Key != "e1" || !strings.Contains(payload.Rows[0].HTML, "这是问题") {
+		t.Fatalf("row0 = %+v", payload.Rows[0])
+	}
+	// 助手行给的是结构化 parts：thinking 纯文本 + text 段 VNode 数据。
+	if payload.Rows[1].Key != "e2" || payload.Rows[1].Kind != "assistant" || len(payload.Rows[1].Parts) != 2 {
+		t.Fatalf("row1 = %+v", payload.Rows[1])
+	}
+	if payload.Rows[1].Parts[0].Type != "thinking" || payload.Rows[1].Parts[0].Text != "先想一下" {
+		t.Fatalf("row1 thinking = %+v", payload.Rows[1].Parts[0])
+	}
+	if payload.Rows[1].Parts[1].Type != "text" || !strings.Contains(string(payload.Rows[1].Parts[1].Nodes), "答案是 42") {
+		t.Fatalf("row1 text nodes = %+v", payload.Rows[1].Parts[1])
+	}
+	if payload.Rows[1].HTML != "" {
+		t.Fatalf("assistant row 不应再带 HTML: %q", payload.Rows[1].HTML)
+	}
+	if payload.Rows[2].Key != "tool:call_1" || !strings.Contains(payload.Rows[2].HTML, "read_file") {
+		t.Fatalf("row2 = %+v", payload.Rows[2])
+	}
+}
+
 // a_da 外壳与 M2 组件的关键 class 必须真的出现在 DOM 里。
 func TestThreadPageUsesAdaShellAndComponentDOM(t *testing.T) {
 	core := newFakeCore().
@@ -1277,7 +1384,7 @@ func TestPluginsUnifiedListAndDetail(t *testing.T) {
 		on("thread.list", emptyThreadList).
 		on("plugin.list", `{"plugins":[
 			{"id":"tools-fs","name":"文件工具","version":"1.2.0","enabled":true,"status":"ready","contributions":{"tools":["read","write"],"hooks":["tool.beforeCall"],"skills":[],"frontend":false,"backend":true}},
-			{"id":"tools-git","name":"Git 工具","version":"1.2.0","enabled":true,"status":"unused","contributions":{"tools":[],"frontend":false,"backend":true}}
+			{"id":"tools-git","name":"Git 工具","version":"1.2.0","enabled":false,"status":"unused","contributions":{"tools":[],"frontend":false,"backend":true}}
 		]}`)
 	ui := &stubUI{list: []web.FrontendPluginInfo{
 		{ID: "ui-demo", Name: "演示前端", Version: "0.1.0", Status: "ready", PageCount: 1, SlotCount: 2, NavCount: 1, FirstPage: "home"},
@@ -1303,8 +1410,9 @@ func TestPluginsUnifiedListAndDetail(t *testing.T) {
 	unused := serve(t, srv, "GET", "/extensions/tools-git", nil).Body.String()
 	wantContains(t, unused, "后端插件")
 	wantContains(t, unused, "未启用")
-	wantContains(t, unused, "当前产品没有声明这个插件")
-	wantNotContains(t, unused, "action=\"/extensions/tools-git/enable\"")
+	wantContains(t, unused, "当前产品没有默认启用这个插件")
+	// 所有插件都能从界面启用/停用：unused 也要有「启用」。
+	wantContains(t, unused, "action=\"/extensions/tools-git/enable\"")
 
 	frontend := serve(t, srv, "GET", "/extensions/ui-demo", nil).Body.String()
 	wantContains(t, frontend, "前端插件")
@@ -1441,4 +1549,65 @@ func TestThreadPageShowsRunError(t *testing.T) {
 	wantContains(t, body, "供应商调用失败")
 	wantContains(t, body, "错误码 5001")
 	wantContains(t, body, "HTTP 401 invalid api key")
+}
+
+// 实时流把累积文本发到 /markdown：必须复用服务端渲染管线并清洗掉原始 HTML。
+func TestMarkdownEndpointRendersAndSanitizes(t *testing.T) {
+	srv, _ := newServer(t, newFakeCore())
+	body := "{\"text\":\"**粗体**\\n\\n```go\\nfmt.Println(1)\\n```\\n\\n<script>alert(1)</script>\"}"
+	req := httptest.NewRequest(http.MethodPost, "/markdown", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	out := rec.Body.String()
+	wantContains(t, out, "<strong>粗体</strong>")
+	wantContains(t, out, "<pre><code")
+	wantNotContains(t, out, "<script")
+}
+
+func TestMarkdownASTEndpointReturnsVNodeData(t *testing.T) {
+	srv, _ := newServer(t, newFakeCore())
+	body := "{\"text\":\"**粗体**\\n\\n```go\\nfmt.Println(1)\\n```\\n\\n<script>alert(1)</script>\"}"
+	req := httptest.NewRequest(http.MethodPost, "/markdown.ast", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
+		t.Fatalf("Content-Type = %q", got)
+	}
+	out := rec.Body.String()
+	wantContains(t, out, `"t":"strong"`)
+	wantContains(t, out, `"t":"pre"`)
+	wantContains(t, out, `"t":"code"`)
+	wantContains(t, out, "粗体")
+	wantNotContains(t, out, `"t":"script"`)
+}
+
+func TestMarkdownEndpointRejectsInvalidJSON(t *testing.T) {
+	srv, _ := newServer(t, newFakeCore())
+	req := httptest.NewRequest(http.MethodPost, "/markdown", strings.NewReader("not json"))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+func TestMarkdownEndpointRejectsOversizedBody(t *testing.T) {
+	srv, _ := newServer(t, newFakeCore())
+	req := httptest.NewRequest(http.MethodPost, "/markdown",
+		strings.NewReader(`{"text":"`+strings.Repeat("a", 512<<10)+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d", rec.Code)
+	}
 }

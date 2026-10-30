@@ -79,6 +79,9 @@ type Config struct {
 	SecretsPath string
 	// Log 接收插件日志；nil 时丢弃。
 	Log func(level, msg string, fields map[string]any)
+	// Debug 开启出网调试：把每次 provider/ctx.fetch 请求与响应摘要（密钥已脱敏）
+	// 写到 Err，用于定位端点、请求体与状态码问题。
+	Debug bool
 }
 
 // Session 是已装配的 Core 侧 CLI 会话。
@@ -110,6 +113,8 @@ type Session struct {
 	appDeps     app.Deps
 	// httpBridge 是插件出网桥；供应商配置变更时动态追加 allowlist。
 	httpBridge httpBridge
+	// debug 与 httpBridge 共用同一序号，--debug 时输出每次出网请求。
+	debug *host.DebugLog
 	// hostBase 是装配期宿主上下文模板（CallAction 用）；frontendScripts/IDs 是
 	// M4 前端插件的脚本与「产品声明允许缺席」集合。
 	hostBase        host.Context
@@ -202,6 +207,10 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 	if cfg.Err == nil {
 		cfg.Err = os.Stderr
 	}
+	var debugLog *host.DebugLog
+	if cfg.Debug {
+		debugLog = host.NewDebugLog(cfg.Err)
+	}
 	dataDir := cfg.DataDir
 	if dataDir == "" {
 		dataDir, err = sqlite.DefaultDataDir(abs)
@@ -232,6 +241,7 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 		steerQueues:   map[string][]domain.Message{},
 		turnActive:    map[string]int{},
 		in:            bufio.NewReader(cfg.In),
+		debug:         debugLog,
 	}
 	cleanup := func(e error) (*Session, error) {
 		_ = s.Close(context.Background())
@@ -244,7 +254,7 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 		s.threadID = cfg.ThreadID
 	}
 
-	httpBridge, err := buildHTTPBridge(cfg)
+	httpBridge, err := buildHTTPBridge(cfg, debugLog)
 	if err != nil {
 		return cleanup(err)
 	}
@@ -1285,15 +1295,21 @@ func (s *Session) fetchModelsFromPlugin(ctx context.Context, providerID string) 
 	} else {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
+	debugID := s.debug.NextID()
+	startedAt := time.Now()
+	s.debug.Request(debugID, http.MethodGet, endpoint, req.Header, nil)
 	res, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
 	if err != nil {
+		s.debug.Error(debugID, err, time.Since(startedAt))
 		return nil, fmt.Errorf("拉取模型列表失败: %w", err)
 	}
 	defer res.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(res.Body, 4<<20))
 	if err != nil {
+		s.debug.Error(debugID, err, time.Since(startedAt))
 		return nil, fmt.Errorf("读取模型列表失败: %w", err)
 	}
+	s.debug.Response(debugID, res.Status, res.Header, time.Since(startedAt), body)
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return nil, fmt.Errorf("拉取模型列表失败：HTTP %d", res.StatusCode)
 	}
@@ -1621,7 +1637,7 @@ func (s *Session) stateOp(ctx context.Context, op host.StateOp) (json.RawMessage
 	}
 }
 
-func buildHTTPBridge(cfg Config) (httpBridge, error) {
+func buildHTTPBridge(cfg Config, debugLog *host.DebugLog) (httpBridge, error) {
 	allow := append([]string(nil), cfg.AllowHosts...)
 	if cfg.BaseURL != "" {
 		if u, err := urlHost(cfg.BaseURL); err == nil && u != "" {
@@ -1631,7 +1647,8 @@ func buildHTTPBridge(cfg Config) (httpBridge, error) {
 	if len(allow) == 0 {
 		allow = []string{"api.openai.com"}
 	}
-	b, err := host.NewHTTPBridge(host.HTTPBridgeConfig{AllowHosts: allow})
+	bcfg := host.HTTPBridgeConfig{AllowHosts: allow, DebugLog: debugLog}
+	b, err := host.NewHTTPBridge(bcfg)
 	return b, err
 }
 
@@ -1821,8 +1838,9 @@ func (s *Session) assembleInitial(ctx context.Context) (*app.Assembly, error) {
 	}
 	s.mu.Unlock()
 	meta := s.listPluginMeta(ctx)
-	extras, disabled := pluginSelection(discovered, meta, s.baseScripts)
-	asm, err := app.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, s.appDeps)
+	productIDs := productIDSet(s.product)
+	extras, disabled, optIn := pluginSelection(discovered, meta, s.baseScripts, productIDs)
+	asm, err := app.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, optIn, s.appDeps)
 	if err == nil {
 		if serr := s.syncPluginMeta(ctx, discovered, meta, nil); serr != nil {
 			return nil, serr
@@ -1848,8 +1866,8 @@ func (s *Session) assembleInitial(ctx context.Context) (*app.Assembly, error) {
 			}
 		}
 		remaining = kept
-		extras, disabled = pluginSelection(remaining, meta, s.baseScripts)
-		asm, err = app.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, s.appDeps)
+		extras, disabled, optIn = pluginSelection(remaining, meta, s.baseScripts, productIDs)
+		asm, err = app.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, optIn, s.appDeps)
 	}
 	if err != nil {
 		return nil, err
@@ -1928,9 +1946,12 @@ func (s *Session) listPluginMeta(ctx context.Context) map[string]sqlite.PluginMe
 	return out
 }
 
-// pluginSelection 决定本次装配的第三方与被禁用的随包插件：
-// 第三方按 plugin_meta.enabled 过滤（缺省 enabled），随包插件里 enabled=false 的进 disabled。
-func pluginSelection(discovered []discovery.Plugin, meta map[string]sqlite.PluginMetaRecord, base []host.Script) ([]host.Script, map[string]bool) {
+// pluginSelection 决定本次装配的第三方、被禁用的随包插件，以及用户显式启用的
+// 未声明随包插件（optIn）：
+//   - 第三方按 plugin_meta.enabled 过滤（缺省 enabled）；
+//   - 随包插件里 enabled=false 且被产品声明的进 disabled；
+//   - 产品未声明、但用户显式启用过的随包插件进 optIn，装配时追加。
+func pluginSelection(discovered []discovery.Plugin, meta map[string]sqlite.PluginMetaRecord, base []host.Script, productIDs map[string]bool) ([]host.Script, map[string]bool, map[string]bool) {
 	extras := make([]host.Script, 0, len(discovered))
 	for _, p := range discovered {
 		if rec, ok := meta[p.ID()]; ok && !rec.Enabled {
@@ -1939,37 +1960,73 @@ func pluginSelection(discovered []discovery.Plugin, meta map[string]sqlite.Plugi
 		extras = append(extras, p.Script)
 	}
 	var disabled map[string]bool
+	var optIn map[string]bool
 	for _, sc := range base {
 		if sc.Manifest == nil {
 			continue
 		}
-		if rec, ok := meta[sc.Manifest.ID]; ok && !rec.Enabled {
+		id := sc.Manifest.ID
+		rec, ok := meta[id]
+		if !ok {
+			continue
+		}
+		if rec.UserSet && rec.Enabled {
+			if optIn == nil {
+				optIn = map[string]bool{}
+			}
+			optIn[id] = true
+		}
+		if !productIDs[id] {
+			continue
+		}
+		if !rec.Enabled {
 			if disabled == nil {
 				disabled = map[string]bool{}
 			}
-			disabled[sc.Manifest.ID] = true
+			disabled[id] = true
 		}
 	}
-	return extras, disabled
+	return extras, disabled, optIn
+}
+
+// productIDSet 把产品声明的插件列表转成集合。
+func productIDSet(p *coreapp.Product) map[string]bool {
+	out := map[string]bool{}
+	if p == nil {
+		return out
+	}
+	for _, id := range p.Plugins {
+		out[id] = true
+	}
+	return out
 }
 
 // syncPluginMeta 把当前发现的插件写进 plugin_meta（6.9：id+版本+指纹）：
 // 新插件缺省 enabled；已有记录保留用户启用状态；本次装配失败被隔离的插件
 // 记录 last_error，健康的插件清掉旧错误。随包插件同样落一行（否则 setEnabled
 // 会因缺行失败），指纹取嵌入 bundle 的哈希。
+//
+// 产品默认与用户显式选择分开：user_set=0 时随包插件的 enabled 由产品声明决定
+// （声明=启用，未声明=未启用）；user_set=1 时以用户的选择为准。这样旧版本给
+// 所有随包插件写下的 enabled=1 不会把未声明插件误当成已启用。
 func (s *Session) syncPluginMeta(ctx context.Context, discovered []discovery.Plugin, meta map[string]sqlite.PluginMetaRecord, failures map[string]string) error {
+	productIDs := productIDSet(s.product)
 	for _, sc := range s.baseScripts {
 		if sc.Manifest == nil {
 			continue
 		}
 		id := sc.Manifest.ID
-		enabled, lastErr := true, ""
+		inProduct := productIDs[id]
+		enabled, userSet, lastErr := inProduct, false, ""
 		if rec, ok := meta[id]; ok {
-			enabled = rec.Enabled
+			userSet = rec.UserSet
 			lastErr = rec.LastError
+			if userSet {
+				enabled = rec.Enabled
+			}
 		}
 		rec := sqlite.PluginMetaRecord{
-			ID: id, Version: sc.Manifest.Version, Enabled: enabled,
+			ID: id, Version: sc.Manifest.Version, Enabled: enabled, UserSet: userSet,
 			Fingerprint: fingerprintScript(sc), LastError: lastErr,
 		}
 		if err := s.store.UpsertPluginMeta(ctx, rec); err != nil {
@@ -1981,16 +2038,17 @@ func (s *Session) syncPluginMeta(ctx context.Context, discovered []discovery.Plu
 		if id == "" || p.Script.Manifest == nil {
 			continue
 		}
-		enabled := true
+		enabled, userSet := true, false
 		if rec, ok := meta[id]; ok {
 			enabled = rec.Enabled
+			userSet = rec.UserSet
 		}
 		lastErr := ""
 		if msg, bad := failures[id]; bad {
 			lastErr = msg
 		}
 		rec := sqlite.PluginMetaRecord{
-			ID: id, Version: p.Script.Manifest.Version, Enabled: enabled,
+			ID: id, Version: p.Script.Manifest.Version, Enabled: enabled, UserSet: userSet,
 			Fingerprint: p.Fingerprint, LastError: lastErr,
 		}
 		if err := s.store.UpsertPluginMeta(ctx, rec); err != nil {
@@ -2048,8 +2106,8 @@ func (s *Session) reloadAssembly(ctx context.Context) error {
 		return fmt.Errorf("cli: 第三方插件发现失败，保留旧装配: %s", strings.Join(msgs, "; "))
 	}
 	meta := s.listPluginMeta(ctx)
-	extras, disabled := pluginSelection(discovered, meta, s.baseScripts)
-	newAsm, err := app.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, s.appDeps)
+	extras, disabled, optIn := pluginSelection(discovered, meta, s.baseScripts, productIDSet(s.product))
+	newAsm, err := app.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, optIn, s.appDeps)
 	if err != nil {
 		return fmt.Errorf("cli: 重建装配失败，保留旧装配: %w", err)
 	}
@@ -2154,13 +2212,18 @@ func (s *Session) PluginViews(ctx context.Context) []PluginView {
 		v.Backend = true
 		v.Frontend = sc.Manifest.Frontend != nil
 		if !productIDs[id] {
-			// 随包但当前产品未声明：可查看/可启用，但不是故障。
-			v.Status = "unused"
-			v.LastError = ""
+			// 随包但当前产品未声明：只有用户显式启用过才进入装配；
+			// 否则用中性状态 unused 表示，可查看、可启用，但不是故障。
+			optedIn := hasRec && rec.UserSet && rec.Enabled
+			if !optedIn {
+				v.Status = "unused"
+				v.Enabled = false
+				v.LastError = ""
+			}
 		}
 		out = append(out, v)
 	}
-	// frontend-only 插件也进列表：产品声明决定它是否已挂载。
+	// frontend-only 插件也进列表：产品声明或用户显式启用决定它是否已挂载。
 	for _, sc := range frontend {
 		if sc.Manifest == nil {
 			continue
@@ -2170,13 +2233,23 @@ func (s *Session) PluginViews(ctx context.Context) []PluginView {
 			continue
 		}
 		seen[id] = true
+		rec, hasRec := meta[id]
+		enabled := productIDs[id]
+		if hasRec && rec.UserSet {
+			enabled = rec.Enabled
+		}
+		status := "ready"
+		if !enabled {
+			if productIDs[id] {
+				status = "disabled"
+			} else {
+				status = "unused"
+			}
+		}
 		v := PluginView{
 			ID: id, Name: sc.Manifest.Name, Version: sc.Manifest.Version,
 			APIVersion: sc.Manifest.APIVersion, Trust: string(sc.Manifest.Trust),
-			Enabled: true, Frontend: true, Status: "ready",
-		}
-		if !productIDs[id] {
-			v.Status = "unused"
+			Enabled: enabled, Frontend: true, Status: status,
 		}
 		out = append(out, v)
 	}
@@ -2385,11 +2458,13 @@ func (s *Session) SetPluginEnabled(ctx context.Context, pluginID string, enabled
 	meta := s.listPluginMeta(ctx)
 	prev, hadPrev := meta[pluginID]
 	prevEnabled := true
+	prevUserSet := false
 	if hadPrev {
 		prevEnabled = prev.Enabled
+		prevUserSet = prev.UserSet
 	}
 	rec := sqlite.PluginMetaRecord{
-		ID: pluginID, Version: manifestVersionOf(script), Enabled: enabled, Fingerprint: fp,
+		ID: pluginID, Version: manifestVersionOf(script), Enabled: enabled, UserSet: true, Fingerprint: fp,
 	}
 	if err := s.store.UpsertPluginMeta(ctx, rec); err != nil {
 		return PluginView{}, err
@@ -2398,6 +2473,7 @@ func (s *Session) SetPluginEnabled(ctx context.Context, pluginID string, enabled
 		// 回滚 meta，与仍在运行的旧代保持一致。
 		rollback := rec
 		rollback.Enabled = prevEnabled
+		rollback.UserSet = prevUserSet
 		rollback.LastError = prev.LastError
 		_ = s.store.UpsertPluginMeta(ctx, rollback)
 		return PluginView{}, err

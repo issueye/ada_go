@@ -141,6 +141,12 @@ data: {"threadId":"th_...","seq":128,"baseSeq":120,"ops":[
 
 为什么不用“全量 HTML 每帧替换”：长对话下会闪烁、丢焦点、丢滚动位置；增量 JSON + 结构片段是更稳的折中。
 
+当前浏览器实现：持久化对话行由 `islands.js` 的 transcript 岛接管，结构变化时拉
+`GET /partials/transcript/{id}`（每行 key + 服务端渲染 HTML），按 key 做 VNode patch；
+助手文本的 Markdown 由 `POST /markdown.ast` 返回 VNode AST，交给 `ui-markdown` 组件渲染
+（`/markdown` 的 HTML 端点保留给无组件回退）；`evt.message.delta` 仍追加到
+`#live-stream`，终态/等待答复仍整页 reload 刷新交互托盘。
+
 ### 7.5 前端插件化
 
 **清单**见 [6.2](05-plugins.md#62-清单)。前端部分支持：
@@ -368,7 +374,7 @@ Todo 卡片是插件的前端段，不是基座组件：`plugins/official/tools-
 
 | 路由 | 页面 | 数据来源 |
 |---|---|---|
-| `GET /`、`GET /threads`、`GET /threads/{id}` | 对话页 / 会话页 | `thread.list`、`thread.get`、`thread.entries` |
+| `GET /`、`GET /threads`、`GET /threads/{id}` | 对话页 / 会话页（持久化行可用 AdaUI keyed patch；流式仍走 SSE + live-stream） | `thread.list`、`thread.get`、`thread.entries` |
 | `GET /overview`、`GET /partials/dashboard.json` | 概览（统计卡、最近会话、插件卡片；AdaUI 岛每 5 秒轮询 JSON） | `thread.list`、`plugin.list`、`dashboard.widgets` 插槽 |
 | `GET /workspaces` | 工作区选择（AdaUI 岛 + SSR 回退；目录浏览限制在当前工作区子树内） | Gateway 配置 + `os.ReadDir` |
 | `GET /extensions` | 插件列表（AdaUI 岛 + SSR 回退；全部随包/已安装插件合并成一张表，不分区；产品未声明的随包插件显示为「未启用 / unused」，不误报 failed） | `PluginLister`、`plugin.list`、`extensions.list` 插槽 |

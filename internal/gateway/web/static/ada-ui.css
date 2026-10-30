@@ -236,6 +236,26 @@
   padding-top: var(--ada-space-3);
 }
 
+/* ── 对话流岛：行 HTML 仍由服务端模板提供，VNode 只做 keyed 容器 ───────── */
+/* 包装层不参与排版；保留 .ada-transcript__item 这个既有类名，兼容
+   components.css 里针对它写的首尾 margin 规则。 */
+.ada-transcript__item {
+  display: contents;
+}
+/* 工具行是助手消息的附属行：与正文（头像 28 + 间距 12）对齐。
+   岛把行包进 .ada-transcript__item 后，原来的
+   `.ada-transcript > .ada-disclosure[data-kind="tool"]` 子选择器不再命中。 */
+.ada-transcript__item > .ada-disclosure[data-kind="tool"] {
+  margin-left: 40px;
+}
+
+/* Markdown AST 到达前的纯文本占位；避免流式首帧空白。 */
+.markdown-pending {
+  color: var(--ph-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* ── 表格：现有 .table / .ada-table-wrap 之上补状态修饰 ───────────────── */
 .ada-table--striped tbody tr:nth-child(even) {
   background: var(--ph-subtle);

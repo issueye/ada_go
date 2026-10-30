@@ -92,10 +92,18 @@ type migration struct {
 
 // migrations 是唯一真源：索引 0 = 版本 1。
 //
-// M1-B 只有版本 1（04 §5.7 冻结的那一份 DDL）。后续里程碑追加条目时：
-// 只能 append，不能修改已有条目；每一步都必须能在事务里回滚。
+// 版本 1 是 04 §5.7 冻结的 DDL；版本 2 只是版本占位：开发期构建曾用版本 2
+// 做过一次父链修复（entries 仍保持 append-only，生产迁移不重放该 UPDATE），
+// 已升级的库必须能继续被新二进制打开（升级只向前，禁止降级）。
+// 版本 3 给 plugin_meta 补 user_set：区分「产品默认」与「用户显式启用/停用」，
+// 否则未声明的随包插件无法从界面按会话启用。旧库里 enabled=0 的行一定来自用户
+// 显式停用（默认同步只会写 enabled=1），迁移时标成 user_set=1。
+// 后续里程碑追加条目时：只能 append，不能修改已有条目；每一步都必须能在事务里回滚。
 var migrations = []migration{
 	{Version: 1, Statement: schema1DDL, Note: "04 §5.7 冻结的初始 schema（threads/entries/runs/interactions/plugin_state/plugin_meta/usage/audit）"},
+	{Version: 2, Statement: "SELECT 1;", Note: "版本占位：兼容开发期已升到 2 的库；父链修复已由写入路径承担"},
+	{Version: 3, Statement: `ALTER TABLE plugin_meta ADD COLUMN user_set INTEGER NOT NULL DEFAULT 0;
+UPDATE plugin_meta SET user_set = 1 WHERE enabled = 0;`, Note: "plugin_meta.user_set：产品默认之外的显式启用/停用"},
 }
 
 // CurrentVersion 读取 PRAGMA user_version，不改任何东西（doctor 用：只报告版本、不迁移，

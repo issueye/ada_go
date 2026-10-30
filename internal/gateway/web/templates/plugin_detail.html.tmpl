@@ -19,7 +19,7 @@
           {{if .Plugin.Status}}<span class="badge badge-neutral badge-mono">{{.Plugin.Status}}</span>{{end}}
         </div>
 
-        {{if eq .Plugin.Status "unused"}}<p class="mt-2 text-xs text-muted">当前产品没有声明这个插件，因此未装配；随包保留，可在产品声明里启用。</p>{{end}}
+        {{if eq .Plugin.Status "unused"}}<p class="mt-2 text-xs text-muted">当前产品没有默认启用这个插件；可在插件列表或本页手动启用。</p>{{end}}
 
         {{if .Plugin.Description}}<p class="mt-2 text-sm leading-6 text-muted">{{.Plugin.Description}}</p>{{end}}
 
@@ -64,18 +64,16 @@
       </div>
 
       <div class="mt-4 flex flex-wrap items-center gap-2">
-        {{if and .Plugin.Backend (ne .Plugin.Status "unused")}}
-          {{if .Plugin.Enabled}}
-          <form method="post" action="/extensions/{{.Plugin.ID}}/disable">
-            {{template "csrf" .}}
-            <button class="ada-btn ada-btn--secondary ada-btn--sm" type="submit">停用</button>
-          </form>
-          {{else}}
-          <form method="post" action="/extensions/{{.Plugin.ID}}/enable">
-            {{template "csrf" .}}
-            <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit">启用</button>
-          </form>
-          {{end}}
+        {{if .Plugin.Enabled}}
+        <form method="post" action="/extensions/{{.Plugin.ID}}/disable">
+          {{template "csrf" .}}
+          <button class="ada-btn ada-btn--secondary ada-btn--sm" type="submit">停用</button>
+        </form>
+        {{else}}
+        <form method="post" action="/extensions/{{.Plugin.ID}}/enable">
+          {{template "csrf" .}}
+          <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit">启用</button>
+        </form>
         {{end}}
         {{if .Plugin.FirstPage}}
         <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/ext/{{.Plugin.ID}}/{{.Plugin.FirstPage}}">{{icon "i-external" 13}}打开插件页面</a>

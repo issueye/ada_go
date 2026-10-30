@@ -346,11 +346,14 @@
 
   /* ── 8. live 轮询后的重建 ────────────────────────────────────────────── */
   function watchTranscript() {
-    var transcript = document.getElementById('transcript');
-    if (!transcript || !window.MutationObserver) return;
+    // 对话流可能被 AdaUI 岛整体替换；观察稳定的 #transcript-island 外层，
+    // 而不是会被 mount 掉的 #transcript 本身。
+    var host = document.getElementById('transcript-island') || document.getElementById('transcript');
+    if (!host || !window.MutationObserver) return;
     new MutationObserver(function () {
-      bindDisclosures(transcript);
-    }).observe(transcript, { childList: true });
+      var transcript = document.getElementById('transcript');
+      if (transcript) bindDisclosures(transcript);
+    }).observe(host, { childList: true, subtree: true });
   }
 
   /* ── 9. 页签（Tabs）────────────────────────────────────────────────────

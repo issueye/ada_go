@@ -49,6 +49,12 @@ type BridgeOptions struct {
 	ProductName string
 	// CSRF 为每次请求返回 token（写表单需要；nil 时 props.app.csrf 为空）。
 	CSRF func(*http.Request) string
+	// Enabled 判断某个插件在当前请求的工作区是否启用；nil 表示全部启用。
+	// 前端插件在进程内固定装配，停用/启用通过这个回调在渲染时实时过滤，
+	// 不需要重启 Gateway。
+	Enabled func(*http.Request, string) bool
+	// InvalidateEnabled 让 Enabled 的实现丢弃某个工作区的缓存（启用/停用后调用）。
+	InvalidateEnabled func(workspace string)
 }
 
 // unit 是一个已登记的前端插件。
@@ -73,6 +79,8 @@ type Bridge struct {
 	workspaceFor func(*http.Request) string
 	product      string
 	csrf         func(*http.Request) string
+	enabled      func(*http.Request, string) bool
+	invalidate   func(string)
 }
 
 var _ web.PluginUI = (*Bridge)(nil)
@@ -87,6 +95,8 @@ func NewBridge(opts BridgeOptions) (*Bridge, error) {
 		workspaceFor: opts.WorkspaceFor,
 		product:      opts.ProductName,
 		csrf:         opts.CSRF,
+		enabled:      opts.Enabled,
+		invalidate:   opts.InvalidateEnabled,
 	}
 	pairs := make([]host.ComponentPair, 0, len(AllowedComponents)+1)
 	for _, name := range AllowedComponents {
@@ -190,6 +200,21 @@ func newUnit(s host.Script) (*unit, error) {
 	return u, nil
 }
 
+// isEnabled 报告插件在当前请求的工作区是否启用；没有回调时视为全部启用。
+func (b *Bridge) isEnabled(r *http.Request, pluginID string) bool {
+	if b.enabled == nil || r == nil {
+		return true
+	}
+	return b.enabled(r, pluginID)
+}
+
+// InvalidateEnabled 丢弃 Enabled 回调的工作区缓存（web 在 plugin.setEnabled 后调用）。
+func (b *Bridge) InvalidateEnabled(workspace string) {
+	if b.invalidate != nil {
+		b.invalidate(workspace)
+	}
+}
+
 // Slot 实现 web.PluginUI：渲染一个插槽的全部贡献。
 func (b *Bridge) Slot(name string, r *http.Request) (template.HTML, int, error) {
 	entries := b.slotIndex[name]
@@ -199,6 +224,9 @@ func (b *Bridge) Slot(name string, r *http.Request) (template.HTML, int, error) 
 	var bodies []string
 	failures := 0
 	for _, e := range entries {
+		if !b.isEnabled(r, e.u.manifest.ID) {
+			continue
+		}
 		html, err := b.renderEntry(e.u, e.contrib.Template, "slot", name, r, b.renderer.RenderTemplate)
 		if err != nil {
 			failures++
@@ -220,7 +248,7 @@ func (b *Bridge) Slot(name string, r *http.Request) (template.HTML, int, error) 
 // 插件或 slug 不存在时返回包装了 web.ErrExtNotFound 的错误（web 据此给 404）。
 func (b *Bridge) Page(pluginID, slug string, r *http.Request) (template.HTML, error) {
 	u, ok := b.byID[pluginID]
-	if !ok {
+	if !ok || !b.isEnabled(r, pluginID) {
 		return "", fmt.Errorf("%w: 没有前端插件 %q", web.ErrExtNotFound, pluginID)
 	}
 	for _, pc := range u.manifest.Frontend.Pages {
@@ -516,9 +544,9 @@ func sanitizeBindingName(s string) string {
 
 // List 实现 web.PluginLister：列出已装配的前端插件（扩展页与概览计数用）。
 //
-// 装配期失败的插件不会进 byID（NewBridge 直接报错），所以这里列出的都是已就绪的；
-// 状态固定为 ready，Enabled 恒为 true（禁用插件在装配前已被过滤）。
-func (b *Bridge) List() []web.FrontendPluginInfo {
+// 装配期失败的插件不会进 byID（NewBridge 直接报错）。是否启用按当前请求的
+// 工作区实时判断：停用的插件仍列在扩展页（可以重新启用），但不进侧栏导航。
+func (b *Bridge) List(r *http.Request) []web.FrontendPluginInfo {
 	ids := make([]string, 0, len(b.byID))
 	for id := range b.byID {
 		ids = append(ids, id)
@@ -528,9 +556,14 @@ func (b *Bridge) List() []web.FrontendPluginInfo {
 	for _, id := range ids {
 		u := b.byID[id]
 		m := u.manifest
+		enabled := b.isEnabled(r, id)
+		status := "ready"
+		if !enabled {
+			status = "disabled"
+		}
 		info := web.FrontendPluginInfo{
 			ID: m.ID, Name: m.Name, Version: m.Version, Description: m.Description,
-			Enabled: true, Status: "ready",
+			Enabled: enabled, Status: status,
 		}
 		if m.Frontend != nil {
 			info.NavCount = len(m.Frontend.Nav)

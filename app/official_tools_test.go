@@ -339,14 +339,15 @@ func TestToolsAsk(t *testing.T) {
 	if _, err := run(t, yesUI, map[string]any{"question": "继续？", "kind": "phone"}); err == nil {
 		t.Fatal("非法 kind 必须报错")
 	}
-	// terminatesTurn 语义标记。
+	// ask 不是终止型工具：回答作为工具结果喂回模型后，轮次继续（02 §5.3 第 6g 步）。
+	// 标成 terminatesTurn 会在用户作答后立刻收尾，界面看起来就是「对话被终止」。
 	for _, inst := range asm.Plugins {
 		if inst.ID() != "tools-ask" {
 			continue
 		}
 		for _, td := range inst.Contribution().Tools {
-			if td.Name == "ask_user" && !td.TerminatesTurn {
-				t.Fatal("ask_user 应标记 terminatesTurn（02 §5.4 的 ask 类）")
+			if td.Name == "ask_user" && td.TerminatesTurn {
+				t.Fatal("ask_user 不能标记 terminatesTurn：回答后还要继续本轮")
 			}
 		}
 	}

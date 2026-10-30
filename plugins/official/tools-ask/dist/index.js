@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:d486a4980ed8e70b) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:94982456cbe4fbc6) by plugins/official/build.mjs — do not edit
 // tools-ask —— 官方插件：ask_user（05 §6.3 的 tools-ask、02 §5.4 的 ask 类工具）。
 //
 // 模型用这一个工具向用户提问，三种形态：
@@ -7,8 +7,8 @@
 // 两条失败关闭（比三态本身更重要，INV-4）：
 //   - ctx.ui 不存在或 available=false（无界面、断线）：不问，直接按 denied 语义报错；
 //   - 用户拒绝 / 取消 / 超时（宿主返回 null）：同样按 denied 语义报错。
-// 工具标了 terminatesTurn：拿到答案即收尾（02 §5.4 的 ask 类），答案已作为工具
-// 结果进历史，下一轮模型可以接着处理。
+// 拿到答案是普通工具结果：轮次继续，模型在同一次运行里接着处理回答。
+// 这里不能标 terminatesTurn —— 那会在用户作答后直接收尾，对话看起来被终止了。
 //
 // access=read：提问本身没有外部效果；能不能问由 ui.ask 能力位决定（只授予 builtin）。
 
@@ -31,7 +31,6 @@
                       
                      
                                                 
-                           
                                                     
  
 
@@ -170,7 +169,6 @@ export default function (agent          )       {
       "界面会依次弹出。用户拒绝、取消、超时或没有可用界面时本工具失败（失败关闭）：不要重复追问，" +
       "改用其它方法或在回复里说明。",
     access: "read",
-    terminatesTurn: true,
     parameters: {
       type: "object",
       properties: {

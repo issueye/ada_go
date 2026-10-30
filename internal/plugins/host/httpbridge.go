@@ -39,6 +39,12 @@ type HTTPBridgeConfig struct {
 	MaxSSEBytes  int
 	// Transport 允许测试注入；nil 时使用带代理与超时的默认 Transport。
 	Transport http.RoundTripper
+	// DebugWriter 非空时把每次出网请求/响应摘要写到其中（密钥已脱敏）。
+	// 用于 adag --debug；运行时不可切换。
+	DebugWriter io.Writer
+	// DebugLog 可直接注入已存在的调试器（与调用方共享请求序号）；
+	// 非空时忽略 DebugWriter。
+	DebugLog *DebugLog
 }
 
 // Bridge 实现 host.HTTPBridge（出网唯一出口）。
@@ -52,6 +58,7 @@ type Bridge struct {
 	maxJSON  int
 	maxSSE   int
 	client   *http.Client
+	debug    *DebugLog
 }
 
 var _ HTTPBridge = (*Bridge)(nil)
@@ -82,9 +89,14 @@ func NewHTTPBridge(cfg HTTPBridgeConfig) (*Bridge, error) {
 	if maxSSE <= 0 {
 		maxSSE = 32 << 20
 	}
+	debugLog := cfg.DebugLog
+	if debugLog == nil {
+		debugLog = NewDebugLog(cfg.DebugWriter)
+	}
 	b := &Bridge{
 		allowAny: cfg.AllowAnyHost, allow: append([]string(nil), cfg.AllowHosts...),
 		connect: connect, idle: idle, total: total, maxJSON: maxJSON, maxSSE: maxSSE,
+		debug: debugLog,
 	}
 	transport := cfg.Transport
 	if transport == nil {
@@ -174,16 +186,22 @@ func (b *Bridge) JSON(ctx context.Context, method, rawURL string, headers map[st
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
+	start := time.Now()
+	debugID := b.debug.NextID()
+	b.debug.Request(debugID, method, u.String(), req.Header, []byte(body))
 	resp, err := b.client.Do(req)
 	if err != nil {
+		b.debug.Error(debugID, err, time.Since(start))
 		return HTTPResult{}, wrapNetworkErr(err)
 	}
 	defer resp.Body.Close()
 	raw, err := readLimited(resp.Body, limit)
 	if err != nil {
+		b.debug.Error(debugID, err, time.Since(start))
 		return HTTPResult{}, domain.WrapError(domain.NewError(domain.CodeProviderError,
 			fmt.Sprintf("读取 HTTP 响应失败（上限 %d 字节）", limit)), err)
 	}
+	b.debug.Response(debugID, resp.Status, resp.Header, time.Since(start), raw)
 	return HTTPResult{Status: resp.StatusCode, Headers: resp.Header, Body: json.RawMessage(raw)}, nil
 }
 
@@ -227,16 +245,22 @@ func (b *Bridge) SSE(ctx context.Context, method, rawURL string, headers map[str
 	if req.Header.Get("Accept") == "" {
 		req.Header.Set("Accept", "text/event-stream")
 	}
+	start := time.Now()
+	debugID := b.debug.NextID()
+	b.debug.Request(debugID, method, u.String(), req.Header, []byte(body))
 	resp, err := b.client.Do(req)
 	if err != nil {
+		b.debug.Error(debugID, err, time.Since(start))
 		return HTTPResult{}, wrapNetworkErr(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := readLimited(resp.Body, 64<<10)
+		b.debug.Response(debugID, resp.Status, resp.Header, time.Since(start), raw)
 		return HTTPResult{Status: resp.StatusCode, Headers: resp.Header, Body: json.RawMessage(raw)},
 			newHTTPError(resp, strings.TrimSpace(string(raw)))
 	}
+	b.debug.Response(debugID, resp.Status, resp.Header, time.Since(start), nil)
 
 	// 空闲期限：每次从连接读到数据就重置；到期取消请求。
 	idleCtx, idleCancel := context.WithCancel(reqCtx)
@@ -273,9 +297,10 @@ func (b *Bridge) SSE(ctx context.Context, method, rawURL string, headers map[str
 		if len(line) > 0 {
 			written += len(line)
 			if written > b.maxSSE {
-				return HTTPResult{Status: resp.StatusCode, Headers: resp.Header, SSEEvents: events},
-					domain.NewError(domain.CodeProviderError,
-						fmt.Sprintf("SSE 响应超过上限 %d 字节", b.maxSSE))
+				err := domain.NewError(domain.CodeProviderError,
+					fmt.Sprintf("SSE 响应超过上限 %d 字节", b.maxSSE))
+				b.debug.Error(debugID, err, time.Since(start))
+				return HTTPResult{Status: resp.StatusCode, Headers: resp.Header, SSEEvents: events}, err
 			}
 			resetIdle()
 			line = strings.TrimRight(line, "\r\n")
@@ -309,11 +334,14 @@ func (b *Bridge) SSE(ctx context.Context, method, rawURL string, headers map[str
 				return HTTPResult{Status: resp.StatusCode, Headers: resp.Header, SSEEvents: events}, nil
 			}
 			if idleCtx.Err() != nil {
-				return HTTPResult{Status: resp.StatusCode, Headers: resp.Header, SSEEvents: events},
-					domain.NewError(domain.CodeProviderError,
-						fmt.Sprintf("SSE 空闲超过 %s", b.idle))
+				err := domain.NewError(domain.CodeProviderError,
+					fmt.Sprintf("SSE 空闲超过 %s", b.idle))
+				b.debug.Error(debugID, err, time.Since(start))
+				return HTTPResult{Status: resp.StatusCode, Headers: resp.Header, SSEEvents: events}, err
 			}
-			return HTTPResult{Status: resp.StatusCode, Headers: resp.Header, SSEEvents: events}, wrapNetworkErr(err)
+			err = wrapNetworkErr(err)
+			b.debug.Error(debugID, err, time.Since(start))
+			return HTTPResult{Status: resp.StatusCode, Headers: resp.Header, SSEEvents: events}, err
 		}
 	}
 }

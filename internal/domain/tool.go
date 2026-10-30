@@ -56,7 +56,8 @@ type Descriptor struct {
 	Repeatable bool `json:"repeatable"`
 	// Rollback 为 true 时执行前把涉及文件纳入检查点（02 §5.4、09 §9.2）。
 	Rollback bool `json:"rollback"`
-	// TerminatesTurn 是 finish/ask 这类可终止轮次的标记（02 §5.4；终止条件 completed 行）。
+	// TerminatesTurn 是 finish 这类可终止轮次的标记（02 §5.4；终止条件 completed 行）。
+	// ask_user 不在此列：它返回后要把回答喂回模型继续本轮。
 	TerminatesTurn bool `json:"terminatesTurn"`
 	// PluginID 是贡献该工具的插件 id（“官方工具插件”或第三方；基座源码不出现具体插件 id）。
 	PluginID string `json:"pluginId"`

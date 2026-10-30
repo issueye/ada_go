@@ -2273,15 +2273,17 @@
     var oldChildren = (oldVNode && oldVNode.c) || [];
     var newChildren = (newVNode && newVNode.c) || [];
     var oldByKey = new Map();
-    var matched = new Set();
 
     for (var i = 0; i < oldChildren.length; i += 1) {
       var child = oldChildren[i];
       if (child && child.k !== undefined && child.k !== null) oldByKey.set(child.k, child);
     }
 
+    // 从后往前 patch，并把新节点直接插到 anchor 前面：中间插入一行时
+    // 只移动真正需要的节点，不会把后面整段行搬一遍（长对话里那下就是闪烁）。
     var usedOld = new Set();
-    for (var n = 0; n < newChildren.length; n += 1) {
+    var anchor = null;
+    for (var n = newChildren.length - 1; n >= 0; n -= 1) {
       var next = newChildren[n];
       var previous = null;
       if (next && next.k !== undefined && next.k !== null) {
@@ -2291,25 +2293,21 @@
       }
       if (previous) {
         usedOld.add(previous);
-        patch(previous, next, el, null, parentInstance, isSVG);
+        patch(previous, next, el, anchor, parentInstance, isSVG);
+        var node = next && next.el;
+        if (node && (node.parentNode !== el || node.nextSibling !== anchor)) {
+          el.insertBefore(node, anchor);
+        }
+        anchor = node || anchor;
       } else {
-        mount(next, el, null, parentInstance, isSVG);
+        mount(next, el, anchor, parentInstance, isSVG);
+        anchor = (next && next.el) || anchor;
       }
     }
 
     for (var o = 0; o < oldChildren.length; o += 1) {
       var oldChild = oldChildren[o];
       if (oldChild && !usedOld.has(oldChild)) unmount(oldChild);
-    }
-
-    var anchor = null;
-    for (var r = newChildren.length - 1; r >= 0; r -= 1) {
-      var node = newChildren[r] && newChildren[r].el;
-      if (!node) continue;
-      if (node.parentNode !== el || node.nextSibling !== anchor) {
-        el.insertBefore(node, anchor);
-      }
-      anchor = node;
     }
   }
 
@@ -2667,6 +2665,9 @@
         if (mountOptions.hydrate) {
           this._instance = hydrateRoot(rootVNode, container, this);
         } else {
+          // 普通 mount 是「接管这个容器」：先清掉 SSR 回退，否则会变成
+          // 回退 DOM + 客户端 DOM 两份。hydrate 走另一条路，不动服务端节点。
+          while (container.firstChild) container.removeChild(container.firstChild);
           this._instance = mountRoot(rootVNode, container, this);
         }
         return this._instance.proxy;

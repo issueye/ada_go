@@ -1,0 +1,118 @@
+<!doctype html>
+<!--
+  对话流岛冒烟页：模拟 #transcript-island 的 SSR 行与 AdaUI keyed 容器。
+  直接以 file:// 打开；生产页面由 chat.html.tmpl 输出同样的结构。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>transcript island smoke</title>
+<link rel="stylesheet" href="../../internal/gateway/web/static/tokens.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/app.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/components.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/layout.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/widgets.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/shell.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/pages.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/app-local.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ada-ui.css">
+<style>
+  body { padding: 24px; }
+  #log { margin-top: 16px; background: var(--ph-subtle); padding: 12px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<main class="ada-main">
+  <div class="ada-scroll"><div class="ada-wrap ada-wrap--page">
+    <div id="transcript-island" data-ada-island="transcript" data-ada-state='{"threadId":"th_1","runStatus":"running","rows":[{"key":"e1","kind":"user","html":"<div class=\"ada-msg ada-msg--user\" data-item-key=\"e1\"><div class=\"ada-bubble\"><div class=\"part-text\">问题</div></div></div>"},{"key":"e2","kind":"assistant","parts":[{"type":"thinking","text":"先想一下"},{"type":"text","nodes":[{"t":"p","c":[{"t":"#text","v":"回答"}]}]}]}]}'>
+      <div id="transcript" class="ada-transcript" data-thread-id="th_1" data-run-status="running">
+        <div class="ada-msg ada-msg--user" data-item-key="e1"><div class="ada-bubble"><div class="part-text">问题</div></div></div>
+        <div class="ada-msg ada-msg--assistant" data-item-key="e2"><div class="ada-msg__body markdown-body ada-markdown"><div class="part-text">回答</div></div></div>
+        <div id="live-stream" class="live-stream" hidden></div>
+      </div>
+    </div>
+  </div></div>
+</main>
+<pre id="log"></pre>
+
+<script src="../../internal/gateway/web/static/ada-render.js"></script>
+<script src="../../internal/gateway/web/static/ada-ui.js"></script>
+<script src="../../internal/gateway/web/static/islands.js"></script>
+<script>
+  (async function () {
+    const log = [];
+    let failed = 0;
+    function check(name, fn) {
+      try { fn(); log.push("PASS " + name); }
+      catch (error) { failed += 1; log.push("FAIL " + name + ": " + (error && error.message ? error.message : error)); }
+    }
+    function assert(condition, message) { if (!condition) throw new Error(message || "assertion failed"); }
+    function q(selector) { return document.querySelector(selector); }
+    function qa(selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)); }
+    function text(node) { return node ? node.textContent : ""; }
+
+    await new Promise((resolve) => {
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", resolve);
+      else resolve();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    check("transcript mounted", function () {
+      assert(q("#transcript-island").getAttribute("data-ada-mounted") === "1");
+      assert(q("#transcript"));
+      assert(q("#live-stream"));
+    });
+    check("fallback rows replaced", function () {
+      assert(qa("#transcript .ada-transcript__item").length === 2);
+      assert(qa("#transcript > .ada-msg").length === 0);
+    });
+    check("row html preserved", function () {
+      assert(text(q('#transcript [data-item-key="e1"]')).includes("问题"));
+      assert(text(q('#transcript [data-item-key="e2"]')).includes("回答"));
+    });
+
+    const app = q("#transcript-island")._adaTranscriptApp;
+    assert(app, "missing transcript app");
+    const firstRow = q('#transcript [data-item-key="e1"]');
+    const liveStream = q("#live-stream");
+    app.setRows([
+      { key: "e1", html: '<div class="ada-msg ada-msg--user" data-item-key="e1"><div class="ada-bubble"><div class="part-text">问题 2</div></div></div>' },
+      { key: "e3", html: '<div class="ada-msg ada-msg--assistant" data-item-key="e3"><div class="ada-msg__body markdown-body ada-markdown"><div class="part-text">追加</div></div></div>' }
+    ], "waiting_input");
+    await window.AdaRender.nextTick();
+
+    check("setRows patches rows", function () {
+      assert(qa("#transcript .ada-transcript__item").length === 2);
+      assert(text(q('#transcript [data-item-key="e1"]')).includes("问题 2"));
+      assert(text(q('#transcript [data-item-key="e3"]')).includes("追加"));
+    });
+    check("keyed row reused", function () {
+      assert(q('#transcript [data-item-key="e1"]') === firstRow);
+    });
+    check("run status updated", function () {
+      assert(q("#transcript").getAttribute("data-run-status") === "waiting_input");
+    });
+    check("live stream survives patch", function () {
+      assert(q("#live-stream") === liveStream);
+      assert(q("#live-stream").hidden === true);
+    });
+
+    // 行数变化时 live-stream 不能被当成“同一位置的新节点”重建。
+    app.setRows([
+      { key: "e3", html: '<div class="ada-msg ada-msg--assistant" data-item-key="e3"><div class="ada-msg__body markdown-body ada-markdown"><div class="part-text">只剩一条</div></div></div>' }
+    ], "completed");
+    await window.AdaRender.nextTick();
+    check("live stream survives row shrink", function () {
+      assert(q("#live-stream") === liveStream);
+      assert(qa("#transcript .ada-transcript__item").length === 1);
+      assert(text(q('#transcript [data-item-key="e3"]')).includes("只剩一条"));
+    });
+
+    document.getElementById("log").textContent = log.join("\n");
+    window.__TRANSCRIPT_RESULT__ = { failed: failed, log: log };
+    document.title = failed === 0 ? "transcript island smoke: PASS" : "transcript island smoke: FAIL";
+  })();
+</script>
+</body>
+</html>

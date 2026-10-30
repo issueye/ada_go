@@ -193,20 +193,18 @@
       methods: {
         actions: function (h, row) {
           var parts = [];
-          if (row.backend && row.status !== 'unused') {
-            var enable = !row.enabled;
-            parts.push(h('form', {
-              method: 'post',
-              action: '/extensions/' + encodeURIComponent(row.id || '') + (enable ? '/enable' : '/disable')
-            },
-              h('input', { type: 'hidden', name: 'csrf_token', value: this.csrf || '' }),
-              h(AdaUI.components.Button, {
-                type: 'submit',
-                size: 'sm',
-                variant: enable ? 'primary' : 'secondary'
-              }, enable ? '启用' : '停用')
-            ));
-          }
+          var enable = !row.enabled;
+          parts.push(h('form', {
+            method: 'post',
+            action: '/extensions/' + encodeURIComponent(row.id || '') + (enable ? '/enable' : '/disable')
+          },
+            h('input', { type: 'hidden', name: 'csrf_token', value: this.csrf || '' }),
+            h(AdaUI.components.Button, {
+              type: 'submit',
+              size: 'sm',
+              variant: enable ? 'primary' : 'secondary'
+            }, enable ? '启用' : '停用')
+          ));
           parts.push(h('a', {
             class: 'link text-xs',
             href: '/extensions/' + encodeURIComponent(row.id || '')
@@ -225,6 +223,115 @@
     });
 
     app.mount(element);
+  }
+
+  function transcriptThinking(h, text) {
+    return h('details', {
+      class: 'ada-disclosure',
+      'data-kind': 'thinking',
+      'data-state': 'closed'
+    },
+      h('summary', { class: 'ada-disclosure__summary' },
+        h('span', { class: 'ada-disclosure__icon' }, h(AdaUI.components.Icon, { name: 'i-bulb', size: 14 })),
+        h('span', { class: 'ada-disclosure__caret' }, h(AdaUI.components.Icon, { name: 'i-chevron', size: 12 })),
+        h('span', { class: 'ada-disclosure__label' }, '思考')),
+      h('div', { class: 'ada-disclosure__rail' },
+        h('div', { class: 'ada-thinking' }, text || '')));
+  }
+
+  function transcriptAssistant(h, row) {
+    var parts = row.parts.map(function (part) {
+      if (part.type === 'thinking') return transcriptThinking(h, part.text);
+      if (part.type === 'image') return h('span', { class: 'ada-msg__images' }, '[图片]');
+      return h(AdaUI.components.Markdown, { nodes: part.nodes || [] });
+    });
+    return h('div', {
+      class: 'ada-msg ada-msg--assistant',
+      'data-item-key': row.key
+    },
+      h('span', { class: 'ada-avatar', title: '助手' },
+        h(AdaUI.components.Icon, { name: 'i-bot', size: 14 })),
+      h('div', { class: 'ada-msg__body markdown-body ada-markdown' }, parts));
+  }
+
+  function transcriptRow(h, row) {
+    if (!row || !row.key) return null;
+    var wrap = h('div', {
+      class: 'ada-transcript__item',
+      key: row.key,
+      'data-item-key': row.key
+    });
+    if (row.kind === 'assistant' && Array.isArray(row.parts)) {
+      wrap.c = [transcriptAssistant(h, row)];
+      return wrap;
+    }
+    if (row.html) {
+      wrap._html = row.html;
+      return wrap;
+    }
+    return null;
+  }
+
+  function mountTranscript(element) {
+    if (element.getAttribute('data-ada-mounted') === '1') return;
+    var fallback = element.querySelector('#transcript');
+    if (!fallback) return;
+    var initial = parseState(element);
+    var threadId = typeof initial.threadId === 'string' && initial.threadId
+      ? initial.threadId
+      : (fallback.getAttribute('data-thread-id') || '');
+    var runStatus = typeof initial.runStatus === 'string' && initial.runStatus
+      ? initial.runStatus
+      : (fallback.getAttribute('data-run-status') || '');
+    var rows = Array.isArray(initial.rows) ? initial.rows : [];
+    if (!rows.length) {
+      // 没有内联状态时退回读取 SSR 行（老页面/状态损坏的兜底）。
+      for (var i = 0; i < fallback.children.length; i += 1) {
+        var node = fallback.children[i];
+        if (node.id === 'live-stream') continue;
+        if (node.hasAttribute && node.hasAttribute('data-slot')) continue;
+        if (!node.matches || !node.matches('.ada-msg, .ada-disclosure, .ada-notice')) continue;
+        rows.push({
+          key: node.getAttribute('data-item-key') || ('row:' + i),
+          html: node.outerHTML
+        });
+      }
+    }
+    if (!rows.length) return;
+    element.setAttribute('data-ada-mounted', '1');
+
+    var app = AdaUI.createApp({
+      data: function () {
+        return { rows: rows, threadId: threadId, runStatus: runStatus };
+      },
+      methods: {
+        setRows: function (next, status) {
+          this.rows = Array.isArray(next) ? next : [];
+          if (status) this.runStatus = status;
+        }
+      },
+      render: function (h) {
+        var nodes = this.rows.map(function (row) {
+          return transcriptRow(h, row);
+        }).filter(Boolean);
+        nodes.push(h('div', {
+          id: 'live-stream',
+          class: 'live-stream',
+          key: 'live-stream',
+          'aria-live': 'polite',
+          'aria-label': '实时输出',
+          hidden: true
+        }));
+        return h('div', {
+          id: 'transcript',
+          class: 'ada-transcript',
+          'data-thread-id': this.threadId,
+          'data-run-status': this.runStatus
+        }, nodes);
+      }
+    });
+    app.mount(element);
+    element._adaTranscriptApp = app._instance ? app._instance.proxy : app;
   }
 
   function mountWorkspaces(element) {
@@ -331,7 +438,7 @@
         '<ui-badge :tone="plugin.statusTone || \'neutral\'" :label="plugin.statusLabel || plugin.status || \'—\'"></ui-badge>' +
         '<ui-badge v-if="plugin.status" tone="neutral" mono :label="plugin.status"></ui-badge>' +
         '</div>' +
-        '<p v-if="plugin.status === \'unused\'" class="mt-2 text-xs text-muted">当前产品没有声明这个插件，因此未装配；随包保留，可在产品声明里启用。</p>' +
+        '<p v-if="plugin.status === \'unused\'" class="mt-2 text-xs text-muted">当前产品没有默认启用这个插件；可在插件列表或本页手动启用。</p>' +
         '<p v-if="plugin.description" class="mt-2 text-sm leading-6 text-muted">{{ plugin.description }}</p>' +
         '<dl class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">' +
         '<div v-if="plugin.source"><dt class="text-xs text-muted">来源</dt><dd class="mt-1 text-sm text-ink">{{ plugin.source }}</dd></div>' +
@@ -349,7 +456,7 @@
         '<p v-if="plugin.error" class="mt-3 text-xs text-danger-ink">{{ plugin.error }}</p>' +
         '</ui-card>' +
         '<div class="mt-4 flex flex-wrap items-center gap-2">' +
-        '<form v-if="plugin.backend && plugin.status !== \'unused\'" method="post" ' +
+        '<form method="post" ' +
         ':action="plugin.enabled ? \'/extensions/\' + plugin.id + \'/disable\' : \'/extensions/\' + plugin.id + \'/enable\'">' +
         '<input type="hidden" name="csrf_token" :value="csrf">' +
         '<ui-button type="submit" :variant="plugin.enabled ? \'secondary\' : \'primary\'" size="sm" ' +
@@ -374,6 +481,8 @@
     for (var k = 0; k < workspaces.length; k += 1) mountWorkspaces(workspaces[k]);
     var detail = document.querySelectorAll('[data-ada-island="plugin-detail"]');
     for (var l = 0; l < detail.length; l += 1) mountPluginDetail(detail[l]);
+    var transcript = document.querySelectorAll('[data-ada-island="transcript"]');
+    for (var m = 0; m < transcript.length; m += 1) mountTranscript(transcript[m]);
   }
 
   if (document.readyState === 'loading') {
@@ -386,6 +495,7 @@
     mountOverview: mountOverview,
     mountExtensions: mountExtensions,
     mountWorkspaces: mountWorkspaces,
-    mountPluginDetail: mountPluginDetail
+    mountPluginDetail: mountPluginDetail,
+    mountTranscript: mountTranscript
   };
 })();

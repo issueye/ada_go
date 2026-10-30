@@ -32,6 +32,7 @@ func runGateway(args []string, stdout io.Writer) error {
 	model := fs.String("model", "gpt-4o", "模型 id")
 	baseURL := fs.String("base-url", "", "OpenAI 兼容端点")
 	fake := fs.Bool("fake", false, "Core 使用确定性回显模型")
+	debug := fs.Bool("debug", false, "把 Core 的每次出网请求/响应摘要写到 stderr（密钥脱敏；也可设 ADAG_DEBUG=1）")
 	parentPID := fs.Int("parent-pid", 0, "父进程 pid（父进程消失时网关自行退出；桌面壳/测试用）")
 	maxCores := fs.Int("max-cores", 8, "同时存活的 Core 上限")
 	idle := fs.Duration("idle-reap", gateway.DefaultIdle, "空闲 Core 回收时间")
@@ -57,6 +58,7 @@ func runGateway(args []string, stdout io.Writer) error {
 		Workspaces: workspaces, Product: *product,
 		Provider: *provider, Model: *model, BaseURL: *baseURL,
 		DataDir: *dataDir, AllowHosts: allowHosts, Fake: *fake,
+		Debug:     debugRequested(*debug),
 		Token:     accessToken,
 		CoreToken: strings.TrimSpace(os.Getenv("ADAG_CORE_TOKEN")),
 		MaxCores:  *maxCores, Idle: *idle,

@@ -5,6 +5,9 @@ package corerpc_test
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -55,6 +58,31 @@ func TestActionInvokePlanAction(t *testing.T) {
 	}
 	if res.Result.Plan.Total != 0 {
 		t.Fatalf("空计划 total = %d", res.Result.Plan.Total)
+	}
+
+	// 计划文件按会话命名：写入 TODO_<threadId>.json 后，plan 动作应读到它。
+	todo := filepath.Join(sess.Workspace(), "TODO_"+created.Thread.ID+".json")
+	body := fmt.Sprintf(`{"threadId":%q,"steps":[{"step":"写文件","status":"done"},{"step":"读卡片","status":"pending"}]}`, created.Thread.ID)
+	if err := os.WriteFile(todo, []byte(body), 0o644); err != nil {
+		t.Fatalf("写 TODO 文件: %v", err)
+	}
+	raw = c.call(t, "action.invoke", map[string]any{
+		"pluginId": "tools-plan", "action": "plan", "threadId": created.Thread.ID,
+	})
+	var filled struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Plan struct {
+				Done  int `json:"done"`
+				Total int `json:"total"`
+			} `json:"plan"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &filled); err != nil || !filled.OK {
+		t.Fatalf("读计划文件 = %s (%v)", raw, err)
+	}
+	if filled.Result.Plan.Total != 2 || filled.Result.Plan.Done != 1 {
+		t.Fatalf("计划文件没有生效: %+v", filled.Result.Plan)
 	}
 
 	// 参数缺失：invalid_params。

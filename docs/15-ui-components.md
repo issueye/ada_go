@@ -44,7 +44,8 @@
 
 当前 `shell.html.tmpl` 只在 `baseData.NeedsUI` 为 true 时加载
 `ada-ui.css` / `ada-render.js` / `ada-ui.js` / `islands.js`。目前启用的是
-`/overview` 与 `/extensions`；其它页面保持原有 SSR 资源，不额外下载引擎。
+`/overview`、`/extensions`、`/extensions/{id}`、`/workspaces`，以及**有历史消息的**
+`/threads/{id}`；其它页面保持原有 SSR 资源，不额外下载引擎。
 
 ## 2. 用法
 
@@ -140,6 +141,7 @@ kebab-case 属性会映射到 camelCase prop：`show-value` → `showValue`，
 | `Dropdown` / `DropdownButton` | `<ui-dropdown>` | `details` + `.ada-row-menu` 菜单 |
 | `Tabs` | `<ui-tabs>` | 键盘方向键、具名 slot 面板 |
 | `Icon` | `<ui-icon>` | `<use href="#i-…">`，依赖 Go 的 sprite |
+| `Markdown` | `<ui-markdown>` | 接收后端 VNode AST，负责 Markdown 排版；不接受 HTML 字符串 |
 | `Card` | `<ui-card>` | `.card` + 标题/header/footer slot |
 | `Badge` | `<ui-badge>` | `.badge badge-*` |
 | `Slider` / `Range` | `<ui-slider>` | 原生 range + `accent-color` |
@@ -226,6 +228,7 @@ kebab-case 属性会映射到 camelCase prop：`show-value` → `showValue`，
 | 组件 | Props | 说明 |
 |---|---|---|
 | `Icon` | `name`，`size`，`title`，`label` | `name` 对应 Go sprite 的 `i-*`；需要页面包含 `{{.Icons}}` |
+| `Markdown` | `nodes`（后端 VNode AST），`text`（AST 到达前的纯文本占位），`class` | 只渲染数据；Markdown 解析与清洗仍在 Go goldmark + bluemonday |
 | `Badge` | `tone` (`neutral`/`brand`/`success`/`warn`/`danger`)，`mono`，`label` | `.badge badge-*` |
 | `Spinner` | `size`，`label` | 复用 `.ada-run-status__spin` |
 | `Empty` | `icon`，`title`，`description` | action slot |
@@ -347,7 +350,7 @@ AdaUI.toast.warn('网络较慢');
 ## 7. 测试
 
 ```bash
-# 35 个 Node 用例：引擎 19 + 组件 16
+# 37 个 Node 用例：引擎 20 + 组件 17
 mingw32-make test-js
 # 或
 node --test internal/gateway/web/testdata/ada-render.test.js internal/gateway/web/testdata/ada-ui.test.js
@@ -362,11 +365,13 @@ node --test internal/gateway/web/testdata/ada-render.test.js internal/gateway/we
 - `tools/render-demo/overview.html` → `overview island smoke: PASS`
 - `tools/render-demo/extensions.html` → `extensions island smoke: PASS`
 - `tools/render-demo/pages.html` → `pages island smoke: PASS`（工作区 + 插件详情）
+- `tools/render-demo/transcript.html` → `transcript island smoke: PASS`（keyed 行 + live-stream 复用）
+- `tools/render-demo/chat-live.html` → `chat live island smoke: PASS`（假 EventSource/fetch 驱动 JSON patch）
 
 Go 侧用例：
 
 ```bash
-go test ./internal/gateway/web -run 'TestOverviewIslandAndDashboardJSON|TestExtensionsIslandAndJSON|TestWorkspacesAndPluginDetailUseAdaUI' -v
+go test ./internal/gateway/web -run 'TestOverviewIslandAndDashboardJSON|TestExtensionsIslandAndJSON|TestWorkspacesAndPluginDetailUseAdaUI|TestThreadTranscriptIslandAndJSON' -v
 ```
 
 ### 7.1 当前项目接入状态
@@ -377,16 +382,24 @@ go test ./internal/gateway/web -run 'TestOverviewIslandAndDashboardJSON|TestExte
 | `/extensions` | `data-ada-island="extensions"` | 原有插件表格 SSR | `GET /partials/extensions.json` |
 | `/extensions/{id}` | `data-ada-island="plugin-detail"` | 原有详情卡/操作 SSR | 初始 `data-ada-state`，无轮询 |
 | `/workspaces` | `data-ada-island="workspaces"` | 原有工作区选择器 SSR | 初始 `data-ada-state`，无轮询 |
-| `/threads/{id}` | 保持原 SSR + `chat-live.js` | — | — |
+| `/threads/{id}` | `data-ada-island="transcript"`（有历史消息时） | 原有 `#transcript` 行 SSR | `GET /partials/transcript/{id}`，结构变化时刷新 |
 
 - `shell.html.tmpl` 只在 `NeedsUI` 页面加载引擎/组件资源；目前由
-  `overviewData`、`handleExtensions`、`handleWorkspaces`、`handlePluginDetail` 显式置位。
+  `overviewData`、`handleExtensions`、`handleWorkspaces`、`handlePluginDetail`
+  以及有历史消息的 `handleThread` 显式置位。
 - 概览岛的插件贡献区仍在岛外，由服务端 `dashboard.widgets` 插槽渲染；客户端岛只接管
   统计卡与最近会话。
 - 插件/工作区/详情岛的启用、停用、选择、新建目录仍是普通 `POST` 表单，带 CSRF
   隐藏字段；没有 JS 时使用服务端回退 HTML。
 - 概览页原来的 htmx `every 5s` 已移除，避免服务端片段替换掉客户端 DOM；轮询改由
   `islands.js` 调 JSON 接口。
+- 对话流岛只接管持久化行：助手行由 `parts[]` 数据 + `ui-markdown` 渲染；用户/工具/
+  Notice 行仍用服务端 row HTML。结构变化时拉取 `/partials/transcript/{id}` 并用 key
+  做 VNode patch；流式文字走 `#live-stream`，实时 Markdown 由 `/markdown.ast` 返回
+  VNode AST，不再回传 HTML。终态/等待答复仍整页 reload 以刷新交互托盘与输入区。
+- 工具行在岛内通过 `.ada-transcript__item > .ada-disclosure[data-kind="tool"]`
+  缩进 40px，与助手正文（头像 28 + 间距 12）对齐；工具状态变化按 800ms 合并窗口
+  刷新，连续工具调用不会逐条刷屏。
 
 ## 8. 已知限制
 
@@ -402,6 +415,11 @@ go test ./internal/gateway/web -run 'TestOverviewIslandAndDashboardJSON|TestExte
 - `Button` 目前不透传任意 `class`；自定义 class 请用 `Card` 的 `class` 或在外层包裹。
 - `Modal` 的 `open()/close()` 方法需要通过 `ref` 拿到组件实例后调用；模板里用
   `v-model` 更直接。
+- 对话流岛的助手行是 `ui-markdown` 组件（`parts[].nodes`）；用户/工具/Notice 行仍是
+  服务端 row 模板 HTML。Markdown 只在 Go goldmark + bluemonday 解析/清洗，前端不
+  解析原始 Markdown，也不接收 HTML 字符串；`/markdown` HTML 端点保留给无组件回退。
+  结构变化时会拉取完整行 JSON（不是增量 patch），极大对话下仍有带宽成本；流式文字
+  仍走 live-stream，终态/等待答复仍 reload。
 
 ---
 

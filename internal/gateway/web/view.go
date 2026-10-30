@@ -258,6 +258,9 @@ type threadData struct {
 	Transcript   []transcriptItem
 	Interactions []interactionView
 	TurnKey      string
+	// TranscriptStateJSON 是对话流岛的初始数据：助手文本是 VNode 数据，
+	// 工具/用户/Notice 行仍是服务端渲染 HTML；没有 JS 时用 Transcript 的 SSR 行。
+	TranscriptStateJSON string
 	// Models 是当前可选的供应商/模型（model.list 投影，供输入框旁的选择器）。
 	Models            []modelOption
 	CurrentModelLabel string
@@ -300,6 +303,31 @@ type transcriptItem struct {
 	Tool  *toolView
 	Level string
 	Text  string
+}
+
+// transcriptPartState 是助手消息的一段：text 段带 VNode 数据（由 ui-markdown
+// 渲染），thinking/image 只带原始数据。
+type transcriptPartState struct {
+	Type  string          `json:"type"`
+	Text  string          `json:"text,omitempty"`
+	Nodes json.RawMessage `json:"nodes,omitempty"`
+}
+
+// transcriptRowState 是对话流 JSON 的一行：key 用于浏览器 keyed diff。
+// 助手行提供 parts（前端组件渲染）；工具/用户/Notice 行提供服务端模板 HTML。
+type transcriptRowState struct {
+	Key   string                `json:"key"`
+	Kind  string                `json:"kind,omitempty"`
+	At    string                `json:"at,omitempty"`
+	Parts []transcriptPartState `json:"parts,omitempty"`
+	HTML  string                `json:"html,omitempty"`
+}
+
+// transcriptPayload 是 /partials/transcript/{id} 的响应。
+type transcriptPayload struct {
+	ThreadID  string               `json:"threadId"`
+	RunStatus string               `json:"runStatus"`
+	Rows      []transcriptRowState `json:"rows"`
 }
 
 type partView struct {

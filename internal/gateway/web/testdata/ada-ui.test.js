@@ -40,7 +40,7 @@ test('AdaUI：注册全部组件，并保留调用方覆盖', () => {
   const names = [
     'Button', 'IconButton', 'Input', 'Textarea', 'Select', 'Dropdown', 'Tabs', 'Icon',
     'Card', 'Slider', 'Progress', 'Table', 'Modal', 'Message', 'Notice', 'Badge',
-    'Empty', 'Spinner', 'Switch', 'Checkbox', 'Radio'
+    'Empty', 'Spinner', 'Switch', 'Checkbox', 'Radio', 'Markdown'
   ];
   for (const name of names) assert.ok(UI.components[name], '缺少组件 ' + name);
   assert.equal(UI.components.TextField, UI.components.Input);
@@ -76,6 +76,34 @@ test('Button：变体、尺寸、点击与禁用', async () => {
   button.click();
   await Ada.nextTick();
   assert.equal(clicks, 1);
+});
+
+test('Markdown：渲染后端 VNode 数据，未就绪时显示纯文本', () => {
+  const { root } = mount({
+    data() {
+      return {
+        nodes: [
+          {
+            t: 'p',
+            p: {},
+            c: [
+              { t: '#text', v: 'hello ' },
+              { t: 'strong', c: [{ t: '#text', v: 'world' }] }
+            ]
+          },
+          {
+            t: 'pre',
+            c: [{ t: 'code', p: { class: 'language-go' }, c: [{ t: '#text', v: 'fmt.Println(1)' }] }]
+          }
+        ]
+      };
+    },
+    template: '<div><ui-markdown :nodes="nodes"></ui-markdown><ui-markdown text="pending"></ui-markdown></div>'
+  });
+  assert.equal(text(q(root, 'p')), 'hello world');
+  assert.equal(text(q(root, 'strong')), 'world');
+  assert.ok(q(root, 'pre code.language-go'));
+  assert.equal(text(q(root, '.markdown-pending')), 'pending');
 });
 
 test('Button / Badge：label 在空 slot 时作为 fallback 渲染', () => {

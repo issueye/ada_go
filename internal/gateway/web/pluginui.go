@@ -66,8 +66,9 @@ type FrontendPluginInfo struct {
 }
 
 // PluginLister 由渲染宿主可选实现：列出已装配的前端插件（扩展页/概览用）。
+// r 用于按当前工作区解析启用状态（同 id 的插件在不同工作区可以不同）。
 type PluginLister interface {
-	List() []FrontendPluginInfo
+	List(r *http.Request) []FrontendPluginInfo
 }
 
 // ActionBinding 是动作桥解析出的一条绑定：binding 名 → 目标后端动作。
@@ -134,13 +135,17 @@ func (s *Server) pluginScripts() []string {
 }
 
 // pluginNavLinks 收集前端插件声明的侧栏导航（供应商 / Token 用量等）。
-func (s *Server) pluginNavLinks() []pluginNavLink {
+// 只收启用的插件：停用后入口必须一起消失（INV-11）。
+func (s *Server) pluginNavLinks(r *http.Request) []pluginNavLink {
 	lister, ok := s.cfg.PluginUI.(PluginLister)
 	if !ok {
 		return nil
 	}
 	var out []pluginNavLink
-	for _, p := range lister.List() {
+	for _, p := range lister.List(r) {
+		if !p.Enabled {
+			continue
+		}
 		for _, n := range p.Nav {
 			if strings.TrimSpace(n.Label) == "" || strings.TrimSpace(n.Slug) == "" {
 				continue

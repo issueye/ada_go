@@ -185,6 +185,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /partials/dashboard", s.handleOverviewPartial)
 	mux.HandleFunc("GET /partials/dashboard.json", s.handleOverviewJSON)
 	mux.HandleFunc("GET /partials/extensions.json", s.handleExtensionsJSON)
+	mux.HandleFunc("GET /partials/transcript/{id}", s.handleTranscriptJSON)
+	mux.HandleFunc("GET /partials/slot/{name}", s.handleSlotPartial)
 	mux.HandleFunc("GET /threads/{id}", s.handleThread)
 	mux.HandleFunc("POST /threads/{id}/send", s.handleTurn)
 	mux.HandleFunc("POST /threads/{id}/abort", s.handleCancel)
@@ -199,6 +201,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /thread/{id}/cancel", s.handleCancel)
 	mux.HandleFunc("POST /thread/{id}/interaction/{requestId}", s.handleInteraction)
 	mux.HandleFunc("GET /events/{id}", s.handleEvents)
+	mux.HandleFunc("POST /markdown", s.handleMarkdown)
+	mux.HandleFunc("POST /markdown.ast", s.handleMarkdownAST)
 	mux.HandleFunc("POST /model/select", s.handleModelSelect)
 	mux.HandleFunc("GET /workspaces", s.handleWorkspaces)
 	mux.HandleFunc("GET /workspace", s.handleWorkspaceGet)
@@ -270,7 +274,7 @@ func (s *Server) base(r *http.Request, page, title string, threads []threadSumma
 	gateway := "http://" + r.Host
 	conn := connected
 	csrf := s.csrf(r)
-	pluginNav := s.pluginNavLinks()
+	pluginNav := s.pluginNavLinks(r)
 	badge := productBadge(s.cfg.BrandName, s.cfg.ProductName)
 	sidebar := renderSidebar(sidebarData{
 		Active:             page,

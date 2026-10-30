@@ -36,11 +36,13 @@ import (
 const usage = `adag —— 本地优先的 Agent 系统（单二进制，两角色）
 
 用法：
-  adag gateway    [--addr 127.0.0.1:52353]      Gateway：鉴权 + SSR + SSE（M2）
-  adag core       --workspace <dir> [--product <file>] [--self-check]
+  adag gateway    [--addr 127.0.0.1:52353] [--debug]
+                                                Gateway：鉴权 + SSR + SSE（M2）
+  adag core       --workspace <dir> [--product <file>] [--self-check] [--debug]
                                                 Agent Core：JSON-RPC over 回环 WebSocket（M2）
-  adag chat       [--workspace <dir>] [--fake]  交互式会话（M1）
-  adag print      [--workspace <dir>] --prompt <text>
+  adag chat       [--workspace <dir>] [--fake] [--debug]
+                                                交互式会话（M1）
+  adag print      [--workspace <dir>] --prompt <text> [--debug]
                                                 单轮执行并输出（M1）
   adag threads    [--workspace <dir>]           列出线程（M1）
   adag events     --thread <id>                 以 JSONL 导出线程事件/entry（M1）
@@ -82,6 +84,19 @@ func exitCode(err error) int {
 type usageError struct{ msg string }
 
 func (e *usageError) Error() string { return e.msg }
+
+// debugRequested 让 --debug 与 ADAG_DEBUG=1 等价：Gateway 拉起的 Core 与
+// 桌面壳启动的进程都能通过环境变量继承调试开关。
+func debugRequested(flagValue bool) bool {
+	if flagValue {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ADAG_DEBUG"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
 
 func run(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
@@ -151,6 +166,7 @@ func cmdCore(args []string, stdout io.Writer) error {
 	model := fs.String("model", "gpt-4o", "模型 id")
 	dataDir := fs.String("data-dir", "", "数据目录（默认 ~/.adago/workspaces/<hash>）")
 	fake := fs.Bool("fake", false, "使用确定性回显模型（不需要密钥）")
+	debug := fs.Bool("debug", false, "把每次出网请求/响应摘要写到 stderr（密钥脱敏；也可设 ADAG_DEBUG=1）")
 	var allowHosts stringList
 	fs.Var(&allowHosts, "allow-host", "额外出网 host/端口（可重复）")
 	if err := fs.Parse(args); err != nil {
@@ -235,6 +251,7 @@ func cmdCore(args []string, stdout io.Writer) error {
 		BaseURL:    *baseURL,
 		AllowHosts: allowHosts,
 		Fake:       *fake,
+		Debug:      debugRequested(*debug),
 		// Core 由 Gateway 托管：交互由网页里的托盘回答（没有终端 stdin）。
 		HasUI: true,
 		In:    strings.NewReader(""),

@@ -58,7 +58,16 @@ func (s *stubUI) Page(pluginID, slug string, r *http.Request) (template.HTML, er
 func (s *stubUI) Styles() []string  { return s.styles }
 func (s *stubUI) Scripts() []string { return s.scripts }
 
-func (s *stubUI) List() []web.FrontendPluginInfo { return s.list }
+func (s *stubUI) List(_ *http.Request) []web.FrontendPluginInfo {
+	out := append([]web.FrontendPluginInfo(nil), s.list...)
+	for i := range out {
+		if out[i].Status == "" {
+			out[i].Status = "ready"
+		}
+		out[i].Enabled = out[i].Status != "disabled" && out[i].Status != "unused"
+	}
+	return out
+}
 
 func (s *stubUI) StaticAsset(pluginID, name string) ([]byte, bool) {
 	data, ok := s.assets[pluginID+"/"+name]
@@ -141,6 +150,47 @@ func TestPluginSlotFailureIsolated(t *testing.T) {
 	wantContains(t, body, "正常卡")
 	wantContains(t, body, "这是问题") // transcript 照常
 	wantNotContains(t, body, "boom")
+}
+
+// 运行中只刷新单个插槽：返回与整页同形的 .ada-slot 宿主，客户端直接替换。
+func TestSlotPartialRendersSingleSlot(t *testing.T) {
+	ui := &stubUI{slots: map[string]struct {
+		body  template.HTML
+		count int
+	}{
+		"chat.corner": {`<details id="todo-card"><summary>Todo 列表 3/3</summary></details>`, 1},
+	}}
+	srv, _ := newServerWithUI(t, newFakeCore(), ui)
+
+	rec := serve(t, srv, "GET", "/partials/slot/chat.corner?threadId=th_1", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET 单槽 = %d, want 200（body=%s）", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Fatalf("Content-Type = %q", ct)
+	}
+	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "no-store") {
+		t.Fatalf("Cache-Control = %q，局部刷新的响应必须 no-store", cc)
+	}
+	body := rec.Body.String()
+	wantContains(t, body, `data-slot="chat.corner" data-contributors="1"`)
+	wantContains(t, body, "todo-card")
+	// 其它插槽不应该被顺带渲染。
+	wantNotContains(t, body, "thread.tray")
+}
+
+func TestSlotPartialRejectsUnknownAndMissingThread(t *testing.T) {
+	srv, _ := newServerWithUI(t, newFakeCore(), &stubUI{})
+	if rec := serve(t, srv, "GET", "/partials/slot/not.a.slot?threadId=th_1", nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("未知插槽 = %d, want 404", rec.Code)
+	}
+	if rec := serve(t, srv, "GET", "/partials/slot/chat.corner", nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("缺少 threadId = %d, want 400", rec.Code)
+	}
+	// 非 thread 宿主的插槽不通过这个端点（避免把整页级插槽当局部片段）。
+	if rec := serve(t, srv, "GET", "/partials/slot/topbar.right?threadId=th_1", nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("topbar.right = %d, want 404", rec.Code)
+	}
 }
 
 // ---- /ext 页面路由 ---------------------------------------------------------

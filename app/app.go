@@ -162,9 +162,11 @@ func OfficialScripts() ([]host.Script, error) {
 //     官方同 id 的冲突也由调用方剥掉（官方不可被磁盘同名包覆盖，6.9）。
 //   - disabled 列出本次不装配的产品插件 id（plugin_meta.enabled=false）。禁用唯一
 //     策略插件且目录里仍有写/执行工具时，Runtime.Check 拒绝（plugin.setEnabled 门禁）。
+//   - optIn 是产品未声明、但用户显式启用过的随包插件 id：按与产品插件相同的
+//     加载/能力/门禁路径追加装配（后端段进目录，前端段记入 frontendDecls）。
 //
 // 与 Assemble 共用同一条装配路径：清单校验、能力授予、贡献结算与门禁判定完全一致。
-func AssembleWithExtras(ctx context.Context, p *coreapp.Product, base, extras []host.Script, disabled map[string]bool, deps Deps) (*Assembly, error) {
+func AssembleWithExtras(ctx context.Context, p *coreapp.Product, base, extras []host.Script, disabled, optIn map[string]bool, deps Deps) (*Assembly, error) {
 	if len(base) == 0 {
 		b, err := OfficialScripts()
 		if err != nil {
@@ -172,7 +174,7 @@ func AssembleWithExtras(ctx context.Context, p *coreapp.Product, base, extras []
 		}
 		base = b
 	}
-	return assembleSet(ctx, p, base, extras, disabled, deps)
+	return assembleSet(ctx, p, base, extras, disabled, optIn, deps)
 }
 
 // Assemble 把产品声明与插件集合结算成运行期目录（06 §6.5 的两阶段在 M3 落地；
@@ -181,12 +183,12 @@ func AssembleWithExtras(ctx context.Context, p *coreapp.Product, base, extras []
 // 缺失插件是装配错误而不是静默跳过：产品声明就是「启用这些插件」的承诺，
 // 少一个就等于承诺没兑现（1.5.5 禁用即能力消失的反向）。
 func Assemble(ctx context.Context, p *coreapp.Product, scripts []host.Script, deps Deps) (*Assembly, error) {
-	return assembleSet(ctx, p, scripts, nil, nil, deps)
+	return assembleSet(ctx, p, scripts, nil, nil, nil, deps)
 }
 
 // assembleSet 是 Assemble / AssembleWithExtras 的共用实现：
 // 先按产品声明挑选（disabled 的容忍缺席），再按 id 排序追加第三方。
-func assembleSet(ctx context.Context, p *coreapp.Product, base, extras []host.Script, disabled map[string]bool, deps Deps) (*Assembly, error) {
+func assembleSet(ctx context.Context, p *coreapp.Product, base, extras []host.Script, disabled, optIn map[string]bool, deps Deps) (*Assembly, error) {
 	if p == nil {
 		return nil, errors.New("app: Assemble 需要非空产品声明")
 	}
@@ -252,6 +254,30 @@ func assembleSet(ctx context.Context, p *coreapp.Product, base, extras []host.Sc
 		sort.Strings(have)
 		return nil, fmt.Errorf("app: 产品 %s 声明的插件没有随包提供：%s（可用：%s）",
 			p.ID, strings.Join(missing, ", "), strings.Join(have, ", "))
+	}
+	// 用户显式启用的未声明随包插件：与产品插件同一条装配路径追加。
+	// 前端段记入 frontendDecls（由 Gateway 渲染桥装配），后端段进目录。
+	if len(optIn) > 0 {
+		optIDs := make([]string, 0, len(optIn))
+		for id := range optIn {
+			if productIDs[id] {
+				continue
+			}
+			if _, ok := byID[id]; ok {
+				optIDs = append(optIDs, id)
+			}
+		}
+		sort.Strings(optIDs)
+		for _, id := range optIDs {
+			s := byID[id]
+			if deps.FrontendIDs[id] {
+				frontendDecls = append(frontendDecls, id)
+			}
+			if s.Manifest.Backend == nil {
+				continue
+			}
+			picked = append(picked, s)
+		}
 	}
 	// 第三方按 id 排序追加：与官方同一条装配路径，顺序确定保证回放确定性（6.5）。
 	extraIDs := make([]string, 0, len(extras))

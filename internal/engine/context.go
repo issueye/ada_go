@@ -170,8 +170,10 @@ func (r *run) headID() string {
 	return t.HeadEntryID
 }
 
-// appendAssistant 落助手消息 entry（含 toolCalls，供回执配对）。
-func (r *run) appendAssistant(m domain.Message) {
+// appendAssistant 落助手消息 entry（含 toolCalls，供回执配对），落库成功后再发
+// message-end：客户端收到 end 会立即拉取对话流并丢掉实时块，先发后落库会让它
+// 拉到一份还不包含这条消息的历史（实时块已删、服务端行还没出现）。
+func (r *run) appendAssistant(m domain.Message, messageID string) {
 	defer r.pending.Reset() // 增量缓冲已随本条消息落库，避免取消路径重复落一条。
 	raw, err := json.Marshal(m)
 	if err != nil {
@@ -183,6 +185,12 @@ func (r *run) appendAssistant(m domain.Message) {
 		Tokens: int64(estimateTokens(string(raw))),
 	}); err != nil {
 		r.emitErrorCode(domain.CodeStorageBusy, "追加助手消息失败: "+err.Error())
+		return
+	}
+	if messageID != "" {
+		// pending 里的增量文本此时还没 Reset（defer 在本函数返回后才执行），
+		// 指纹仍然包含本条消息的正文。
+		r.emitMessageEnd(messageID)
 	}
 }
 
@@ -223,7 +231,7 @@ func (r *run) flushPartial(text, thinking string) {
 	if text != "" {
 		parts = append(parts, domain.Part{Type: domain.PartText, Text: text})
 	}
-	r.appendAssistant(domain.Message{Role: domain.RoleAssistant, Parts: parts})
+	r.appendAssistant(domain.Message{Role: domain.RoleAssistant, Parts: parts}, "")
 }
 
 // keepPartialMessage 在取消路径上确保已到达的内容不丢。

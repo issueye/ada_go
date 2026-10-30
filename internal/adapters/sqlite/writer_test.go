@@ -304,3 +304,44 @@ func TestCloseCancelsInFlightAndDrains(t *testing.T) {
 		}
 	}
 }
+
+// TestAppendEntryDefaultsParentToHead 钉住线性追加语义：省略 ParentID 时接到当前
+// head。漏掉这一步，parent_id 全是 NULL，TraceFromHead 只回放最新一条 entry，
+// 模型在第一次工具调用后就丢掉用户指令与工具结果（表现为「答非所问」）。
+func TestAppendEntryDefaultsParentToHead(t *testing.T) {
+	t.Parallel()
+	ws, dataDir := newWorkspace(t)
+	ctx := context.Background()
+	st := openStore(t, testConfig(t, ws, dataDir))
+	th := mustThread(t, st, "线性追加")
+
+	first := appendMessage(t, st, th.ID, "", "一")
+	if first.ParentID != "" {
+		t.Fatalf("首条 entry 不该有父节点，got %q", first.ParentID)
+	}
+	second := appendMessage(t, st, th.ID, "", "二")
+	if second.ParentID != first.ID {
+		t.Fatalf("第二条 ParentID = %q，期望当前 head %q", second.ParentID, first.ID)
+	}
+	third := appendMessage(t, st, th.ID, "", "三")
+	if third.ParentID != second.ID {
+		t.Fatalf("第三条 ParentID = %q，期望当前 head %q", third.ParentID, second.ID)
+	}
+
+	win, err := st.TraceFromHead(ctx, th.ID)
+	if err != nil {
+		t.Fatalf("TraceFromHead: %v", err)
+	}
+	if len(win.Entries) != 3 {
+		t.Fatalf("TraceFromHead 回放 %d 条，期望 3 条（parent 链断开）", len(win.Entries))
+	}
+	if win.Entries[0].ID != first.ID || win.Entries[2].ID != third.ID {
+		t.Fatalf("回放顺序不对: %s..%s", win.Entries[0].ID, win.Entries[2].ID)
+	}
+
+	// 显式 ParentID 仍表示分支写入，不能被 head 覆盖。
+	branch := appendMessage(t, st, th.ID, first.ID, "分支")
+	if branch.ParentID != first.ID {
+		t.Fatalf("显式 ParentID = %q，期望 %q", branch.ParentID, first.ID)
+	}
+}

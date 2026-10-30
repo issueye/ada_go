@@ -161,6 +161,42 @@ func TestBridgeTaskPlanSlotWithoutAction(t *testing.T) {
 	}
 }
 
+// 停用的前端插件不渲染、也不触发它的动作预取（Enabled 回调按工作区过滤）。
+func TestBridgeSkipsDisabledPlugin(t *testing.T) {
+	scripts, err := official.FrontendScripts()
+	if err != nil {
+		t.Fatalf("official.FrontendScripts: %v", err)
+	}
+	core := newFakeCore()
+	var asked []string
+	b, err := frontend.NewBridge(frontend.BridgeOptions{
+		Scripts:     scripts,
+		Supervisor:  &fakeSup{core: core},
+		ProductName: "ada-go",
+		Enabled: func(_ *http.Request, id string) bool {
+			asked = append(asked, id)
+			return id != "tools-plan"
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewBridge: %v", err)
+	}
+
+	html, count, err := b.Slot("chat.corner", request(t, "/thread/th_1"))
+	if err != nil {
+		t.Fatalf("Slot(chat.corner): %v", err)
+	}
+	if html != "" || count != 0 {
+		t.Fatalf("停用插件的贡献仍被渲染: %q (%d)", html, count)
+	}
+	if len(asked) == 0 {
+		t.Fatal("Enabled 回调没有被调用")
+	}
+	if got := core.count("action.invoke"); got != 0 {
+		t.Fatalf("停用插件仍触发了动作预取: %d 次", got)
+	}
+}
+
 // 动作预取成功：计划卡用真实动作结果渲染。
 func TestBridgeTaskPlanSlotWithActionResult(t *testing.T) {
 	core := newFakeCore().on("action.invoke",

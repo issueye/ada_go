@@ -76,7 +76,7 @@ type Descriptor struct {
     ParallelSafe   bool
     Repeatable     bool            // 轮询类工具不计入循环检测
     Rollback       bool            // 执行前纳入检查点
-    TerminatesTurn bool            // finish/ask 这类
+    TerminatesTurn bool            // finish 这类（ask 返回后继续本轮，不算终止）
     PluginID       string          // 贡献该工具的插件 id（如 tools-fs）
 }
 

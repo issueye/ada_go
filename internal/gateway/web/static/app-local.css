@@ -366,7 +366,7 @@ select:focus {
 
 .error-detail {
   padding: 10px;
-  background: var(--ph-code-bg);
+  background: var(--ph-subtle);
   border-radius: var(--ada-radius-sm);
   color: var(--ph-muted);
   overflow-wrap: anywhere;
@@ -414,7 +414,7 @@ select:focus {
 }
 
 .run-badge[data-state="terminal"] {
-  background: var(--ph-code-bg);
+  background: var(--ph-subtle);
   color: var(--ph-muted);
 }
 
@@ -438,34 +438,11 @@ select:focus {
   display: none;
 }
 
-.live-thinking {
-  padding-left: 10px;
-  border-left: 2px solid var(--ph-line-strong);
-  color: var(--ph-muted);
-  font-size: 13px;
-}
-
-/* 实时思考的头部与落库后的「思考」折叠行同构：同一个图标 + 同一个标签。 */
-.live-thinking__head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
-  color: var(--ph-faint);
-  font-size: var(--ada-text-xs);
-  font-weight: 500;
-}
-
-.live-thinking__text {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 .live-status {
   margin: 0 0 12px;
   padding: 8px 12px;
   border-radius: var(--ada-radius-sm);
-  background: var(--ph-code-bg);
+  background: var(--ph-subtle);
   color: var(--ph-muted);
   font-size: 13px;
 }
@@ -600,7 +577,7 @@ select:focus {
   padding: 8px 10px;
   max-height: 320px;
   overflow: auto;
-  background: var(--ph-code-bg);
+  background: var(--ph-subtle);
   border-radius: var(--ada-radius-sm);
   font-size: 12px;
   white-space: pre-wrap;
@@ -616,7 +593,7 @@ select:focus {
   max-height: 260px;
   overflow: auto;
   padding: 8px;
-  background: var(--ph-code-bg);
+  background: var(--ph-subtle);
   border-radius: var(--ada-radius-sm);
 }
 
@@ -627,7 +604,7 @@ select:focus {
 }
 
 .notice-info {
-  background: var(--ph-code-bg);
+  background: var(--ph-subtle);
   color: var(--ph-muted);
 }
 
@@ -1118,3 +1095,19 @@ html:not(.js) .ada-select [data-select-menu] {
   min-width: 160px;
 }
 
+
+/* ── 插件列表：表格自己滚动，表头吸顶 ─────────────────────────────────
+   页面整体也可以滚，但插件表通常很长（随包 + 已安装），让表体独立滚动
+   可以保持页头、操作列和「重载插件」按钮始终可见。 */
+.ada-extensions .ada-table-wrap {
+  max-height: max(240px, calc(100dvh - 250px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.ada-extensions .ada-table-wrap thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--ph-surface);
+}

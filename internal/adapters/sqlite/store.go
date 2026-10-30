@@ -396,7 +396,7 @@ VALUES(?, ?, ?, NULL, ?, ?, 0)`,
 // 契约细节：
 //   - seq 在唯一写协程内分配（SELECT MAX(seq)+1 FOR UPDATE 语义由单写者 + BEGIN IMMEDIATE 提供）；
 //   - ID 为空时由 Config.NewID 生成（ULID）；
-//   - ParentID 非空时必须属于同一线程（否则拒绝，不猜父节点）；
+//   - ParentID 为空时接到当前 head（线性追加）；非空时必须属于同一线程（否则拒绝，不猜父节点）；
 //   - 写入后把 threads.head_entry_id 指向新 entry：线性追加正是靠这一步成立，
 //     分支切换用 MoveHead，历史不改写（04 §5.7「编辑并重发」）。
 func (st *Store) AppendEntry(ctx context.Context, e ports.Entry) (ports.Entry, error) {
@@ -425,6 +425,19 @@ func (st *Store) AppendEntry(ctx context.Context, e ports.Entry) (ports.Entry, e
 		}
 		if err := requireThread(ctx, tx, e.ThreadID); err != nil {
 			return err
+		}
+		// 省略 ParentID 表示「线性追加到当前 head」，与内存替身同一口径；
+		// 显式传 ParentID 才是分支写入。不补这一步 parent_id 会全是 NULL，
+		// TraceFromHead 只能回溯到最新一条 entry，模型随即丢掉指令与工具结果。
+		if e.ParentID == "" {
+			var head sql.NullString
+			if err := tx.QueryRowContext(ctx,
+				`SELECT head_entry_id FROM threads WHERE id = ?`, e.ThreadID).Scan(&head); err != nil {
+				return fmt.Errorf("sqlite: 读取线程 head 失败: %w", err)
+			}
+			if head.Valid {
+				e.ParentID = head.String
+			}
 		}
 		if e.ParentID != "" {
 			if err := requireEntryInThread(ctx, tx, e.ThreadID, e.ParentID); err != nil {

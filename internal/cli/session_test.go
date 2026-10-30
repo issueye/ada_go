@@ -82,6 +82,65 @@ func TestSessionFakeRunAndExport(t *testing.T) {
 	}
 }
 
+// 产品未声明的随包插件可以从界面显式启用：plugin_meta.user_set 让装配把它加回来。
+func TestSessionEnableUndeclaredPlugin(t *testing.T) {
+	cfg := testConfig(t, "")
+	ctx := context.Background()
+	sess, err := cli.Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer sess.Close(ctx)
+
+	hasTool := func(name string) bool {
+		for _, d := range sess.Assembly().Tools.List(ctx) {
+			if d.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	if hasTool("git_status") {
+		t.Fatal("headless 产品不应默认装配 tools-git")
+	}
+	view, ok := viewOf(sess, ctx, "tools-git")
+	if !ok || view.Enabled || view.Status != "unused" {
+		t.Fatalf("未启用前 tools-git = %+v（ok=%v）", view, ok)
+	}
+
+	if _, err := sess.SetPluginEnabled(ctx, "tools-git", true); err != nil {
+		t.Fatalf("启用 tools-git: %v", err)
+	}
+	if !hasTool("git_status") {
+		t.Fatal("启用后 tools-git 的工具应出现在目录里")
+	}
+	view, _ = viewOf(sess, ctx, "tools-git")
+	if !view.Enabled || view.Status != "ready" {
+		t.Fatalf("启用后 tools-git = %+v", view)
+	}
+
+	if _, err := sess.SetPluginEnabled(ctx, "tools-git", false); err != nil {
+		t.Fatalf("停用 tools-git: %v", err)
+	}
+	if hasTool("git_status") {
+		t.Fatal("停用后 tools-git 的工具应消失")
+	}
+	view, _ = viewOf(sess, ctx, "tools-git")
+	if view.Enabled || view.Status != "unused" {
+		t.Fatalf("停用后 tools-git = %+v", view)
+	}
+}
+
+// viewOf 从 plugin.list 投影里取一个插件（测试辅助）。
+func viewOf(sess *cli.Session, ctx context.Context, id string) (cli.PluginView, bool) {
+	for _, v := range sess.PluginViews(ctx) {
+		if v.ID == id {
+			return v, true
+		}
+	}
+	return cli.PluginView{}, false
+}
+
 func TestSessionScriptedToolTurn(t *testing.T) {
 	ws := t.TempDir()
 	data := t.TempDir()
@@ -174,6 +233,24 @@ func TestSessionAskUserRoundTripsThroughUI(t *testing.T) {
 	}
 	if !strings.Contains(jsonl.String(), "用户的回答（input）：Ada") {
 		t.Fatalf("工具结果里没有界面给出的答案:\n%s", jsonl.String())
+	}
+
+	// 答题后的第二次模型请求必须同时带上原始指令和工具结果：问答不是轮次终点。
+	reqs := fake.Requests()
+	if len(reqs) < 2 {
+		t.Fatalf("模型请求数 = %d，期望至少 2（答题后继续本轮）", len(reqs))
+	}
+	var contextText strings.Builder
+	for _, m := range reqs[1].Messages {
+		for _, p := range m.Parts {
+			contextText.WriteString(p.Text)
+		}
+	}
+	if !strings.Contains(contextText.String(), "问我名字") {
+		t.Fatalf("第二次请求丢了原始指令（parent 链/上下文重建有问题）:\n%s", contextText.String())
+	}
+	if !strings.Contains(contextText.String(), "Ada") {
+		t.Fatalf("第二次请求丢了界面回答:\n%s", contextText.String())
 	}
 }
 

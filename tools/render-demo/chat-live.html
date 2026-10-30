@@ -1,0 +1,138 @@
+<!doctype html>
+<!--
+  chat-live + transcript 岛集成冒烟：用假 EventSource/fetch 验证
+  item.updated → JSON 行 → VNode patch 的链路。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="csrf-token" content="csrf-token">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chat live island smoke</title>
+<link rel="stylesheet" href="../../internal/gateway/web/static/tokens.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/app.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/components.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/layout.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/widgets.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/shell.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/pages.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/app-local.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ada-ui.css">
+<style>
+  body { padding: 24px; }
+  #log { margin-top: 16px; background: var(--ph-subtle); padding: 12px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<main class="ada-main">
+  <div class="ada-scroll" id="chat-scroll"><div class="ada-wrap ada-wrap--page">
+    <div id="transcript-island" data-ada-island="transcript">
+      <div id="transcript" class="ada-transcript" data-thread-id="th_1" data-run-status="running">
+        <div class="ada-msg ada-msg--user" data-item-key="e1"><div class="ada-bubble"><div class="part-text">问题</div></div></div>
+        <div id="live-stream" class="live-stream" hidden></div>
+      </div>
+    </div>
+  </div></div>
+</main>
+<pre id="log"></pre>
+
+<script>
+  window.__esHandlers = {};
+  window.__fetchCalls = [];
+  window.EventSource = function (url) {
+    this.url = url;
+    this.addEventListener = function (name, fn) { window.__esHandlers[name] = fn; };
+    this.close = function () {};
+    window.__es = this;
+  };
+  window.fetch = function (url) {
+    window.__fetchCalls.push(url);
+    if (url === "/markdown.ast") {
+      return Promise.resolve({
+        ok: true,
+        json: function () {
+          return Promise.resolve({ nodes: [{ t: "p", c: [{ t: "#text", v: "流式内容" }] }] });
+        }
+      });
+    }
+    return Promise.resolve({
+      ok: true,
+      json: function () {
+        return Promise.resolve({
+          threadId: "th_1",
+          runStatus: "running",
+          rows: [
+            { key: "e9", html: '<div class="ada-msg ada-msg--assistant" data-item-key="e9"><div class="ada-msg__body markdown-body ada-markdown"><div class="part-text">新行</div></div></div>' },
+            { key: "tool:call_9", html: '<details class="ada-disclosure" data-kind="tool" data-key="call_9" data-item-key="tool:call_9"><summary class="ada-disclosure__summary"><span class="ada-disclosure__label">read_file</span></summary><div class="ada-disclosure__rail">ok</div></details>' }
+          ]
+        });
+      }
+    });
+  };
+</script>
+<script src="../../internal/gateway/web/static/components.js" defer></script>
+<script src="../../internal/gateway/web/static/ada-render.js" defer></script>
+<script src="../../internal/gateway/web/static/ada-ui.js" defer></script>
+<script src="../../internal/gateway/web/static/islands.js" defer></script>
+<script src="../../internal/gateway/web/static/chat-live.js" defer></script>
+<script>
+  window.addEventListener("load", async function () {
+    const log = [];
+    let failed = 0;
+    function check(name, fn) {
+      try { fn(); log.push("PASS " + name); }
+      catch (error) { failed += 1; log.push("FAIL " + name + ": " + (error && error.message ? error.message : error)); }
+    }
+    function assert(condition, message) { if (!condition) throw new Error(message || "assertion failed"); }
+    function q(selector) { return document.querySelector(selector); }
+    function qa(selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)); }
+    function text(node) { return node ? node.textContent : ""; }
+
+    check("transcript island mounted before chat-live", function () {
+      assert(q("#transcript-island").getAttribute("data-ada-mounted") === "1");
+      assert(q("#transcript-island")._adaTranscriptApp);
+      assert(qa("#transcript .ada-transcript__item").length === 1);
+    });
+    check("chat-live opened event source", function () {
+      assert(window.__es && window.__es.url === "/events/th_1");
+    });
+
+    const handler = window.__esHandlers["evt.item.updated"];
+    assert(handler, "missing evt.item.updated handler");
+    handler({ data: JSON.stringify({ key: "tool:call_1", status: "ok" }) });
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    check("item.updated fetched transcript JSON", function () {
+      assert(window.__fetchCalls.some((url) => url === "/partials/transcript/th_1"));
+    });
+    check("JSON rows patched into island", function () {
+      assert(qa("#transcript .ada-transcript__item").length === 2);
+      assert(text(q('#transcript [data-item-key="e9"]')).includes("新行"));
+      assert(q("#live-stream"));
+    });
+    check("tool disclosure rebound after patch", function () {
+      const tool = q('#transcript [data-key="call_9"]');
+      assert(tool);
+      assert(tool.getAttribute("data-ada-bound") === "1");
+      // 与思考正文对齐：头像 28 + 间距 12。
+      assert(window.getComputedStyle(tool).marginLeft === "40px");
+    });
+
+    const delta = window.__esHandlers["evt.message.delta"];
+    assert(delta, "missing evt.message.delta handler");
+    delta({ data: JSON.stringify({ messageId: "m1", text: "**流式**" }) });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+
+    check("live markdown uses AST component", function () {
+      assert(q("#live-stream .ada-msg--assistant"));
+      assert(text(q("#live-stream .live-text p")).includes("流式内容"));
+      assert(window.__fetchCalls.some((url) => url === "/markdown.ast"));
+    });
+
+    document.getElementById("log").textContent = log.join("\n");
+    window.__CHAT_LIVE_RESULT__ = { failed: failed, log: log };
+    document.title = failed === 0 ? "chat live island smoke: PASS" : "chat live island smoke: FAIL";
+  });
+</script>
+</body>
+</html>

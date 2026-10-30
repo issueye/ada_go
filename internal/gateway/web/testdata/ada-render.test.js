@@ -164,6 +164,14 @@ test('patch：keyed 列表重排复用节点', async () => {
   assert.equal(ul.childNodes[0], c);
   assert.equal(ul.childNodes[1], b);
   assert.equal(ul.childNodes[2], a);
+
+  items.splice(1, 0, { id: 'x', label: 'X' });
+  await nextTick();
+  assert.equal(domText(ul), 'CXBA');
+  assert.equal(ul.childNodes[0], c);
+  assert.equal(domText(ul.childNodes[1]), 'X');
+  assert.equal(ul.childNodes[2], b);
+  assert.equal(ul.childNodes[3], a);
 });
 
 /* ── 组件、props、emit、slots ───────────────────────────────────────── */
@@ -301,6 +309,22 @@ test('renderToJSON：v-html 内容拒绝进入 SSR 线格式', () => {
 });
 
 /* ── hydration ──────────────────────────────────────────────────────── */
+
+test('mount：清理容器里的 SSR 回退，hydrate 保留节点', () => {
+  const fallbackRoot = container();
+  fallbackRoot.innerHTML = '<p class="fallback">SSR</p>';
+  const mounted = createApp({ render: (h) => h('div', null, 'client') });
+  mounted.mount(fallbackRoot);
+  assert.equal(fallbackRoot.childNodes.length, 1);
+  assert.equal(domText(fallbackRoot), 'client');
+
+  const hydrateRoot = container();
+  hydrateRoot.innerHTML = '<div class="keep">SSR</div>';
+  const serverNode = hydrateRoot.firstChild;
+  const hydrated = createApp({ render: (h) => h('div', { class: 'keep' }, 'SSR') });
+  hydrated.mount(hydrateRoot, { hydrate: true });
+  assert.equal(hydrateRoot.firstChild, serverNode);
+});
 
 test('hydrate：复用服务端节点并在更新时就地 patch', async () => {
   const app = createApp({

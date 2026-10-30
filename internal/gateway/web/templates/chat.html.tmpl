@@ -14,6 +14,7 @@
           <div class="ada-empty__action"><a class="ada-btn ada-btn--primary ada-btn--md" href="">重新连接</a></div>
         </div>
         {{else if .Thread.ID}}
+        <div id="transcript-island"{{if .Transcript}} data-ada-island="transcript" data-ada-state="{{.TranscriptStateJSON}}"{{end}}>
         <div id="transcript" class="ada-transcript" data-thread-id="{{.Thread.ID}}" data-run-status="{{.Run.Status}}">
           {{if .Transcript}}{{range .Transcript}}{{template "row" .}}{{end}}{{else}}
           <div class="ada-empty">
@@ -23,8 +24,9 @@
           </div>
           {{end}}
           <div id="live-stream" class="live-stream" aria-live="polite" aria-label="实时输出" hidden></div>
-          {{slot "transcript.after" .Slots.TranscriptAfter .SlotCounts.TranscriptAfter ""}}
         </div>
+        </div>
+        {{slot "transcript.after" .Slots.TranscriptAfter .SlotCounts.TranscriptAfter ""}}
         <div id="live-status" class="live-status" role="status" aria-live="polite" hidden></div>
         {{if .Run.ErrorLabel}}
         <div class="ada-run-error" role="alert">
@@ -116,13 +118,16 @@
           <span class="ada-aux__item ada-aux__item--neutral"><span>工作区：{{.WorkspaceName}}</span></span>
         </span>
         <div class="ada-aux__actions">
-          {{if .Run.Active}}<form class="ada-action-form" method="post" action="/threads/{{.Thread.ID}}/abort" data-confirm="确定中止当前轮次吗？"><button class="ada-btn ada-btn--danger ada-btn--sm ada-aux__action" type="submit">{{icon "i-stop" 14}}<span class="ada-btn__label">中止</span></button></form>{{end}}
+          {{/* 按钮用 form 属性关联到下方的独立表单：form 不能嵌套在发送表单里，
+               否则解析器会提前闭合外层表单，而且中止表单拿不到 CSRF 字段。 */}}
+          {{if .Run.Active}}<button class="ada-btn ada-btn--danger ada-btn--sm ada-aux__action" type="submit" form="abort-form">{{icon "i-stop" 14}}<span class="ada-btn__label">中止</span></button>{{end}}
         </div>
         <span class="ada-aux__plugins">{{slot "composer.footer" .Slots.ComposerFooter .SlotCounts.ComposerFooter ""}}</span>
       </div>
     </div>
     <input type="hidden" name="idempotencyKey" value="{{.TurnKey}}">
   </form>
+  {{if .Run.Active}}<form id="abort-form" class="ada-action-form" method="post" action="/threads/{{.Thread.ID}}/abort" data-confirm="确定中止当前轮次吗？">{{template "csrf" .}}</form>{{end}}
   <script src="{{asset "chat-live.js"}}" defer></script>
   {{end}}
 {{template "shell_end" .}}{{end}}

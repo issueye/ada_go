@@ -215,19 +215,19 @@ func (r *run) loop(tools []domain.Descriptor) domain.TerminalReason {
 		}
 
 		// 6d. 流式请求 + 6e 组装。
-		assistant, calls, reason, ok := r.streamOnce(system, messages)
+		assistant, calls, messageID, reason, ok := r.streamOnce(system, messages)
 		if !ok {
 			return reason
 		}
 
 		if len(calls) == 0 {
 			// 自然收束（没有工具调用）。
-			r.appendAssistant(assistant)
+			r.appendAssistant(assistant, messageID)
 			r.afterTurn()
 			return TerminalCompleted
 		}
 
-		r.appendAssistant(assistant)
+		r.appendAssistant(assistant, messageID)
 
 		// 6g. 工具：顺序预检 → 执行 → 结构化回执 → 追加结果。
 		result := r.runTools(calls, tools)
@@ -291,7 +291,7 @@ func (r *run) budgetCheck() domain.TerminalReason {
 }
 
 // streamOnce 请求一次模型并组装 assistant 消息（03 §5.5 统一增量）。
-func (r *run) streamOnce(system string, messages []domain.Message) (domain.Message, []domain.ToolCall, domain.TerminalReason, bool) {
+func (r *run) streamOnce(system string, messages []domain.Message) (domain.Message, []domain.ToolCall, string, domain.TerminalReason, bool) {
 	req := ports.Request{
 		Model:    r.spec.Model,
 		System:   system,
@@ -302,10 +302,10 @@ func (r *run) streamOnce(system string, messages []domain.Message) (domain.Messa
 	stream, err := r.deps.Model.Stream(r.ctx, req)
 	if err != nil {
 		if ctxErr := r.ctx.Err(); ctxErr != nil {
-			return domain.Message{}, nil, TerminalCancelled, false
+			return domain.Message{}, nil, "", TerminalCancelled, false
 		}
 		r.emitErrorCode(domain.CodeProviderError, "模型请求失败: "+err.Error())
-		return domain.Message{}, nil, TerminalError, false
+		return domain.Message{}, nil, "", TerminalError, false
 	}
 	defer stream.Close()
 
@@ -322,7 +322,7 @@ func (r *run) streamOnce(system string, messages []domain.Message) (domain.Messa
 		if r.ctx.Err() != nil {
 			r.flushPartial(text.String(), thinking.String())
 			r.emitErrorCode(domain.CodeTurnAborted, "轮次已取消")
-			return domain.Message{}, nil, TerminalCancelled, false
+			return domain.Message{}, nil, messageID, TerminalCancelled, false
 		}
 		d, err := stream.Recv()
 		if err != nil {
@@ -330,7 +330,7 @@ func (r *run) streamOnce(system string, messages []domain.Message) (domain.Messa
 				// 取消贯穿（INV-8）：已到达内容保留，终态是 cancelled 而不是协议错误。
 				r.flushPartial(text.String(), thinking.String())
 				r.emitErrorCode(domain.CodeTurnAborted, "轮次在模型流中被取消")
-				return domain.Message{}, nil, TerminalCancelled, false
+				return domain.Message{}, nil, messageID, TerminalCancelled, false
 			}
 			if gotFinish {
 				break
@@ -338,7 +338,7 @@ func (r *run) streamOnce(system string, messages []domain.Message) (domain.Messa
 			// EOF / 流错误且没有终止信号（03 §5.5：EOF 不等于完成）。
 			r.emitErrorCode(domain.CodeProtocolError, "模型流异常结束: "+err.Error())
 			r.flushPartial(text.String(), thinking.String())
-			return domain.Message{}, nil, TerminalError, false
+			return domain.Message{}, nil, messageID, TerminalError, false
 		}
 		switch d.Kind {
 		case ports.DeltaTextStart, ports.DeltaThinkingStart:
@@ -381,7 +381,7 @@ func (r *run) streamOnce(system string, messages []domain.Message) (domain.Messa
 	}
 	if !gotFinish {
 		r.emitErrorCode(domain.CodeProtocolError, "模型流提前结束且无终止信号")
-		return domain.Message{}, nil, TerminalError, false
+		return domain.Message{}, nil, messageID, TerminalError, false
 	}
 
 	// 流结束后整体校验工具调用参数；失败作为工具错误回执（03 §5.5）。
@@ -411,8 +411,7 @@ func (r *run) streamOnce(system string, messages []domain.Message) (domain.Messa
 		assistant.Parts = append(assistant.Parts, domain.Part{Type: domain.PartText, Text: text.String()})
 	}
 	assistant.ToolCalls = calls
-	r.emitMessageEnd(messageID)
-	return assistant, calls, "", true
+	return assistant, calls, messageID, "", true
 }
 
 // callAcc 按 index 累积一次工具调用的参数片段。

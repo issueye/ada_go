@@ -8,13 +8,11 @@ package app_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/adag/ada-go/app"
@@ -23,41 +21,6 @@ import (
 	"github.com/adag/ada-go/internal/plugins/host"
 	"github.com/adag/ada-go/plugins/official"
 )
-
-// memState 是线程级 KV 的测试替身（host.Context.State 的形状）。
-type memState struct {
-	mu   sync.Mutex
-	data map[string]json.RawMessage
-}
-
-func newMemState() *memState { return &memState{data: map[string]json.RawMessage{}} }
-
-func (m *memState) state(_ context.Context, op host.StateOp) (json.RawMessage, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	switch op.Kind {
-	case "get":
-		if v, ok := m.data[op.Key]; ok {
-			return v, nil
-		}
-		return json.RawMessage("null"), nil
-	case "set":
-		m.data[op.Key] = op.Value
-		return nil, nil
-	case "delete":
-		delete(m.data, op.Key)
-		return nil, nil
-	case "list":
-		out := map[string]json.RawMessage{}
-		for k, v := range m.data {
-			if op.Prefix == "" || strings.HasPrefix(k, op.Prefix) {
-				out[k] = v
-			}
-		}
-		return json.Marshal(out)
-	}
-	return nil, fmt.Errorf("未知 state 操作 %q", op.Kind)
-}
 
 // testProduct 造一份最小产品声明。
 func testProduct(t *testing.T, ids ...string) *coreapp.Product {
@@ -144,10 +107,10 @@ func toolNames(asm *app.Assembly) []string {
 
 // TestToolsPlan 钉 tools-plan 的完整链路：装配 → 注册 → 调 update_plan → read_plan。
 func TestToolsPlan(t *testing.T) {
-	state := newMemState()
+	ws := tempDir(t)
 	hc := host.Context{
-		Workspace: "/workspace",
-		State:     state.state,
+		Workspace: ws,
+		ThreadID:  "th_test_plan",
 		Log:       func(string, string, map[string]any) {},
 	}
 	p := testProduct(t, "tools-plan")
@@ -176,6 +139,47 @@ func TestToolsPlan(t *testing.T) {
 	text, _ = callTool(t, asm, hc, "read_plan", map[string]any{})
 	if !strings.Contains(text, "[x] 读代码") || !strings.Contains(text, "[ ] 跑测试") {
 		t.Fatalf("read_plan 输出 = %q", text)
+	}
+
+	// 数据必须落在按会话命名的文件里，并由工具自己读写。
+	todo := filepath.Join(ws, "TODO_th_test_plan.json")
+	raw, err := os.ReadFile(todo)
+	if err != nil {
+		t.Fatalf("TODO 文件未写出（%s）: %v", todo, err)
+	}
+	for _, want := range []string{`"threadId": "th_test_plan"`, `"steps"`, `"改实现"`, `"in_progress"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("TODO 文件缺少 %q:\n%s", want, raw)
+		}
+	}
+}
+
+// 旧版本线程级 state KV 里的计划：首次读文件时迁移到 TODO_<threadId>.json。
+func TestToolsPlanMigratesLegacyState(t *testing.T) {
+	ws := tempDir(t)
+	hc := host.Context{
+		Workspace: ws,
+		ThreadID:  "th_legacy_plan",
+		State: func(_ context.Context, op host.StateOp) (json.RawMessage, error) {
+			if op.Kind == "get" && op.Key == "plan" {
+				return json.RawMessage(`[{"step":"旧计划","status":"done"}]`), nil
+			}
+			return json.RawMessage("null"), nil
+		},
+		Log: func(string, string, map[string]any) {},
+	}
+	asm := assemble(t, testProduct(t, "tools-plan"), hc, nil)
+
+	text, _ := callTool(t, asm, hc, "read_plan", map[string]any{})
+	if !strings.Contains(text, "1/1 完成") || !strings.Contains(text, "旧计划") {
+		t.Fatalf("read_plan 没读到旧 KV 计划: %q", text)
+	}
+	raw, err := os.ReadFile(filepath.Join(ws, "TODO_th_legacy_plan.json"))
+	if err != nil {
+		t.Fatalf("旧计划没有迁移到 TODO 文件: %v", err)
+	}
+	if !strings.Contains(string(raw), "旧计划") {
+		t.Fatalf("迁移后的文件内容不对:\n%s", raw)
 	}
 }
 

@@ -211,3 +211,45 @@ func TestGatewayTokenQueryLogin(t *testing.T) {
 		}
 	}
 }
+
+// 实时 Markdown 渲染端点要经过鉴权中间件，并且复用服务端清洗管线。
+func TestGatewayMarkdownEndpoint(t *testing.T) {
+	srv := newFakeGateway(t, &fakeSupervisor{client: &fakeCoreClient{responses: map[string]json.RawMessage{}}})
+
+	makeReq := func(token string, body string) *http.Response {
+		req, err := http.NewRequest(http.MethodPost, srv.URL+"/markdown", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("构造请求失败: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := (&http.Client{
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		}).Do(req)
+		if err != nil {
+			t.Fatalf("POST /markdown 失败: %v", err)
+		}
+		return resp
+	}
+
+	unauth := makeReq("", `{"text":"**x**"}`)
+	_ = unauth.Body.Close()
+	if unauth.StatusCode != http.StatusSeeOther {
+		t.Fatalf("未鉴权状态 = %d，期望 303 到登录页", unauth.StatusCode)
+	}
+
+	resp := makeReq(testAccessToken, `{"text":"**粗体**"}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("状态 = %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "<strong>粗体</strong>") {
+		t.Fatalf("正文 = %s", body)
+	}
+}

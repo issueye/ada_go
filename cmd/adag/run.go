@@ -37,6 +37,7 @@ type sessionFlags struct {
 	model       string
 	baseURL     string
 	fake        bool
+	debug       bool
 	interactive bool
 	events      string
 	thread      string
@@ -51,6 +52,7 @@ func addSessionFlags(fs *flag.FlagSet, f *sessionFlags, interactive bool) {
 	fs.StringVar(&f.model, "model", "gpt-4o", "模型 id（provider 必须声明过）")
 	fs.StringVar(&f.baseURL, "base-url", "", "OpenAI 兼容端点（默认 https://api.openai.com/v1）")
 	fs.BoolVar(&f.fake, "fake", false, "使用确定性回显模型（不需要 API key）")
+	fs.BoolVar(&f.debug, "debug", false, "把每次出网请求/响应摘要写到 stderr（密钥脱敏；也可设 ADAG_DEBUG=1）")
 	fs.BoolVar(&f.interactive, "interactive", interactive, "把审批/提问转到终端（默认 chat 开启，print 关闭）")
 	fs.StringVar(&f.events, "events", "", "把领域事件写成 JSONL 文件")
 	fs.StringVar(&f.thread, "thread", "", "继续已有线程")
@@ -78,6 +80,7 @@ func (f *sessionFlags) open(ctx context.Context, interactive bool) (*cli.Session
 		BaseURL:     f.baseURL,
 		AllowHosts:  f.allowHosts,
 		Fake:        f.fake,
+		Debug:       debugRequested(f.debug),
 		Interactive: interactive,
 		// 交互模式的终端就是界面；print 模式没有界面，ask 类工具按失败关闭。
 		HasUI:      interactive,

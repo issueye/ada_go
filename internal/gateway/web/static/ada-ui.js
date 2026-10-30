@@ -105,6 +105,22 @@
       '</svg>'
   });
 
+  // Markdown 只接收后端给的 VNode AST（不是 HTML）。流式阶段还没有 AST 时
+  // 先用 text 纯文本占位，避免空白；AST 到达后由 VNode patch 接管。
+  var Markdown = register('Markdown', {
+    props: {
+      nodes: { default: function () { return []; } },
+      text: { default: '' },
+      class: { default: 'part-text' }
+    },
+    render: function (h) {
+      var nodes = Array.isArray(this.nodes) ? this.nodes : [];
+      if (nodes.length) return h('div', { class: this.class }, nodes);
+      if (this.text) return h('div', { class: [this.class, 'markdown-pending'] }, this.text);
+      return h('div', { class: this.class });
+    }
+  });
+
   var Badge = register('Badge', {
     props: {
       tone: { default: 'neutral' },

@@ -1,13 +1,13 @@
 {
   "id": "tools-plan",
   "name": "任务计划",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "apiVersion": 1,
-  "description": "维护当前线程的任务计划（线程级 KV），并把同一份计划渲染成会话区右上角的 Todo 卡片；工具与卡片同属一个插件，禁用即整块能力消失。",
+  "description": "按会话维护任务计划（工作区根目录 TODO_<threadId>.json，由插件自己读写），并把同一份计划渲染成会话区右上角的 Todo 卡片；工具与卡片同属一个插件，禁用即整块能力消失。",
   "trust": "builtin",
   "backend": {
     "entry": "index.ts",
-    "capabilities": ["state"]
+    "capabilities": ["fs.read", "fs.write", "state"]
   },
   "frontend": {
     "capabilities": ["backend.read"],

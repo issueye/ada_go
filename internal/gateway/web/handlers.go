@@ -94,18 +94,24 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 		title = "新会话"
 	}
 	base := s.base(r, "chat", title, threads, id, true)
-	base.TopbarActions = threadTopbarActions(id, run.Active)
+	base.TopbarActions = threadTopbarActions(id, run.Active, s.csrf(r))
+	base.NeedsUI = len(transcript) > 0
 	models, modelLabel, modelValue := s.modelOptions(r, id)
+	stateJSON, err := json.Marshal(s.transcriptPayload(id, get.Run.Status, transcript))
+	if err != nil {
+		stateJSON = []byte(`{"threadId":"","runStatus":"","rows":[]}`)
+	}
 	data := threadData{
-		baseData:          base,
-		Thread:            buildThreadInfo(get.Thread),
-		Run:               run,
-		Transcript:        transcript,
-		Interactions:      buildInteractions(get.Interactions, id, s.csrf(r)),
-		TurnKey:           newIdempotencyKey(),
-		Models:            models,
-		CurrentModelLabel: modelLabel,
-		CurrentModelValue: modelValue,
+		baseData:            base,
+		Thread:              buildThreadInfo(get.Thread),
+		Run:                 run,
+		Transcript:          transcript,
+		TranscriptStateJSON: string(stateJSON),
+		Interactions:        buildInteractions(get.Interactions, id, s.csrf(r)),
+		TurnKey:             newIdempotencyKey(),
+		Models:              models,
+		CurrentModelLabel:   modelLabel,
+		CurrentModelValue:   modelValue,
 	}
 	if run.Active && !jsClient(r) {
 		// 无 JS 轮询：运行中每 2 秒刷新一次，完成即停止（7.8）。
@@ -113,6 +119,124 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 		data.RefreshSeconds = 2
 	}
 	s.render(w, http.StatusOK, "chat", data)
+}
+
+// handleTranscriptJSON 只返回对话流行，供浏览器岛做 keyed patch；
+// 行的 HTML 仍由服务端 row 模板渲染，客户端不持有 Markdown/转义逻辑。
+func (s *Server) handleTranscriptJSON(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeJSONError(w, http.StatusNotFound, "缺少会话 id")
+		return
+	}
+	rawGet, err := s.call(r, "thread.get", map[string]any{"threadId": id, "itemLimit": 100})
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, publicReason(err))
+		return
+	}
+	var get threadGetResult
+	if err := json.Unmarshal(rawGet, &get); err != nil {
+		writeJSONError(w, http.StatusBadGateway, "Core 返回了无法识别的会话数据")
+		return
+	}
+	rawEntries, err := s.call(r, "thread.entries", map[string]any{"threadId": id, "limit": 100})
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, publicReason(err))
+		return
+	}
+	var page entryPage
+	if err := json.Unmarshal(rawEntries, &page); err != nil {
+		writeJSONError(w, http.StatusBadGateway, "Core 返回了无法识别的历史数据")
+		return
+	}
+	transcript := buildTranscript(page.Entries)
+	if len(transcript) == 0 {
+		transcript = transcriptFromItems(get.Items)
+	}
+	transcript = append(transcript, noticesFromItems(get.Items)...)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(s.transcriptPayload(id, get.Run.Status, transcript))
+}
+
+func (s *Server) transcriptPayload(threadID, runStatus string, items []transcriptItem) transcriptPayload {
+	rows := make([]transcriptRowState, 0, len(items))
+	for i, item := range items {
+		key := item.Key
+		if key == "" {
+			key = fmt.Sprintf("row:%d", i)
+		}
+		if item.Kind == "assistant" {
+			parts := make([]transcriptPartState, 0, len(item.Parts))
+			for _, part := range item.Parts {
+				switch part.Type {
+				case "text":
+					parts = append(parts, transcriptPartState{
+						Type:  "text",
+						Nodes: markdownNodesJSON(part.Text),
+					})
+				case "thinking":
+					parts = append(parts, transcriptPartState{Type: "thinking", Text: part.Text})
+				case "image":
+					parts = append(parts, transcriptPartState{Type: "image"})
+				}
+			}
+			if len(parts) == 0 {
+				continue
+			}
+			rows = append(rows, transcriptRowState{
+				Key: key, Kind: "assistant", At: item.At, Parts: parts,
+			})
+			continue
+		}
+		var buf strings.Builder
+		if err := s.tmpl.ExecuteTemplate(&buf, "row", item); err != nil {
+			continue
+		}
+		rows = append(rows, transcriptRowState{
+			Key: key, Kind: item.Kind, At: item.At, HTML: buf.String(),
+		})
+	}
+	return transcriptPayload{ThreadID: threadID, RunStatus: runStatus, Rows: rows}
+}
+
+// handleSlotPartial 只返回一个插槽的宿主容器，供运行中动态刷新。
+//
+// 插件贡献仍由服务端渲染（同一个 PluginUI.Slot、同一套转义），客户端只做
+// 节点替换；工具落库后 chat-live.js 调它刷新 chat.corner，Todo 卡片不必等
+// 整页 reload 才出现。
+func (s *Server) handleSlotPartial(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.PathValue("name"))
+	host, ok := HostFor(name)
+	if !ok || host.Template != "thread" {
+		http.Error(w, "未知插槽", http.StatusNotFound)
+		return
+	}
+	if ThreadIDFromRequest(r) == "" {
+		http.Error(w, "需要 threadId", http.StatusBadRequest)
+		return
+	}
+	var body template.HTML
+	var contributors int
+	if s.cfg.PluginUI != nil {
+		var err error
+		body, contributors, err = s.cfg.PluginUI.Slot(name, r)
+		if err != nil {
+			http.Error(w, publicReason(err), http.StatusBadGateway)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write([]byte(RenderSlot(name, body, contributors, "")))
+}
+
+func writeJSONError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
 // jsClient 判断这个浏览器是否已经在跑脚本（sidebar-boot.js 首屏种的 cookie）。
@@ -1130,7 +1254,7 @@ func (s *Server) collectPlugins(r *http.Request) []pluginRow {
 		return p
 	}
 	if lister, ok := s.cfg.PluginUI.(PluginLister); ok {
-		for _, p := range lister.List() {
+		for _, p := range lister.List(r) {
 			row := upsert(p.ID)
 			row.Frontend = true
 			if p.Name != "" {
@@ -1234,6 +1358,11 @@ func (s *Server) setPluginEnabled(w http.ResponseWriter, r *http.Request, enable
 		redirect(w, flashRedirect(path, "error", cleanRPCError(err)))
 		return
 	}
+	// 前端插件是否渲染由渲染桥按 plugin.list 实时判断；让它的短缓存立刻失效。
+	if inval, ok := s.cfg.PluginUI.(interface{ InvalidateEnabled(string) }); ok {
+		ws, _ := s.resolveWorkspace(r)
+		inval.InvalidateEnabled(ws)
+	}
 	action := "已启用"
 	if !enabled {
 		action = "已停用"
@@ -1292,12 +1421,13 @@ func pluginScope(source, trust string) string {
 }
 
 // threadTopbarActions 是会话页顶栏右侧：刷新 + 运行中时的停止。
-func threadTopbarActions(threadID string, running bool) template.HTML {
+// 停止是 POST，必须带 CSRF 字段；缺了会被安全中间件以 csrf_invalid 拒绝。
+func threadTopbarActions(threadID string, running bool, csrf string) template.HTML {
 	out := fmt.Sprintf(`<a class="ada-icon-btn" href="/threads/%s" title="刷新" aria-label="刷新">%s</a>`,
 		esc(threadID), iconHTML("i-refresh", 14))
 	if running {
-		out += fmt.Sprintf(`<form class="ada-action-form" method="post" action="/threads/%s/abort" data-confirm="确定中止当前轮次吗？"><button class="ada-btn ada-btn--danger ada-btn--sm" type="submit">%s<span class="ada-btn__label">停止</span></button></form>`,
-			esc(threadID), iconHTML("i-stop", 14))
+		out += fmt.Sprintf(`<form class="ada-action-form" method="post" action="/threads/%s/abort" data-confirm="确定中止当前轮次吗？">%s<button class="ada-btn ada-btn--danger ada-btn--sm" type="submit">%s<span class="ada-btn__label">停止</span></button></form>`,
+			esc(threadID), csrfInput(csrf), iconHTML("i-stop", 14))
 	}
 	return template.HTML(out)
 }
@@ -1423,6 +1553,60 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.cfg.Events.ServeHTTP(w, r)
+}
+
+// maxMarkdownBytes 是实时 Markdown 渲染请求的上限；助手单条消息远小于此。
+const maxMarkdownBytes = 512 << 10
+
+// handleMarkdown 把流式累积的助手正文渲染成清洗后的 HTML。
+//
+// 实时流在浏览器里只有原始文本；客户端按节流节奏把累积文本发到这里，
+// 复用服务端 goldmark + bluemonday 管线，让「正在生成」与「落库后」的
+// 排版一致，同时不把未清洗的 HTML 交给前端。
+func (s *Server) handleMarkdown(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxMarkdownBytes+1))
+	if err != nil {
+		http.Error(w, "读取请求体失败", http.StatusBadRequest)
+		return
+	}
+	if len(body) > maxMarkdownBytes {
+		http.Error(w, "正文超过上限", http.StatusRequestEntityTooLarge)
+		return
+	}
+	var req struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "请求体不是合法 JSON", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = io.WriteString(w, string(renderMarkdown(req.Text)))
+}
+
+// handleMarkdownAST 是实时 Markdown 的结构化版本：返回 VNode 数据，
+// 由浏览器 ui-markdown 组件渲染，不再把 HTML 字符串交给前端。
+func (s *Server) handleMarkdownAST(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxMarkdownBytes+1))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "读取请求体失败")
+		return
+	}
+	if len(body) > maxMarkdownBytes {
+		writeJSONError(w, http.StatusRequestEntityTooLarge, "正文超过上限")
+		return
+	}
+	var req struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "请求体不是合法 JSON")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(map[string]any{"nodes": markdownVNodes(req.Text)})
 }
 
 // handleStatic 提供内嵌的静态资源（a_da token/CSS/JS 副本与 app-local.css）。

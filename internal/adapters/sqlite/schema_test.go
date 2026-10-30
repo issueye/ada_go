@@ -63,10 +63,10 @@ func TestMigrateIsIdempotent(t *testing.T) {
 }
 
 // TestMigrateFromOldVersion 验证「旧版本库→升级」的真实代码路径：
-// 先在版本 1 上建库并写数据，再用「追加了版本 2」的迁移表重新打开，
+// 先在当前最新版本上建库并写数据，再用「追加了一个临时迁移」的表重新打开，
 // 断言 user_version 前进、老数据完好、新版本对象出现。
 //
-// 版本 2 是测试专用的临时迁移（生产 migrations 只有 04 §5.7 冻结的版本 1），
+// 追加的迁移是测试专用的（生产 migrations 只到版本占位 2），
 // 这样既走了多版本升级路径，又不给生产发明表结构。
 //
 // 不并行原因：它临时替换包级 migrations 变量，与其它用例共享进程状态。
@@ -83,10 +83,11 @@ func TestMigrateFromOldVersion(t *testing.T) {
 
 	orig := migrations
 	t.Cleanup(func() { migrations = orig })
+	nextVersion := orig[len(orig)-1].Version + 1
 	migrations = append(append([]migration{}, orig...), migration{
-		Version:   orig[0].Version + 1,
+		Version:   nextVersion,
 		Statement: `CREATE TABLE m1_probe(id TEXT PRIMARY KEY, note TEXT NOT NULL);`,
-		Note:      "测试专用的版本 2（验证升级路径，不进生产）",
+		Note:      "测试专用的追加版本（验证升级路径，不进生产）",
 	})
 
 	st2 := openStore(t, testConfig(t, ws, dataDir))
@@ -94,7 +95,7 @@ func TestMigrateFromOldVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Version: %v", err)
 	}
-	if want := orig[0].Version + 1; v != want || v != SchemaVersion() {
+	if want := nextVersion; v != want || v != SchemaVersion() {
 		t.Fatalf("升级后 user_version=%d，期望 %d", v, want)
 	}
 	got, err := st2.GetThread(ctx, th.ID)
@@ -151,8 +152,9 @@ func TestMigrateFailureRollsBack(t *testing.T) {
 
 	orig := migrations
 	t.Cleanup(func() { migrations = orig })
+	nextVersion := orig[len(orig)-1].Version + 1
 	migrations = append(append([]migration{}, orig...), migration{
-		Version: orig[0].Version + 1,
+		Version: nextVersion,
 		Statement: `CREATE TABLE half_built(id TEXT PRIMARY KEY);
 CREATE TABLE half_built(id TEXT PRIMARY KEY);`, // 第二条必然失败
 		Note: "测试用的失败迁移",
@@ -177,18 +179,19 @@ CREATE TABLE half_built(id TEXT PRIMARY KEY);`, // 第二条必然失败
 	if err != nil {
 		t.Fatalf("读库版本失败: %v", err)
 	}
-	if v != orig[0].Version {
-		t.Fatalf("user_version=%d，期望停在已成功的版本 %d：失败的那一步不能写新版本号", v, orig[0].Version)
+	lastVersion := orig[len(orig)-1].Version
+	if v != lastVersion {
+		t.Fatalf("user_version=%d，期望停在已成功的版本 %d：失败的那一步不能写新版本号", v, lastVersion)
 	}
 	if tableExists(t, ctx, StateDBPath(dataDir), "half_built") {
 		t.Fatalf("失败的迁移残留了 half_built 表：事务回滚没生效")
 	}
 
-	// 库仍然可用：用原始迁移表重新打开，落在版本 1。
+	// 库仍然可用：用原始迁移表重新打开，停在最后一个自洽版本。
 	migrations = orig
 	st := openStore(t, testConfig(t, ws, dataDir))
-	if got, err := st.Version(ctx); err != nil || got != orig[0].Version {
-		t.Fatalf("回滚后重新打开：user_version=%d err=%v，期望 %d", got, err, orig[0].Version)
+	if got, err := st.Version(ctx); err != nil || got != lastVersion {
+		t.Fatalf("回滚后重新打开：user_version=%d err=%v，期望 %d", got, err, lastVersion)
 	}
 }
 

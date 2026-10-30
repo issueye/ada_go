@@ -30,8 +30,10 @@ type SpawnSpec struct {
 	DataDir    string
 	AllowHosts []string
 	Fake       bool
-	ParentPID  int
-	Token      string
+	// Debug 给 Core 加 --debug；子进程 stderr 同时转发到网关 stderr。
+	Debug     bool
+	ParentPID int
+	Token     string
 }
 
 // Process 是 Supervisor 需要的最小进程抽象；测试可注入假实现。
@@ -73,6 +75,7 @@ func (s *Supervisor) startEntry(ctx context.Context, e *entry) (
 		DataDir:    s.opts.DataDir,
 		AllowHosts: append([]string(nil), s.opts.AllowHosts...),
 		Fake:       s.opts.Fake,
+		Debug:      s.opts.Debug,
 		ParentPID:  s.opts.ParentPID,
 		Token:      s.opts.Token,
 	}
@@ -284,6 +287,9 @@ func execSpawn(ctx context.Context, spec SpawnSpec) (Process, error) {
 	if spec.Fake {
 		args = append(args, "--fake")
 	}
+	if spec.Debug {
+		args = append(args, "--debug")
+	}
 	for _, h := range spec.AllowHosts {
 		args = append(args, "--allow-host", h)
 	}
@@ -295,7 +301,12 @@ func execSpawn(ctx context.Context, spec SpawnSpec) (Process, error) {
 		return nil, fmt.Errorf("创建 stdout 管道失败: %w", err)
 	}
 	stderr := &tailBuffer{max: 8 << 10}
-	cmd.Stderr = stderr
+	var stderrOut io.Writer = stderr
+	if spec.Debug {
+		// 调试模式把 Core 的请求日志透传到网关终端；tail 仍保留最后 8KB 供启动失败诊断。
+		stderrOut = io.MultiWriter(stderr, os.Stderr)
+	}
+	cmd.Stderr = stderrOut
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("启动 %s 失败: %w", spec.Binary, err)
 	}

@@ -2,7 +2,7 @@
 
 > 对应实现：`internal/gateway/web/static/ada-render.js`
 > 组件层：[15-ui-components.md](15-ui-components.md)
-> 页面接入：`static/islands.js` + `data-ada-island` / `data-ada-state`（概览、插件页已启用）
+> 页面接入：`static/islands.js` + `data-ada-island`（概览、插件、工作区、对话流已启用）
 > 测试：`internal/gateway/web/testdata/ada-render.test.js`、`tools/render-demo/index.html`
 > 版本：0.1 · 2026-10-30
 
@@ -132,7 +132,7 @@ const {
 | API | 说明 |
 |---|---|
 | `createApp(options)` | `options` 即根组件：`data` / `props` / `computed` / `methods` / `template` / `render` / `setup` / `components` / `allowHTML` |
-| `app.mount(el, { hydrate })` | `el` 可以是选择器或元素；`hydrate: true` 复用服务端 DOM |
+| `app.mount(el, { hydrate })` | `el` 可以是选择器或元素；普通 mount 会先清空容器再接管，`hydrate: true` 保留服务端 DOM |
 | `app.unmount()` | 停止 effect、移除 DOM |
 | `app.component(name, def)` | 全局注册组件；支持 `ui-my-card` / `my-card` / `myCard` / `MyCard` 解析 |
 | `h(tagOrComponent, props, ...children)` | 元素或组件 VNode；`onClick` 自动转事件绑定 |
@@ -164,6 +164,10 @@ const {
 组件标签在浏览器模板里必须带前缀（`<ui-button>`、`<ui-input>`）：HTML 解析器会把
 `<Button>` 小写成原生 `<button>`，引擎不会把原生标签名解析成组件。非原生名字
 （`<Card>`、`<Tabs>`、`<Icon>`）虽然仍能解析，但组件层统一使用 `ui-*` 以避免歧义。
+
+Markdown 走数据而不是 HTML：Go goldmark + bluemonday 解析/清洗后转成 VNode AST，
+浏览器 `ui-markdown` 组件渲染；流式入口是 `POST /markdown.ast`，`POST /markdown`
+保留 HTML 兼容路径。
 
 ## 6. 后端 SSR 怎么真正变简单
 
@@ -385,13 +389,14 @@ make test-js
 |---|---|---|
 | P0（已完成） | 引入引擎、组件层与测试 | Node 测试 + 浏览器冒烟通过 |
 | P1（已完成） | `/overview`、`/extensions`、`/extensions/{id}`、`/workspaces` 改为 AdaUI 客户端岛：SSR 回退 + `islands.js` mount | 无 JS 行为不变；有 JS 时用组件渲染，概览/插件列表走 JSON，其余用初始状态 |
-| P2 | 把实时对话流从“fetch 整页 + outerHTML 比较”切到 VNode patch | 不再整段重画；滚动/焦点稳定 |
+| P2（已完成基础版） | 对话流从“fetch 整页 + outerHTML 比较”切到 JSON 行 + VNode keyed patch；结构变化仍按 `item.updated` 拉取行 JSON | 不再整段重画；行按 key 复用；滚动/焦点稳定；流式增量仍走 live-stream |
 | P3 | 把 `ui.go` 的字符串拼接改为 VNode 构造（先侧栏，后工具卡） | golden HTML 不变 |
 | P4 | 评估 moejs 服务端执行同一份 JS 组件 | 页面渲染预算内；无重复 DOM 代码 |
 
 每一步都可以独立回滚：引擎是增量层，Go SSR 始终是可用的基线。当前落地为
-P0 + P1：概览、插件列表、插件详情、工作区页已是“SSR 回退 + 客户端岛”，
-`/threads/{id}` 仍走原 SSR + SSE。
+P0 + P1 + P2（基础版）：概览、插件列表、插件详情、工作区页已是“SSR 回退 + 客户端岛”；
+`/threads/{id}` 的持久化对话行也已切到 JSON + keyed patch，流式文字仍在 live-stream，
+终态/等待答复仍整页 reload。
 
 ## 13. 已知限制
 

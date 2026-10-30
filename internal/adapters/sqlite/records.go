@@ -89,9 +89,12 @@ type UsageRecord struct {
 // Gateway 发 RPC、Core 落库——所以本包的写入口只有下面的 UpsertPluginMeta /
 // SetPluginEnabled，它们都只可能由持锁的 Core 调用。
 type PluginMetaRecord struct {
-	ID          string    `json:"id"`
-	Version     string    `json:"version"`
-	Enabled     bool      `json:"enabled"`
+	ID      string `json:"id"`
+	Version string `json:"version"`
+	Enabled bool   `json:"enabled"`
+	// UserSet 标记 Enabled 来自用户显式操作（plugin.setEnabled），而不是产品默认。
+	// 未声明于产品的随包插件只有 user_set=1 时才会被装配。
+	UserSet     bool      `json:"userSet"`
 	Fingerprint string    `json:"fingerprint"`
 	InstalledAt time.Time `json:"installedAt"`
 	LastError   string    `json:"lastError,omitempty"`
@@ -667,15 +670,16 @@ func (st *Store) UpsertPluginMeta(ctx context.Context, m PluginMetaRecord) error
 	}
 	return st.w.submit(ctx, "plugin.upsertMeta", func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
-INSERT INTO plugin_meta(id, version, enabled, fingerprint, installed_at, last_error)
-VALUES(?, ?, ?, ?, ?, ?)
+INSERT INTO plugin_meta(id, version, enabled, user_set, fingerprint, installed_at, last_error)
+VALUES(?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   version = excluded.version,
   enabled = excluded.enabled,
+  user_set = excluded.user_set,
   fingerprint = excluded.fingerprint,
   installed_at = excluded.installed_at,
   last_error = excluded.last_error`,
-			m.ID, m.Version, intOf(m.Enabled), m.Fingerprint, ms(m.InstalledAt), nilIfEmpty(m.LastError))
+			m.ID, m.Version, intOf(m.Enabled), intOf(m.UserSet), m.Fingerprint, ms(m.InstalledAt), nilIfEmpty(m.LastError))
 		if err != nil {
 			return fmt.Errorf("sqlite: 写 plugin_meta 失败: %w", err)
 		}
@@ -695,7 +699,7 @@ func (st *Store) SetPluginEnabled(ctx context.Context, pluginID string, enabled 
 			return fmt.Errorf("sqlite: 读取 plugin_meta 失败: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
-UPDATE plugin_meta SET enabled = ?, last_error = ? WHERE id = ?`,
+UPDATE plugin_meta SET enabled = ?, user_set = 1, last_error = ? WHERE id = ?`,
 			intOf(enabled), nilIfEmpty(lastError), pluginID); err != nil {
 			return fmt.Errorf("sqlite: 更新 plugin_meta 失败: %w", err)
 		}
@@ -709,7 +713,7 @@ UPDATE plugin_meta SET enabled = ?, last_error = ? WHERE id = ?`,
 // ListPluginMeta 列插件元信息（只读）。
 func (r *Reader) ListPluginMeta(ctx context.Context) ([]PluginMetaRecord, error) {
 	rows, err := r.read.QueryContext(ctx, `
-SELECT id, version, enabled, fingerprint, installed_at, last_error
+SELECT id, version, enabled, user_set, fingerprint, installed_at, last_error
 FROM plugin_meta ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: 读 plugin_meta 失败: %w", err)
@@ -720,13 +724,15 @@ FROM plugin_meta ORDER BY id`)
 		var (
 			m           PluginMetaRecord
 			enabled     int
+			userSet     int
 			installedAt int64
 			LastError   sql.NullString
 		)
-		if err := rows.Scan(&m.ID, &m.Version, &enabled, &m.Fingerprint, &installedAt, &LastError); err != nil {
+		if err := rows.Scan(&m.ID, &m.Version, &enabled, &userSet, &m.Fingerprint, &installedAt, &LastError); err != nil {
 			return nil, fmt.Errorf("sqlite: 读取 plugin_meta 行失败: %w", err)
 		}
 		m.Enabled = enabled != 0
+		m.UserSet = userSet != 0
 		m.InstalledAt = fromMS(installedAt)
 		m.LastError = LastError.String
 		out = append(out, m)

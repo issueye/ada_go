@@ -9,12 +9,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/adag/ada-go/internal/coreapp"
@@ -45,6 +47,8 @@ type Config struct {
 	DataDir    string
 	AllowHosts []string
 	Fake       bool
+	// Debug 让 Core 把每次出网请求摘要写到自己的 stderr（网关再转发到本进程）。
+	Debug bool
 	// Token 是 Gateway 的访问令牌；空时自动生成。
 	Token string
 	// CoreToken 是 Gateway↔Core 的 RPC 令牌；空时自动生成。
@@ -76,6 +80,102 @@ type Gateway struct {
 	handler http.Handler
 }
 
+// frontendGate 提供「某工作区里某前端插件是否启用」的短期缓存。
+// 渲染桥每个插槽贡献都会问一次；缓存避免一次页面渲染打十几次 plugin.list。
+type frontendGate struct {
+	sup          contracts.Supervisor
+	workspaceFor func(*http.Request) string
+	mu           sync.Mutex
+	byWorkspace  map[string]frontendEnabledEntry
+}
+
+type frontendEnabledEntry struct {
+	at       time.Time
+	set      map[string]bool
+	allowAll bool // Core 暂时不可用：按启用渲染，避免整页插件区消失
+}
+
+const frontendEnabledTTL = 2 * time.Second
+
+func newFrontendGate(sup contracts.Supervisor, workspaceFor func(*http.Request) string) *frontendGate {
+	return &frontendGate{sup: sup, workspaceFor: workspaceFor, byWorkspace: map[string]frontendEnabledEntry{}}
+}
+
+// Enabled 实现 frontend.BridgeOptions.Enabled。
+func (g *frontendGate) Enabled(r *http.Request, pluginID string) bool {
+	workspace := ""
+	if g.workspaceFor != nil {
+		workspace = g.workspaceFor(r)
+	}
+	entry, err := g.snapshot(workspace)
+	if err != nil || entry.allowAll {
+		return true
+	}
+	return entry.set[pluginID]
+}
+
+// Invalidate 丢弃一个工作区的缓存；workspace 为空时清空全部。
+func (g *frontendGate) Invalidate(workspace string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if workspace == "" {
+		g.byWorkspace = map[string]frontendEnabledEntry{}
+		return
+	}
+	delete(g.byWorkspace, workspace)
+}
+
+func (g *frontendGate) snapshot(workspace string) (frontendEnabledEntry, error) {
+	g.mu.Lock()
+	if e, ok := g.byWorkspace[workspace]; ok && time.Since(e.at) < frontendEnabledTTL {
+		g.mu.Unlock()
+		return e, nil
+	}
+	g.mu.Unlock()
+
+	// 每个工作区最多每 2s 查一次；失败也缓存 allowAll，避免 Core 故障时
+	// 每个插槽都等满超时。
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	entry := frontendEnabledEntry{at: time.Now()}
+	core, err := g.sup.Acquire(ctx, workspace)
+	if err != nil {
+		entry.allowAll = true
+	} else {
+		raw, callErr := core.Call(ctx, "plugin.list", map[string]any{})
+		g.sup.Release(workspace)
+		if callErr != nil {
+			entry.allowAll = true
+		} else {
+			var res struct {
+				Plugins []struct {
+					ID      string `json:"id"`
+					Enabled bool   `json:"enabled"`
+					Status  string `json:"status"`
+				} `json:"plugins"`
+			}
+			if jsonErr := json.Unmarshal(raw, &res); jsonErr != nil {
+				entry.allowAll = true
+			} else {
+				entry.set = make(map[string]bool, len(res.Plugins))
+				for _, p := range res.Plugins {
+					if p.ID == "" || !p.Enabled {
+						continue
+					}
+					switch p.Status {
+					case "", "ready", "degraded":
+						entry.set[p.ID] = true
+					}
+				}
+			}
+		}
+	}
+	g.mu.Lock()
+	g.byWorkspace[workspace] = entry
+	g.mu.Unlock()
+	return entry, err
+}
+
 // New 装配 Gateway。调用方必须最终调用 Shutdown。
 func New(ctx context.Context, cfg Config) (*Gateway, error) {
 	workspaces, err := normalizeWorkspaces(cfg.Workspace, cfg.Workspaces)
@@ -96,7 +196,7 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 	if err != nil {
 		return nil, err
 	}
-	frontendScripts, err := selectFrontendScripts(cfg.FrontendScripts, product)
+	frontendScripts, err := selectFrontendScripts(cfg.FrontendScripts)
 	if err != nil {
 		return nil, err
 	}
@@ -125,6 +225,7 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 		realSup, err := supervisor.New(supervisor.Options{
 			Binary: cfg.Binary, Product: cfg.Product, Provider: cfg.Provider, Model: cfg.Model,
 			BaseURL: cfg.BaseURL, DataDir: cfg.DataDir, AllowHosts: cfg.AllowHosts, Fake: cfg.Fake,
+			Debug: cfg.Debug,
 			Token: coreToken, MaxCores: cfg.MaxCores, IdleTimeout: cfg.Idle,
 			Dial: relay.Dial,
 		})
@@ -151,14 +252,18 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 	resolveWorkspace := workspaceResolver(workspaces)
 	events := &eventHandler{sup: sup, workspaceFor: resolveWorkspace}
 	// M4 前端插件渲染桥（7.5）：脚本由上层注入；为空时全部插槽保持基座占位。
+	// 前端插件在进程内固定装配，是否渲染由 plugin.list 的启用状态实时过滤。
 	var pluginUI web.PluginUI
 	if len(frontendScripts) > 0 {
+		gate := newFrontendGate(sup, resolveWorkspace)
 		bridge, err := frontend.NewBridge(frontend.BridgeOptions{
-			Scripts:      frontendScripts,
-			Supervisor:   sup,
-			WorkspaceFor: resolveWorkspace,
-			ProductName:  product.Name,
-			CSRF:         mw.CSRFToken,
+			Scripts:           frontendScripts,
+			Supervisor:        sup,
+			WorkspaceFor:      resolveWorkspace,
+			ProductName:       product.Name,
+			CSRF:              mw.CSRFToken,
+			Enabled:           gate.Enabled,
+			InvalidateEnabled: gate.Invalidate,
 		})
 		if err != nil {
 			if ownSup {
@@ -339,16 +444,14 @@ func randomToken() (string, error) {
 // DefaultIdle 是 Gateway 默认的空闲回收时间（与 supervisor 默认一致）。
 const DefaultIdle = 15 * time.Minute
 
-// selectFrontendScripts 按产品声明过滤前端插件：产品声明是「启用哪些插件」的承诺，
-// 前端插件也一样——只渲染产品启用且随包提供的前端插件；未启用的不进渲染桥。
-// 产品声明了前端 id 但脚本缺失时，由 Session 侧的装配校验统一报错（这里不重复）。
-func selectFrontendScripts(scripts []host.Script, product *coreapp.Product) ([]host.Script, error) {
+// selectFrontendScripts 登记全部随包前端插件。
+//
+// 哪些插件真正渲染由 frontendGate 在请求时按工作区的 plugin_meta 过滤：
+// 产品声明的默认启用，未声明的只有用户显式启用后才渲染。这里不能再按产品
+// 过滤，否则界面上的「启用」要重启 Gateway 才生效。
+func selectFrontendScripts(scripts []host.Script) ([]host.Script, error) {
 	if len(scripts) == 0 {
 		return nil, nil
-	}
-	declared := map[string]bool{}
-	for _, id := range product.Plugins {
-		declared[id] = true
 	}
 	ids := make([]string, 0, len(scripts))
 	byID := map[string]host.Script{}
@@ -362,9 +465,7 @@ func selectFrontendScripts(scripts []host.Script, product *coreapp.Product) ([]h
 	sort.Strings(ids)
 	out := make([]host.Script, 0, len(ids))
 	for _, id := range ids {
-		if declared[id] {
-			out = append(out, byID[id])
-		}
+		out = append(out, byID[id])
 	}
 	return out, nil
 }
