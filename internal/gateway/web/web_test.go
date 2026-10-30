@@ -1740,8 +1740,8 @@ func TestPluginsUnifiedListAndDetail(t *testing.T) {
 	}
 }
 
-// 插件详情：左侧两个分区（信息/目录），右侧渲染统计、README 与文件清单；
-// README/文件只对详情请求带 detailId 拉取，列表轮询保持轻量。
+// 插件详情：左侧文件树、右侧默认渲染 README；README/文件只对详情请求带
+// detailId 拉取，列表轮询保持轻量。
 func TestPluginDetailShowsReadmeAndFiles(t *testing.T) {
 	core := newFakeCore().
 		on("thread.list", emptyThreadList).
@@ -1786,6 +1786,92 @@ func TestPluginDetailShowsReadmeAndFiles(t *testing.T) {
 	if call, ok := core.lastCall("plugin.list"); ok {
 		if _, has := call.Params["detailId"]; has {
 			t.Fatalf("列表页不应请求 detailId: %+v", call.Params)
+		}
+	}
+}
+
+// 插件文件预览：只允许清单内的相对路径；内容由服务端读取，前端点击按路径拉取。
+func TestPluginFilePreview(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "demo-plugin")
+	if err := os.MkdirAll(filepath.Join(root, "static"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("# Demo\n\nhello plugin\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "index.ts"), []byte("export const answer = 42;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "static", "todo.css"), []byte(".todo { color: red; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "binary.bin"), []byte{0, 1, 2, 3}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 父目录里的文件不在插件根内；即使伪造进文件清单也必须拒绝。
+	if err := os.WriteFile(filepath.Join(parent, "secret.txt"), []byte("do not leak"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := []map[string]any{
+		{"path": "README.md", "size": 20},
+		{"path": "index.ts", "size": 27},
+		{"path": "static/todo.css", "size": 22, "depth": 1},
+		{"path": "binary.bin", "size": 4},
+		{"path": "../secret.txt", "size": 11},
+	}
+	payload, err := json.Marshal(map[string]any{"plugins": []map[string]any{{
+		"id": "demo-plugin", "name": "演示插件", "path": root, "enabled": true, "status": "ready",
+		"readme": "# Demo", "files": files,
+		"contributions": map[string]any{"backend": true},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	core := newFakeCore().on("thread.list", emptyThreadList).on("plugin.list", string(payload))
+	srv, _ := newServer(t, core)
+
+	// 默认选中 README，服务端直接渲染内容；左侧文件树保留所有路径。
+	page := serve(t, srv, "GET", "/extensions/demo-plugin", nil).Body.String()
+	for _, want := range []string{
+		`class="ada-plugin-tree"`,
+		`data-plugin-file-path="index.ts"`,
+		`data-plugin-file-content`,
+		"hello plugin",
+		`class="ada-plugin-tree__item is-active"`,
+	} {
+		wantContains(t, page, want)
+	}
+
+	// 无 JS 的回退：?file= 切换服务端渲染的选中文件。
+	indexPage := serve(t, srv, "GET", "/extensions/demo-plugin?file=index.ts", nil).Body.String()
+	wantContains(t, indexPage, "export const answer = 42;")
+
+	res := serve(t, srv, "GET", "/extensions/demo-plugin/file?path=index.ts", nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("GET file = %d, body=%s", res.Code, res.Body.String())
+	}
+	var file struct {
+		Path     string `json:"path"`
+		Content  string `json:"content"`
+		Binary   bool   `json:"binary"`
+		Size     int64  `json:"size"`
+		SizeText string `json:"sizeLabel"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &file); err != nil {
+		t.Fatalf("file JSON: %v (%s)", err, res.Body.String())
+	}
+	if file.Path != "index.ts" || !strings.Contains(file.Content, "answer = 42") || file.Binary || file.Size == 0 {
+		t.Fatalf("文件预览内容错误: %+v", file)
+	}
+
+	binary := serve(t, srv, "GET", "/extensions/demo-plugin/file?path=binary.bin", nil)
+	if binary.Code != http.StatusOK || !strings.Contains(binary.Body.String(), `"binary":true`) {
+		t.Fatalf("二进制文件 = %d %s", binary.Code, binary.Body.String())
+	}
+	for _, unsafe := range []string{"../secret.txt", "static/../../secret.txt", "missing.ts"} {
+		if rec := serve(t, srv, "GET", "/extensions/demo-plugin/file?path="+url.QueryEscape(unsafe), nil); rec.Code != http.StatusNotFound {
+			t.Fatalf("非法路径 %q = %d, want 404 (body=%s)", unsafe, rec.Code, rec.Body.String())
 		}
 	}
 }

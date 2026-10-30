@@ -24,6 +24,12 @@
   --ph-warn-ink: #72551a;
   --ph-success-soft: #e3ede8;
   --ph-success-ink: #2f5d50;
+  --ph-syn-keyword: #8a3b6b;
+  --ph-syn-string: #2f6b4a;
+  --ph-syn-number: #8a5a12;
+  --ph-syn-comment: #6e6a60;
+  --ph-syn-function: #2f5d8a;
+  --ph-syn-type: #6b4a8a;
   --ph-code-bg: #efebe0;
   --ph-shadow: 0 10px 30px rgba(22, 23, 26, 0.08);
   --ada-radius: 10px;
@@ -51,6 +57,12 @@
     --ph-warn-ink: #ead39a;
     --ph-success-soft: #23352f;
     --ph-success-ink: #b9ddce;
+    --ph-syn-keyword: #e6a6c8;
+    --ph-syn-string: #8fd3b0;
+    --ph-syn-number: #e8c583;
+    --ph-syn-comment: #928b7e;
+    --ph-syn-function: #9dc4e8;
+    --ph-syn-type: #c9aee6;
     --ph-code-bg: #262622;
     --ph-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   }
@@ -75,6 +87,12 @@ html.dark {
   --ph-warn-ink: #ead39a;
   --ph-success-soft: #23352f;
   --ph-success-ink: #b9ddce;
+  --ph-syn-keyword: #e6a6c8;
+  --ph-syn-string: #8fd3b0;
+  --ph-syn-number: #e8c583;
+  --ph-syn-comment: #928b7e;
+  --ph-syn-function: #9dc4e8;
+  --ph-syn-type: #c9aee6;
   --ph-code-bg: #262622;
   --ph-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
 }
@@ -1146,16 +1164,23 @@ html:not(.js) .ada-select [data-select-menu] {
   background: var(--ph-surface);
 }
 
-/* ── 插件详情：左侧两个分区（信息/目录），右侧内容 ─────────────────── */
+/* ── 插件详情：左侧文件树，右侧文件内容 ─────────────────────────────── */
 .ada-plugin-detail {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 280px minmax(0, 1fr);
   gap: 12px;
   align-items: start;
 }
 .ada-plugin-detail__side {
   position: sticky;
   top: 12px;
+  min-width: 0;
+}
+.ada-plugin-detail__main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
 }
 .ada-plugin-nav {
   display: flex;
@@ -1325,12 +1350,235 @@ html:not(.js) .ada-select [data-select-menu] {
 .ada-plugin-file--d3 { padding-left: 52px; }
 .ada-plugin-file--d4 { padding-left: 66px; }
 
+/* 左侧文件树 */
+.ada-plugin-tree-card {
+  padding: 10px;
+}
+.ada-plugin-tree-card__head {
+  padding: 2px 4px 8px;
+  border-bottom: 1px solid var(--ph-line);
+}
+.ada-plugin-tree-card__head .ada-plugin-section__title {
+  margin: 0;
+}
+.ada-plugin-tree {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0 0;
+  max-height: calc(100vh - 300px);
+  overflow: auto;
+}
+.ada-plugin-tree__row {
+  margin: 0;
+}
+.ada-plugin-tree__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--ada-radius-sm);
+  color: var(--ph-ink);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+}
+.ada-plugin-tree__item:hover {
+  background: var(--ph-subtle);
+}
+.ada-plugin-tree__item.is-active {
+  background: var(--ph-brand-soft);
+  color: var(--ph-brand-ink, var(--ph-ink));
+}
+.ada-plugin-tree__item.is-dir {
+  color: var(--ph-muted);
+  cursor: default;
+}
+.ada-plugin-tree__item.is-dir:hover {
+  background: transparent;
+}
+.ada-plugin-tree__row.ada-plugin-file--d1 .ada-plugin-tree__item { padding-left: 24px; }
+.ada-plugin-tree__row.ada-plugin-file--d2 .ada-plugin-tree__item { padding-left: 38px; }
+.ada-plugin-tree__row.ada-plugin-file--d3 .ada-plugin-tree__item { padding-left: 52px; }
+.ada-plugin-tree__row.ada-plugin-file--d4 .ada-plugin-tree__item { padding-left: 66px; }
+.ada-plugin-tree__icon {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--ph-faint);
+}
+.ada-plugin-tree__path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: 12px;
+}
+.ada-plugin-tree__size {
+  flex-shrink: 0;
+  color: var(--ph-faint);
+  font-size: 12px;
+}
+.ada-plugin-tree-card__info {
+  display: inline-flex;
+  margin-top: 8px;
+  padding: 6px 8px;
+  color: var(--ph-muted);
+  font-size: 12px;
+  text-decoration: none;
+}
+.ada-plugin-tree-card__info:hover {
+  color: var(--ph-ink);
+}
+.ada-plugin-tree__empty {
+  margin: 8px 4px 0;
+  color: var(--ph-muted);
+  font-size: 13px;
+}
+
+/* 右侧文件内容 */
+.ada-plugin-viewer {
+  overflow: hidden;
+  padding: 0;
+}
+.ada-plugin-viewer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--ph-line);
+  background: var(--ph-subtle);
+}
+.ada-plugin-viewer__path {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ph-ink);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: 12px;
+}
+.ada-plugin-viewer__meta {
+  flex-shrink: 0;
+  color: var(--ph-faint);
+  font-size: 12px;
+}
+.ada-plugin-viewer__code {
+  margin: 0;
+  padding: 14px 16px;
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+  background: var(--ph-surface);
+  color: var(--ph-ink);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.6;
+  tab-size: 2;
+}
+.ada-plugin-viewer__empty {
+  margin: 0;
+  padding: 24px 16px;
+  color: var(--ph-muted);
+  font-size: 13px;
+}
+
+/* Chroma 输出的 token class；颜色全部走 tokens.css。 */
+.chroma .c,
+.chroma .ch,
+.chroma .cm,
+.chroma .cp,
+.chroma .cpf,
+.chroma .c1,
+.chroma .cs {
+  color: var(--ph-syn-comment);
+  font-style: italic;
+}
+.chroma .k,
+.chroma .kc,
+.chroma .kd,
+.chroma .kn,
+.chroma .kp,
+.chroma .kr,
+.chroma .kt {
+  color: var(--ph-syn-keyword);
+  font-weight: 600;
+}
+.chroma .s,
+.chroma .sa,
+.chroma .sb,
+.chroma .sc,
+.chroma .dl,
+.chroma .sd,
+.chroma .s2,
+.chroma .se,
+.chroma .sh,
+.chroma .si,
+.chroma .sx,
+.chroma .sr,
+.chroma .s1,
+.chroma .ss {
+  color: var(--ph-syn-string);
+}
+.chroma .m,
+.chroma .mb,
+.chroma .mf,
+.chroma .mh,
+.chroma .mi,
+.chroma .il,
+.chroma .mo {
+  color: var(--ph-syn-number);
+}
+.chroma .nf,
+.chroma .nc,
+.chroma .nn,
+.chroma .nd,
+.chroma .ne,
+.chroma .nl,
+.chroma .nt,
+.chroma .nv,
+.chroma .vc,
+.chroma .vg,
+.chroma .vi,
+.chroma .vm {
+  color: var(--ph-syn-function);
+}
+.chroma .kt,
+.chroma .nb,
+.chroma .bp {
+  color: var(--ph-syn-type);
+}
+.chroma .na,
+.chroma .nt {
+  color: var(--ph-syn-type);
+}
+.chroma .o,
+.chroma .ow,
+.chroma .p,
+.chroma .pi {
+  color: var(--ph-muted);
+}
+.chroma .err {
+  color: var(--ph-danger-ink);
+}
+.chroma .gd {
+  color: var(--ph-danger-ink);
+}
+.chroma .gi {
+  color: var(--ph-success-ink);
+}
+
 @media (max-width: 900px) {
   .ada-plugin-detail {
     grid-template-columns: 1fr;
   }
   .ada-plugin-detail__side {
     position: static;
+  }
+  .ada-plugin-tree {
+    max-height: none;
+  }
+  .ada-plugin-viewer__code {
+    max-height: none;
   }
   .ada-plugin-nav {
     flex-direction: row;

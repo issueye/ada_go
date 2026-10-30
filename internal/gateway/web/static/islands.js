@@ -431,37 +431,93 @@
     plugin.files = Array.isArray(plugin.files) ? plugin.files : [];
 
     var app = AdaUI.createApp({
+      allowHTML: true,
       data: function () {
         return {
-          section: 'info',
           plugin: plugin,
-          csrf: typeof initial.csrf === 'string' ? initial.csrf : ''
+          file: initial.file && typeof initial.file === 'object' ? initial.file : null,
+          loading: false,
+          fileError: '',
+          showInfo: false,
+          csrf: typeof initial.csrf === 'string' ? initial.csrf : '',
+          fileSeq: 0
         };
       },
       methods: {
-        select: function (section) {
-          this.section = section;
+        openFile: function (path) {
+          var self = this;
+          if (!path || typeof window.fetch !== 'function') return;
+          self.fileSeq += 1;
+          var seq = self.fileSeq;
+          self.loading = true;
+          self.fileError = '';
+          self.showInfo = false;
+          window
+            .fetch('/extensions/' + encodeURIComponent(self.plugin.id) + '/file?path=' + encodeURIComponent(path), {
+              credentials: 'same-origin',
+              headers: { Accept: 'application/json' }
+            })
+            .then(function (response) {
+              return response.json().then(function (body) {
+                if (!response.ok) throw new Error(body && body.error ? body.error : 'HTTP ' + response.status);
+                return body;
+              });
+            })
+            .then(function (data) {
+              if (seq !== self.fileSeq) return;
+              self.file = data;
+              self.loading = false;
+            })
+            .catch(function (error) {
+              if (seq !== self.fileSeq) return;
+              self.loading = false;
+              self.fileError = (error && error.message) || '读取文件失败';
+            });
+        },
+        toggleInfo: function () {
+          this.showInfo = !this.showInfo;
         }
       },
       template:
         '<div class="ada-plugin-detail">' +
         '<aside class="ada-plugin-detail__side">' +
-        '<nav class="ada-plugin-nav" aria-label="插件详情分区">' +
-        '<button type="button" class="ada-plugin-nav__item" ' +
-        ':class="{ \'is-active\': section === \'info\' }" @click="select(\'info\')">' +
-        '<span class="ada-plugin-nav__icon"><ui-icon name="i-plug" :size="14"></ui-icon></span>' +
-        '<span class="ada-plugin-nav__text"><strong>插件信息</strong><small>版本、能力与 README</small></span>' +
-        '</button>' +
-        '<button type="button" class="ada-plugin-nav__item" ' +
-        ':class="{ \'is-active\': section === \'files\' }" @click="select(\'files\')">' +
-        '<span class="ada-plugin-nav__icon"><ui-icon name="i-folder" :size="14"></ui-icon></span>' +
-        '<span class="ada-plugin-nav__text"><strong>插件目录</strong><small>{{ plugin.files.length }} 个文件</small></span>' +
-        '</button>' +
-        '</nav>' +
+        '<section class="card ada-plugin-tree-card" aria-label="插件目录">' +
+        '<div class="ada-plugin-tree-card__head">' +
+        '<h2 class="ada-plugin-section__title">插件目录 <span class="ada-plugin-section__meta">{{ plugin.files.length }} 个文件</span></h2>' +
+        '</div>' +
+        '<ul v-if="plugin.files.length" class="ada-plugin-tree">' +
+        '<li v-for="f in plugin.files" :key="f.path" class="ada-plugin-tree__row" :class="f.depthClass || \'ada-plugin-file--d0\'">' +
+        '<span v-if="f.dir" class="ada-plugin-tree__item is-dir" :title="f.path">' +
+        '<span class="ada-plugin-tree__icon"><ui-icon name="i-folder" :size="13"></ui-icon></span>' +
+        '<code class="ada-plugin-tree__path">{{ f.path }}</code></span>' +
+        '<button v-else type="button" class="ada-plugin-tree__item" ' +
+        ':class="{ \'is-active\': file && file.path === f.path }" :title="f.path" @click="openFile(f.path)">' +
+        '<span class="ada-plugin-tree__icon"><ui-icon name="i-file" :size="13"></ui-icon></span>' +
+        '<code class="ada-plugin-tree__path">{{ f.path }}</code>' +
+        '<span class="ada-plugin-tree__size">{{ f.sizeLabel }}</span>' +
+        '</button></li>' +
+        '</ul>' +
+        '<p v-else class="ada-plugin-tree__empty">这个插件没有可展示的包内文件。</p>' +
+        '<button type="button" class="ada-plugin-tree-card__info" @click="toggleInfo">' +
+        '{{ showInfo ? \'返回文件\' : \'插件信息\' }}</button>' +
+        '</section>' +
         '</aside>' +
         '<div class="ada-plugin-detail__main">' +
 
-        '<section v-if="section === \'info\'" class="card p-4 ada-plugin-panel">' +
+        '<section v-if="!showInfo" class="card ada-plugin-viewer" aria-label="文件内容">' +
+        '<header v-if="file" class="ada-plugin-viewer__head">' +
+        '<code class="ada-plugin-viewer__path">{{ file.path }}</code>' +
+        '<span class="ada-plugin-viewer__meta">{{ file.sizeLabel }}<span v-if="file.truncated"> · 已截断</span></span>' +
+        '</header>' +
+        '<p v-if="loading" class="ada-plugin-viewer__empty">正在读取文件…</p>' +
+        '<p v-else-if="fileError" class="ada-plugin-viewer__empty">{{ fileError }}</p>' +
+        '<p v-else-if="file && file.error" class="ada-plugin-viewer__empty">{{ file.error }}</p>' +
+        '<p v-else-if="file && file.binary" class="ada-plugin-viewer__empty">这是二进制文件，暂不展示内容。</p>' +
+        '<pre v-else-if="file" class="ada-plugin-viewer__code chroma"><code v-html="file.html"></code></pre>' +
+        '<p v-else class="ada-plugin-viewer__empty">这个插件没有可展示的包内文件。</p>' +
+        '</section>' +
+
+        '<section v-else class="card p-4 ada-plugin-panel">' +
         '<div class="flex flex-wrap items-center gap-2">' +
         '<ui-badge v-if="plugin.frontend" tone="brand" label="前端插件"></ui-badge>' +
         '<ui-badge v-if="plugin.backend" tone="neutral" label="后端插件"></ui-badge>' +
@@ -506,21 +562,6 @@
         '</form>' +
         '<ui-button v-if="plugin.firstPage" :href="\'/ext/\' + plugin.id + \'/\' + plugin.firstPage" ' +
         'variant="secondary" size="sm" icon="i-external" label="打开插件页面"></ui-button>' +
-        '</div>' +
-        '</section>' +
-
-        '<section v-if="section === \'files\'" class="card p-4 ada-plugin-panel">' +
-        '<div class="ada-plugin-section">' +
-        '<h2 class="ada-plugin-section__title">插件目录 <span class="ada-plugin-section__meta">{{ plugin.files.length }} 个文件</span></h2>' +
-        '<ul v-if="plugin.files.length" class="ada-plugin-files">' +
-        '<li v-for="f in plugin.files" :key="f.path" class="ada-plugin-file" ' +
-        ':class="f.depthClass || \'ada-plugin-file--d0\'">' +
-        '<span class="ada-plugin-file__icon"><ui-icon name="i-file" :size="13"></ui-icon></span>' +
-        '<code class="ada-plugin-file__path">{{ f.path }}</code>' +
-        '<span class="ada-plugin-file__size">{{ f.sizeLabel }}</span>' +
-        '</li>' +
-        '</ul>' +
-        '<p v-else class="text-sm text-muted">这个插件没有可展示的包内文件。</p>' +
         '</div>' +
         '</section>' +
 

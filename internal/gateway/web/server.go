@@ -222,6 +222,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/fs/list", s.handleFSList)
 	mux.HandleFunc("GET /extensions", s.handleExtensions)
 	mux.HandleFunc("GET /extensions/{id}", s.handlePluginDetail)
+	mux.HandleFunc("GET /extensions/{id}/file", s.handlePluginFile)
 	mux.HandleFunc("POST /extensions/reload", s.handleExtensionsReload)
 	mux.HandleFunc("POST /extensions/{id}/enable", s.handlePluginEnable)
 	mux.HandleFunc("POST /extensions/{id}/disable", s.handlePluginDisable)

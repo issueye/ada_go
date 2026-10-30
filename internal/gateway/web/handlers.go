@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -18,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // pluginSummaryDTO 对应 Core plugin.list 的一行（只声明 SSR 用到的字段）。
@@ -1509,28 +1511,166 @@ func (s *Server) handleExtensionsJSON(w http.ResponseWriter, r *http.Request) {
 // handlePluginDetail 渲染单个插件的信息：前端/后端归属只在这里展示。
 func (s *Server) handlePluginDetail(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.PathValue("id"))
-	for _, p := range s.collectPlugins(r, id) {
-		if p.ID != id {
-			continue
-		}
-		p.ReadmeNodes = markdownNodesJSON(p.Readme)
-		threads, err := s.listThreads(r, 50)
-		state := pluginDetailState{Plugin: p, CSRF: s.csrf(r)}
-		raw, marshalErr := json.Marshal(state)
-		if marshalErr != nil {
-			raw = []byte(`{"plugin":{},"csrf":""}`)
-		}
-		base := s.base(r, "extensions", p.Name, threads, "", err == nil)
-		base.NeedsUI = true
-		s.render(w, http.StatusOK, "plugin_detail", pluginDetailData{
-			baseData:  base,
-			Plugin:    p,
-			StateJSON: string(raw),
-		})
+	p, ok := s.pluginByID(r, id)
+	if !ok {
+		s.renderError(w, r, http.StatusNotFound, "没有这个插件",
+			"插件 "+id+" 不存在或未装配。请从插件列表重新进入。", "", "/extensions", "返回插件列表")
 		return
 	}
-	s.renderError(w, r, http.StatusNotFound, "没有这个插件",
-		"插件 "+id+" 不存在或未装配。请从插件列表重新进入。", "", "/extensions", "返回插件列表")
+	p.ReadmeNodes = markdownNodesJSON(p.Readme)
+	file := s.pluginFileForView(p, initialPluginFile(p, r.URL.Query().Get("file")))
+	threads, err := s.listThreads(r, 50)
+	state := pluginDetailState{Plugin: p, File: file, CSRF: s.csrf(r)}
+	raw, marshalErr := json.Marshal(state)
+	if marshalErr != nil {
+		raw = []byte(`{"plugin":{},"csrf":""}`)
+	}
+	base := s.base(r, "extensions", p.Name, threads, "", err == nil)
+	base.NeedsUI = true
+	s.render(w, http.StatusOK, "plugin_detail", pluginDetailData{
+		baseData:  base,
+		Plugin:    p,
+		File:      file,
+		StateJSON: string(raw),
+	})
+}
+
+// handlePluginFile 返回插件包内单个文件的文本预览。
+// 只允许详情请求里出现过的文件（相对路径），防止把插件目录之外的任意文件读给浏览器。
+func (s *Server) handlePluginFile(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	p, ok := s.pluginByID(r, id)
+	if !ok {
+		writeJSONError(w, http.StatusNotFound, "没有这个插件")
+		return
+	}
+	rel := strings.TrimSpace(r.URL.Query().Get("path"))
+	if rel == "" {
+		writeJSONError(w, http.StatusBadRequest, "缺少文件路径")
+		return
+	}
+	view, err := s.readPluginFile(p, rel)
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+// pluginByID 用 plugin.list 的详情请求定位单个插件。
+func (s *Server) pluginByID(r *http.Request, id string) (pluginRow, bool) {
+	for _, p := range s.collectPlugins(r, id) {
+		if p.ID == id {
+			return p, true
+		}
+	}
+	return pluginRow{}, false
+}
+
+const maxPluginFilePreview = 512 << 10
+
+// initialPluginFile 优先 README.md，其次第一个文件。
+func initialPluginFile(p pluginRow, requested string) string {
+	if requested = strings.TrimSpace(requested); requested != "" {
+		return requested
+	}
+	for _, f := range p.Files {
+		if !f.Dir && strings.EqualFold(f.Path, "README.md") {
+			return f.Path
+		}
+	}
+	for _, f := range p.Files {
+		if !f.Dir {
+			return f.Path
+		}
+	}
+	return ""
+}
+
+// pluginFileForView 把读取失败也包装成可展示的视图，让页面右侧显示原因而不是空白。
+func (s *Server) pluginFileForView(p pluginRow, filePath string) *pluginFileView {
+	if filePath == "" {
+		return nil
+	}
+	view, err := s.readPluginFile(p, filePath)
+	if err != nil {
+		meta := pluginFileMeta(p, filePath)
+		meta.Error = err.Error()
+		return &meta
+	}
+	return &view
+}
+
+func pluginFileMeta(p pluginRow, filePath string) pluginFileView {
+	for _, f := range p.Files {
+		if f.Path == filePath {
+			return pluginFileView{Path: f.Path, Size: f.Size, SizeLabel: f.SizeLabel}
+		}
+	}
+	return pluginFileView{Path: filePath}
+}
+
+// readPluginFile 读取插件包内文件：只接受清单里的相对路径，大小有上限，
+// 二进制文件返回标记而不把字节塞进 JSON。
+func (s *Server) readPluginFile(p pluginRow, rel string) (pluginFileView, error) {
+	rel = strings.TrimPrefix(strings.TrimSpace(rel), "./")
+	rel = path.Clean(filepath.ToSlash(rel))
+	if rel == "" || rel == "." || path.IsAbs(rel) || strings.HasPrefix(rel, "../") {
+		return pluginFileView{}, fmt.Errorf("文件路径不合法")
+	}
+	meta := pluginFileMeta(p, rel)
+	found := false
+	for _, f := range p.Files {
+		if f.Path == rel && !f.Dir {
+			meta = pluginFileView{Path: f.Path, Size: f.Size, SizeLabel: f.SizeLabel}
+			found = true
+			break
+		}
+	}
+	if !found {
+		return pluginFileView{}, fmt.Errorf("文件不在插件目录中")
+	}
+	if strings.TrimSpace(p.Path) == "" {
+		return meta, fmt.Errorf("插件文件未落盘，无法预览")
+	}
+	root, err := realPath(p.Path)
+	if err != nil {
+		return meta, fmt.Errorf("插件目录不可读")
+	}
+	target, err := realPath(filepath.Join(root, filepath.FromSlash(rel)))
+	if err != nil {
+		return meta, fmt.Errorf("文件不存在或不可读")
+	}
+	if !withinRoot(root, target) {
+		return meta, fmt.Errorf("文件路径越界")
+	}
+	info, err := os.Stat(target)
+	if err != nil || !info.Mode().IsRegular() {
+		return meta, fmt.Errorf("文件不存在或不是普通文件")
+	}
+	f, err := os.Open(target)
+	if err != nil {
+		return meta, fmt.Errorf("无法打开文件")
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxPluginFilePreview+1))
+	if err != nil {
+		return meta, fmt.Errorf("读取文件失败")
+	}
+	truncated := len(data) > maxPluginFilePreview
+	if truncated {
+		data = data[:maxPluginFilePreview]
+	}
+	meta.Size = info.Size()
+	meta.SizeLabel = humanBytes(info.Size())
+	if bytes.IndexByte(data, 0) >= 0 || !utf8.Valid(data) {
+		meta.Binary = true
+		return meta, nil
+	}
+	meta.Content = string(data)
+	meta.HTML, meta.Language = highlightPluginSource(meta.Content, meta.Path)
+	meta.Truncated = truncated
+	return meta, nil
 }
 
 // collectPlugins 合并前端插件（渲染桥）与后端插件（Core plugin.list）。

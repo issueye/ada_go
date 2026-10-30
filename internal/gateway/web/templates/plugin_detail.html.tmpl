@@ -13,19 +13,59 @@
       <div id="plugin-detail-island" data-ada-island="plugin-detail" data-ada-state="{{.StateJSON}}">
       <div class="ada-plugin-detail">
         <aside class="ada-plugin-detail__side">
-          <nav class="ada-plugin-nav" aria-label="插件详情分区">
-            <a class="ada-plugin-nav__item is-active" href="#plugin-info" data-plugin-section="info">
-              <span class="ada-plugin-nav__icon">{{icon "i-plug" 14}}</span>
-              <span class="ada-plugin-nav__text"><strong>插件信息</strong><small>版本、能力与 README</small></span>
-            </a>
-            <a class="ada-plugin-nav__item" href="#plugin-files" data-plugin-section="files">
-              <span class="ada-plugin-nav__icon">{{icon "i-folder" 14}}</span>
-              <span class="ada-plugin-nav__text"><strong>插件目录</strong><small>{{len .Plugin.Files}} 个文件</small></span>
-            </a>
-          </nav>
+          <section class="card ada-plugin-tree-card" aria-label="插件目录">
+            <div class="ada-plugin-tree-card__head">
+              <h2 class="ada-plugin-section__title">插件目录 <span class="ada-plugin-section__meta">{{len .Plugin.Files}} 个文件</span></h2>
+            </div>
+            {{if .Plugin.Files}}
+            <ul class="ada-plugin-tree">
+              {{range .Plugin.Files}}
+              {{if .Dir}}
+              <li class="ada-plugin-tree__row {{.DepthClass}}">
+                <span class="ada-plugin-tree__item is-dir">
+                  <span class="ada-plugin-tree__icon">{{icon "i-folder" 13}}</span>
+                  <code class="ada-plugin-tree__path">{{.Path}}</code>
+                </span>
+              </li>
+              {{else}}
+              <li class="ada-plugin-tree__row {{.DepthClass}}">
+                <a class="ada-plugin-tree__item{{if and $.File (eq .Path $.File.Path)}} is-active{{end}}"
+                   href="/extensions/{{$.Plugin.ID}}?file={{urlquery .Path}}"
+                   data-plugin-file-path="{{.Path}}" title="{{.Path}}">
+                  <span class="ada-plugin-tree__icon">{{icon "i-file" 13}}</span>
+                  <code class="ada-plugin-tree__path">{{.Path}}</code>
+                  <span class="ada-plugin-tree__size">{{.SizeLabel}}</span>
+                </a>
+              </li>
+              {{end}}
+              {{end}}
+            </ul>
+            {{else}}
+            <p class="ada-plugin-tree__empty">这个插件没有可展示的包内文件。</p>
+            {{end}}
+            <a class="ada-plugin-tree-card__info" href="#plugin-info">插件信息</a>
+          </section>
         </aside>
 
         <div class="ada-plugin-detail__main">
+          <section class="card ada-plugin-viewer" aria-label="文件内容">
+            {{if .File}}
+            <header class="ada-plugin-viewer__head">
+              <code class="ada-plugin-viewer__path">{{.File.Path}}</code>
+              <span class="ada-plugin-viewer__meta">{{.File.SizeLabel}}{{if .File.Truncated}} · 已截断{{end}}</span>
+            </header>
+            {{if .File.Error}}
+            <p class="ada-plugin-viewer__empty">{{.File.Error}}</p>
+            {{else if .File.Binary}}
+            <p class="ada-plugin-viewer__empty">这是二进制文件，暂不展示内容。</p>
+            {{else}}
+            <pre class="ada-plugin-viewer__code chroma" data-plugin-file-content><code>{{.File.HTML}}</code></pre>
+            {{end}}
+            {{else}}
+            <p class="ada-plugin-viewer__empty">这个插件没有可展示的包内文件。</p>
+            {{end}}
+          </section>
+
           <section id="plugin-info" class="card p-4 ada-plugin-panel" data-plugin-panel="info">
             <div class="flex flex-wrap items-center gap-2">
               {{if .Plugin.Frontend}}<span class="badge badge-brand">前端插件</span>{{end}}
@@ -109,25 +149,6 @@
               {{end}}
               {{if .Plugin.FirstPage}}
               <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/ext/{{.Plugin.ID}}/{{.Plugin.FirstPage}}">{{icon "i-external" 13}}打开插件页面</a>
-              {{end}}
-            </div>
-          </section>
-
-          <section id="plugin-files" class="card p-4 ada-plugin-panel" data-plugin-panel="files">
-            <div class="ada-plugin-section">
-              <h2 class="ada-plugin-section__title">插件目录 <span class="ada-plugin-section__meta">{{len .Plugin.Files}} 个文件</span></h2>
-              {{if .Plugin.Files}}
-              <ul class="ada-plugin-files">
-                {{range .Plugin.Files}}
-                <li class="ada-plugin-file {{.DepthClass}}">
-                  <span class="ada-plugin-file__icon">{{icon "i-file" 13}}</span>
-                  <code class="ada-plugin-file__path">{{.Path}}</code>
-                  <span class="ada-plugin-file__size">{{.SizeLabel}}</span>
-                </li>
-                {{end}}
-              </ul>
-              {{else}}
-              <p class="text-sm text-muted">这个插件没有可展示的包内文件。</p>
               {{end}}
             </div>
           </section>

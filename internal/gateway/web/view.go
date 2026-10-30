@@ -555,18 +555,33 @@ type pluginFileDTO struct {
 	DepthClass string `json:"depthClass,omitempty"`
 }
 
+// pluginFileView 是右侧预览的单个文件内容。
+type pluginFileView struct {
+	Path      string        `json:"path"`
+	Size      int64         `json:"size"`
+	SizeLabel string        `json:"sizeLabel,omitempty"`
+	Content   string        `json:"content,omitempty"`
+	HTML      template.HTML `json:"html,omitempty"`
+	Language  string        `json:"language,omitempty"`
+	Binary    bool          `json:"binary,omitempty"`
+	Truncated bool          `json:"truncated,omitempty"`
+	Error     string        `json:"error,omitempty"`
+}
+
 // pluginDetailData 是 /extensions/{id} 的详情页。
 type pluginDetailData struct {
 	baseData
 	Plugin pluginRow
+	File   *pluginFileView
 	// StateJSON 是给浏览器岛的初始状态；无 JS 时仍渲染 Plugin。
 	StateJSON string
 }
 
 // pluginDetailState 是插件详情岛的数据形态。
 type pluginDetailState struct {
-	Plugin pluginRow `json:"plugin"`
-	CSRF   string    `json:"csrf"`
+	Plugin pluginRow       `json:"plugin"`
+	File   *pluginFileView `json:"file,omitempty"`
+	CSRF   string          `json:"csrf"`
 }
 
 // offlineData 是二级页的离线壳：保留页面外壳，内容区如实说“未连接”。
