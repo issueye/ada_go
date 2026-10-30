@@ -26,6 +26,7 @@ func dtoBindings() map[string]reflect.Type {
 		"RunState":            reflect.TypeOf(proto.RunState{}),
 		"Usage":               reflect.TypeOf(proto.Usage{}),
 		"PluginSummary":       reflect.TypeOf(proto.PluginSummary{}),
+		"PluginFile":          reflect.TypeOf(proto.PluginFile{}),
 		"ModelRef":            reflect.TypeOf(proto.ModelRef{}),
 		"ModelInfo":           reflect.TypeOf(proto.ModelInfo{}),
 		"WorkspaceInfo":       reflect.TypeOf(proto.WorkspaceInfo{}),

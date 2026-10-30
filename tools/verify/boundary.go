@@ -26,7 +26,10 @@ var registrationAPIRe = regexp.MustCompile(`(?m)^func\s+(?:\([^)]+\)\s+)?(Regist
 // importOfficialRe 匹配对官方插件源码包（plugins/official）的 import，
 // 同时兼容模块根包旧路径 official。组合根 app/ 是唯一允许 import 它的包
 // （01 §3.3：app 唯一知道官方插件包）；internal/ 与 cmd/ 出现即越界。
-var importOfficialRe = regexp.MustCompile(`"(?:github\.com/[^"/]+/[^"/]+/)?(?:plugins/)?official(?:/[^"]*)?"`)
+//
+// 必须带路径分隔符：`filepath.Join(exeDir, "plugins", "official", id)`
+// 里的裸目录名 "official" 不是 import，不能误判。
+var importOfficialRe = regexp.MustCompile(`"(?:[^"]*/)(?:plugins/)?official(?:/[^"]*)?"`)
 
 // checkDocs 检查文档链接可解析、文档地图完整、以及「核心数字」与生成结果一致。
 //

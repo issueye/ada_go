@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:e7238ba94164ebfd) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:2c3ecea6d377260a) by plugins/official/build.mjs — do not edit
 // tools-plan —— 官方插件：维护当前线程的任务计划（05 §6.3、02 §5.4 的 tools-plan）。
 //
 // 计划不写进会话 entry：插件自己把每个会话的计划保存到工作区 `.adag/todo/`

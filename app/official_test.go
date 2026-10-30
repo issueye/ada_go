@@ -130,10 +130,12 @@ func TestToolsShell(t *testing.T) {
 		t.Fatal("带空白的 command 没有按预期被拒绝")
 	}
 
-	// Windows 原生 find 不是 Unix find：非零退出时给出可操作的提示。
+	// Windows 上 Unix-only 命令非零退出时给出可操作的提示。
+	// 用无效 flag 强制失败：Git Bash 的 PATH 里 find 是 Unix 版本，
+	// 拿掉这个前提会让用例在「有 Unix find 的 Windows」上假失败。
 	if runtime.GOOS == "windows" {
 		text, _ := callTool(t, asm, hc, "run_command", map[string]any{
-			"command": "find", "args": []string{"/", "-maxdepth", "4"},
+			"command": "find", "args": []string{"--ada-go-invalid-flag"},
 		})
 		if !strings.Contains(text, "--- hint ---") || !strings.Contains(text, "Windows 宿主没有 Unix find") {
 			t.Fatalf("Windows find 误用没有给出提示: %q", text)

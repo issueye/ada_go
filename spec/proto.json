@@ -331,6 +331,13 @@
         "fingerprint": { "type": "string", "description": "文件指纹；第三方指纹变化才重新编译" },
         "lastError": { "type": "string", "description": "最近装配/运行错误，写入 plugin_meta.last_error 并显示到页面" },
         "source": { "type": "string", "enum": ["workspace", "global"], "description": "第三方插件的安装来源（M3 发现/安装）；随包插件省略" },
+        "path": { "type": "string", "description": "第三方插件的绝对目录；随包插件为空（内嵌于二进制）" },
+        "readme": { "type": "string", "description": "插件 README 正文；随包插件无 README 时回退为清单说明" },
+        "files": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/PluginFile" },
+          "description": "插件包内的文件清单（相对路径，不含宿主绝对路径）"
+        },
         "contributions": {
           "type": "object",
           "additionalProperties": false,
@@ -347,6 +354,18 @@
         }
       },
       "required": ["id", "version", "trust", "enabled", "status", "fingerprint"]
+    },
+    "PluginFile": {
+      "type": "object",
+      "description": "插件包内的一个文件（详情页「插件目录」用）。",
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "description": "相对插件目录的路径" },
+        "size": { "type": "integer", "minimum": 0 },
+        "dir": { "type": "boolean", "description": "true 表示目录" },
+        "depth": { "type": "integer", "minimum": 0, "description": "相对插件根的层级" }
+      },
+      "required": ["path", "size"]
     },
     "SkillSummary": {
       "type": "object",
