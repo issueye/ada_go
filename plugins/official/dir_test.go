@@ -24,7 +24,7 @@ func TestScriptsFromRepoDir(t *testing.T) {
 			backend[s.Manifest.ID] = true
 		}
 	}
-	for _, want := range []string{"tools-plan", "tools-fs", "provider-openai-chat", "policy-default"} {
+	for _, want := range []string{"tools-plan", "tools-fs", "provider-openai-chat", "policy-default", "plugin-creator"} {
 		if !backend[want] {
 			t.Fatalf("后端插件缺少 %q（现有：%v）", want, backend)
 		}
@@ -43,7 +43,7 @@ func TestScriptsFromRepoDir(t *testing.T) {
 			fe[s.Manifest.ID] = true
 		}
 	}
-	for _, want := range []string{"tools-plan", "provider-admin", "token-usage", "ui-hello-tsx"} {
+	for _, want := range []string{"tools-plan", "provider-admin", "token-usage", "plugin-creator", "ui-hello-tsx"} {
 		if !fe[want] {
 			t.Fatalf("前端插件缺少 %q（现有：%v）", want, fe)
 		}

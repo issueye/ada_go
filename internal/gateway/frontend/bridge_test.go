@@ -336,8 +336,17 @@ func TestBridgeAssetsAndBindings(t *testing.T) {
 		t.Fatalf("Styles 缺少计划卡样式（带内容指纹）: %v", styles)
 	}
 	scripts := b.Scripts()
-	if len(scripts) != 1 || !strings.HasPrefix(scripts[0], "/ext/provider-admin/static/provider-admin.js?v=") {
-		t.Fatalf("Scripts 应只含 provider-admin 的增强脚本（带内容指纹），got %v", scripts)
+	wantScripts := []string{
+		"/ext/plugin-creator/static/plugin-creator.js?v=",
+		"/ext/provider-admin/static/provider-admin.js?v=",
+	}
+	if len(scripts) != len(wantScripts) {
+		t.Fatalf("Scripts 应含 %v，got %v", wantScripts, scripts)
+	}
+	for i, prefix := range wantScripts {
+		if !strings.HasPrefix(scripts[i], prefix) {
+			t.Fatalf("Scripts[%d] 应以 %q 开头（带内容指纹），got %v", i, prefix, scripts)
+		}
 	}
 	if data, ok := b.StaticAsset("tools-plan", "todo.css"); !ok || len(data) == 0 {
 		t.Fatal("StaticAsset 应能取到 todo.css")

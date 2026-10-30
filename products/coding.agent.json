@@ -12,7 +12,8 @@
     "policy-default",
     "persona-coding",
     "provider-admin",
-    "token-usage"
+    "token-usage",
+    "plugin-creator"
   ],
   "capabilities": {
     "skills": true,

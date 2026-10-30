@@ -1,0 +1,20 @@
+{
+  "id": "plugin-creator",
+  "name": "创建插件",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "在工作区 .adago/plugins 下生成可直接加载的第三方插件骨架（清单、入口、README），创建后自动重载插件列表。",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts",
+    "capabilities": ["fs.read", "fs.write"]
+  },
+  "frontend": {
+    "capabilities": ["frontend.script"],
+    "nav": [{ "label": "创建插件", "slug": "new" }],
+    "pages": [{ "slug": "new", "title": "创建插件", "template": "page.tsx" }],
+    "scripts": ["plugin-creator.js"],
+    "styles": ["plugin-creator.css"],
+    "assets": "static"
+  }
+}
