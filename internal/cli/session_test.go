@@ -129,6 +129,22 @@ func TestSessionEnableUndeclaredPlugin(t *testing.T) {
 	if view.Enabled || view.Status != "unused" {
 		t.Fatalf("停用后 tools-git = %+v", view)
 	}
+
+	// 纯前端插件没有后端实例，但从界面同样要能启用/停用（状态来自 frontend 段）。
+	if _, err := sess.SetPluginEnabled(ctx, "ui-hello-tsx", true); err != nil {
+		t.Fatalf("启用 ui-hello-tsx: %v", err)
+	}
+	view, ok = viewOf(sess, ctx, "ui-hello-tsx")
+	if !ok || !view.Enabled || view.Status != "ready" {
+		t.Fatalf("启用后 ui-hello-tsx = %+v（ok=%v）", view, ok)
+	}
+	if _, err := sess.SetPluginEnabled(ctx, "ui-hello-tsx", false); err != nil {
+		t.Fatalf("停用 ui-hello-tsx: %v", err)
+	}
+	view, _ = viewOf(sess, ctx, "ui-hello-tsx")
+	if view.Enabled || view.Status != "unused" {
+		t.Fatalf("停用后 ui-hello-tsx = %+v", view)
+	}
 }
 
 // viewOf 从 plugin.list 投影里取一个插件（测试辅助）。

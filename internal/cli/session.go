@@ -1839,7 +1839,7 @@ func (s *Session) assembleInitial(ctx context.Context) (*app.Assembly, error) {
 	s.mu.Unlock()
 	meta := s.listPluginMeta(ctx)
 	productIDs := productIDSet(s.product)
-	extras, disabled, optIn := pluginSelection(discovered, meta, s.baseScripts, productIDs)
+	extras, disabled, optIn := pluginSelection(discovered, meta, s.baseScripts, s.frontendScripts, productIDs)
 	asm, err := app.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, optIn, s.appDeps)
 	if err == nil {
 		if serr := s.syncPluginMeta(ctx, discovered, meta, nil); serr != nil {
@@ -1866,7 +1866,7 @@ func (s *Session) assembleInitial(ctx context.Context) (*app.Assembly, error) {
 			}
 		}
 		remaining = kept
-		extras, disabled, optIn = pluginSelection(remaining, meta, s.baseScripts, productIDs)
+		extras, disabled, optIn = pluginSelection(remaining, meta, s.baseScripts, s.frontendScripts, productIDs)
 		asm, err = app.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, optIn, s.appDeps)
 	}
 	if err != nil {
@@ -1951,7 +1951,7 @@ func (s *Session) listPluginMeta(ctx context.Context) map[string]sqlite.PluginMe
 //   - 第三方按 plugin_meta.enabled 过滤（缺省 enabled）；
 //   - 随包插件里 enabled=false 且被产品声明的进 disabled；
 //   - 产品未声明、但用户显式启用过的随包插件进 optIn，装配时追加。
-func pluginSelection(discovered []discovery.Plugin, meta map[string]sqlite.PluginMetaRecord, base []host.Script, productIDs map[string]bool) ([]host.Script, map[string]bool, map[string]bool) {
+func pluginSelection(discovered []discovery.Plugin, meta map[string]sqlite.PluginMetaRecord, base, frontend []host.Script, productIDs map[string]bool) ([]host.Script, map[string]bool, map[string]bool) {
 	extras := make([]host.Script, 0, len(discovered))
 	for _, p := range discovered {
 		if rec, ok := meta[p.ID()]; ok && !rec.Enabled {
@@ -1961,11 +1961,21 @@ func pluginSelection(discovered []discovery.Plugin, meta map[string]sqlite.Plugi
 	}
 	var disabled map[string]bool
 	var optIn map[string]bool
-	for _, sc := range base {
+	// 统一插件包会同时出现在 base 与 frontend（后端/前端两种加载形态）；
+	// 按 id 去重，但前端-only 插件只能从 frontend 看到。
+	seen := map[string]bool{}
+	bundled := make([]host.Script, 0, len(base)+len(frontend))
+	bundled = append(bundled, base...)
+	bundled = append(bundled, frontend...)
+	for _, sc := range bundled {
 		if sc.Manifest == nil {
 			continue
 		}
 		id := sc.Manifest.ID
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
 		rec, ok := meta[id]
 		if !ok {
 			continue
@@ -2106,7 +2116,7 @@ func (s *Session) reloadAssembly(ctx context.Context) error {
 		return fmt.Errorf("cli: 第三方插件发现失败，保留旧装配: %s", strings.Join(msgs, "; "))
 	}
 	meta := s.listPluginMeta(ctx)
-	extras, disabled, optIn := pluginSelection(discovered, meta, s.baseScripts, productIDSet(s.product))
+	extras, disabled, optIn := pluginSelection(discovered, meta, s.baseScripts, s.frontendScripts, productIDSet(s.product))
 	newAsm, err := app.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, optIn, s.appDeps)
 	if err != nil {
 		return fmt.Errorf("cli: 重建装配失败，保留旧装配: %w", err)
@@ -2337,9 +2347,15 @@ func (s *Session) viewFor(ctx context.Context, id string) PluginView {
 	return PluginView{ID: id, Status: "failed", LastError: "插件不在当前视图里"}
 }
 
-// lookupPlugin 找一个插件的脚本、来源与指纹（随包 base 优先，其次第三方快照）。
+// lookupPlugin 找一个插件的脚本、来源与指纹（随包 base 优先，其次前端段，最后第三方）。
 func (s *Session) lookupPlugin(id string) (host.Script, string, string, bool) {
 	for _, sc := range s.baseScripts {
+		if sc.Manifest != nil && sc.Manifest.ID == id {
+			return sc, "", fingerprintScript(sc), true
+		}
+	}
+	// 纯前端官方插件只在 frontendScripts 里（baseScripts 只收 backend 段）。
+	for _, sc := range s.frontendScripts {
 		if sc.Manifest != nil && sc.Manifest.ID == id {
 			return sc, "", fingerprintScript(sc), true
 		}

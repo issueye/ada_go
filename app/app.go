@@ -263,13 +263,19 @@ func assembleSet(ctx context.Context, p *coreapp.Product, base, extras []host.Sc
 			if productIDs[id] {
 				continue
 			}
-			if _, ok := byID[id]; ok {
-				optIDs = append(optIDs, id)
-			}
+			optIDs = append(optIDs, id)
 		}
 		sort.Strings(optIDs)
 		for _, id := range optIDs {
-			s := byID[id]
+			s, hasScript := byID[id]
+			if !hasScript {
+				// 纯前端插件没有后端加载单元：只登记 frontendDecls，
+				// 由 Gateway 渲染桥按启停状态决定是否渲染。
+				if deps.FrontendIDs[id] {
+					frontendDecls = append(frontendDecls, id)
+				}
+				continue
+			}
 			if deps.FrontendIDs[id] {
 				frontendDecls = append(frontendDecls, id)
 			}
