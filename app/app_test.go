@@ -152,6 +152,22 @@ func TestToolsPlan(t *testing.T) {
 			t.Fatalf("TODO 文件缺少 %q:\n%s", want, raw)
 		}
 	}
+
+	// 没有 threadId 的插槽预取（首页）只读动作必须返回空计划，而不是抛错。
+	// 抛错会被宿主记成插件降级，整张 Todo 卡片从此不可用。
+	def, ok := asm.ActionDef("tools-plan", "plan")
+	if !ok {
+		t.Fatal("tools-plan 没有注册 plan 动作")
+	}
+	inst, _ := asm.Plugin("tools-plan")
+	noThread := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
+	actRaw, err := inst.CallAction(context.Background(), def.Handler, json.RawMessage(`{}`), noThread)
+	if err != nil {
+		t.Fatalf("无 threadId 的 plan 动作不应失败: %v", err)
+	}
+	if !strings.Contains(string(actRaw), `"total":0`) {
+		t.Fatalf("无 threadId 时应返回空计划: %s", actRaw)
+	}
 }
 
 // 旧版本线程级 state KV 里的计划：首次读文件时迁移到 TODO_<threadId>.json。

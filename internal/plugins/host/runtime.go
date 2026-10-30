@@ -1024,6 +1024,9 @@ func (p *Instance) recordResult(c *call, err error) {
 	if err == nil {
 		p.mu.Lock()
 		p.failures = 0
+		// 成功调用清掉上一次调用的错误：否则插件会一直显示“降级”，
+		// 即使导致失败的调用早已修好（例如缺 threadId 的一次插槽预取）。
+		p.lastError = ""
 		p.mu.Unlock()
 		return
 	}

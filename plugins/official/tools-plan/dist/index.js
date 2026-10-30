@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:cce8217564465c7d) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:c8a289b4f77673cb) by plugins/official/build.mjs — do not edit
 // tools-plan —— 官方插件：维护当前线程的任务计划（05 §6.3、02 §5.4 的 tools-plan）。
 //
 // 计划不写进会话 entry：插件自己把每个会话的计划保存到工作区根目录的
@@ -248,10 +248,15 @@ export default function (agent          )       {
 
   // 只读动作 plan：给本插件前端段的 Todo 卡片取数（7.5 的 action.invoke 桥）。
   // 返回 { plan }；total=0 表示当前会话没有计划（前端据此不画卡）。
+  // 没有会话上下文（首页/概览页的插槽预取）时直接返回空计划：读动作失败
+  // 会被宿主记成插件降级，不能因为“没有会话”把整个插件标坏。
   agent.registerAction({
     name: "plan",
     mode: "read",
     execute: async (_input     , ctx             ) => {
+      if (!String(ctx.threadId || "").trim()) {
+        return { plan: planView([]) };
+      }
       const steps = await loadSteps(ctx);
       return { plan: planView(steps) };
     },

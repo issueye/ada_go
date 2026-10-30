@@ -215,8 +215,24 @@ func (b *Bridge) InvalidateEnabled(workspace string) {
 	}
 }
 
+// threadContextSlots 是只在会话上下文里有意义的插槽。首页/概览页没有
+// threadId，渲染它们会让插槽的只读动作带着空 threadId 去预取（例如
+// Todo 卡片），插件按失败关闭会拒绝，进而把插件标成降级。
+var threadContextSlots = map[string]bool{
+	"chat.corner":      true,
+	"composer.left":    true,
+	"composer.right":   true,
+	"composer.footer":  true,
+	"composer.above":   true,
+	"thread.tray":      true,
+	"transcript.after": true,
+}
+
 // Slot 实现 web.PluginUI：渲染一个插槽的全部贡献。
 func (b *Bridge) Slot(name string, r *http.Request) (template.HTML, int, error) {
+	if threadContextSlots[name] && threadIDFromRequest(r) == "" {
+		return "", 0, nil
+	}
 	entries := b.slotIndex[name]
 	if len(entries) == 0 {
 		return "", 0, nil

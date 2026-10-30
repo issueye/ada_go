@@ -247,10 +247,15 @@ export default function (agent: AgentAPI): void {
 
   // 只读动作 plan：给本插件前端段的 Todo 卡片取数（7.5 的 action.invoke 桥）。
   // 返回 { plan }；total=0 表示当前会话没有计划（前端据此不画卡）。
+  // 没有会话上下文（首页/概览页的插槽预取）时直接返回空计划：读动作失败
+  // 会被宿主记成插件降级，不能因为“没有会话”把整个插件标坏。
   agent.registerAction({
     name: "plan",
     mode: "read",
     execute: async (_input: any, ctx: ToolContext) => {
+      if (!String(ctx.threadId || "").trim()) {
+        return { plan: planView([]) };
+      }
       const steps = await loadSteps(ctx);
       return { plan: planView(steps) };
     },

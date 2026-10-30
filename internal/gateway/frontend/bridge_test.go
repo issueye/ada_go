@@ -197,6 +197,32 @@ func TestBridgeSkipsDisabledPlugin(t *testing.T) {
 	}
 }
 
+// 会话级插槽在首页（没有 threadId）不渲染、也不预取动作；
+// 否则 Todo 卡片的 plan 动作会带着空 threadId 失败，把插件标成降级。
+func TestBridgeThreadSlotSkipsHomePage(t *testing.T) {
+	core := newFakeCore().on("action.invoke", `{"ok":true,"result":{"plan":{"done":0,"total":0,"steps":[]}}}`)
+	b := testBridge(t, core)
+
+	html, count, err := b.Slot("chat.corner", request(t, "/"))
+	if err != nil {
+		t.Fatalf("Slot(chat.corner) on /: %v", err)
+	}
+	if html != "" || count != 0 {
+		t.Fatalf("首页不应渲染会话级插槽: %q (%d)", html, count)
+	}
+	if got := core.count("action.invoke"); got != 0 {
+		t.Fatalf("首页不应预取插槽动作: %d 次", got)
+	}
+
+	// 有 threadId 的会话页仍然预取（ActionResult 为空计划时模板返回 null）。
+	if _, _, err := b.Slot("chat.corner", request(t, "/threads/th_1")); err != nil {
+		t.Fatalf("Slot(chat.corner) on thread: %v", err)
+	}
+	if got := core.count("action.invoke"); got != 1 {
+		t.Fatalf("会话页应预取一次动作，got %d", got)
+	}
+}
+
 // 动作预取成功：计划卡用真实动作结果渲染。
 func TestBridgeTaskPlanSlotWithActionResult(t *testing.T) {
 	core := newFakeCore().on("action.invoke",
