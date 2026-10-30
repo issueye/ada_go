@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -28,6 +29,8 @@ func runGateway(args []string, stdout io.Writer) error {
 	fs.Var(&workspaces, "workspace", "工作区目录（可重复；默认 .）")
 	product := fs.String("product", defaultProductPath(), "产品声明文件")
 	dataDir := fs.String("data-dir", "", "Core 数据目录")
+	workspacesFile := fs.String("workspaces-file", defaultWorkspacesFile(),
+		"工作区列表持久化文件（FilePicker 打开的目录重启后保留；空表示不持久化）")
 	provider := fs.String("provider", "openai", "provider id")
 	model := fs.String("model", "gpt-4o", "模型 id")
 	baseURL := fs.String("base-url", "", "OpenAI 兼容端点")
@@ -64,6 +67,7 @@ func runGateway(args []string, stdout io.Writer) error {
 		MaxCores:  *maxCores, Idle: *idle,
 		Secure:          false,
 		FrontendScripts: frontendScripts,
+		WorkspacesFile:  strings.TrimSpace(*workspacesFile),
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -121,6 +125,19 @@ func runGateway(args []string, stdout io.Writer) error {
 		return nil
 	}
 	return err
+}
+
+// defaultWorkspacesFile 返回用户级工作区列表位置；ADAGO_HOME 优先，
+// 与桌面壳/供应商配置使用同一产品目录。
+func defaultWorkspacesFile() string {
+	if home := strings.TrimSpace(os.Getenv("ADAGO_HOME")); home != "" {
+		return filepath.Join(home, "workspaces.json")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.Join(home, ".adago", "workspaces.json")
 }
 
 // requireLoopback 拒绝非回环监听：M2 第一切片不做 TLS/配对码登录。

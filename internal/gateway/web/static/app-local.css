@@ -788,6 +788,40 @@ select:focus {
   max-width: 280px;
 }
 
+/* 级联模型菜单：左侧模型，悬停/右箭头在右侧展开推理等级。 */
+.ada-model-picker__chevron {
+  display: flex;
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--ph-faint);
+}
+
+.ada-model-cascade {
+  position: fixed;
+  z-index: 75;
+  min-width: 140px;
+  padding: 6px;
+  border: 1px solid var(--ph-line-strong);
+  border-radius: var(--ada-radius-lg);
+  background: var(--ph-elevated);
+  box-shadow: var(--ph-shadow);
+}
+
+.ada-model-cascade[hidden] {
+  display: none;
+}
+
+.ada-model-cascade__title {
+  margin: 2px 6px 6px;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-xs);
+}
+
+.ada-model-cascade__option {
+  width: 100%;
+  text-align: left;
+}
+
 .ada-model-picker__trigger {
   height: 28px;
   gap: 6px;
@@ -1303,5 +1337,158 @@ html:not(.js) .ada-select [data-select-menu] {
   }
   .ada-plugin-nav__item {
     flex: 1 1 0;
+  }
+}
+
+/* ── 新建任务：左上角入口 + 居中输入区 ───────────────────────────────── */
+
+.ada-new {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  gap: 6px;
+  text-decoration: none;
+}
+
+.ada-new__kbd {
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid var(--ph-line);
+  border-radius: 4px;
+  color: var(--ph-faint);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.ada-newtask {
+  display: grid;
+  min-height: calc(100vh - 140px);
+  padding: 24px 0 40px;
+  place-items: center;
+}
+
+/* 新建任务的 Composer 要和正常对话一样宽 860：.ada-wrap 的 860 含左右
+   28px 内边距，这里把容器放宽，内容区正好回到 860。 */
+.ada-wrap--newtask {
+  max-width: 916px;
+}
+
+.ada-newtask__inner {
+  width: min(860px, 100%);
+  text-align: center;
+}
+
+.ada-newtask__mark {
+  display: inline-grid;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 16px;
+  place-items: center;
+  border: 1px solid var(--ph-line);
+  border-radius: 16px;
+  background: var(--ph-elevated);
+  box-shadow: var(--ph-shadow);
+}
+
+.ada-newtask__mark img {
+  border-radius: 12px;
+}
+
+.ada-newtask__greeting {
+  margin: 0;
+  color: var(--ph-ink);
+  font-size: clamp(22px, 3vw, 30px);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.ada-newtask__desc {
+  margin: 10px 0 0;
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
+}
+
+.ada-newtask__form {
+  margin-top: 22px;
+  text-align: left;
+}
+
+/* 工作区入口放进 Composer 工具行，和正常对话的 chip 同一位置/同一套样式。 */
+.ada-newtask__ws-controls {
+  display: inline-flex;
+  min-width: 0;
+}
+
+.ada-newtask .ada-tool--workspace {
+  /* 正常 Composer 在窄卡片里会隐藏工作区名；新建任务是选工作区的主入口，
+     窄屏也要保留。 */
+  display: inline-flex;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ada-newtask__ws-native {
+  max-width: 260px;
+}
+
+html.js .ada-newtask__ws-native {
+  display: none;
+}
+
+.ada-newtask__aux {
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+/* 下拉选项必须撑满菜单：<button> 的 width:auto 是收缩宽度，
+   在宽菜单里会出现“只有文字那一小段能点/能高亮”的问题。 */
+.ada-select__option {
+  width: 100%;
+  text-align: left;
+  box-sizing: border-box;
+}
+
+/* ── FilePicker 弹窗 ─────────────────────────────────────────────────── */
+.ada-file-picker__panel {
+  width: min(680px, calc(100vw - 48px));
+}
+
+.ada-file-picker__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-right: 28px;
+}
+
+.ada-file-picker__head .ada-modal__title {
+  margin: 0;
+}
+
+.ada-file-picker .wp-picker__list {
+  height: 340px;
+}
+
+.wp-picker__section {
+  display: grid;
+  gap: 6px;
+}
+
+.wp-picker__section-label {
+  margin: 0;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-xs);
+}
+
+@media (max-width: 560px) {
+  .ada-newtask {
+    min-height: calc(100vh - 120px);
+  }
+  .ada-file-picker .wp-picker__list {
+    height: 260px;
   }
 }

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -232,17 +233,29 @@ func (r *Registry) Stream(ctx context.Context, req ports.Request) (ports.Stream,
 	}
 
 	baseURL, apiKey := r.BaseURL, ""
+	params := req.Params
+	var proxy string
+	var headers map[string]string
 	if cfg != nil {
 		baseURL, apiKey = cfg.BaseURL, cfg.APIKey
+		proxy, headers = cfg.Proxy, cfg.Headers
+		for _, m := range cfg.Models {
+			if m.ID == req.Model.ModelID {
+				applyThinkingLevel(&params, m, req.Model.ThinkingLevel)
+				break
+			}
+		}
 	}
 	payload, err := json.Marshal(providerRequest{
 		Model:    req.Model.ModelID,
 		System:   req.System,
 		Messages: req.Messages,
 		Tools:    req.Tools,
-		Params:   req.Params,
+		Params:   params,
 		BaseURL:  baseURL,
 		APIKey:   apiKey,
+		Proxy:    proxy,
+		Headers:  headers,
 	})
 	if err != nil {
 		return nil, domain.WrapError(domain.NewError(domain.CodeProviderError, "provider 请求无法序列化"), err)
@@ -373,6 +386,36 @@ type providerRequest struct {
 	BaseURL  string             `json:"baseUrl,omitempty"`
 	// APIKey 是用户配置里针对该供应商的密钥；空时插件回退到 ctx.secret。
 	APIKey string `json:"apiKey,omitempty"`
+	// Proxy 是该供应商的出网代理；插件把它交给宿主 HTTP 桥。
+	Proxy string `json:"proxy,omitempty"`
+	// Headers 是用户配置的自定义请求头。
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// applyThinkingLevel 把选中的推理档位写进请求参数。未选择时用模型的第一档；
+// 档位不在模型允许列表里时忽略（避免把非法值透传给 provider）。
+func applyThinkingLevel(params *ports.Params, m Model, selected string) {
+	levels := m.ThinkingLevels
+	if len(levels) == 0 {
+		return
+	}
+	selected = strings.ToLower(strings.TrimSpace(selected))
+	if selected == "" {
+		selected = levels[0]
+	}
+	valid := false
+	for _, level := range levels {
+		if strings.EqualFold(level, selected) {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return
+	}
+	v := true
+	params.Thinking = &v
+	params.ReasoningEffort = selected
 }
 
 type streamEvent struct {

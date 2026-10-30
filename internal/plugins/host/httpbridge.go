@@ -59,6 +59,10 @@ type Bridge struct {
 	maxSSE   int
 	client   *http.Client
 	debug    *DebugLog
+
+	baseTransport *http.Transport
+	proxyMu       sync.Mutex
+	proxyClients  map[string]*http.Client
 }
 
 var _ HTTPBridge = (*Bridge)(nil)
@@ -96,7 +100,8 @@ func NewHTTPBridge(cfg HTTPBridgeConfig) (*Bridge, error) {
 	b := &Bridge{
 		allowAny: cfg.AllowAnyHost, allow: append([]string(nil), cfg.AllowHosts...),
 		connect: connect, idle: idle, total: total, maxJSON: maxJSON, maxSSE: maxSSE,
-		debug: debugLog,
+		debug:        debugLog,
+		proxyClients: map[string]*http.Client{},
 	}
 	transport := cfg.Transport
 	if transport == nil {
@@ -111,16 +116,60 @@ func NewHTTPBridge(cfg HTTPBridgeConfig) (*Bridge, error) {
 			ExpectContinueTimeout: time.Second,
 		}
 	}
-	b.client = &http.Client{
-		Transport: transport,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return errors.New("host: HTTP 重定向超过 5 跳")
-			}
-			return b.checkURL(req.URL)
-		},
+	if base, ok := transport.(*http.Transport); ok {
+		b.baseTransport = base
 	}
+	b.client = &http.Client{Transport: transport, CheckRedirect: b.checkRedirect}
 	return b, nil
+}
+
+func (b *Bridge) checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 5 {
+		return errors.New("host: HTTP 重定向超过 5 跳")
+	}
+	return b.checkURL(req.URL)
+}
+
+// clientForProxy 返回按供应商代理配置复用的 HTTP 客户端。
+// 空代理复用默认客户端；代理 URL 只允许 http/https/socks5。
+func (b *Bridge) clientForProxy(proxy string) (*http.Client, error) {
+	proxy = strings.TrimSpace(proxy)
+	if proxy == "" {
+		return b.client, nil
+	}
+	u, err := url.Parse(proxy)
+	if err != nil || u.Host == "" {
+		return nil, domain.NewError(domain.CodeProviderError, "代理地址不合法: "+proxy)
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https", "socks5":
+	default:
+		return nil, domain.NewError(domain.CodeProviderError,
+			"代理只支持 http/https/socks5，得到 "+u.Scheme)
+	}
+	b.proxyMu.Lock()
+	defer b.proxyMu.Unlock()
+	if c := b.proxyClients[proxy]; c != nil {
+		return c, nil
+	}
+	var transport http.RoundTripper
+	if b.baseTransport != nil {
+		clone := b.baseTransport.Clone()
+		clone.Proxy = http.ProxyURL(u)
+		transport = clone
+	} else {
+		transport = &http.Transport{
+			Proxy:               http.ProxyURL(u),
+			DialContext:         (&net.Dialer{Timeout: b.connect, KeepAlive: 30 * time.Second}).DialContext,
+			ForceAttemptHTTP2:   true,
+			MaxIdleConns:        16,
+			IdleConnTimeout:     90 * time.Second,
+			TLSHandshakeTimeout: b.connect,
+		}
+	}
+	c := &http.Client{Transport: transport, CheckRedirect: b.checkRedirect}
+	b.proxyClients[proxy] = c
+	return c, nil
 }
 
 // AllowHost 动态追加一个 host/host:port 白名单项（用户配置的供应商端点）。
@@ -145,14 +194,36 @@ func (b *Bridge) AllowHost(host string) {
 
 // Close 释放连接池（测试与 Core 退出时调用）。
 func (b *Bridge) Close() {
-	if b != nil && b.client != nil {
+	if b == nil {
+		return
+	}
+	if b.client != nil {
 		b.client.CloseIdleConnections()
 	}
+	b.proxyMu.Lock()
+	defer b.proxyMu.Unlock()
+	for _, c := range b.proxyClients {
+		c.CloseIdleConnections()
+	}
+	b.proxyClients = map[string]*http.Client{}
 }
 
 // JSON 发一次请求并返回原始响应体；非 2xx 也返回结果，由调用方决定语义
 // （ctx.fetch 与 fetch 语义一致：HTTP 错误是响应，不是异常）。
 func (b *Bridge) JSON(ctx context.Context, method, rawURL string, headers map[string]string, body string, maxBytes int) (HTTPResult, error) {
+	return b.jsonWithClient(ctx, b.client, method, rawURL, headers, body, maxBytes)
+}
+
+// JSONWithProxy 与 JSON 相同，但用供应商配置的代理发请求。
+func (b *Bridge) JSONWithProxy(ctx context.Context, method, rawURL string, headers map[string]string, body string, maxBytes int, proxy string) (HTTPResult, error) {
+	client, err := b.clientForProxy(proxy)
+	if err != nil {
+		return HTTPResult{}, err
+	}
+	return b.jsonWithClient(ctx, client, method, rawURL, headers, body, maxBytes)
+}
+
+func (b *Bridge) jsonWithClient(ctx context.Context, client *http.Client, method, rawURL string, headers map[string]string, body string, maxBytes int) (HTTPResult, error) {
 	if method == "" {
 		method = http.MethodGet
 	}
@@ -189,7 +260,7 @@ func (b *Bridge) JSON(ctx context.Context, method, rawURL string, headers map[st
 	start := time.Now()
 	debugID := b.debug.NextID()
 	b.debug.Request(debugID, method, u.String(), req.Header, []byte(body))
-	resp, err := b.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		b.debug.Error(debugID, err, time.Since(start))
 		return HTTPResult{}, wrapNetworkErr(err)
@@ -209,6 +280,19 @@ func (b *Bridge) JSON(ctx context.Context, method, rawURL string, headers map[st
 //
 // 非 2xx 返回 *HTTPError（带状态与 Retry-After），provider 桥据此决定是否重试。
 func (b *Bridge) SSE(ctx context.Context, method, rawURL string, headers map[string]string, body string, onEvent func(event, data string) error) (HTTPResult, error) {
+	return b.sseWithClient(ctx, b.client, method, rawURL, headers, body, onEvent)
+}
+
+// SSEWithProxy 与 SSE 相同，但用供应商配置的代理发请求。
+func (b *Bridge) SSEWithProxy(ctx context.Context, method, rawURL string, headers map[string]string, body string, onEvent func(event, data string) error, proxy string) (HTTPResult, error) {
+	client, err := b.clientForProxy(proxy)
+	if err != nil {
+		return HTTPResult{}, err
+	}
+	return b.sseWithClient(ctx, client, method, rawURL, headers, body, onEvent)
+}
+
+func (b *Bridge) sseWithClient(ctx context.Context, client *http.Client, method, rawURL string, headers map[string]string, body string, onEvent func(event, data string) error) (HTTPResult, error) {
 	if onEvent == nil {
 		return HTTPResult{}, errors.New("host: SSE 需要 onEvent 回调")
 	}
@@ -248,7 +332,7 @@ func (b *Bridge) SSE(ctx context.Context, method, rawURL string, headers map[str
 	start := time.Now()
 	debugID := b.debug.NextID()
 	b.debug.Request(debugID, method, u.String(), req.Header, []byte(body))
-	resp, err := b.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		b.debug.Error(debugID, err, time.Since(start))
 		return HTTPResult{}, wrapNetworkErr(err)

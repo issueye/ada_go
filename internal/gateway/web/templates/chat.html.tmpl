@@ -5,7 +5,7 @@
 
   <div class="ada-chat-viewport">
     <div class="ada-scroll" id="chat-scroll">
-      <div class="ada-wrap">
+      <div class="ada-wrap{{if not .Thread.ID}} ada-wrap--newtask{{end}}">
         {{if not .Connected}}
         <div class="ada-empty">
           <span class="ada-empty__mark">{{icon "i-alert" 20}}</span>
@@ -40,15 +40,57 @@
         </div>
         {{end}}
         {{else}}
-        <div class="ada-empty ada-empty--newconv">
-          <span class="ada-empty__mark"><img class="ada-empty__logo" src="{{asset "logo.png"}}" alt="" width="32" height="32" decoding="async"></span>
-          <h2 class="ada-empty__title">开始一段新的对话</h2>
-          <p class="ada-empty__desc">左侧会自动列出本地会话。新建会话后，在下方输入框向 agent 发送任务。</p>
-          <div class="ada-empty__action">
-            <form method="post" action="/threads">
+        <div class="ada-newtask">
+          <div class="ada-newtask__inner">
+            <span class="ada-newtask__mark"><img src="{{asset "logo.png"}}" alt="" width="40" height="40" decoding="async"></span>
+            <h2 class="ada-newtask__greeting">{{.Greeting}}</h2>
+            <p class="ada-newtask__desc">描述你要完成的任务，agent 会在选定的工作区里开始工作。</p>
+            <form class="ada-newtask__form" method="post" action="/threads" data-new-task>
               {{template "csrf" .}}
-              <input type="hidden" name="title" value="新会话">
-              <button class="ada-btn ada-btn--primary ada-btn--md" type="submit">{{icon "i-plus" 14}}<span class="ada-btn__label">新建会话</span></button>
+              <div class="ada-composer__card ada-newtask__card">
+                <textarea class="ada-composer__input" name="text" rows="2" maxlength="65536" placeholder="向 {{.ProductName}} 提问，或描述一个任务…" aria-label="任务描述" required></textarea>
+                <div class="ada-composer__bar">
+                  <div class="ada-composer__group ada-composer__group--left">
+                    <div class="ada-newtask__ws-controls" data-workspace-controls hidden>
+                      <button class="ada-tool ada-tool--workspace" type="button" data-file-picker-open title="选择工作区：{{.Workspace}}">
+                        {{icon "i-folder" 14}}<span class="ada-tool__label" data-workspace-label>{{.WorkspaceName}}</span>{{icon "i-chevron-down" 12}}
+                      </button>
+                    </div>
+                    <select class="input ada-newtask__ws-native" name="workspace" data-workspace-native aria-label="工作区">
+                      {{range .Workspaces}}<option value="{{.Path}}"{{if eq .Path $.Workspace}} selected{{end}}>{{.Name}} — {{.Path}}</option>{{end}}
+                    </select>
+                    <input type="hidden" data-workspace-input value="{{.Workspace}}">
+                    {{if .Models}}
+                    <ada-select class="ada-select ada-model-picker" data-model-picker>
+                      <button class="ada-select__trigger ada-model-picker__trigger" type="button" data-select-trigger aria-expanded="false" title="选择当前模型">
+                        <span class="ada-model-picker__icon">{{icon "i-sparkles" 14}}</span>
+                        <span class="ada-select__label ada-model-picker__label" data-select-label>{{.CurrentModelLabel}}</span>
+                        <span class="ada-select__caret">{{icon "i-chevron-down" 12}}</span>
+                      </button>
+                      <div class="ada-select__menu ada-model-picker__menu" data-select-menu hidden>
+                        <p class="ada-model-picker__group">模型</p>
+                        {{range .Models}}<button class="ada-select__option ada-model-picker__option{{if .Current}} is-selected{{end}}" type="button" data-value="{{.ProviderID}}|{{.ModelID}}" data-label="{{.ShortLabel}}" data-levels="{{.ThinkingLevelsCSV}}" data-current-level="{{if .Current}}{{$.CurrentModelLevel}}{{end}}" aria-selected="{{if .Current}}true{{else}}false{{end}}">
+                          <span class="ada-model-picker__name">{{.Label}}</span>
+                          <span class="ada-model-picker__provider">{{.ProviderID}}</span>
+                          {{if .ThinkingLevels}}<span class="ada-model-picker__chevron">{{icon "i-chevron" 12}}</span>{{end}}
+                        </button>
+                        {{end}}
+                      </div>
+                      <input type="hidden" data-select-input value="{{.CurrentModelValue}}">
+                      <noscript><select class="input ada-select__fallback" name="model" aria-label="选择当前模型">{{range .Models}}<option value="{{.ProviderID}}|{{.ModelID}}"{{if .Current}} selected{{end}}>{{.Label}}</option>{{end}}</select></noscript>
+                    </ada-select>
+                    {{end}}
+                    {{slot "composer.left" .Slots.ComposerLeft .SlotCounts.ComposerLeft ""}}
+                  </div>
+                  <div class="ada-composer__group ada-composer__group--right">
+                    {{slot "composer.right" .Slots.ComposerRight .SlotCounts.ComposerRight ""}}
+                    <button class="ada-send" type="submit" aria-label="开始任务" title="开始任务">{{icon "i-send" 14}}</button>
+                  </div>
+                </div>
+              </div>
+              <div class="ada-aux ada-newtask__aux">
+                <span class="ada-aux__plugins">{{slot "composer.footer" .Slots.ComposerFooter .SlotCounts.ComposerFooter ""}}</span>
+              </div>
             </form>
           </div>
         </div>
@@ -79,7 +121,7 @@
           <details class="ada-plus">
             <summary class="ada-plus__button" title="更多操作" aria-label="更多操作">{{icon "i-plus" 14}}</summary>
             <div class="ada-plus__panel">
-              <form method="post" action="/threads">{{template "csrf" .}}<input type="hidden" name="title" value="新会话"><button class="ada-plus__item" type="submit">{{icon "i-chat" 14}}<span>新会话</span></button></form>
+              <a class="ada-plus__item" href="/">{{icon "i-plus" 14}}<span>新建任务</span></a>
               <a class="ada-plus__item" href="/workspaces">{{icon "i-folder" 14}}<span>切换工作区</span></a>
             </div>
           </details>
@@ -93,9 +135,10 @@
             </button>
             <div class="ada-select__menu ada-model-picker__menu" data-select-menu hidden>
               <p class="ada-model-picker__group">模型</p>
-              {{range .Models}}<button class="ada-select__option ada-model-picker__option{{if .Current}} is-selected{{end}}" type="button" data-value="{{.ProviderID}}|{{.ModelID}}" data-label="{{.ShortLabel}}" aria-selected="{{if .Current}}true{{else}}false{{end}}">
+              {{range .Models}}<button class="ada-select__option ada-model-picker__option{{if .Current}} is-selected{{end}}" type="button" data-value="{{.ProviderID}}|{{.ModelID}}" data-label="{{.ShortLabel}}" data-levels="{{.ThinkingLevelsCSV}}" data-current-level="{{if .Current}}{{$.CurrentModelLevel}}{{end}}" aria-selected="{{if .Current}}true{{else}}false{{end}}">
                 <span class="ada-model-picker__name">{{.Label}}</span>
                 <span class="ada-model-picker__provider">{{.ProviderID}}</span>
+                {{if .ThinkingLevels}}<span class="ada-model-picker__chevron">{{icon "i-chevron" 12}}</span>{{end}}
               </button>
               {{end}}
             </div>

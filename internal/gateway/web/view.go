@@ -258,6 +258,8 @@ type threadData struct {
 	Transcript   []transcriptItem
 	Interactions []interactionView
 	TurnKey      string
+	// Greeting 是新建任务页按时间变化的问候语。
+	Greeting string
 	// TranscriptStateJSON 是对话流岛的初始数据：助手文本是 VNode 数据，
 	// 工具/用户/Notice 行仍是服务端渲染 HTML；没有 JS 时用 Transcript 的 SSR 行。
 	TranscriptStateJSON string
@@ -265,14 +267,30 @@ type threadData struct {
 	Models            []modelOption
 	CurrentModelLabel string
 	CurrentModelValue string
+	// CurrentModelLevels/Level 是当前模型可选的推理档位与已选档位。
+	CurrentModelLevels []string
+	CurrentModelLevel  string
 }
 
 type modelOption struct {
-	ProviderID string
-	ModelID    string
-	Label      string
-	ShortLabel string
-	Current    bool
+	ProviderID     string
+	ModelID        string
+	Label          string
+	ShortLabel     string
+	Current        bool
+	ThinkingLevels []string
+	ThinkingLevel  string
+	// ThinkingLevelsCSV 是模板用的档位串（low|high|max），供级联子菜单读取。
+	ThinkingLevelsCSV string
+}
+
+// modelPickerData 是 model.list 的展示投影：选项、当前标签/值、当前推理档位。
+type modelPickerData struct {
+	Models []modelOption
+	Label  string
+	Value  string
+	Levels []string
+	Level  string
 }
 
 type threadInfo struct {

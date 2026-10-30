@@ -260,7 +260,8 @@
       "additionalProperties": false,
       "properties": {
         "providerId": { "type": "string", "minLength": 1, "maxLength": 64 },
-        "modelId": { "type": "string", "minLength": 1, "maxLength": 128 }
+        "modelId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "thinkingLevel": { "type": "string", "maxLength": 32, "description": "当前选择的推理档位；空表示不传" }
       },
       "required": ["providerId", "modelId"]
     },
@@ -276,6 +277,11 @@
         "input": { "type": "array", "items": { "type": "string", "enum": ["text", "image"] }, "description": "图片输入受模型能力位+产品 capabilities.images 双门" },
         "supportsTools": { "type": "boolean" },
         "supportsThinking": { "type": "boolean" },
+        "thinkingLevels": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 32 },
+          "description": "模型可选推理等级（从低到高）；空表示不提供档位"
+        },
         "pricing": {
           "type": "object",
           "additionalProperties": false,

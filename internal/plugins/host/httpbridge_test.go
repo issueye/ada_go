@@ -29,6 +29,37 @@ func bridgeFor(t *testing.T, srv *httptest.Server) *host.Bridge {
 	return b
 }
 
+// 供应商级代理必须真的改变出网路径；非法协议在桥层拒绝。
+func TestBridgeUsesPerRequestProxy(t *testing.T) {
+	hits := 0
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if r.URL.Host != "api.example.com" {
+			t.Errorf("代理收到的目标 = %q", r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer proxy.Close()
+
+	b, err := host.NewHTTPBridge(host.HTTPBridgeConfig{AllowHosts: []string{"api.example.com"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+
+	res, err := b.JSONWithProxy(context.Background(), "GET", "http://api.example.com/v1/models", nil, "", 1024, proxy.URL)
+	if err != nil {
+		t.Fatalf("JSONWithProxy: %v", err)
+	}
+	if res.Status != 200 || hits != 1 {
+		t.Fatalf("status=%d proxyHits=%d", res.Status, hits)
+	}
+	if _, err := b.JSONWithProxy(context.Background(), "GET", "http://api.example.com/v1/models", nil, "", 1024, "ftp://example.com"); err == nil {
+		t.Fatal("非 http(s)/socks5 代理应被拒绝")
+	}
+}
+
 func TestHTTPBridgeAllowlist(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"ok":true}`)

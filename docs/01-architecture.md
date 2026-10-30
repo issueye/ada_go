@@ -119,7 +119,7 @@ ada-go 的取舍：保留双层消息、统一流、树形会话、steering、co
 - 单二进制 `adag`，子命令 `gateway`、`core`、`plugin`、`doctor`、`verify`、`export`、`backup`。
 - Gateway 是唯一的公开监听者；Core 只监听 `127.0.0.1` 的临时端口，握手时用一次性 token。
 - 一个 Gateway 默认绑定一个工作区，也可以注册多个工作区；线程 id 形如 `th_<workspaceHash>_<ulid>`，自带工作区前缀，URL 不需要额外前缀。
-- 侧栏线程列表按**当前工作区**展示；跨工作区通过切换器重建，不维护全局线程索引。
+- 侧栏线程列表按**当前工作区**展示；跨工作区通过切换器重建，不维护全局线程索引。FilePicker 打开的工作区写入用户级 `~/.adago/workspaces.json`，重启 Gateway 后仍保留；显式 `--data-dir` 的隔离运行不共享该列表。
 - 打包时模板与网关静态资源通过 `go:embed` 进二进制；官方插件放进 Electron `resources/plugins/official`，第三方插件在工作区/用户目录。官方插件仍按插件装配，可禁用。
 
 ### 3.2 为什么 Gateway 与 Core 分进程

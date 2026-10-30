@@ -26,10 +26,14 @@ interface ProviderRequest {
     topP?: number;
     maxTokens?: number;
     thinking?: boolean;
+    reasoningEffort?: string;
     extra?: unknown;
   };
   baseUrl?: string;
   apiKey?: string;
+  // 供应商级出网代理与自定义请求头（由 provider-admin 配置）。
+  proxy?: string;
+  headers?: Record<string, string>;
 }
 
 interface ProviderMessage {
@@ -50,6 +54,7 @@ interface HttpInit {
   headers?: Record<string, string>;
   body?: string;
   maxBytes?: number;
+  proxy?: string;
 }
 
 interface ProviderContext {
@@ -125,6 +130,20 @@ function argsString(raw: unknown): string {
     return JSON.stringify(raw);
   } catch {
     return "{}";
+  }
+}
+
+// mergeHeaders 把供应商自定义头合并进请求；连接级字段不允许覆盖。
+function mergeHeaders(base: Record<string, string>, custom: Record<string, string> | undefined): void {
+  if (!custom) return;
+  for (const rawKey of Object.keys(custom)) {
+    const key = String(rawKey).trim();
+    if (!key) continue;
+    const lower = key.toLowerCase();
+    if (lower === "host" || lower === "content-length") continue;
+    const value = custom[rawKey];
+    if (value === undefined || value === null) continue;
+    base[key] = String(value);
   }
 }
 
@@ -207,6 +226,9 @@ function buildBody(req: ProviderRequest): Record<string, unknown> {
   if (typeof params.temperature === "number") body.temperature = params.temperature;
   if (typeof params.topP === "number") body.top_p = params.topP;
   if (typeof params.maxTokens === "number" && params.maxTokens > 0) body.max_tokens = params.maxTokens;
+  if (typeof params.reasoningEffort === "string" && params.reasoningEffort.length > 0) {
+    body.reasoning_effort = params.reasoningEffort;
+  }
   if (params.extra && typeof params.extra === "object") {
     const extra = params.extra as Record<string, unknown>;
     for (const key of Object.keys(extra)) {
@@ -227,6 +249,7 @@ function streamOnce(req: ProviderRequest, ctx: ProviderContext): Promise<void> {
     "Content-Type": "application/json",
     Authorization: `Bearer ${key}`,
   };
+  mergeHeaders(headers, req.headers);
   const body = JSON.stringify(buildBody(req));
 
   let textOpen = false;
@@ -320,7 +343,7 @@ function streamOnce(req: ProviderRequest, ctx: ProviderContext): Promise<void> {
   }
 
   return ctx.http
-    .sse(url, { method: "POST", headers, body }, (event) => {
+    .sse(url, { method: "POST", headers, body, proxy: req.proxy }, (event) => {
       const data = event && typeof event.data === "string" ? event.data : "";
       if (data === "[DONE]") {
         sawDone = true;

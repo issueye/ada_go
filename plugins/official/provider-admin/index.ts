@@ -16,6 +16,7 @@ interface ProviderModel {
   input?: string[];
   supportsTools: boolean;
   supportsThinking?: boolean;
+  thinkingLevels?: string[];
   disabled?: boolean;
 }
 
@@ -24,6 +25,8 @@ interface ProviderInfo {
   displayName?: string;
   protocol?: string;
   baseUrl?: string;
+  proxy?: string;
+  headers?: Record<string, string>;
   disabled?: boolean;
   hasApiKey: boolean;
   apiKeyHint?: string;
@@ -49,6 +52,8 @@ interface ProviderInput {
   baseUrl?: string;
   apiKey?: string;
   clearApiKey?: boolean;
+  proxy?: string;
+  headers?: Record<string, string>;
   disabled?: boolean;
   models?: ProviderModel[];
 }
@@ -97,6 +102,10 @@ export default function (agent: AgentAPI): void {
       baseUrl: String(body.baseUrl || "").trim(),
       apiKey: body.apiKey === undefined ? "" : String(body.apiKey),
       clearApiKey: body.clearApiKey === true,
+      proxy: String(body.proxy || "").trim(),
+      headers: body.headers && typeof body.headers === "object" && !Array.isArray(body.headers)
+        ? (body.headers as Record<string, string>)
+        : {},
       disabled: body.disabled === true,
       models: Array.isArray(body.models) ? (body.models as ProviderModel[]) : [],
     };

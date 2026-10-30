@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:4e8fb448ec29ad81) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:0f0c5a4d9abc073c) by plugins/official/build.mjs — do not edit
 // provider-openai-responses —— 官方插件：OpenAI Responses API 的流式协议映射（03 §5.5）。
 //
 // 与 Chat Completions 的差别：system 走顶层 instructions；历史用 Responses 的消息形状
@@ -29,10 +29,13 @@
                   
                        
                        
+                             
                     
     
                    
                   
+                 
+                                   
  
 
                            
@@ -53,6 +56,7 @@
                                    
                 
                     
+                 
  
 
                            
@@ -132,6 +136,19 @@ function argsString(raw         )         {
   }
 }
 
+function mergeHeaders(base                        , custom                                    )       {
+  if (!custom) return;
+  for (const rawKey of Object.keys(custom)) {
+    const key = String(rawKey).trim();
+    if (!key) continue;
+    const lower = key.toLowerCase();
+    if (lower === "host" || lower === "content-length") continue;
+    const value = custom[rawKey];
+    if (value === undefined || value === null) continue;
+    base[key] = String(value);
+  }
+}
+
 // toResponsesInput 做统一消息 → Responses 输入项的唯一转换：
 // user/assistant 用 role + content 消息形状，工具调用与回执用独立项
 // function_call / function_call_output（call_id 与 Chat 的 tool_call_id 对应）。
@@ -198,6 +215,9 @@ function buildBody(req                 )                          {
   if (typeof params.temperature === "number") body.temperature = params.temperature;
   if (typeof params.topP === "number") body.top_p = params.topP;
   if (typeof params.maxTokens === "number" && params.maxTokens > 0) body.max_output_tokens = params.maxTokens;
+  if (typeof params.reasoningEffort === "string" && params.reasoningEffort.length > 0) {
+    body.reasoning = { effort: params.reasoningEffort };
+  }
   if (params.extra && typeof params.extra === "object") {
     const extra = params.extra                           ;
     for (const key of Object.keys(extra)) {
@@ -218,6 +238,7 @@ function streamOnce(req                 , ctx                 )                {
     "Content-Type": "application/json",
     Authorization: `Bearer ${key}`,
   };
+  mergeHeaders(headers, req.headers);
   const body = JSON.stringify(buildBody(req));
 
   let textOpen = false;
@@ -343,7 +364,7 @@ function streamOnce(req                 , ctx                 )                {
   }
 
   return ctx.http
-    .sse(url, { method: "POST", headers, body }, (event) => {
+    .sse(url, { method: "POST", headers, body, proxy: req.proxy }, (event) => {
       const data = event && typeof event.data === "string" ? event.data : "";
       if (data.length === 0) return;
       let chunk     ;

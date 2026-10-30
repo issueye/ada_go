@@ -199,6 +199,7 @@
             action: '/extensions/' + encodeURIComponent(row.id || '') + (enable ? '/enable' : '/disable')
           },
             h('input', { type: 'hidden', name: 'csrf_token', value: this.csrf || '' }),
+            h('input', { type: 'hidden', name: 'next', value: '/extensions' }),
             h(AdaUI.components.Button, {
               type: 'submit',
               size: 'sm',
@@ -499,6 +500,7 @@
         '<div class="mt-4 flex flex-wrap items-center gap-2">' +
         '<form method="post" :action="plugin.enabled ? \'/extensions/\' + plugin.id + \'/disable\' : \'/extensions/\' + plugin.id + \'/enable\'">' +
         '<input type="hidden" name="csrf_token" :value="csrf">' +
+        '<input type="hidden" name="next" :value="\'/extensions/\' + plugin.id">' +
         '<ui-button type="submit" :variant="plugin.enabled ? \'secondary\' : \'primary\'" size="sm" ' +
         ':label="plugin.enabled ? \'停用\' : \'启用\'"></ui-button>' +
         '</form>' +

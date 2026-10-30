@@ -23,9 +23,10 @@
 {{if .NeedsUI}}<link rel="stylesheet" href="{{asset "ada-ui.css"}}">
 {{end}}{{range .PluginStyles}}<link rel="stylesheet" href="{{.}}">
 {{end}}<script src="{{asset "htmx.min.js"}}" defer></script>
-<script src="{{asset "app.js"}}" defer></script>
 <script src="{{asset "ada-select.js"}}" defer></script>
 <script src="{{asset "ada-modal.js"}}" defer></script>
+<script src="{{asset "file-picker.js"}}" defer></script>
+<script src="{{asset "app.js"}}" defer></script>
 <script src="{{asset "components.js"}}" defer></script>
 <script src="{{asset "api.js"}}" defer></script>
 {{if .NeedsUI}}<script src="{{asset "ada-render.js"}}" defer></script>

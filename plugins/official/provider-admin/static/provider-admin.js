@@ -16,6 +16,8 @@
     busy: false,
   };
   var root = null;
+  // 模型弹窗里正在编辑的推理等级（从低到高）。
+  var modelLevels = [];
 
   // 拉取弹窗的独立状态：它是一次性的远端快照，不混进供应商配置里。
   var fetchState = {
@@ -210,6 +212,8 @@
       name: p.displayName || p.id,
       protocol: p.protocol || "openai_chat",
       baseUrl: p.baseUrl || "",
+      proxy: p.proxy || "",
+      headers: p.headers || {},
       disabled: !!p.disabled,
       models: (p.models || []).map(function (m) {
         return {
@@ -220,6 +224,7 @@
           input: Array.isArray(m.input) ? m.input : ["text"],
           supportsTools: !!m.supportsTools,
           supportsThinking: !!m.supportsThinking,
+          thinkingLevels: Array.isArray(m.thinkingLevels) ? m.thinkingLevels.slice() : [],
           disabled: !!m.disabled,
         };
       }),
@@ -525,6 +530,26 @@
     return node;
   }
 
+  function headersText(headers) {
+    var out = [];
+    Object.keys(headers || {}).sort().forEach(function (key) {
+      out.push(key + ": " + headers[key]);
+    });
+    return out.join("\n");
+  }
+
+  function parseHeadersText(text) {
+    var out = {};
+    String(text || "").split(/\r?\n/).forEach(function (line) {
+      var cut = line.indexOf(":");
+      if (cut <= 0) return;
+      var key = line.slice(0, cut).trim();
+      var value = line.slice(cut + 1).trim();
+      if (key) out[key] = value;
+    });
+    return out;
+  }
+
   function renderDetail() {
     var box = root.querySelector("[data-pm-detail]");
     if (!box) return;
@@ -650,6 +675,12 @@
     base.addEventListener("change", function () { saveProvider({ baseUrl: base.value.trim() }); });
     panel.appendChild(field("Base URL", base));
 
+    var proxy = input("pm-input", p.proxy || "", "http://127.0.0.1:7890（可选）");
+    proxy.addEventListener("change", function () {
+      saveProvider({ proxy: proxy.value.trim() }, "网络代理已更新");
+    });
+    panel.appendChild(field("网络代理", proxy));
+
     var protocol = adaSelect(
       [
         ["openai_chat", "Chat Completions (/chat/completions)"],
@@ -691,6 +722,16 @@
     });
     panel.appendChild(field("API Key", keyRow));
 
+    var headerBox = document.createElement("textarea");
+    headerBox.className = "pm-input pm-textarea";
+    headerBox.rows = 4;
+    headerBox.value = headersText(p.headers);
+    headerBox.placeholder = "X-Custom-Header: value\nX-Another-Header: value";
+    headerBox.addEventListener("change", function () {
+      saveProvider({ headers: parseHeadersText(headerBox.value) }, "自定义请求头已更新");
+    });
+    panel.appendChild(field("自定义请求头（每行 Name: value）", headerBox));
+
     var models = p.models || [];
     var enabled = models.filter(function (m) { return !m.disabled; }).length;
     panel.appendChild(
@@ -731,7 +772,9 @@
     var inputs = Array.isArray(m.input) ? m.input : [];
     if (inputs.indexOf("image") >= 0) tags.push("视觉");
     if (m.supportsTools) tags.push("工具");
-    if (m.supportsThinking) tags.push("思考");
+    var levels = Array.isArray(m.thinkingLevels) ? m.thinkingLevels : [];
+    if (levels.length) tags.push("推理 " + levels.join("/"));
+    else if (m.supportsThinking) tags.push("思考");
     return tags;
   }
 
@@ -770,6 +813,63 @@
     return row;
   }
 
+  function renderModelLevels() {
+    var host = document.querySelector("#pm-model-modal [data-pm-levels]");
+    if (!host) return;
+    host.textContent = "";
+    if (modelLevels.length) {
+      var thinking = document.querySelector('#pm-model-modal [name="supportsThinking"]');
+      if (thinking) thinking.checked = true;
+    }
+    modelLevels.forEach(function (level, index) {
+      var chip = el("span", "pm-level");
+      chip.appendChild(el("span", "pm-level__name", level));
+      var remove = el("button", "pm-level__remove", "×");
+      remove.type = "button";
+      remove.title = "移除 " + level;
+      remove.setAttribute("aria-label", "移除推理等级 " + level);
+      remove.addEventListener("click", function () {
+        modelLevels.splice(index, 1);
+        renderModelLevels();
+      });
+      chip.appendChild(remove);
+      host.appendChild(chip);
+    });
+    var add = el("button", "pm-level__add", "+");
+    add.type = "button";
+    add.title = "添加推理等级";
+    add.setAttribute("aria-label", "添加推理等级");
+    add.addEventListener("click", function () {
+      if (host.querySelector(".pm-level__input")) return;
+      var field = document.createElement("input");
+      field.className = "pm-level__input";
+      field.placeholder = "如 max";
+      field.autocomplete = "off";
+      function commit() {
+        var value = field.value.trim().toLowerCase();
+        if (value && modelLevels.indexOf(value) < 0 && modelLevels.length < 8) {
+          modelLevels.push(value);
+        }
+        renderModelLevels();
+      }
+      field.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          commit();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          renderModelLevels();
+        }
+      });
+      field.addEventListener("blur", function () {
+        if (field.isConnected) commit();
+      });
+      host.appendChild(field);
+      field.focus();
+    });
+    host.appendChild(add);
+  }
+
   function buildModelModal() {
     if (document.getElementById("pm-model-modal")) return;
     var modal = document.createElement("ada-modal");
@@ -787,6 +887,10 @@
       '<div class="pm-model-form__row">' +
       '<label class="pm-field"><span class="pm-field__label">上下文窗口</span><input class="pm-input" name="contextWindow" inputmode="numeric" autocomplete="off"></label>' +
       '<label class="pm-field"><span class="pm-field__label">最大输出</span><input class="pm-input" name="maxOutput" inputmode="numeric" autocomplete="off"></label>' +
+      "</div>" +
+      '<div class="pm-field"><span class="pm-field__label">推理等级（从低到高）</span>' +
+      '<div class="pm-levels" data-pm-levels></div>' +
+      '<p class="pm-hint">留空表示不提供推理档位；点 + 添加 provider 支持的原值（如 low、high、max）。</p>' +
       "</div>" +
       '<div class="pm-model-form__flags">' +
       '<label class="pm-check"><input type="checkbox" name="supportsTools"><span>工具</span></label>' +
@@ -809,7 +913,8 @@
         maxOutput: Number(form.elements.maxOutput.value || 0),
         input: form.elements.image.checked ? ["text", "image"] : ["text"],
         supportsTools: form.elements.supportsTools.checked,
-        supportsThinking: form.elements.supportsThinking.checked,
+        supportsThinking: form.elements.supportsThinking.checked || modelLevels.length > 0,
+        thinkingLevels: modelLevels.slice(),
         disabled: false,
       };
       if (!model.id) {
@@ -894,15 +999,19 @@
     if (title) title.textContent = index >= 0 ? "编辑模型" : "添加模型";
     var m = model || {
       id: "", displayName: "", contextWindow: 128000, maxOutput: 0,
-      input: ["text"], supportsTools: true, supportsThinking: false, disabled: false,
+      input: ["text"], supportsTools: true, supportsThinking: false,
+      thinkingLevels: [], disabled: false,
     };
+    m.thinkingLevels = Array.isArray(m.thinkingLevels) ? m.thinkingLevels.slice() : [];
+    modelLevels = m.thinkingLevels.slice();
     form.elements.id.value = m.id || "";
     form.elements.displayName.value = m.displayName || "";
     form.elements.contextWindow.value = m.contextWindow ? String(m.contextWindow) : "";
     form.elements.maxOutput.value = m.maxOutput ? String(m.maxOutput) : "";
     form.elements.supportsTools.checked = !!m.supportsTools;
-    form.elements.supportsThinking.checked = !!m.supportsThinking;
+    form.elements.supportsThinking.checked = !!m.supportsThinking || modelLevels.length > 0;
     form.elements.image.checked = Array.isArray(m.input) && m.input.indexOf("image") >= 0;
+    renderModelLevels();
     window.AdaComponents.openModal("pm-model");
   }
 

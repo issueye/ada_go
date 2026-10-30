@@ -75,7 +75,11 @@ type Model struct {
 	Input            []string `json:"input,omitempty"`
 	SupportsTools    bool     `json:"supportsTools"`
 	SupportsThinking bool     `json:"supportsThinking,omitempty"`
-	Disabled         bool     `json:"disabled,omitempty"`
+	// ThinkingLevels 是该模型可选的推理等级（从低到高）；空表示不提供档位。
+	ThinkingLevels []string `json:"thinkingLevels,omitempty"`
+	// ThinkingLevel 是旧的单档配置；加载时会迁移进 ThinkingLevels。
+	ThinkingLevel string `json:"thinkingLevel,omitempty"`
+	Disabled      bool   `json:"disabled,omitempty"`
 }
 
 // Info 转成宿主模型能力（不含 Disabled，调用方过滤）。
@@ -85,6 +89,7 @@ func (m Model) Info() host.ModelInfo {
 		ContextWindow: m.ContextWindow, MaxOutput: m.MaxOutput,
 		Input: m.Input, SupportsTools: m.SupportsTools,
 		SupportsThinking: m.SupportsThinking,
+		ThinkingLevels:   append([]string(nil), m.ThinkingLevels...),
 	}
 }
 
@@ -95,8 +100,12 @@ type Config struct {
 	Protocol Protocol `json:"protocol"`
 	BaseURL  string   `json:"baseUrl,omitempty"`
 	APIKey   string   `json:"apiKey,omitempty"`
-	Disabled bool     `json:"disabled,omitempty"`
-	Models   []Model  `json:"models"`
+	// Proxy 是该供应商出网使用的代理（http/https/socks5）；空表示直连。
+	Proxy string `json:"proxy,omitempty"`
+	// Headers 是随每次请求发送的自定义请求头（不覆盖 Host/Content-Length）。
+	Headers  map[string]string `json:"headers,omitempty"`
+	Disabled bool              `json:"disabled,omitempty"`
+	Models   []Model           `json:"models"`
 }
 
 // Clone 深拷贝配置（避免调用方修改 registry 内部状态）。
@@ -105,8 +114,64 @@ func (c Config) Clone() Config {
 	out.Models = append([]Model(nil), c.Models...)
 	for i := range out.Models {
 		out.Models[i].Input = append([]string(nil), c.Models[i].Input...)
+		out.Models[i].ThinkingLevels = append([]string(nil), c.Models[i].ThinkingLevels...)
+	}
+	if c.Headers != nil {
+		out.Headers = make(map[string]string, len(c.Headers))
+		for k, v := range c.Headers {
+			out.Headers[k] = v
+		}
 	}
 	return out
+}
+
+// NormalizeThinkingLevels 归一化推理等级列表：小写、去空、去重，最多 8 档。
+// 档位名允许字母/数字/下划线/连字符，便于自定义 low/high/max 这类 provider 原值。
+func NormalizeThinkingLevels(in []string) ([]string, error) {
+	out := make([]string, 0, len(in))
+	seen := map[string]bool{}
+	for _, raw := range in {
+		level := strings.ToLower(strings.TrimSpace(raw))
+		if level == "" {
+			continue
+		}
+		if len(level) > 32 {
+			return nil, fmt.Errorf("推理等级 %q 过长", raw)
+		}
+		for _, r := range level {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+				continue
+			}
+			return nil, fmt.Errorf("推理等级 %q 只能包含字母、数字、下划线和连字符", raw)
+		}
+		if seen[level] {
+			continue
+		}
+		seen[level] = true
+		out = append(out, level)
+	}
+	if len(out) > 8 {
+		return nil, errors.New("推理等级最多 8 档")
+	}
+	return out, nil
+}
+
+// NormalizeThinkingLevel 归一化旧的单档配置；空串表示默认。
+func NormalizeThinkingLevel(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return "", nil
+	case "off":
+		return "off", nil
+	case "low":
+		return "low", nil
+	case "medium":
+		return "medium", nil
+	case "high":
+		return "high", nil
+	default:
+		return "", fmt.Errorf("思考级别必须是 off/low/medium/high，得到 %q", raw)
+	}
 }
 
 // Store 是 providers.json 的读写器。API 只在 Core 侧使用。

@@ -43,11 +43,18 @@ type pluginListResult struct {
 
 // ---- 对话页 ----------------------------------------------------------------
 
-// handleChatHome 渲染对话页（无激活会话）：侧栏列会话，主区是新会话空态。
+// handleChatHome 渲染新建任务页：侧栏列已有会话，主区是居中的任务输入。
 func (s *Server) handleChatHome(w http.ResponseWriter, r *http.Request) {
 	threads, err := s.listThreads(r, 50)
+	picker := s.modelOptions(r, "")
 	data := threadData{
-		baseData: s.base(r, "chat", "新对话", threads, "", err == nil),
+		baseData:           s.base(r, "chat", "新建任务", threads, "", err == nil),
+		Greeting:           greetingText(time.Now()),
+		Models:             picker.Models,
+		CurrentModelLabel:  picker.Label,
+		CurrentModelValue:  picker.Value,
+		CurrentModelLevels: picker.Levels,
+		CurrentModelLevel:  picker.Level,
 	}
 	s.render(w, http.StatusOK, "chat", data)
 }
@@ -100,7 +107,8 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 	base := s.base(r, "chat", title, threads, id, true)
 	base.TopbarActions = threadTopbarActions(id, run.Active, s.csrf(r))
 	base.NeedsUI = len(transcript) > 0
-	models, modelLabel, modelValue := s.modelOptions(r, id)
+	picker := s.modelOptions(r, id)
+	models, modelLabel, modelValue := picker.Models, picker.Label, picker.Value
 	stateJSON, err := json.Marshal(s.transcriptPayload(id, get.Run.Status, transcript))
 	if err != nil {
 		stateJSON = []byte(`{"threadId":"","runStatus":"","rows":[]}`)
@@ -116,6 +124,8 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 		Models:              models,
 		CurrentModelLabel:   modelLabel,
 		CurrentModelValue:   modelValue,
+		CurrentModelLevels:  picker.Levels,
+		CurrentModelLevel:   picker.Level,
 	}
 	if run.Active && !jsClient(r) {
 		// 无 JS 轮询：运行中每 2 秒刷新一次，完成即停止（7.8）。
@@ -250,7 +260,11 @@ func jsClient(r *http.Request) bool {
 	return err == nil && c.Value == "1"
 }
 
-// handleCreateThread 创建线程并 303 到会话页。
+// handleCreateThread 创建任务：可指定工作区，并可直接带上第一条消息。
+//
+// 新建任务页把「选工作区 + 输入任务 + 发送」合成一次表单提交：
+// 先按所选工作区 thread.create，再在同一 Core 上 turn.start。两步都成功
+// 才跳会话页；turn.start 失败时线程已经建好，回跳并显示错误提示。
 func (s *Server) handleCreateThread(w http.ResponseWriter, r *http.Request) {
 	if err := s.parseForm(w, r); err != nil {
 		s.renderError(w, r, http.StatusBadRequest, "无法读取表单",
@@ -258,8 +272,46 @@ func (s *Server) handleCreateThread(w http.ResponseWriter, r *http.Request) {
 			err.Error(), "/", "返回")
 		return
 	}
+
+	workspace, index := s.resolveWorkspace(r)
+	if raw := strings.TrimSpace(r.PostFormValue("workspace")); raw != "" {
+		idx, ok := s.registerWorkspace(raw)
+		if !ok {
+			s.renderError(w, r, http.StatusBadRequest, "这个目录不能作为工作区",
+				"请选择一个存在且可访问的目录。", "path="+raw, "/", "返回新建任务")
+			return
+		}
+		list := s.workspaceList()
+		if idx >= len(list) {
+			s.renderError(w, r, http.StatusInternalServerError, "工作区登记失败",
+				"服务端没有找到刚登记的工作区，请重试。", "", "/", "返回新建任务")
+			return
+		}
+		workspace, index = list[idx], idx
+	}
+
+	// 无 JS 时模型选择器用原生 select 提交；有 JS 时选中的那一刻已通过
+	// /model/select 切换，这里不会有值。模型是工作区级（还没有线程）。
+	if rawModel := strings.TrimSpace(r.PostFormValue("model")); rawModel != "" {
+		providerID, modelID, ok := strings.Cut(rawModel, "|")
+		if ok && providerID != "" && modelID != "" {
+			params := map[string]any{
+				"model": map[string]any{"providerId": providerID, "modelId": modelID},
+			}
+			if _, err := s.callWorkspace(r, workspace, "model.set", params); err != nil {
+				s.renderCoreError(w, r, err, "/")
+				return
+			}
+		}
+	}
+
+	text := strings.TrimSpace(r.PostFormValue("text"))
 	title := strings.TrimSpace(r.PostFormValue("title"))
-	raw, err := s.call(r, "thread.create", map[string]any{"title": title})
+	if title == "" {
+		title = titleFromTask(text)
+	}
+
+	raw, err := s.callWorkspace(r, workspace, "thread.create", map[string]any{"title": title})
 	if err != nil {
 		s.renderCoreError(w, r, err, "/")
 		return
@@ -270,12 +322,58 @@ func (s *Server) handleCreateThread(w http.ResponseWriter, r *http.Request) {
 		} `json:"thread"`
 	}
 	if err := json.Unmarshal(raw, &res); err != nil || res.Thread.ID == "" {
-		s.renderError(w, r, http.StatusBadGateway, "创建会话失败",
+		s.renderError(w, r, http.StatusBadGateway, "创建任务失败",
 			"Core 没有返回新会话 id。请返回后重试；若持续出现，请检查 Core 日志。",
 			"thread.create 返回值缺少 thread.id", "/", "返回")
 		return
 	}
+
+	// 后续页面、SSE 与会话请求都要落到同一个工作区：先写 cookie 再跳转。
+	s.setWorkspaceCookie(w, index)
+
+	if text != "" {
+		params := map[string]any{
+			"threadId":       res.Thread.ID,
+			"idempotencyKey": newIdempotencyKey(),
+			"text":           text,
+		}
+		if _, err := s.callWorkspace(r, workspace, "turn.start", params); err != nil {
+			redirect(w, flashRedirect(threadPath(res.Thread.ID), "error", cleanRPCError(err)))
+			return
+		}
+	}
 	redirect(w, threadPath(res.Thread.ID))
+}
+
+// titleFromTask 用任务首行做标题；空任务回落为“新任务”。
+func titleFromTask(text string) string {
+	text = strings.TrimSpace(text)
+	if i := strings.IndexAny(text, "\r\n"); i >= 0 {
+		text = strings.TrimSpace(text[:i])
+	}
+	if text == "" {
+		return "新任务"
+	}
+	const maxRunes = 40
+	runes := []rune(text)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes]) + "…"
+	}
+	return text
+}
+
+// greetingText 给新建任务页一句按时间变化的问候。
+func greetingText(now time.Time) string {
+	switch h := now.Hour(); {
+	case h >= 5 && h < 11:
+		return "上午好，开始一个新任务吧"
+	case h >= 11 && h < 13:
+		return "中午好，开始一个新任务吧"
+	case h >= 13 && h < 18:
+		return "下午好，开始一个新任务吧"
+	default:
+		return "晚上好，今天辛苦啦"
+	}
 }
 
 // ThreadIDFromRequest 从 query threadId、页面路径（/threads/{id}、/thread/{id}）
@@ -739,10 +837,10 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 
 // modelOptions 是输入框旁模型选择器的数据（model.list 投影）；失败时返回空列表，
 // 不阻塞会话页渲染。
-func (s *Server) modelOptions(r *http.Request, threadID string) ([]modelOption, string, string) {
+func (s *Server) modelOptions(r *http.Request, threadID string) modelPickerData {
 	raw, err := s.call(r, "model.list", map[string]any{"threadId": threadID})
 	if err != nil {
-		return nil, "", ""
+		return modelPickerData{}
 	}
 	var res struct {
 		Models []struct {
@@ -751,19 +849,22 @@ func (s *Server) modelOptions(r *http.Request, threadID string) ([]modelOption, 
 				ModelID    string `json:"modelId"`
 			} `json:"model"`
 			Info struct {
-				DisplayName string `json:"displayName"`
+				DisplayName    string   `json:"displayName"`
+				ThinkingLevels []string `json:"thinkingLevels"`
 			} `json:"info"`
 		} `json:"models"`
 		Current struct {
-			ProviderID string `json:"providerId"`
-			ModelID    string `json:"modelId"`
+			ProviderID    string `json:"providerId"`
+			ModelID       string `json:"modelId"`
+			ThinkingLevel string `json:"thinkingLevel"`
 		} `json:"current"`
 	}
 	if err := json.Unmarshal(raw, &res); err != nil {
-		return nil, "", ""
+		return modelPickerData{}
 	}
 	out := make([]modelOption, 0, len(res.Models))
 	currentLabel := ""
+	var currentLevels []string
 	for _, m := range res.Models {
 		if m.Model.ProviderID == "" || m.Model.ModelID == "" {
 			continue
@@ -779,13 +880,16 @@ func (s *Server) modelOptions(r *http.Request, threadID string) ([]modelOption, 
 		current := res.Current.ProviderID == m.Model.ProviderID && res.Current.ModelID == m.Model.ModelID
 		if current {
 			currentLabel = short
+			currentLevels = append([]string(nil), m.Info.ThinkingLevels...)
 		}
 		out = append(out, modelOption{
-			ProviderID: m.Model.ProviderID,
-			ModelID:    m.Model.ModelID,
-			Label:      label,
-			ShortLabel: short,
-			Current:    current,
+			ProviderID:        m.Model.ProviderID,
+			ModelID:           m.Model.ModelID,
+			Label:             label,
+			ShortLabel:        short,
+			Current:           current,
+			ThinkingLevels:    append([]string(nil), m.Info.ThinkingLevels...),
+			ThinkingLevelsCSV: strings.Join(m.Info.ThinkingLevels, "|"),
 		})
 	}
 	value := ""
@@ -795,7 +899,10 @@ func (s *Server) modelOptions(r *http.Request, threadID string) ([]modelOption, 
 	if currentLabel == "" {
 		currentLabel = "选择模型"
 	}
-	return out, currentLabel, value
+	return modelPickerData{
+		Models: out, Label: currentLabel, Value: value,
+		Levels: currentLevels, Level: res.Current.ThinkingLevel,
+	}
 }
 
 // handleCancel 取消当前轮。
@@ -863,13 +970,14 @@ func (s *Server) handleModelSelect(w http.ResponseWriter, r *http.Request) {
 	providerID := strings.TrimSpace(r.PostFormValue("providerId"))
 	modelID := strings.TrimSpace(r.PostFormValue("modelId"))
 	threadID := strings.TrimSpace(r.PostFormValue("threadId"))
+	level := strings.ToLower(strings.TrimSpace(r.PostFormValue("thinkingLevel")))
 	if providerID == "" || modelID == "" {
 		s.renderError(w, r, http.StatusBadRequest, "缺少模型参数",
 			"需要 providerId 与 modelId。", "", safeReturnPath(r), "返回")
 		return
 	}
 	params := map[string]any{
-		"model": map[string]any{"providerId": providerID, "modelId": modelID},
+		"model": map[string]any{"providerId": providerID, "modelId": modelID, "thinkingLevel": level},
 	}
 	if threadID != "" {
 		params["threadId"] = threadID
@@ -924,27 +1032,28 @@ func (s *Server) handleWorkspaceSelect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	index := -1
+	list := s.workspaceList()
 	rawPath := strings.TrimSpace(r.PostFormValue("path"))
 	rawWorkspace := strings.TrimSpace(r.PostFormValue("workspace"))
 	if rawPath == "" {
 		rawPath = rawWorkspace
 	}
 	if rawPath != "" {
-		index = workspaceIndex(s.cfg.Workspaces, rawPath)
+		index = workspaceIndex(list, rawPath)
 		if index < 0 {
 			// 允许相对/绝对路径差异：按规范化路径再匹配一次。
-			index = workspaceIndexFolded(s.cfg.Workspaces, rawPath)
+			index = workspaceIndexFolded(list, rawPath)
 		}
 		if index < 0 {
-			s.renderError(w, r, http.StatusBadRequest, "这个目录不是工作区",
-				"Gateway 的工作区在启动时固定。请从“磁盘与常用位置”里选择已配置的工作区。",
+			s.renderError(w, r, http.StatusBadRequest, "这个目录不是当前工作区",
+				"请从 FilePicker 或“磁盘与常用位置”里选择一个工作区。",
 				"path="+rawPath, "/workspaces", "返回")
 			return
 		}
 	} else {
 		raw := strings.TrimSpace(r.PostFormValue("index"))
 		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 0 || parsed >= len(s.cfg.Workspaces) {
+		if err != nil || parsed < 0 || parsed >= len(list) {
 			s.renderError(w, r, http.StatusBadRequest, "没有这个工作区",
 				"请求的工作区不在 Gateway 配置中。请返回后从列表中选择。",
 				"index="+raw, "/workspaces", "返回")
@@ -952,6 +1061,12 @@ func (s *Server) handleWorkspaceSelect(w http.ResponseWriter, r *http.Request) {
 		}
 		index = parsed
 	}
+	s.setWorkspaceCookie(w, index)
+	redirect(w, "/")
+}
+
+// setWorkspaceCookie 记住当前工作区索引；页面、SSE 与 RPC 都靠它解析工作区。
+func (s *Server) setWorkspaceCookie(w http.ResponseWriter, index int) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     WorkspaceCookieName,
 		Value:    strconv.Itoa(index),
@@ -961,7 +1076,180 @@ func (s *Server) handleWorkspaceSelect(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: false,
 		Secure:   s.cfg.CookieSecure,
 	})
-	redirect(w, "/")
+}
+
+// handleWorkspaceOpen 是 FilePicker 的“选中即记住”：登记目录并写工作区
+// cookie，不创建 Core、不跳页。这样后续选模型触发的整页 reload 不会把
+// 未提交的工作区选择丢掉。
+func (s *Server) handleWorkspaceOpen(w http.ResponseWriter, r *http.Request) {
+	if err := s.parseForm(w, r); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "无法读取表单")
+		return
+	}
+	path := strings.TrimSpace(r.PostFormValue("path"))
+	if path == "" {
+		writeJSONError(w, http.StatusBadRequest, "缺少工作区路径")
+		return
+	}
+	index, ok := s.registerWorkspace(path)
+	if !ok {
+		writeJSONError(w, http.StatusBadRequest, "这个目录不能作为工作区")
+		return
+	}
+	list := s.workspaceList()
+	if index >= len(list) {
+		writeJSONError(w, http.StatusInternalServerError, "工作区登记失败")
+		return
+	}
+	s.setWorkspaceCookie(w, index)
+	writeJSON(w, http.StatusOK, map[string]any{"workspace": list[index], "index": index})
+}
+
+// ---- 文件系统 API（FilePicker） -------------------------------------------
+
+// fsListRoot 是一个可选的工作区根。
+type fsListRoot struct {
+	Label string `json:"label"`
+	Path  string `json:"path"`
+}
+
+// fsListEntry 是目录下的一项（只列目录）。
+type fsListEntry struct {
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	Selectable bool   `json:"selectable"`
+}
+
+// fsListResponse 是 FilePicker 的目录快照。
+type fsListResponse struct {
+	Path       string        `json:"path"`
+	Parent     string        `json:"parent"`
+	Roots      []fsListRoot  `json:"roots"`      // Windows 盘符 / Unix 根与主目录
+	Workspaces []fsListRoot  `json:"workspaces"` // 已打开/已配置的工作区，快捷入口
+	Entries    []fsListEntry `json:"entries"`
+	Selectable bool          `json:"selectable"`
+	Truncated  bool          `json:"truncated"`
+	Omitted    int           `json:"omitted"`
+}
+
+// handleFSList 是 FilePicker 的只读目录 API。
+//
+// Windows 上不带 path 时返回盘符列表（A:–Z:），让用户先选盘；Unix 返回
+// 根目录与主目录。带 path 时浏览该目录。只列目录，不列文件，也不返回
+// 文件内容。路径统一 EvalSymlinks，页面拿到的是真实落点。
+func (s *Server) handleFSList(w http.ResponseWriter, r *http.Request) {
+	requested := strings.TrimSpace(r.URL.Query().Get("path"))
+	current := ""
+	entries := []fsListEntry{}
+	truncated := false
+	omitted := 0
+	if requested != "" {
+		real, err := realPath(requested)
+		if err != nil {
+			writeJSONError(w, http.StatusNotFound, "目录不存在或无法访问")
+			return
+		}
+		info, err := os.Stat(real)
+		if err != nil || !info.IsDir() {
+			writeJSONError(w, http.StatusNotFound, "这个路径不是目录")
+			return
+		}
+		current = real
+		var listed []workspaceEntry
+		listed, truncated, omitted = listDirectories(current, 500)
+		entries = make([]fsListEntry, 0, len(listed))
+		for _, entry := range listed {
+			child, err := realPath(entry.Path)
+			if err != nil {
+				continue
+			}
+			entries = append(entries, fsListEntry{Name: entry.Name, Path: child, Selectable: true})
+		}
+	}
+
+	parent := ""
+	if current != "" {
+		if dir := filepath.Dir(current); !samePath(dir, current) {
+			parent = dir
+		}
+	}
+	writeJSON(w, http.StatusOK, fsListResponse{
+		Path:       current,
+		Parent:     parent,
+		Roots:      fsSystemRoots(),
+		Workspaces: fsWorkspaceRoots(s.workspaceList()),
+		Entries:    entries,
+		Selectable: current != "",
+		Truncated:  truncated,
+		Omitted:    omitted,
+	})
+}
+
+// fsSystemRoots 返回文件系统入口：Windows 是盘符，其他平台是 / 与主目录。
+func fsSystemRoots() []fsListRoot {
+	if os.PathSeparator == '\\' {
+		out := make([]fsListRoot, 0, 8)
+		// 从 C: 开始：A:/B: 是软驱字母，Stat 可能触发系统插入磁盘提示。
+		for c := 'C'; c <= 'Z'; c++ {
+			root := string(c) + ":\\"
+			if info, err := os.Stat(root); err == nil && info.IsDir() {
+				out = append(out, fsListRoot{Label: string(c) + ":", Path: root})
+			}
+		}
+		return out
+	}
+	out := []fsListRoot{{Label: "/", Path: "/"}}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		out = append(out, fsListRoot{Label: "主目录", Path: home})
+	}
+	return out
+}
+
+// fsWorkspaceRoots 把工作区列表转成 FilePicker 的快捷入口。
+func fsWorkspaceRoots(workspaces []string) []fsListRoot {
+	out := make([]fsListRoot, 0, len(workspaces))
+	for _, ws := range workspaces {
+		real, err := realPath(ws)
+		if err != nil {
+			continue
+		}
+		name := filepath.Base(real)
+		if name == "" || name == "." || name == string(filepath.Separator) {
+			name = real
+		}
+		out = append(out, fsListRoot{Label: name, Path: real})
+	}
+	return out
+}
+
+// realPath 把路径规范成真实落点（EvalSymlinks）；不存在时返回错误。
+func realPath(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(real), nil
+}
+
+// samePath 比较两个已规范化的路径；Windows 下大小写不敏感。
+func samePath(a, b string) bool {
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if os.PathSeparator == '\\' {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+// writeJSON 输出 no-store 的 JSON 响应。
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
 }
 
 // handleWorkspaces 渲染工作区页：磁盘/常用位置 + 最近工作区 + 目录浏览。
@@ -979,8 +1267,9 @@ func (s *Server) handleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		currentCount = len(threads)
 	}
 
-	roots := make([]workspaceRoot, 0, len(s.cfg.Workspaces))
-	for _, ws := range s.cfg.Workspaces {
+	list := s.workspaceList()
+	roots := make([]workspaceRoot, 0, len(list))
+	for _, ws := range list {
 		name := filepath.Base(ws)
 		if name == "" || name == "." || name == string(filepath.Separator) {
 			name = ws
@@ -992,8 +1281,8 @@ func (s *Server) handleWorkspaces(w http.ResponseWriter, r *http.Request) {
 			Kind:  "project",
 		})
 	}
-	recent := make([]workspaceRecent, 0, len(s.cfg.Workspaces))
-	for _, ws := range s.cfg.Workspaces {
+	recent := make([]workspaceRecent, 0, len(list))
+	for _, ws := range list {
 		name := filepath.Base(ws)
 		if name == "" || name == "." || name == string(filepath.Separator) {
 			name = ws
@@ -1016,7 +1305,7 @@ func (s *Server) handleWorkspaces(w http.ResponseWriter, r *http.Request) {
 	if parent != "" {
 		parentHref = "/workspaces?path=" + urlQueryEscape(parent)
 	}
-	selectable := workspaceIndexFolded(s.cfg.Workspaces, browse) >= 0
+	selectable := workspaceIndexFolded(list, browse) >= 0
 	state := workspacesState{
 		Roots:      roots,
 		Recent:     recent,
@@ -1143,7 +1432,7 @@ func (s *Server) overviewDashboard(r *http.Request, threads []threadSummaryDTO) 
 		Stats: []overviewStat{
 			{Label: "会话", Value: strconv.Itoa(len(threads)), Hint: "本地会话总数", Tone: "brand"},
 			{Label: "最近活动", Value: lastActivity, Hint: "最后一个会话的更新时间", Tone: "neutral"},
-			{Label: "工作区", Value: strconv.Itoa(len(s.cfg.Workspaces)), Hint: "Gateway 配置的工作区", Tone: "neutral"},
+			{Label: "工作区", Value: strconv.Itoa(len(s.workspaceList())), Hint: "配置与本次打开的工作区", Tone: "neutral"},
 			{Label: "插件", Value: strconv.Itoa(pluginCount), Hint: "前端与后端插件总数", Tone: "brand"},
 		},
 		Recent: recent,
@@ -1346,7 +1635,7 @@ func (s *Server) collectPlugins(r *http.Request, detailID string) []pluginRow {
 
 // handleExtensionsReload 重载全部 agent 插件（前端插件在装配期固定，不在此处重载）。
 func (s *Server) handleExtensionsReload(w http.ResponseWriter, r *http.Request) {
-	path := safeReturnPath(r)
+	path := actionReturnPath(r)
 	if _, err := s.call(r, "plugin.reload", map[string]any{}); err != nil {
 		redirect(w, flashRedirect(path, "error", cleanRPCError(err)))
 		return
@@ -1369,7 +1658,7 @@ func (s *Server) handlePluginDisable(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) setPluginEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
 	id := strings.TrimSpace(r.PathValue("id"))
-	path := safeReturnPath(r)
+	path := actionReturnPath(r)
 	if id == "" {
 		redirect(w, flashRedirect(path, "error", "缺少插件 id"))
 		return
@@ -1389,6 +1678,22 @@ func (s *Server) setPluginEnabled(w http.ResponseWriter, r *http.Request, enable
 		action = "已停用"
 	}
 	redirect(w, flashRedirect(path, "notice", action+"插件 "+id))
+}
+
+// actionReturnPath 决定表单动作后的回跳地址。
+//
+// 页面统一发 Referrer-Policy: no-referrer，浏览器不会带 Referer，单靠
+// safeReturnPath 会退回首页——插件启停因此会“跳回会话界面”。表单显式
+// 带 next 时优先用它（只接受站内绝对路径）。
+func actionReturnPath(r *http.Request) string {
+	if next := strings.TrimSpace(r.PostFormValue("next")); next != "" {
+		if strings.HasPrefix(next, "/") && !strings.HasPrefix(next, "//") && !strings.Contains(next, `\`) {
+			if u, err := url.Parse(next); err == nil && u.Host == "" {
+				return next
+			}
+		}
+	}
+	return safeReturnPath(r)
 }
 
 // flashRedirect 给回跳地址加上提示参数。
@@ -1554,9 +1859,17 @@ func normalizePath(p string) string {
 
 func workspaceIndexFolded(list []string, p string) int {
 	target := normalizePath(p)
+	targetReal, _ := realPath(p)
 	for i, candidate := range list {
 		if normalizePath(candidate) == target {
 			return i
+		}
+		// FilePicker 返回的是 EvalSymlinks 后的真实路径；配置里的工作区
+		// 可能本身是 symlink，必须按真实落点再比一次。
+		if targetReal != "" {
+			if candidateReal, err := realPath(candidate); err == nil && samePath(candidateReal, targetReal) {
+				return i
+			}
 		}
 	}
 	return -1

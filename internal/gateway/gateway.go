@@ -11,7 +11,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -67,6 +69,10 @@ type Config struct {
 	// 非空时组合根构建 web.PluginUI 渲染桥，SSR 填充插槽并提供 /ext 页面。
 	// 脚本由上层组合根注入（app/ 层）——internal/ 不 import official/。
 	FrontendScripts []host.Script
+	// WorkspacesFile 是工作区列表的持久化文件；FilePicker 新登记的工作区
+	// 会写到这里，下次启动再合并回列表。空表示不持久化。
+	// 显式传 DataDir 时忽略（隔离数据目录不共享用户级工作区列表）。
+	WorkspacesFile string
 }
 
 // Gateway 持有 HTTP handler 与它管理的 Core 进程。
@@ -182,6 +188,21 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 用户级工作区列表只在默认数据目录下启用；显式 --data-dir 表示隔离运行。
+	persistWorkspaces := strings.TrimSpace(cfg.WorkspacesFile) != "" && strings.TrimSpace(cfg.DataDir) == ""
+	if persistWorkspaces {
+		saved, loadErr := loadWorkspacesFile(cfg.WorkspacesFile)
+		if loadErr != nil {
+			log.Printf("gateway: 读取工作区列表失败（忽略）: %v", loadErr)
+		}
+		if len(saved) > 0 {
+			merged := append(append([]string(nil), workspaces...), saved...)
+			workspaces, err = normalizeWorkspaces("", merged)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	cfg.Workspaces = workspaces
 	cfg.Workspace = workspaces[0]
 	if len(workspaces) > 1 && strings.TrimSpace(cfg.DataDir) != "" {
@@ -247,19 +268,21 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 		return nil, err
 	}
 
-	// web 与 SSE 使用同一个解析器：cookie 索引 → 配置里的工作区，
-	// 越界/损坏时回退到第一个工作区。两个入口不会出现工作区不一致。
+	// 页面、SSE 与插件桥必须使用同一套工作区解析：cookie 索引 + 本次会话
+	// 通过 FilePicker 登记的动态工作区。动态列表归 web.Server 管，所以先用
+	// 静态解析兜底，web.New 之后再切换到它的动态解析。
 	resolveWorkspace := workspaceResolver(workspaces)
-	events := &eventHandler{sup: sup, workspaceFor: resolveWorkspace}
+	requestWorkspace := newWorkspaceRequestResolver(resolveWorkspace)
+	events := &eventHandler{sup: sup, workspaceFor: requestWorkspace.Resolve}
 	// M4 前端插件渲染桥（7.5）：脚本由上层注入；为空时全部插槽保持基座占位。
 	// 前端插件在进程内固定装配，是否渲染由 plugin.list 的启用状态实时过滤。
 	var pluginUI web.PluginUI
 	if len(frontendScripts) > 0 {
-		gate := newFrontendGate(sup, resolveWorkspace)
+		gate := newFrontendGate(sup, requestWorkspace.Resolve)
 		bridge, err := frontend.NewBridge(frontend.BridgeOptions{
 			Scripts:           frontendScripts,
 			Supervisor:        sup,
-			WorkspaceFor:      resolveWorkspace,
+			WorkspaceFor:      requestWorkspace.Resolve,
 			ProductName:       product.Name,
 			CSRF:              mw.CSRFToken,
 			Enabled:           gate.Enabled,
@@ -280,6 +303,14 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 		Locale: product.Identity.Locale,
 		Events: events, CSRF: mw.CSRFToken, LoginPath: "/login",
 		PluginUI: pluginUI,
+		WorkspacesChanged: func(list []string) {
+			if !persistWorkspaces {
+				return
+			}
+			if saveErr := saveWorkspacesFile(cfg.WorkspacesFile, list); saveErr != nil {
+				log.Printf("gateway: 保存工作区列表失败: %v", saveErr)
+			}
+		},
 	})
 	if err != nil {
 		if ownSup {
@@ -287,6 +318,7 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 		}
 		return nil, err
 	}
+	requestWorkspace.Set(webSrv.WorkspaceForRequest)
 
 	root := http.NewServeMux()
 	root.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
@@ -362,6 +394,33 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+// workspaceRequestResolver 允许 SSE 与前端插件桥在 web.Server 创建后
+// 复用同一套动态工作区解析（含 FilePicker 登记的工作区）。创建前先静态兜底。
+type workspaceRequestResolver struct {
+	mu      sync.RWMutex
+	resolve func(*http.Request) string
+}
+
+func newWorkspaceRequestResolver(resolve func(*http.Request) string) *workspaceRequestResolver {
+	return &workspaceRequestResolver{resolve: resolve}
+}
+
+func (r *workspaceRequestResolver) Resolve(req *http.Request) string {
+	r.mu.RLock()
+	resolve := r.resolve
+	r.mu.RUnlock()
+	if resolve == nil {
+		return ""
+	}
+	return resolve(req)
+}
+
+func (r *workspaceRequestResolver) Set(resolve func(*http.Request) string) {
+	r.mu.Lock()
+	r.resolve = resolve
+	r.mu.Unlock()
+}
+
 // eventHandler 为每条 SSE 连接取一个 Core 句柄，连接结束即 Release。
 // 每个连接一个 Hub 意味着断线后 Last-Event-ID 回放只在本次连接内有界；
 // 跨连接重同步由客户端调用 thread.get 完成。
@@ -431,6 +490,83 @@ func workspaceResolver(workspaces []string) func(*http.Request) string {
 		}
 		return workspaces[0]
 	}
+}
+
+// workspacesFileData 是用户级工作区列表的落盘形状。
+type workspacesFileData struct {
+	Workspaces []string `json:"workspaces"`
+}
+
+// loadWorkspacesFile 读取用户上次打开过的工作区；不存在的目录直接跳过，
+// 避免移动/删除项目后启动列表里留下永远打不开的条目。
+func loadWorkspacesFile(path string) ([]string, error) {
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var data workspacesFileData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return nil, fmt.Errorf("解析 %s 失败: %w", path, err)
+	}
+	out := make([]string, 0, len(data.Workspaces))
+	for _, candidate := range data.Workspaces {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		abs, err := filepath.Abs(candidate)
+		if err != nil {
+			continue
+		}
+		info, err := os.Stat(abs)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		out = append(out, abs)
+	}
+	return out, nil
+}
+
+// saveWorkspacesFile 原子写入工作区列表（0600，同目录临时文件 + rename）。
+func saveWorkspacesFile(path string, workspaces []string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	raw, err := json.MarshalIndent(workspacesFileData{
+		Workspaces: append([]string(nil), workspaces...),
+	}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("工作区列表无法序列化: %w", err)
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("创建工作区状态目录失败: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".workspaces-*.json")
+	if err != nil {
+		return fmt.Errorf("创建工作区状态临时文件失败: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("设置工作区状态权限失败: %w", err)
+	}
+	if _, err := tmp.Write(raw); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("写入工作区列表失败: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("关闭工作区状态文件失败: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("替换工作区列表失败: %w", err)
+	}
+	return nil
 }
 
 func randomToken() (string, error) {

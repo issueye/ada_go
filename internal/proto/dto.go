@@ -315,6 +315,8 @@ type PluginFile struct {
 type ModelRef struct {
 	ProviderID string `json:"providerId"`
 	ModelID    string `json:"modelId"`
+	// ThinkingLevel 是当前选择的推理档位；空表示不传。
+	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 }
 
 // ModelPricing 是每百万 token 的微单位价格。
@@ -334,6 +336,7 @@ type ModelInfo struct {
 	Input            []string      `json:"input"`
 	SupportsTools    bool          `json:"supportsTools"`
 	SupportsThinking bool          `json:"supportsThinking,omitempty"`
+	ThinkingLevels   []string      `json:"thinkingLevels,omitempty"`
 	Pricing          *ModelPricing `json:"pricing,omitempty"`
 }
 

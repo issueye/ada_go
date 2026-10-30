@@ -28,10 +28,13 @@ interface ProviderRequest {
     topP?: number;
     maxTokens?: number;
     thinking?: boolean;
+    reasoningEffort?: string;
     extra?: unknown;
   };
   baseUrl?: string;
   apiKey?: string;
+  proxy?: string;
+  headers?: Record<string, string>;
 }
 
 interface ProviderMessage {
@@ -52,6 +55,7 @@ interface HttpInit {
   headers?: Record<string, string>;
   body?: string;
   maxBytes?: number;
+  proxy?: string;
 }
 
 interface ProviderContext {
@@ -144,8 +148,21 @@ function parseArgs(raw: unknown): Record<string, unknown> {
   return {};
 }
 
-function isToolResultEntry(entry: Record<string, unknown> | undefined): boolean {
-  if (!entry || entry.role !== "user") return false;
+// mergeHeaders 把供应商自定义头合并进请求；连接级字段不允许覆盖。
+function mergeHeaders(base: Record<string, string>, custom: Record<string, string> | undefined): void {
+  if (!custom) return;
+  for (const rawKey of Object.keys(custom)) {
+    const key = String(rawKey).trim();
+    if (!key) continue;
+    const lower = key.toLowerCase();
+    if (lower === "host" || lower === "content-length") continue;
+    const value = custom[rawKey];
+    if (value === undefined || value === null) continue;
+    base[key] = String(value);
+  }
+}
+
+function isToolResultEntry(entry: Record<string, unknown> | undefined): boolean {  if (!entry || entry.role !== "user") return false;
   const content = entry.content;
   if (!Array.isArray(content) || content.length === 0) return false;
   return content.every((b) => Boolean(b) && (b as Record<string, unknown>).type === "tool_result");
@@ -234,6 +251,22 @@ function buildBody(req: ProviderRequest): Record<string, unknown> {
   const params = req.params || {};
   if (typeof params.temperature === "number") body.temperature = params.temperature;
   if (typeof params.topP === "number") body.top_p = params.topP;
+  const effort = String(params.reasoningEffort || (params.thinking === true ? "medium" : ""));
+  if (effort.length > 0) {
+    // 档位名由供应商配置决定；已知档位映射到预算，自定义档位用默认预算。
+    const budgets: Record<string, number> = {
+      minimal: 1024,
+      low: 2048,
+      medium: 8192,
+      high: 16384,
+      max: 32768,
+    };
+    const budget = budgets[effort] || 8192;
+    body.thinking = { type: "enabled", budget_tokens: budget };
+    if (typeof body.max_tokens === "number") body.max_tokens = Math.max(body.max_tokens as number, budget + 1024);
+    // Anthropic 在 thinking 开启时要求 temperature 使用默认值。
+    delete body.temperature;
+  }
   if (params.extra && typeof params.extra === "object") {
     const extra = params.extra as Record<string, unknown>;
     for (const key of Object.keys(extra)) {
@@ -255,6 +288,7 @@ function streamOnce(req: ProviderRequest, ctx: ProviderContext): Promise<void> {
     "x-api-key": key,
     "anthropic-version": API_VERSION,
   };
+  mergeHeaders(headers, req.headers);
   const body = JSON.stringify(buildBody(req));
 
   // 每个 content block 一个槽位（text|thinking|tool），content_block_stop 时关闭；
@@ -368,7 +402,7 @@ function streamOnce(req: ProviderRequest, ctx: ProviderContext): Promise<void> {
   }
 
   return ctx.http
-    .sse(url, { method: "POST", headers, body }, (event) => {
+    .sse(url, { method: "POST", headers, body, proxy: req.proxy }, (event) => {
       const data = event && typeof event.data === "string" ? event.data : "";
       if (data.length === 0) return;
       let chunk: any;

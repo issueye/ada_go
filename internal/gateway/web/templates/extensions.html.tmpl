@@ -12,6 +12,7 @@
         </div>
         <form method="post" action="/agent-plugins/reload">
           {{template "csrf" .}}
+          <input type="hidden" name="next" value="/extensions">
           <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit">{{icon "i-refresh" 13}}重载插件</button>
         </form>
       </div>
@@ -54,11 +55,13 @@
               {{if .Enabled}}
               <form method="post" action="/extensions/{{.ID}}/disable">
                 {{template "csrf" $}}
+                <input type="hidden" name="next" value="/extensions">
                 <button class="ada-btn ada-btn--secondary ada-btn--sm" type="submit">停用</button>
               </form>
               {{else}}
               <form method="post" action="/extensions/{{.ID}}/enable">
                 {{template "csrf" $}}
+                <input type="hidden" name="next" value="/extensions">
                 <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit">启用</button>
               </form>
               {{end}}

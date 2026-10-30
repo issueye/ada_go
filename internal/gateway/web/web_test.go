@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -309,8 +311,14 @@ func TestHomeRendersThreadList(t *testing.T) {
 	wantContains(t, body, "第一个会话")
 	wantContains(t, body, "第二个会话")
 	wantContains(t, body, `action="/threads"`)
-	wantContains(t, body, "新会话")
-	wantContains(t, body, "开始一段新的对话")
+	wantContains(t, body, "新建任务")
+	wantContains(t, body, "ada-newtask")
+	wantContains(t, body, `data-new-task`)
+	wantContains(t, body, `data-workspace-native`)
+	wantContains(t, body, `data-workspace-controls`)
+	wantContains(t, body, "选择工作区")
+	wantContains(t, body, "file-picker.js")
+	wantContains(t, body, "描述你要完成的任务")
 	wantContains(t, body, `href="/threads/th_1"`)
 	wantContains(t, body, "ada-thread-list")
 	wantContains(t, body, `action="/threads/th_1/delete"`)
@@ -343,6 +351,289 @@ func TestCreateThreadCallsCoreAndRedirects(t *testing.T) {
 	}
 	if call.Params["title"] != "新想法" {
 		t.Fatalf("thread.create title = %v", call.Params["title"])
+	}
+}
+
+// 新建任务可以带工作区与第一条消息：thread.create 与 turn.start 都必须
+// 落在所选工作区，并且回跳前把工作区 cookie 写好。
+func TestCreateThreadWithWorkspaceAndFirstMessage(t *testing.T) {
+	ws1 := t.TempDir()
+	ws2 := t.TempDir()
+	core := newFakeCore().
+		on("thread.create", `{"thread":{"id":"th_2"}}`).
+		on("turn.start", `{"runId":"run_2","duplicate":false,"seq":0}`)
+	srv, sup := newServerWithWorkspaces(t, core, []string{ws1, ws2})
+
+	rec := serve(t, srv, "POST", "/threads", url.Values{
+		"workspace": {ws2},
+		"text":      {"第一个任务\n第二行"},
+	})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /threads = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/threads/th_2" {
+		t.Fatalf("Location = %q", loc)
+	}
+	realWS2, err := filepath.EvalSymlinks(ws2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sup.lastWorkspace(); got != filepath.Clean(realWS2) {
+		t.Fatalf("最后使用的工作区 = %q，期望 %q", got, realWS2)
+	}
+	create, _ := core.lastCall("thread.create")
+	if create.Params["title"] != "第一个任务" {
+		t.Fatalf("标题应取任务首行，实得 %v", create.Params["title"])
+	}
+	start, ok := core.lastCall("turn.start")
+	if !ok || start.Params["text"] != "第一个任务\n第二行" {
+		t.Fatalf("首条消息没有进入 turn.start: %#v", start.Params)
+	}
+	cookies := rec.Result().Cookies()
+	found := false
+	for _, c := range cookies {
+		if c.Name == web.WorkspaceCookieName {
+			found = true
+			if c.Value != "1" {
+				t.Fatalf("workspace cookie = %q，期望 1", c.Value)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("创建任务后没有写工作区 cookie")
+	}
+
+	bad := serve(t, srv, "POST", "/threads", url.Values{
+		"workspace": {filepath.Join(t.TempDir(), "missing")},
+		"text":      {"x"},
+	})
+	if bad.Code != http.StatusBadRequest {
+		t.Fatalf("不存在的目录 = %d，期望 400", bad.Code)
+	}
+}
+
+// FilePicker 选中的任意目录都可以登记成本次会话的工作区。
+func TestCreateThreadOpensNewWorkspace(t *testing.T) {
+	newWs := t.TempDir()
+	core := newFakeCore().
+		on("thread.create", `{"thread":{"id":"th_dynamic"}}`).
+		on("turn.start", `{"runId":"run_dynamic"}`)
+	srv, sup := newServerWithWorkspaces(t, core, []string{"/tmp/ws"})
+
+	rec := serve(t, srv, "POST", "/threads", url.Values{
+		"workspace": {newWs},
+		"text":      {"在任意目录里开任务"},
+	})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /threads = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	real, err := filepath.EvalSymlinks(newWs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sup.lastWorkspace(); got != filepath.Clean(real) {
+		t.Fatalf("工作区 = %q，期望 %q", got, filepath.Clean(real))
+	}
+	cookies := rec.Result().Cookies()
+	found := false
+	for _, c := range cookies {
+		if c.Name == web.WorkspaceCookieName {
+			found = true
+			if c.Value != "1" {
+				t.Fatalf("动态工作区 cookie = %q，期望 1", c.Value)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("动态工作区没有写 cookie")
+	}
+}
+
+// 动态工作区必须盖过 Gateway 注入的 WorkspaceFor：后者只认识启动配置，
+// 否则新建任务后 thread.get 会落到默认工作区，报“thread 不存在”。
+func TestDynamicWorkspaceBeatsStaleWorkspaceFor(t *testing.T) {
+	ws1 := t.TempDir()
+	ws2 := t.TempDir()
+	dyn := t.TempDir()
+	core := newFakeCore().
+		on("thread.create", `{"thread":{"id":"th_dyn"}}`).
+		on("turn.start", `{"runId":"run_dyn"}`).
+		on("thread.get", `{"thread":{"id":"th_dyn","workspace":"","title":"动态工作区会话","createdAt":"2026-10-28T10:00:00Z","updatedAt":"2026-10-28T10:00:00Z","archived":false},"items":[],"seq":1,"run":{"runId":"run_dyn","status":"terminal","terminal":"completed"},"interactions":[],"hasMore":false}`).
+		on("thread.entries", `{"entries":[],"hasMore":false}`)
+	sup := &fakeSupervisor{core: core}
+	srv, err := web.New(web.Config{
+		Supervisor: sup, Workspace: ws1, Workspaces: []string{ws1, ws2},
+		// 模拟 Gateway 的旧解析器：只认识配置里的第一个工作区。
+		WorkspaceFor: func(*http.Request) string { return ws1 },
+		ProductName:  "测试产品", Locale: "zh-CN",
+		CSRF: func(*http.Request) string { return "csrf-token" },
+	})
+	if err != nil {
+		t.Fatalf("web.New: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+
+	rec := serve(t, srv, "POST", "/threads", url.Values{
+		"workspace": {dyn},
+		"text":      {"动态工作区任务"},
+	})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /threads = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	var cookie *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == web.WorkspaceCookieName {
+			cookie = c
+		}
+	}
+	if cookie == nil {
+		t.Fatal("没有写工作区 cookie")
+	}
+
+	page := serveWithCookies(t, srv, "GET", "/threads/th_dyn", nil, cookie)
+	if page.Code != http.StatusOK {
+		t.Fatalf("GET /threads/th_dyn = %d (body=%s)", page.Code, page.Body.String())
+	}
+	if strings.Contains(page.Body.String(), "没有找到这个会话") {
+		t.Fatalf("动态工作区会话被解析到了错误 Core:\n%s", page.Body.String())
+	}
+	real, err := filepath.EvalSymlinks(dyn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sup.lastWorkspace(); got != filepath.Clean(real) {
+		t.Fatalf("thread.get 使用的工作区 = %q，期望 %q", got, filepath.Clean(real))
+	}
+}
+
+// FilePicker 选中即写 cookie：模型选择触发的 reload 不能把选择丢掉。
+func TestWorkspaceSelectAPIWritesCookie(t *testing.T) {
+	ws1 := t.TempDir()
+	ws2 := t.TempDir()
+	srv, _ := newServerWithWorkspaces(t, newFakeCore(), []string{ws1, ws2})
+
+	rec := serve(t, srv, "POST", "/api/workspace/select", url.Values{"path": {ws2}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/workspace/select = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Workspace string `json:"workspace"`
+		Index     int    `json:"index"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("响应 JSON: %v", err)
+	}
+	if body.Index != 1 {
+		t.Fatalf("index = %d，期望 1", body.Index)
+	}
+	found := false
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == web.WorkspaceCookieName {
+			found = true
+			if c.Value != "1" {
+				t.Fatalf("cookie = %q，期望 1", c.Value)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("没有写工作区 cookie")
+	}
+	if bad := serve(t, srv, "POST", "/api/workspace/select", url.Values{"path": {filepath.Join(ws1, "missing")}}); bad.Code != http.StatusBadRequest {
+		t.Fatalf("不存在目录 = %d，期望 400", bad.Code)
+	}
+}
+
+// FilePicker 的目录 API：只列目录；Windows 入口给盘符，工作区另作快捷入口。
+func TestFSListAPI(t *testing.T) {
+	ws := t.TempDir()
+	other := t.TempDir()
+	for _, name := range []string{"alpha", "beta"} {
+		if err := os.MkdirAll(filepath.Join(ws, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(ws, "note.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv, _ := newServerWithWorkspaces(t, newFakeCore(), []string{ws, other})
+
+	type listResponse struct {
+		Path       string `json:"path"`
+		Parent     string `json:"parent"`
+		Selectable bool   `json:"selectable"`
+		Roots      []struct {
+			Label string `json:"label"`
+			Path  string `json:"path"`
+		} `json:"roots"`
+		Workspaces []struct {
+			Label string `json:"label"`
+			Path  string `json:"path"`
+		} `json:"workspaces"`
+		Entries []struct {
+			Name       string `json:"name"`
+			Path       string `json:"path"`
+			Selectable bool   `json:"selectable"`
+		} `json:"entries"`
+	}
+
+	// 不带 path：Windows 先给盘符，已打开的工作区作为快捷入口。
+	boot := serve(t, srv, "GET", "/api/fs/list", nil)
+	var bootResp listResponse
+	if err := json.Unmarshal(boot.Body.Bytes(), &bootResp); err != nil {
+		t.Fatalf("解析入口响应: %v", err)
+	}
+	if boot.Code != http.StatusOK || bootResp.Path != "" || bootResp.Selectable {
+		t.Fatalf("入口响应 = %d path=%q selectable=%v", boot.Code, bootResp.Path, bootResp.Selectable)
+	}
+	if len(bootResp.Roots) == 0 {
+		t.Fatal("入口响应缺少磁盘/根目录")
+	}
+	if len(bootResp.Workspaces) != 2 {
+		t.Fatalf("工作区快捷入口 = %d，期望 2", len(bootResp.Workspaces))
+	}
+
+	rec := serve(t, srv, "GET", "/api/fs/list?path="+url.QueryEscape(ws), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/fs/list = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	var root listResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &root); err != nil {
+		t.Fatalf("解析目录响应: %v", err)
+	}
+	if !root.Selectable {
+		t.Fatal("任何目录都应能作为工作区")
+	}
+	names := map[string]bool{}
+	for _, entry := range root.Entries {
+		names[entry.Name] = true
+	}
+	if !names["alpha"] || !names["beta"] {
+		t.Fatalf("目录项缺少子目录: %#v", root.Entries)
+	}
+	if names["note.txt"] {
+		t.Fatal("目录 API 不应列出文件")
+	}
+
+	sub := serve(t, srv, "GET", "/api/fs/list?path="+url.QueryEscape(filepath.Join(ws, "alpha")), nil)
+	var subResp listResponse
+	if err := json.Unmarshal(sub.Body.Bytes(), &subResp); err != nil {
+		t.Fatalf("解析子目录响应: %v", err)
+	}
+	if sub.Code != http.StatusOK || !subResp.Selectable {
+		t.Fatalf("子目录 = %d selectable=%v，期望 200 且可选", sub.Code, subResp.Selectable)
+	}
+	if subResp.Parent == "" {
+		t.Fatal("子目录应返回 parent")
+	}
+
+	// 现在允许跨工作区浏览（Windows 盘符模型的必然结果）。
+	outside := serve(t, srv, "GET", "/api/fs/list?path="+url.QueryEscape(filepath.Dir(ws)), nil)
+	if outside.Code != http.StatusOK {
+		t.Fatalf("工作区外 = %d，期望 200", outside.Code)
+	}
+	missing := serve(t, srv, "GET", "/api/fs/list?path="+url.QueryEscape(filepath.Join(ws, "missing-dir")), nil)
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("不存在目录 = %d，期望 404", missing.Code)
 	}
 }
 
@@ -1533,6 +1824,34 @@ func TestPluginToggleRejectionShowsFlash(t *testing.T) {
 	wantNotContains(t, page, "Core 暂时不可用")
 }
 
+// 页面统一 no-referrer，浏览器不带 Referer；插件启停/重载必须靠表单里的
+// next 回到插件页，而不是退回会话首页。
+func TestPluginActionsReturnToExtensionsWithoutReferer(t *testing.T) {
+	core := newFakeCore().
+		on("plugin.setEnabled", `{}`).
+		on("plugin.reload", `{}`)
+	srv, _ := newServer(t, core)
+
+	for _, tc := range []struct {
+		target string
+		next   string
+		want   string
+	}{
+		{"/extensions/tools-fs/disable", "/extensions", "/extensions?notice="},
+		{"/extensions/tools-fs/enable", "/extensions", "/extensions?notice="},
+		{"/extensions/tools-fs/disable", "/extensions/tools-fs", "/extensions/tools-fs?notice="},
+		{"/agent-plugins/reload", "/extensions", "/extensions?notice="},
+	} {
+		rec := serve(t, srv, "POST", tc.target, url.Values{"next": {tc.next}})
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("%s = %d (body=%s)", tc.target, rec.Code, rec.Body.String())
+		}
+		if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, tc.want) {
+			t.Fatalf("%s 回跳 = %q，期望 %s…（无 Referer）", tc.target, loc, tc.want)
+		}
+	}
+}
+
 // RenderSlot 是唯一的插槽输出函数：签名固定为 template.HTML，空贡献回退。
 func TestRenderSlotWrapsBodyAndFallsBack(t *testing.T) {
 	// 编译期固定签名：body/fallback 只能是 template.HTML，普通 string 不会通过。
@@ -1588,8 +1907,8 @@ func TestThreadComposerShowsModelPicker(t *testing.T) {
 		on("thread.entries", entriesAscending).
 		on("model.list", `{"models":[
 		  {"model":{"providerId":"openai","modelId":"gpt-4o"},"info":{"displayName":"GPT-4o","contextWindow":128000,"supportsTools":true}},
-		  {"model":{"providerId":"custom","modelId":"deepseek"},"info":{"displayName":"DeepSeek","contextWindow":1000000,"supportsTools":true}}
-		],"current":{"providerId":"custom","modelId":"deepseek"}}`)
+		  {"model":{"providerId":"custom","modelId":"deepseek"},"info":{"displayName":"DeepSeek","contextWindow":1000000,"supportsTools":true,"thinkingLevels":["low","high","max"]}}
+		],"current":{"providerId":"custom","modelId":"deepseek","thinkingLevel":"high"}}`)
 	srv, _ := newServer(t, core)
 
 	body := serve(t, srv, "GET", "/thread/th_1", nil).Body.String()
@@ -1599,12 +1918,43 @@ func TestThreadComposerShowsModelPicker(t *testing.T) {
 	wantContains(t, body, `data-value="custom|deepseek"`)
 	wantContains(t, body, `data-label="DeepSeek"`)
 	wantContains(t, body, `data-select-label`)
+	wantContains(t, body, `data-levels="low|high|max"`)
+	wantContains(t, body, `data-current-level="high"`)
+	wantContains(t, body, `ada-model-picker__chevron`)
+	wantNotContains(t, body, `data-model-level-picker`)
 	// 无 JS 时的原生 select 回退：随消息提交，基座在 turn.start 前切模型。
 	wantContains(t, body, `name="model"`)
 	wantContains(t, body, `ada-select__fallback`)
 	// 供应商管理入口由 provider-admin 插件贡献到 composer.left，
 	// 基座模板只保留插槽宿位（不再写死插件 id 与页面路由）。
 	wantContains(t, body, `data-slot="composer.left"`)
+}
+
+// 模型选择/推理等级切换：thinkingLevel 必须透传到 model.set。
+func TestModelSelectPassesThinkingLevel(t *testing.T) {
+	core := newFakeCore().on("model.set", `{"model":{"providerId":"custom","modelId":"deepseek","thinkingLevel":"high"},"scope":"thread"}`)
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "POST", "/model/select", url.Values{
+		"providerId":    {"custom"},
+		"modelId":       {"deepseek"},
+		"thinkingLevel": {"high"},
+		"threadId":      {"th_1"},
+	})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /model/select = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	call, ok := core.lastCall("model.set")
+	if !ok {
+		t.Fatal("没有调用 model.set")
+	}
+	model, _ := call.Params["model"].(map[string]any)
+	if model["providerId"] != "custom" || model["modelId"] != "deepseek" || model["thinkingLevel"] != "high" {
+		t.Fatalf("model.set 参数 = %#v", call.Params["model"])
+	}
+	if call.Params["threadId"] != "th_1" {
+		t.Fatalf("threadId = %v", call.Params["threadId"])
+	}
 }
 
 func TestThreadPageShowsRunError(t *testing.T) {

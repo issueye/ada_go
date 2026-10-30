@@ -56,6 +56,7 @@ type ModelInfo struct {
 	Input            []string `json:"input,omitempty"`
 	SupportsTools    bool     `json:"supportsTools"`
 	SupportsThinking bool     `json:"supportsThinking,omitempty"`
+	ThinkingLevels   []string `json:"thinkingLevels,omitempty"`
 }
 
 // PromptDef 是 registerPrompt 的入参（05 §6.3）。

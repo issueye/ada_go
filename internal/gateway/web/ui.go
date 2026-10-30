@@ -248,11 +248,9 @@ func renderSidebar(d sidebarData) template.HTML {
 		`<a class="ada-rail__mark" href="/" title="%s" aria-label="%s"><img class="ada-rail__logo" src="%s" alt="" width="24" height="24" decoding="async"></a>`,
 		railTitle, railTitle, assetURL("logo.png"),
 	))
-	rail.WriteString(`<form class="ada-rail__new" method="post" action="/threads"><input type="hidden" name="title" value="新会话">`)
-	rail.WriteString(csrfInput(d.CSRF))
-	rail.WriteString(`<button class="ada-rail__btn ada-rail__btn--primary" type="submit" title="新会话" aria-label="新会话">`)
+	rail.WriteString(`<a class="ada-rail__btn ada-rail__btn--primary" href="/" data-new-task-link title="新建任务" aria-label="新建任务">`)
 	rail.WriteString(string(iconHTML("i-plus", 14)))
-	rail.WriteString(`</button></form>`)
+	rail.WriteString(`</a>`)
 	if d.Search {
 		rail.WriteString(`<button class="ada-rail__btn" type="button" data-rail-search title="搜索会话（Ctrl K）" aria-label="搜索会话">`)
 		rail.WriteString(string(iconHTML("i-search", 18)))
@@ -300,12 +298,10 @@ func renderSidebar(d sidebarData) template.HTML {
 		brandLabel, brandLabel, assetURL("logo.png"), esc(d.BrandName), badge,
 	))
 	b.WriteString(string(RenderSlot("sidebar.top", d.SidebarTop, d.SidebarTopCount, "")))
-	// 新会话
-	b.WriteString(`<form class="ada-new" method="post" action="/threads"><input type="hidden" name="title" value="新会话">`)
-	b.WriteString(csrfInput(d.CSRF))
-	b.WriteString(`<button class="ada-btn ada-btn--secondary ada-btn--sm" type="submit">`)
+	// 新建任务
+	b.WriteString(`<a class="ada-new ada-btn ada-btn--secondary ada-btn--sm" href="/" data-new-task-link title="新建任务（Ctrl N）">`)
 	b.WriteString(string(iconHTML("i-plus", 14)))
-	b.WriteString(`<span>新会话</span></button></form>`)
+	b.WriteString(`<span>新建任务</span><kbd class="ada-new__kbd">Ctrl N</kbd></a>`)
 	// 工作区切换器
 	b.WriteString(fmt.Sprintf(
 		`<a class="ada-ws-switch" href="/workspaces"%s>%s<span class="ada-ws-switch__name">%s</span>%s%s</a>`,

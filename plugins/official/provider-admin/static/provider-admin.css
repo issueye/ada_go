@@ -255,6 +255,16 @@
   box-shadow: 0 0 0 3px var(--ph-brand-soft);
 }
 
+.pm-textarea {
+  height: auto;
+  min-height: 96px;
+  padding: 8px 10px;
+  resize: vertical;
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+  line-height: 1.6;
+}
+
 .pm-key {
   display: flex;
   align-items: center;
@@ -550,6 +560,81 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* 推理等级芯片：与截图一致，从左到右表示低→高。 */
+.pm-levels {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.pm-level {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 32px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--ph-line-strong);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-surface);
+  color: var(--ph-ink);
+}
+
+.pm-level__name {
+  font-size: var(--ada-text-sm);
+}
+
+.pm-level__remove {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--ada-radius-sm);
+  background: transparent;
+  color: var(--ph-faint);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pm-level__remove:hover {
+  background: var(--ph-subtle);
+  color: var(--ph-danger-ink);
+}
+
+.pm-level__add {
+  display: grid;
+  width: 36px;
+  height: 32px;
+  place-items: center;
+  border: 1px dashed var(--ph-line-strong);
+  border-radius: var(--ada-radius-md);
+  background: transparent;
+  color: var(--ph-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pm-level__add:hover {
+  border-color: var(--ph-brand);
+  color: var(--ph-brand-ink);
+  background: var(--ph-brand-soft);
+}
+
+.pm-level__input {
+  width: 88px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--ph-brand);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-surface);
+  color: var(--ph-ink);
+  font: inherit;
+  font-size: var(--ada-text-sm);
 }
 
 .pm-model-form__row {

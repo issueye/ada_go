@@ -28,10 +28,13 @@ interface ProviderRequest {
     topP?: number;
     maxTokens?: number;
     thinking?: boolean;
+    reasoningEffort?: string;
     extra?: unknown;
   };
   baseUrl?: string;
   apiKey?: string;
+  proxy?: string;
+  headers?: Record<string, string>;
 }
 
 interface ProviderMessage {
@@ -52,6 +55,7 @@ interface HttpInit {
   headers?: Record<string, string>;
   body?: string;
   maxBytes?: number;
+  proxy?: string;
 }
 
 interface ProviderContext {
@@ -131,6 +135,19 @@ function argsString(raw: unknown): string {
   }
 }
 
+function mergeHeaders(base: Record<string, string>, custom: Record<string, string> | undefined): void {
+  if (!custom) return;
+  for (const rawKey of Object.keys(custom)) {
+    const key = String(rawKey).trim();
+    if (!key) continue;
+    const lower = key.toLowerCase();
+    if (lower === "host" || lower === "content-length") continue;
+    const value = custom[rawKey];
+    if (value === undefined || value === null) continue;
+    base[key] = String(value);
+  }
+}
+
 // toResponsesInput 做统一消息 → Responses 输入项的唯一转换：
 // user/assistant 用 role + content 消息形状，工具调用与回执用独立项
 // function_call / function_call_output（call_id 与 Chat 的 tool_call_id 对应）。
@@ -197,6 +214,9 @@ function buildBody(req: ProviderRequest): Record<string, unknown> {
   if (typeof params.temperature === "number") body.temperature = params.temperature;
   if (typeof params.topP === "number") body.top_p = params.topP;
   if (typeof params.maxTokens === "number" && params.maxTokens > 0) body.max_output_tokens = params.maxTokens;
+  if (typeof params.reasoningEffort === "string" && params.reasoningEffort.length > 0) {
+    body.reasoning = { effort: params.reasoningEffort };
+  }
   if (params.extra && typeof params.extra === "object") {
     const extra = params.extra as Record<string, unknown>;
     for (const key of Object.keys(extra)) {
@@ -217,6 +237,7 @@ function streamOnce(req: ProviderRequest, ctx: ProviderContext): Promise<void> {
     "Content-Type": "application/json",
     Authorization: `Bearer ${key}`,
   };
+  mergeHeaders(headers, req.headers);
   const body = JSON.stringify(buildBody(req));
 
   let textOpen = false;
@@ -342,7 +363,7 @@ function streamOnce(req: ProviderRequest, ctx: ProviderContext): Promise<void> {
   }
 
   return ctx.http
-    .sse(url, { method: "POST", headers, body }, (event) => {
+    .sse(url, { method: "POST", headers, body, proxy: req.proxy }, (event) => {
       const data = event && typeof event.data === "string" ? event.data : "";
       if (data.length === 0) return;
       let chunk: any;

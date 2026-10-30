@@ -78,6 +78,10 @@ type Config struct {
 	EventsPath string
 	// SecretsPath 是 secrets.toml 位置；空时取 ~/.adago/secrets.toml。
 	SecretsPath string
+	// ProvidersPath 是供应商配置位置；空时按数据目录决定：
+	//   - 显式传 DataDir：<DataDir>/providers.json（测试/隔离数据目录）；
+	//   - 默认数据目录：~/.adago/providers.json（切换工作区共享同一套供应商）。
+	ProvidersPath string
 	// Log 接收插件日志；nil 时丢弃。
 	Log func(level, msg string, fields map[string]any)
 	// Debug 开启出网调试：把每次 provider/ctx.fetch 请求与响应摘要（密钥已脱敏）
@@ -218,6 +222,7 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 		debugLog = host.NewDebugLog(cfg.Err)
 	}
 	dataDir := cfg.DataDir
+	explicitDataDir := dataDir != ""
 	if dataDir == "" {
 		dataDir, err = sqlite.DefaultDataDir(abs)
 		if err != nil {
@@ -225,6 +230,15 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 		}
 	}
 	cfg.DataDir = dataDir
+	providersPath := strings.TrimSpace(cfg.ProvidersPath)
+	if providersPath == "" {
+		if explicitDataDir {
+			providersPath = filepath.Join(dataDir, "providers.json")
+		} else {
+			providersPath = defaultProvidersPath(dataDir)
+		}
+	}
+	cfg.ProvidersPath = providersPath
 
 	clock := adapters.SystemClock{}
 	ids := adapters.NewULIDGen()
@@ -243,7 +257,7 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 	}
 	s := &Session{
 		cfg: cfg, store: store, ids: ids, clock: clock, secrets: secrets,
-		providerStore: provider.NewStore(filepath.Join(dataDir, "providers.json")),
+		providerStore: provider.NewStore(providersPath),
 		steerQueues:   map[string][]domain.Message{},
 		turnActive:    map[string]int{},
 		in:            bufio.NewReader(cfg.In),
@@ -931,6 +945,7 @@ func (s *Session) ResolveModel(providerID, modelID string) (ports.ModelRef, bool
 				Input:            append([]string(nil), m.Input...),
 				SupportsTools:    m.SupportsTools,
 				SupportsThinking: m.SupportsThinking,
+				ThinkingLevel:    firstThinkingLevel(m.ThinkingLevels),
 			}, true
 		}
 	}
@@ -972,6 +987,9 @@ func (s *Session) ModelRefFor(threadID string) ports.ModelRef {
 	s.mu.Unlock()
 	if override != nil {
 		if ref, ok := s.ResolveModel(override.ProviderID, override.ModelID); ok {
+			if override.ThinkingLevel != "" {
+				ref.ThinkingLevel = override.ThinkingLevel
+			}
 			return ref
 		}
 		return *override
@@ -979,9 +997,18 @@ func (s *Session) ModelRefFor(threadID string) ports.ModelRef {
 	return s.defaultModelRef()
 }
 
+// firstThinkingLevel 返回模型的第一档推理等级；没有档位时为空。
+func firstThinkingLevel(levels []string) string {
+	if len(levels) == 0 {
+		return ""
+	}
+	return levels[0]
+}
+
 // providerCatalog 实现 host.Context.Providers（capability: model.admin）。
 // 返回所有配置（含停用项，页面需要展示开关）；API Key 只给「是否配置 + 尾号」。
 func (s *Session) providerCatalog() host.ProviderCatalog {
+	s.RefreshProviderConfigs()
 	s.providersMu.Lock()
 	cfgs := cloneProviderConfigs(s.providerConfigs)
 	s.providersMu.Unlock()
@@ -990,7 +1017,7 @@ func (s *Session) providerCatalog() host.ProviderCatalog {
 		cat.Providers = append(cat.Providers, s.providerInfo(c))
 	}
 	cur := s.ModelRef()
-	cat.Current = host.ModelRef{ProviderID: cur.ProviderID, ModelID: cur.ModelID}
+	cat.Current = host.ModelRef{ProviderID: cur.ProviderID, ModelID: cur.ModelID, ThinkingLevel: cur.ThinkingLevel}
 	return cat
 }
 
@@ -1009,11 +1036,39 @@ func (s *Session) selectModelFromPlugin(ctx context.Context, providerID, modelID
 	} else {
 		s.SetWorkspaceModel(ref)
 	}
-	return host.ModelRef{ProviderID: ref.ProviderID, ModelID: ref.ModelID}, nil
+	return host.ModelRef{ProviderID: ref.ProviderID, ModelID: ref.ModelID, ThinkingLevel: ref.ThinkingLevel}, nil
 }
 
-// applyProviderConfigs 把 providers.json 注入当前装配的 Registry。
-// 文件不存在时从适配器插件播种（保留旧产品开箱即用的行为）。
+// migrateProviderThinkingLevels 把旧的单档 thinkingLevel 迁移成 thinkingLevels。
+func migrateProviderThinkingLevels(cfgs []provider.Config) {
+	for i := range cfgs {
+		for j := range cfgs[i].Models {
+			m := &cfgs[i].Models[j]
+			if len(m.ThinkingLevels) == 0 && m.ThinkingLevel != "" {
+				if level, err := provider.NormalizeThinkingLevel(m.ThinkingLevel); err == nil &&
+					level != "" && level != "off" {
+					m.ThinkingLevels = []string{level}
+					m.SupportsThinking = true
+				}
+			}
+			m.ThinkingLevel = ""
+		}
+	}
+}
+
+// defaultProvidersPath 返回跨工作区共享的供应商配置位置。
+// 用户主目录不可用时退回当前数据目录，保证 Core 仍能启动。
+func defaultProvidersPath(dataDir string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return filepath.Join(dataDir, "providers.json")
+	}
+	return filepath.Join(home, ".adago", "providers.json")
+}
+
+// applyProviderConfigs 把共享的 providers.json 注入当前装配的 Registry。
+// 首次启动先迁移旧的「每工作区一份」配置，避免用户升级后丢失已配置的供应商；
+// 没有可迁移配置时才从适配器插件播种（保留旧产品开箱即用的行为）。
 // 配置读取/写入失败只记警告：供应商配置坏掉不应该让整个 Core 起不来。
 func (s *Session) applyProviderConfigs(asm *app.Assembly) {
 	if asm == nil || asm.Providers == nil {
@@ -1025,11 +1080,20 @@ func (s *Session) applyProviderConfigs(asm *app.Assembly) {
 		return
 	}
 	if !exists {
-		cfgs = seedProviderConfigs(asm, s.BaseURL())
-		if err := s.providerStore.Save(cfgs); err != nil {
-			s.logWarn("供应商配置首次写入失败: " + err.Error())
+		if legacy, ok := s.legacyProviderConfigs(); ok {
+			cfgs = legacy
+		} else {
+			cfgs = seedProviderConfigs(asm, s.BaseURL(), s.providerCredentialConfigured)
+		}
+		// 播种为空时不落盘：保留「尚未初始化」状态，之后打开其他工作区
+		// 仍有机会迁移到那里已有的用户配置。
+		if len(cfgs) > 0 {
+			if err := s.providerStore.Save(cfgs); err != nil {
+				s.logWarn("供应商配置首次写入失败: " + err.Error())
+			}
 		}
 	}
+	migrateProviderThinkingLevels(cfgs)
 	for _, c := range cfgs {
 		s.allowProviderHost(c)
 	}
@@ -1040,8 +1104,130 @@ func (s *Session) applyProviderConfigs(asm *app.Assembly) {
 	s.ensureCurrentModel(asm)
 }
 
+// RefreshProviderConfigs 重新读取共享供应商配置。
+// 多工作区共用一个 providers.json 时，其他 Core 保存后本 Core 需要刷新，
+// 否则模型列表/供应商页会一直停留在启动时的快照。文件不存在或损坏时保留现状。
+func (s *Session) RefreshProviderConfigs() {
+	asm := s.Assembly()
+	if asm == nil || asm.Providers == nil {
+		return
+	}
+	cfgs, exists, err := s.providerStore.Load()
+	if err != nil || !exists {
+		return
+	}
+	migrateProviderThinkingLevels(cfgs)
+	for _, c := range cfgs {
+		s.allowProviderHost(c)
+	}
+	asm.Providers.SetConfigs(cfgs)
+	s.providersMu.Lock()
+	s.providerConfigs = cloneProviderConfigs(cfgs)
+	s.providersMu.Unlock()
+	s.ensureCurrentModel(asm)
+}
+
+// legacyProviderConfigs 查找升级前按工作区保存的供应商配置。
+// 优先当前工作区；否则扫描同级工作区，取最近修改的一份用户配置。
+// 只有确实含用户改动（密钥/代理/请求头/自定义端点或供应商）才迁移，
+// 避免把旧版本自动播种的 OpenAI 默认项带进共享配置。
+func (s *Session) legacyProviderConfigs() ([]provider.Config, bool) {
+	path := s.providerStore.Path()
+	if strings.TrimSpace(path) == "" {
+		return nil, false
+	}
+	current := filepath.Join(s.cfg.DataDir, "providers.json")
+	if samePath(path, current) {
+		return nil, false // 本来就用工作区配置，不需要迁移
+	}
+	if cfgs, ok := loadUserProviderConfigs(current); ok {
+		return cfgs, true
+	}
+	root := filepath.Dir(s.cfg.DataDir)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, false
+	}
+	var best []provider.Config
+	var bestTime time.Time
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		candidate := filepath.Join(root, entry.Name(), "providers.json")
+		if samePath(candidate, path) {
+			continue
+		}
+		cfgs, ok := loadUserProviderConfigs(candidate)
+		if !ok {
+			continue
+		}
+		info, statErr := os.Stat(candidate)
+		if statErr != nil {
+			continue
+		}
+		if best == nil || info.ModTime().After(bestTime) {
+			best = cfgs
+			bestTime = info.ModTime()
+		}
+	}
+	return best, best != nil
+}
+
+func samePath(a, b string) bool {
+	aa, errA := filepath.Abs(a)
+	bb, errB := filepath.Abs(b)
+	if errA != nil || errB != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return strings.EqualFold(aa, bb)
+}
+
+// loadUserProviderConfigs 读取一份旧配置；没有用户改动时视为「可重新播种」。
+// 内置 ID 且仍是默认端点/无密钥的条目是旧版本自动播种的，迁移时丢弃，
+// 避免升级后又冒出一套未配置的 GPT/Claude 供应商。
+func loadUserProviderConfigs(path string) ([]provider.Config, bool) {
+	cfgs, exists, err := provider.NewStore(path).Load()
+	if err != nil || !exists {
+		return nil, false
+	}
+	out := make([]provider.Config, 0, len(cfgs))
+	for _, c := range cfgs {
+		if userModifiedProvider(c) {
+			out = append(out, c)
+		}
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return out, true
+}
+
+func userModifiedProvider(c provider.Config) bool {
+	if strings.TrimSpace(c.APIKey) != "" || strings.TrimSpace(c.Proxy) != "" ||
+		len(c.Headers) > 0 || c.Disabled {
+		return true
+	}
+	if !seededProviderID(c.ID) {
+		return true
+	}
+	base := strings.TrimSpace(c.BaseURL)
+	return base != "" && !strings.EqualFold(base, defaultProviderBase(c.Protocol))
+}
+
+func seededProviderID(id string) bool {
+	switch id {
+	case "openai", "openai-responses", "anthropic":
+		return true
+	default:
+		return false
+	}
+}
+
 // seedProviderConfigs 用已装配的适配器声明播种默认供应商。
-func seedProviderConfigs(asm *app.Assembly, baseURL string) []provider.Config {
+// 只有显式 BaseURL 或对应密钥已配置时才播种；否则新工作区会凭空出现
+// 一套不可用的模型（用户并没有配置过这个供应商）。
+func seedProviderConfigs(asm *app.Assembly, baseURL string, hasCredential func(provider.Protocol) bool) []provider.Config {
 	out := make([]provider.Config, 0, len(asm.Providers.AdapterIDs()))
 	for _, id := range asm.Providers.AdapterIDs() {
 		models := asm.Providers.AdapterModels(id)
@@ -1050,12 +1236,11 @@ func seedProviderConfigs(asm *app.Assembly, baseURL string) []provider.Config {
 		}
 		protocol := provider.ProtocolForAdapter(id)
 		cfgBase := baseURL
-		if protocol == provider.ProtocolAnthropic {
-			if cfgBase == "" {
-				cfgBase = "https://api.anthropic.com/v1"
+		if cfgBase == "" {
+			if hasCredential == nil || !hasCredential(protocol) {
+				continue
 			}
-		} else if cfgBase == "" {
-			cfgBase = "https://api.openai.com/v1"
+			cfgBase = defaultProviderBase(protocol)
 		}
 		cfg := provider.Config{
 			ID: id, Name: providerDisplayName(id), Protocol: protocol,
@@ -1072,6 +1257,23 @@ func seedProviderConfigs(asm *app.Assembly, baseURL string) []provider.Config {
 		out = append(out, cfg)
 	}
 	return out
+}
+
+func defaultProviderBase(protocol provider.Protocol) string {
+	if protocol == provider.ProtocolAnthropic {
+		return "https://api.anthropic.com/v1"
+	}
+	return "https://api.openai.com/v1"
+}
+
+// providerCredentialConfigured 报告某个协议是否已通过环境变量/secrets 提供密钥。
+func (s *Session) providerCredentialConfigured(protocol provider.Protocol) bool {
+	name := "openai_api_key"
+	if protocol == provider.ProtocolAnthropic {
+		name = "anthropic_api_key"
+	}
+	_, ok := s.secret(name)
+	return ok
 }
 
 func providerDisplayName(adapterID string) string {
@@ -1105,7 +1307,8 @@ func (s *Session) ensureCurrentModel(asm *app.Assembly) {
 		s.SetWorkspaceModel(ports.ModelRef{
 			ProviderID: pid, ModelID: m.ID,
 			ContextWindow: int64(m.ContextWindow), MaxOutput: int64(m.MaxOutput),
-			SupportsTools: m.SupportsTools,
+			SupportsTools: m.SupportsTools, SupportsThinking: m.SupportsThinking,
+			ThinkingLevel: firstThinkingLevel(m.ThinkingLevels),
 		})
 		return
 	}
@@ -1128,6 +1331,7 @@ func modelUsable(asm *app.Assembly, providerID, modelID string) bool {
 // saveProviderFromPlugin 实现 host.Context.SaveProvider。
 // APIKey 留空表示保留旧值；ClearAPIKey 才清空。
 func (s *Session) saveProviderFromPlugin(ctx context.Context, in host.ProviderInput) (host.ProviderInfo, error) {
+	s.RefreshProviderConfigs()
 	s.providersMu.Lock()
 	defer s.providersMu.Unlock()
 	cfgs := cloneProviderConfigs(s.providerConfigs)
@@ -1155,6 +1359,14 @@ func (s *Session) saveProviderFromPlugin(ctx context.Context, in host.ProviderIn
 			return host.ProviderInfo{}, errors.New("Base URL 必须是 http(s) 地址")
 		}
 	}
+	proxy, err := normalizeProviderProxy(in.Proxy)
+	if err != nil {
+		return host.ProviderInfo{}, err
+	}
+	headers, err := normalizeProviderHeaders(in.Headers)
+	if err != nil {
+		return host.ProviderInfo{}, err
+	}
 	models, err := normalizeProviderModels(in.Models)
 	if err != nil {
 		return host.ProviderInfo{}, err
@@ -1178,7 +1390,7 @@ func (s *Session) saveProviderFromPlugin(ctx context.Context, in host.ProviderIn
 	}
 	cfg := provider.Config{
 		ID: id, Name: name, Protocol: protocol, BaseURL: baseURL,
-		APIKey: key, Disabled: in.Disabled, Models: models,
+		APIKey: key, Proxy: proxy, Headers: headers, Disabled: in.Disabled, Models: models,
 	}
 	if idx >= 0 {
 		cfgs[idx] = cfg
@@ -1220,6 +1432,7 @@ func (s *Session) providerInfo(c provider.Config) host.ProviderInfo {
 
 // removeProviderFromPlugin 实现 host.Context.RemoveProvider。
 func (s *Session) removeProviderFromPlugin(_ context.Context, providerID string) error {
+	s.RefreshProviderConfigs()
 	s.providersMu.Lock()
 	defer s.providersMu.Unlock()
 	providerID = strings.TrimSpace(providerID)
@@ -1301,10 +1514,21 @@ func (s *Session) fetchModelsFromPlugin(ctx context.Context, providerID string) 
 	} else {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
+	for k, v := range cfg.Headers {
+		req.Header.Set(k, v)
+	}
+	client := &http.Client{Timeout: 20 * time.Second}
+	if strings.TrimSpace(cfg.Proxy) != "" {
+		proxyURL, err := url.Parse(cfg.Proxy)
+		if err != nil {
+			return nil, fmt.Errorf("代理地址不合法: %w", err)
+		}
+		client.Transport = &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	}
 	debugID := s.debug.NextID()
 	startedAt := time.Now()
 	s.debug.Request(debugID, http.MethodGet, endpoint, req.Header, nil)
-	res, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	res, err := client.Do(req)
 	if err != nil {
 		s.debug.Error(debugID, err, time.Since(startedAt))
 		return nil, fmt.Errorf("拉取模型列表失败: %w", err)
@@ -1349,6 +1573,57 @@ func (s *Session) fetchModelsFromPlugin(ctx context.Context, providerID string) 
 	return out, nil
 }
 
+// normalizeProviderProxy 校验供应商代理地址；空表示直连。
+func normalizeProviderProxy(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "", errors.New("代理地址不合法，需要 http(s):// 或 socks5:// 地址")
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https", "socks5":
+		return raw, nil
+	default:
+		return "", fmt.Errorf("代理只支持 http/https/socks5，得到 %s", u.Scheme)
+	}
+}
+
+// normalizeProviderHeaders 校验自定义请求头：拒绝 Host/Content-Length，
+// 限制数量与长度，避免把连接级字段写坏。
+func normalizeProviderHeaders(in map[string]string) (map[string]string, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	if len(in) > 32 {
+		return nil, errors.New("自定义请求头最多 32 个")
+	}
+	out := make(map[string]string, len(in))
+	for rawKey, rawValue := range in {
+		key := strings.TrimSpace(rawKey)
+		if key == "" {
+			continue
+		}
+		if len(key) > 128 || len(rawValue) > 4096 {
+			return nil, fmt.Errorf("请求头 %q 过长", key)
+		}
+		if strings.ContainsAny(key, " \t\r\n:") {
+			return nil, fmt.Errorf("请求头名 %q 含非法字符", key)
+		}
+		switch strings.ToLower(key) {
+		case "host", "content-length":
+			return nil, fmt.Errorf("不能自定义连接级请求头 %q", key)
+		}
+		out[key] = strings.TrimSpace(rawValue)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
 func normalizeProviderModels(in []host.ProviderModel) ([]provider.Model, error) {
 	out := make([]provider.Model, 0, len(in))
 	seen := map[string]bool{}
@@ -1377,11 +1652,16 @@ func normalizeProviderModels(in []host.ProviderModel) ([]provider.Model, error) 
 		if m.ContextWindow < 0 || m.MaxOutput < 0 {
 			return nil, fmt.Errorf("模型 %s 的窗口/输出上限不能为负数", id)
 		}
+		levels, err := provider.NormalizeThinkingLevels(m.ThinkingLevels)
+		if err != nil {
+			return nil, fmt.Errorf("模型 %s: %w", id, err)
+		}
 		out = append(out, provider.Model{
 			ID: id, DisplayName: strings.TrimSpace(m.DisplayName),
 			ContextWindow: m.ContextWindow, MaxOutput: m.MaxOutput,
 			Input: allowed, SupportsTools: m.SupportsTools,
-			SupportsThinking: m.SupportsThinking, Disabled: m.Disabled,
+			SupportsThinking: m.SupportsThinking || len(levels) > 0,
+			ThinkingLevels:   levels, Disabled: m.Disabled,
 		})
 	}
 	return out, nil
@@ -1390,7 +1670,7 @@ func normalizeProviderModels(in []host.ProviderModel) ([]provider.Model, error) 
 func providerInfoOf(c provider.Config) host.ProviderInfo {
 	info := host.ProviderInfo{
 		ID: c.ID, DisplayName: c.Name, Protocol: string(c.Protocol),
-		BaseURL: c.BaseURL, Disabled: c.Disabled,
+		BaseURL: c.BaseURL, Proxy: c.Proxy, Headers: cloneHeaders(c.Headers), Disabled: c.Disabled,
 		HasAPIKey:  strings.TrimSpace(c.APIKey) != "",
 		APIKeyHint: maskAPIKey(c.APIKey),
 		Models:     make([]host.ProviderModel, 0, len(c.Models)),
@@ -1400,10 +1680,22 @@ func providerInfoOf(c provider.Config) host.ProviderInfo {
 			ID: m.ID, DisplayName: m.DisplayName,
 			ContextWindow: m.ContextWindow, MaxOutput: m.MaxOutput,
 			Input: m.Input, SupportsTools: m.SupportsTools,
-			SupportsThinking: m.SupportsThinking, Disabled: m.Disabled,
+			SupportsThinking: m.SupportsThinking, ThinkingLevels: append([]string(nil), m.ThinkingLevels...),
+			Disabled: m.Disabled,
 		})
 	}
 	return info
+}
+
+func cloneHeaders(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func maskAPIKey(key string) string {

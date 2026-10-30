@@ -164,32 +164,13 @@
 
   /* 输入框旁的模型选择器：改选即切换（线程级；没有会话上下文时工作区级）。
      选择器在发送表单内部，不能嵌套第二个 form，所以用 fetch + CSRF。 */
-  document.addEventListener('ada:select', function (event) {
-    var picker = event.target;
-    if (!picker || !picker.matches || !picker.matches('[data-model-picker]')) return;
-    var value = String((event.detail && event.detail.value) || "");
-    var cut = value.indexOf("|");
-    if (cut <= 0) return;
-    var providerId = value.slice(0, cut);
-    var modelId = value.slice(cut + 1);
-
-    // ada-select 默认把整个 option 文本写进 label；这里换成简短名称。
-    var labelNode = picker.querySelector("[data-select-label]");
-    var chosen = null;
-    var options = picker.querySelectorAll("[data-select-menu] [data-value]");
-    for (var i = 0; i < options.length; i++) {
-      if (options[i].getAttribute("data-value") === value) chosen = options[i];
-    }
-    if (labelNode && chosen) {
-      var shortLabel = chosen.getAttribute("data-label");
-      if (shortLabel) labelNode.textContent = shortLabel;
-    }
-
+  function switchModel(picker, providerId, modelId, level) {
     var thread = document.querySelector("[data-thread-id]");
     var csrf = document.querySelector('meta[name="csrf-token"]');
     var body = new URLSearchParams();
     body.set("providerId", providerId);
     body.set("modelId", modelId);
+    if (level) body.set("thinkingLevel", level);
     if (thread && thread.getAttribute("data-thread-id")) {
       body.set("threadId", thread.getAttribute("data-thread-id"));
     }
@@ -215,6 +196,200 @@
       picker.removeAttribute("aria-busy");
       notify("切换模型失败：" + (err && err.message ? err.message : err), "error");
     });
+  }
+
+  var cascade = null;
+  var cascadePicker = null;
+  var cascadeRow = null;
+
+  function ensureCascade() {
+    if (cascade) return cascade;
+    cascade = document.createElement("div");
+    cascade.className = "ada-model-cascade";
+    cascade.hidden = true;
+    cascade.setAttribute("role", "menu");
+    document.body.appendChild(cascade);
+    cascade.addEventListener("click", function (event) {
+      var button = event.target.closest && event.target.closest("[data-cascade-level]");
+      if (!button || !cascadeRow || !cascadePicker) return;
+      event.preventDefault();
+      var value = cascadeRow.getAttribute("data-value") || "";
+      var cut = value.indexOf("|");
+      if (cut <= 0) return;
+      var level = button.getAttribute("data-cascade-level") || "";
+      var picker = cascadePicker;
+      hideCascade(null);
+      switchModel(picker, value.slice(0, cut), value.slice(cut + 1), level);
+    });
+    cascade.addEventListener("keydown", function (event) {
+      var items = Array.prototype.slice.call(cascade.querySelectorAll("[data-cascade-level]"));
+      if (!items.length) return;
+      var index = items.indexOf(document.activeElement);
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        var step = event.key === "ArrowDown" ? 1 : -1;
+        var next = index < 0 ? 0 : index + step;
+        if (next < 0) next = items.length - 1;
+        if (next >= items.length) next = 0;
+        items[next].focus();
+        return;
+      }
+      if (event.key === "ArrowLeft" || event.key === "Escape") {
+        event.preventDefault();
+        hideCascade(true);
+      }
+    });
+    document.addEventListener(
+      "click",
+      function (event) {
+        if (!cascade || cascade.hidden) return;
+        if (event.target.closest && (event.target.closest(".ada-model-cascade") || event.target.closest("[data-model-picker]"))) {
+          return;
+        }
+        hideCascade(null);
+      },
+      true
+    );
+    window.addEventListener("resize", function () { hideCascade(null); });
+    window.addEventListener("scroll", function () { hideCascade(null); }, true);
+    return cascade;
+  }
+
+  function hideCascade(focusRow) {
+    var row = cascadeRow;
+    if (cascade) cascade.hidden = true;
+    cascadePicker = null;
+    cascadeRow = null;
+    if (focusRow && row) row.focus();
+  }
+
+  function showCascade(picker, row) {
+    if (cascadeRow === row && cascade && !cascade.hidden) return;
+    var levels = (row.getAttribute("data-levels") || "").split("|").filter(Boolean);
+    if (!levels.length) {
+      hideCascade(null);
+      return;
+    }
+    ensureCascade();
+    cascade.textContent = "";
+    var title = document.createElement("p");
+    title.className = "ada-model-cascade__title";
+    title.textContent = "推理等级";
+    cascade.appendChild(title);
+    var current = row.getAttribute("data-current-level") || "";
+    levels.forEach(function (level) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "ada-select__option ada-model-cascade__option" + (level === current ? " is-selected" : "");
+      button.setAttribute("data-cascade-level", level);
+      button.textContent = level;
+      cascade.appendChild(button);
+    });
+    cascade.hidden = false;
+    cascade.style.visibility = "hidden";
+    var rect = row.getBoundingClientRect();
+    var width = cascade.offsetWidth;
+    var height = cascade.offsetHeight;
+    var left = rect.right + 4;
+    if (left + width > window.innerWidth - 8) left = rect.left - width - 4;
+    if (left < 8) left = 8;
+    var top = rect.top;
+    if (top + height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - height - 8);
+    cascade.style.left = left + "px";
+    cascade.style.top = top + "px";
+    cascade.style.visibility = "";
+    cascadePicker = picker;
+    cascadeRow = row;
+  }
+
+  /* 模型菜单的级联：有档位的模型在右侧展开推理等级，不把档位平铺到工具行。 */
+  function bindModelCascades() {
+    var pickers = document.querySelectorAll("[data-model-picker]");
+    for (var i = 0; i < pickers.length; i += 1) {
+      (function (picker) {
+        if (picker.getAttribute("data-cascade-bound") === "1") return;
+        picker.setAttribute("data-cascade-bound", "1");
+
+        function rowOf(target) {
+          return target && target.closest ? target.closest(".ada-model-picker__option") : null;
+        }
+        function hasLevels(row) {
+          return !!(row && row.getAttribute("data-levels"));
+        }
+
+        // 点击有档位的模型：不直接选中，展开右侧子菜单。
+        picker.addEventListener(
+          "click",
+          function (event) {
+            var row = rowOf(event.target);
+            if (!hasLevels(row)) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            showCascade(picker, row);
+          },
+          true
+        );
+        picker.addEventListener("mouseover", function (event) {
+          var row = rowOf(event.target);
+          if (!row) return;
+          if (hasLevels(row)) showCascade(picker, row);
+          else hideCascade(null);
+        });
+        picker.addEventListener("focusin", function (event) {
+          var row = rowOf(event.target);
+          if (hasLevels(row)) showCascade(picker, row);
+        });
+        picker.addEventListener(
+          "keydown",
+          function (event) {
+            var row = rowOf(document.activeElement);
+            if (row && hasLevels(row) && (event.key === "ArrowRight" || event.key === "Enter")) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              showCascade(picker, row);
+              var first = cascade ? cascade.querySelector("[data-cascade-level]") : null;
+              if (first) first.focus();
+              return;
+            }
+            if (event.key === "Escape" && cascade && !cascade.hidden) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              hideCascade(true);
+            }
+          },
+          true
+        );
+        var menu = picker.querySelector("[data-select-menu]");
+        if (menu && window.MutationObserver) {
+          new MutationObserver(function () {
+            if (menu.hidden) hideCascade(null);
+          }).observe(menu, { attributes: true, attributeFilter: ["hidden"] });
+        }
+      })(pickers[i]);
+    }
+  }
+
+  document.addEventListener("ada:select", function (event) {
+    var picker = event.target;
+    if (!picker || !picker.matches || !picker.matches("[data-model-picker]")) return;
+    var value = String((event.detail && event.detail.value) || "");
+    var cut = value.indexOf("|");
+    if (cut <= 0) return;
+    var providerId = value.slice(0, cut);
+    var modelId = value.slice(cut + 1);
+
+    // ada-select 默认把整个 option 文本写进 label；这里换成简短名称。
+    var labelNode = picker.querySelector("[data-select-label]");
+    var chosen = null;
+    var options = picker.querySelectorAll("[data-select-menu] [data-value]");
+    for (var i = 0; i < options.length; i++) {
+      if (options[i].getAttribute("data-value") === value) chosen = options[i];
+    }
+    if (labelNode && chosen) {
+      var shortLabel = chosen.getAttribute("data-label");
+      if (shortLabel) labelNode.textContent = shortLabel;
+    }
+    switchModel(picker, providerId, modelId, "");
   });
 
   /* ── 3. 侧栏：≤760px 是抽屉，>760px 是 56px 窄轨 ───────────────────────
@@ -499,6 +674,86 @@
     if (railSearch) railSearch.addEventListener('click', focusSearch);
   }
 
+  /* ── 新建任务：工作区选择 + 居中输入 ─────────────────────────────────
+     有 JS 时把服务端渲染的原生 select 换成 FilePicker 弹窗；没有 JS 时
+     原生 select 照常提交。hidden 字段只在增强成功后才有 name，避免两个
+     同名字段同时提交。 */
+  function bindNewTask() {
+    var form = document.querySelector('form[data-new-task]');
+    if (!form) return;
+    var controls = form.querySelector('[data-workspace-controls]');
+    var nativeSelect = form.querySelector('[data-workspace-native]');
+    var hidden = form.querySelector('[data-workspace-input]');
+    var label = form.querySelector('[data-workspace-label]');
+    var enhanced = !!(window.AdaFilePicker && controls && hidden);
+
+    function choose(workspace) {
+      if (!workspace || !hidden) return;
+      // 选中即落 cookie：模型选择等操作会整页 reload，未提交的工作区选择
+      // 不能因此丢回旧工作区（否则模型列表会突然换一套供应商）。
+      var csrf = document.querySelector('meta[name="csrf-token"]');
+      var body = new URLSearchParams();
+      body.set("path", workspace.path);
+      fetch("/api/workspace/select", {
+        method: "POST",
+        credentials: "same-origin",
+        redirect: "manual",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-CSRF-Token": csrf ? csrf.getAttribute("content") : ""
+        },
+        body: body.toString()
+      }).then(function (res) {
+        if (res.type === "opaqueredirect" || res.ok) {
+          window.location.reload();
+          return null;
+        }
+        return res.text().then(function (text) {
+          throw new Error(text || ("HTTP " + res.status));
+        });
+      }).catch(function (err) {
+        notify("切换工作区失败：" + (err && err.message ? err.message : err), "error");
+      });
+    }
+
+    if (enhanced) {
+      controls.hidden = false;
+      if (nativeSelect) {
+        nativeSelect.hidden = true;
+        nativeSelect.disabled = true;
+      }
+      hidden.setAttribute('name', 'workspace');
+      controls.addEventListener('click', function (event) {
+        var opener = event.target.closest && event.target.closest('[data-file-picker-open]');
+        if (!opener) return;
+        event.preventDefault();
+        window.AdaFilePicker.open({
+          current: hidden.value,
+          onSelect: choose
+        });
+      });
+    } else if (controls) {
+      controls.hidden = true;
+    }
+
+    var input = form.querySelector('textarea');
+    if (input) {
+      try {
+        input.focus({ preventScroll: true });
+      } catch (err) {
+        input.focus();
+      }
+    }
+  }
+
+  function bindNewTaskShortcut() {
+    document.addEventListener('keydown', function (event) {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'n') return;
+      event.preventDefault();
+      window.location.href = '/';
+    });
+  }
+
   function boot() {
     wireDialog();
     autoDismissFlashes();
@@ -506,6 +761,9 @@
     bindScrollBottom();
     bindAskWizards(document);
     bindThreadSearch();
+    bindNewTask();
+    bindModelCascades();
+    bindNewTaskShortcut();
     // 恢复上次的折叠偏好（宽屏）并让按钮文案与真实状态一致
     onBreakpointChange();
   }

@@ -50,7 +50,7 @@ func (p *Instance) httpObject(rt *mojsRuntime, c *call, hc Context) moejs.Value 
 				return moejs.Undefined(), err
 			}
 			return p.hostAsync(c, "http.json", func(ctx context.Context) (any, error) {
-				res, err := hc.HTTP.JSON(ctx, req.method, req.url, req.headers, req.body, req.maxBytes)
+				res, err := hc.HTTP.JSONWithProxy(ctx, req.method, req.url, req.headers, req.body, req.maxBytes, req.proxy)
 				if err != nil {
 					return nil, err
 				}
@@ -79,10 +79,10 @@ func (p *Instance) httpObject(rt *mojsRuntime, c *call, hc Context) moejs.Value 
 			}
 			p.keepRoot(cb)
 			return p.hostAsyncTimeout(c, "http.sse", p.budgets.ProviderTotal, func(ctx context.Context) (any, error) {
-				res, err := hc.HTTP.SSE(ctx, req.method, req.url, req.headers, req.body,
+				res, err := hc.HTTP.SSEWithProxy(ctx, req.method, req.url, req.headers, req.body,
 					func(event, data string) error {
 						return p.deliverEvent(ctx, c, cb, event, data)
-					})
+					}, req.proxy)
 				if err != nil {
 					return nil, err
 				}
@@ -150,6 +150,7 @@ type httpInit struct {
 	headers  map[string]string
 	body     string
 	maxBytes int
+	proxy    string
 }
 
 // parseHTTPInit 读取 (url, init) 参数；只做形状校验，allowlist 与期限留给桥。
@@ -182,6 +183,9 @@ func parseHTTPInit(rt *mojsRuntime, args []moejs.Value) (httpInit, error) {
 		if n, ok := jsInt(v); ok && n > 0 {
 			out.maxBytes = int(n)
 		}
+	}
+	if v, err := rt.Get(init, "proxy"); err == nil && !v.IsNullish() {
+		out.proxy = strings.TrimSpace(v.String())
 	}
 	return out, nil
 }

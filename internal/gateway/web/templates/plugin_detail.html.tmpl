@@ -97,11 +97,13 @@
               {{if .Plugin.Enabled}}
               <form method="post" action="/extensions/{{.Plugin.ID}}/disable">
                 {{template "csrf" .}}
+                <input type="hidden" name="next" value="/extensions/{{.Plugin.ID}}">
                 <button class="ada-btn ada-btn--secondary ada-btn--sm" type="submit">停用</button>
               </form>
               {{else}}
               <form method="post" action="/extensions/{{.Plugin.ID}}/enable">
                 {{template "csrf" .}}
+                <input type="hidden" name="next" value="/extensions/{{.Plugin.ID}}">
                 <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit">启用</button>
               </form>
               {{end}}

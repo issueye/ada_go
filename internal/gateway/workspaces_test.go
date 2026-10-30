@@ -8,8 +8,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/adag/ada-go/internal/gateway/contracts"
 	"github.com/adag/ada-go/internal/gateway/web"
@@ -146,5 +150,167 @@ func TestEventHandlerUsesCookieWorkspace(t *testing.T) {
 	}
 	if sup.acquired[0] != "/ws/b" {
 		t.Fatalf("eventHandler 工作区 = %q, want /ws/b", sup.acquired[0])
+	}
+}
+
+// FilePicker 新登记的工作区不在启动配置里；SSE 必须和页面使用同一套
+// 动态解析，否则会话页有内容、事件流却连在旧 Core 上，表现为一直空白。
+func TestEventHandlerUsesDynamicWorkspace(t *testing.T) {
+	base := t.TempDir()
+	dynamic := t.TempDir()
+	product, err := filepath.Abs(filepath.Join("..", "..", "products", "headless.agent.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const token = "gateway-dynamic-workspace-token"
+	acquired := make(chan string, 4)
+	sup := &acquireChanSupervisor{workspaces: acquired}
+	gw, err := New(context.Background(), Config{
+		Workspace:  base,
+		Product:    product,
+		Token:      token,
+		Supervisor: sup,
+	})
+	if err != nil {
+		t.Fatalf("gateway.New: %v", err)
+	}
+	t.Cleanup(func() { _ = gw.Shutdown(context.Background()) })
+	srv := httptest.NewServer(gw.Handler())
+	t.Cleanup(srv.Close)
+
+	form := url.Values{"path": {dynamic}}.Encode()
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/workspace/select", strings.NewReader(form))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/workspace/select: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/workspace/select = %d", res.StatusCode)
+	}
+	var workspaceCookie *http.Cookie
+	for _, c := range res.Cookies() {
+		if c.Name == web.WorkspaceCookieName {
+			workspaceCookie = c
+		}
+	}
+	if workspaceCookie == nil {
+		t.Fatal("没有写工作区 cookie")
+	}
+
+	eventsReq, err := http.NewRequest(http.MethodGet, srv.URL+"/events/th_dynamic", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventsReq.Header.Set("Authorization", "Bearer "+token)
+	eventsReq.AddCookie(workspaceCookie)
+	eventsRes, err := (&http.Client{Timeout: 3 * time.Second}).Do(eventsReq)
+	if err != nil {
+		t.Fatalf("GET /events: %v", err)
+	}
+	defer eventsRes.Body.Close()
+	if ct := eventsRes.Header.Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+		t.Fatalf("GET /events Content-Type = %q", ct)
+	}
+	select {
+	case got := <-acquired:
+		real, err := filepath.EvalSymlinks(dynamic)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if filepath.Clean(got) != filepath.Clean(real) {
+			t.Fatalf("SSE 使用的工作区 = %q，期望动态工作区 %q", got, real)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("eventHandler 没有 Acquire 工作区")
+	}
+}
+
+type acquireChanSupervisor struct {
+	workspaces chan string
+}
+
+func (s *acquireChanSupervisor) Acquire(_ context.Context, workspace string) (contracts.CoreClient, error) {
+	s.workspaces <- workspace
+	return stubCore{}, nil
+}
+
+func (s *acquireChanSupervisor) Release(string)                    {}
+func (s *acquireChanSupervisor) Shutdown(context.Context) error    { return nil }
+func (s *acquireChanSupervisor) List() []contracts.WorkspaceStatus { return nil }
+
+// FilePicker 打开的工作区必须落盘，重启 Gateway 后仍在列表里。
+func TestGatewayPersistsDynamicWorkspace(t *testing.T) {
+	base := t.TempDir()
+	dynamic := t.TempDir()
+	stateFile := filepath.Join(t.TempDir(), "workspaces.json")
+	product, err := filepath.Abs(filepath.Join("..", "..", "products", "headless.agent.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const token = "gateway-workspace-persist-token"
+	newGateway := func() *Gateway {
+		t.Helper()
+		gw, err := New(context.Background(), Config{
+			Workspace:      base,
+			Product:        product,
+			Token:          token,
+			WorkspacesFile: stateFile,
+			Supervisor:     &eventRecordingSupervisor{},
+		})
+		if err != nil {
+			t.Fatalf("gateway.New: %v", err)
+		}
+		t.Cleanup(func() { _ = gw.Shutdown(context.Background()) })
+		return gw
+	}
+
+	gw := newGateway()
+	srv := httptest.NewServer(gw.Handler())
+	form := url.Values{"path": {dynamic}}.Encode()
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/workspace/select", strings.NewReader(form))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/workspace/select: %v", err)
+	}
+	defer res.Body.Close()
+	srv.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/workspace/select = %d", res.StatusCode)
+	}
+
+	raw, err := os.ReadFile(stateFile)
+	if err != nil {
+		t.Fatalf("工作区列表没有落盘: %v", err)
+	}
+	if !strings.Contains(string(raw), filepath.Base(dynamic)) {
+		t.Fatalf("工作区列表缺少 %s: %s", dynamic, raw)
+	}
+
+	// 模拟重启：同一状态文件、同一启动工作区。
+	restarted := newGateway()
+	realDynamic, err := filepath.EvalSymlinks(dynamic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, ws := range restarted.Workspaces() {
+		if candidate, err := filepath.EvalSymlinks(ws); err == nil && filepath.Clean(candidate) == filepath.Clean(realDynamic) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("重启后工作区列表 = %v，缺少 %s", restarted.Workspaces(), dynamic)
 	}
 }

@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:26b8c09fb25cb4b7) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:24418f779e359c39) by plugins/official/build.mjs — do not edit
 // provider-openai-chat —— 官方插件：OpenAI Chat Completions 的流式协议映射（03 §5.5）。
 //
 // 这一层只做「SSE 事件 → 归一化 Delta」：TLS、代理、重定向、超时、取消、allowlist、
@@ -27,10 +27,14 @@
                   
                        
                        
+                             
                     
     
                    
                   
+                                          
+                 
+                                   
  
 
                            
@@ -51,6 +55,7 @@
                                    
                 
                     
+                 
  
 
                            
@@ -126,6 +131,20 @@ function argsString(raw         )         {
     return JSON.stringify(raw);
   } catch {
     return "{}";
+  }
+}
+
+// mergeHeaders 把供应商自定义头合并进请求；连接级字段不允许覆盖。
+function mergeHeaders(base                        , custom                                    )       {
+  if (!custom) return;
+  for (const rawKey of Object.keys(custom)) {
+    const key = String(rawKey).trim();
+    if (!key) continue;
+    const lower = key.toLowerCase();
+    if (lower === "host" || lower === "content-length") continue;
+    const value = custom[rawKey];
+    if (value === undefined || value === null) continue;
+    base[key] = String(value);
   }
 }
 
@@ -208,6 +227,9 @@ function buildBody(req                 )                          {
   if (typeof params.temperature === "number") body.temperature = params.temperature;
   if (typeof params.topP === "number") body.top_p = params.topP;
   if (typeof params.maxTokens === "number" && params.maxTokens > 0) body.max_tokens = params.maxTokens;
+  if (typeof params.reasoningEffort === "string" && params.reasoningEffort.length > 0) {
+    body.reasoning_effort = params.reasoningEffort;
+  }
   if (params.extra && typeof params.extra === "object") {
     const extra = params.extra                           ;
     for (const key of Object.keys(extra)) {
@@ -228,6 +250,7 @@ function streamOnce(req                 , ctx                 )                {
     "Content-Type": "application/json",
     Authorization: `Bearer ${key}`,
   };
+  mergeHeaders(headers, req.headers);
   const body = JSON.stringify(buildBody(req));
 
   let textOpen = false;
@@ -321,7 +344,7 @@ function streamOnce(req                 , ctx                 )                {
   }
 
   return ctx.http
-    .sse(url, { method: "POST", headers, body }, (event) => {
+    .sse(url, { method: "POST", headers, body, proxy: req.proxy }, (event) => {
       const data = event && typeof event.data === "string" ? event.data : "";
       if (data === "[DONE]") {
         sawDone = true;

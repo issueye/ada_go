@@ -192,6 +192,8 @@ type Context struct {
 type ModelRef struct {
 	ProviderID string `json:"providerId"`
 	ModelID    string `json:"modelId"`
+	// ThinkingLevel 是当前选择的推理档位；空表示不传。
+	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 }
 
 // ProviderCatalog 是 model.admin 能力看到的供应商/模型目录（不含端点密钥）。
@@ -202,15 +204,17 @@ type ProviderCatalog struct {
 
 // ProviderInfo 是单个供应商的只读投影。
 type ProviderInfo struct {
-	ID          string          `json:"id"`
-	DisplayName string          `json:"displayName,omitempty"`
-	Protocol    string          `json:"protocol,omitempty"`
-	BaseURL     string          `json:"baseUrl,omitempty"`
-	Disabled    bool            `json:"disabled,omitempty"`
-	Available   bool            `json:"available"`
-	HasAPIKey   bool            `json:"hasApiKey"`
-	APIKeyHint  string          `json:"apiKeyHint,omitempty"`
-	Models      []ProviderModel `json:"models"`
+	ID          string            `json:"id"`
+	DisplayName string            `json:"displayName,omitempty"`
+	Protocol    string            `json:"protocol,omitempty"`
+	BaseURL     string            `json:"baseUrl,omitempty"`
+	Proxy       string            `json:"proxy,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	Disabled    bool              `json:"disabled,omitempty"`
+	Available   bool              `json:"available"`
+	HasAPIKey   bool              `json:"hasApiKey"`
+	APIKeyHint  string            `json:"apiKeyHint,omitempty"`
+	Models      []ProviderModel   `json:"models"`
 }
 
 // ProviderModel 是可编辑的模型配置（含启用状态）。
@@ -222,19 +226,23 @@ type ProviderModel struct {
 	Input            []string `json:"input,omitempty"`
 	SupportsTools    bool     `json:"supportsTools"`
 	SupportsThinking bool     `json:"supportsThinking,omitempty"`
-	Disabled         bool     `json:"disabled,omitempty"`
+	// ThinkingLevels 是该模型可选的推理等级（从低到高）。
+	ThinkingLevels []string `json:"thinkingLevels,omitempty"`
+	Disabled       bool     `json:"disabled,omitempty"`
 }
 
 // ProviderInput 是保存供应商的入参（页面只传用户改过的密钥）。
 type ProviderInput struct {
-	ID          string          `json:"id"`
-	Name        string          `json:"name"`
-	Protocol    string          `json:"protocol"`
-	BaseURL     string          `json:"baseUrl,omitempty"`
-	APIKey      string          `json:"apiKey,omitempty"`
-	ClearAPIKey bool            `json:"clearApiKey,omitempty"`
-	Disabled    bool            `json:"disabled,omitempty"`
-	Models      []ProviderModel `json:"models"`
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Protocol    string            `json:"protocol"`
+	BaseURL     string            `json:"baseUrl,omitempty"`
+	APIKey      string            `json:"apiKey,omitempty"`
+	ClearAPIKey bool              `json:"clearApiKey,omitempty"`
+	Proxy       string            `json:"proxy,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	Disabled    bool              `json:"disabled,omitempty"`
+	Models      []ProviderModel   `json:"models"`
 }
 
 // CheckpointMeta 是一次检查点登记的归属（M5）。
@@ -286,6 +294,9 @@ type HTTPBridge interface {
 	JSON(ctx context.Context, method, url string, headers map[string]string, body string, maxBytes int) (HTTPResult, error)
 	// SSE 逐事件回调，直到显式终止或 ctx 取消。
 	SSE(ctx context.Context, method, url string, headers map[string]string, body string, onEvent func(event, data string) error) (HTTPResult, error)
+	// JSONWithProxy / SSEWithProxy 使用供应商配置的代理；空代理等价于 JSON/SSE。
+	JSONWithProxy(ctx context.Context, method, url string, headers map[string]string, body string, maxBytes int, proxy string) (HTTPResult, error)
+	SSEWithProxy(ctx context.Context, method, url string, headers map[string]string, body string, onEvent func(event, data string) error, proxy string) (HTTPResult, error)
 }
 
 // HTTPResult 是出网调用的摘要结果。

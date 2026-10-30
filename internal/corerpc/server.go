@@ -726,6 +726,7 @@ func (s *Server) handleModelList(_ context.Context, raw json.RawMessage) (any, e
 		ThreadID string `json:"threadId"`
 	}
 	_ = decode(raw, &p)
+	s.sess.RefreshProviderConfigs()
 	asm := s.sess.Assembly()
 	models := []map[string]any{}
 	if asm.Providers != nil {
@@ -744,15 +745,16 @@ func (s *Server) handleModelList(_ context.Context, raw json.RawMessage) (any, e
 	}
 	return map[string]any{
 		"models":  models,
-		"current": proto.ModelRef{ProviderID: cur.ProviderID, ModelID: cur.ModelID},
+		"current": proto.ModelRef{ProviderID: cur.ProviderID, ModelID: cur.ModelID, ThinkingLevel: cur.ThinkingLevel},
 	}, nil
 }
 
 func (s *Server) handleModelSet(ctx context.Context, raw json.RawMessage) (any, error) {
 	var p struct {
 		Model *struct {
-			ProviderID string `json:"providerId"`
-			ModelID    string `json:"modelId"`
+			ProviderID    string `json:"providerId"`
+			ModelID       string `json:"modelId"`
+			ThinkingLevel string `json:"thinkingLevel"`
 		} `json:"model"`
 		ThreadID string `json:"threadId"`
 	}
@@ -762,10 +764,32 @@ func (s *Server) handleModelSet(ctx context.Context, raw json.RawMessage) (any, 
 	if p.Model == nil || p.Model.ProviderID == "" || p.Model.ModelID == "" {
 		return nil, invalid("model.set: 需要 model.providerId 与 model.modelId")
 	}
+	s.sess.RefreshProviderConfigs()
 	ref, ok := s.sess.ResolveModel(p.Model.ProviderID, p.Model.ModelID)
 	if !ok {
 		return nil, invalid(fmt.Sprintf(
 			"model.set: provider %q/model %q 未在装配中声明", p.Model.ProviderID, p.Model.ModelID))
+	}
+	level := strings.ToLower(strings.TrimSpace(p.Model.ThinkingLevel))
+	if level != "" {
+		valid := false
+		if asm := s.sess.Assembly(); asm != nil && asm.Providers != nil {
+			for _, m := range asm.Providers.Models(p.Model.ProviderID) {
+				if m.ID != p.Model.ModelID {
+					continue
+				}
+				for _, allowed := range m.ThinkingLevels {
+					if strings.EqualFold(allowed, level) {
+						valid = true
+						break
+					}
+				}
+			}
+		}
+		if !valid {
+			return nil, invalid(fmt.Sprintf("model.set: 模型 %q 不支持推理等级 %q", p.Model.ModelID, level))
+		}
+		ref.ThinkingLevel = level
 	}
 	scope := "workspace"
 	if p.ThreadID != "" {
@@ -778,7 +802,9 @@ func (s *Server) handleModelSet(ctx context.Context, raw json.RawMessage) (any, 
 		s.sess.SetWorkspaceModel(ref)
 	}
 	return map[string]any{
-		"model": proto.ModelRef{ProviderID: ref.ProviderID, ModelID: ref.ModelID},
+		"model": proto.ModelRef{
+			ProviderID: ref.ProviderID, ModelID: ref.ModelID, ThinkingLevel: ref.ThinkingLevel,
+		},
 		"scope": scope,
 	}, nil
 }
@@ -1655,6 +1681,7 @@ func modelInfo(m host.ModelInfo) proto.ModelInfo {
 		ID: m.ID, DisplayName: m.DisplayName, ContextWindow: m.ContextWindow,
 		MaxOutput: m.MaxOutput, Input: append([]string(nil), m.Input...),
 		SupportsTools: m.SupportsTools, SupportsThinking: m.SupportsThinking,
+		ThinkingLevels: append([]string(nil), m.ThinkingLevels...),
 	}
 }
 

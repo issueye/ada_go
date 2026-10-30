@@ -50,6 +50,8 @@ type ModelRef struct {
 	// SupportsTools / SupportsThinking 能力位（03 §5.5）。
 	SupportsTools    bool `json:"supportsTools"`
 	SupportsThinking bool `json:"supportsThinking,omitempty"`
+	// ThinkingLevel 是当前选择的推理档位；空表示不传。
+	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 	// InputPerMTok / OutputPerMTok 定价，用于估算 Usage.CostMicros；无价时只显示 token（03 §5.5）。
 	InputPerMTok  float64 `json:"inputPerMTok,omitempty"`
 	OutputPerMTok float64 `json:"outputPerMTok,omitempty"`
@@ -70,6 +72,8 @@ type Params struct {
 	MaxTokens   int      `json:"maxTokens,omitempty"`
 	// Thinking 非 nil 时显式开关思考；仅模型 SupportsThinking 时有效（03 §5.5）。
 	Thinking *bool `json:"thinking,omitempty"`
+	// ReasoningEffort 是模型配置的思考强度（off/low/medium/high）；空串由 provider 决定。
+	ReasoningEffort string `json:"reasoningEffort,omitempty"`
 	// ImagesAllowed 是【产品能力位】门（08 §8.6 capabilities.images）：与 ModelRef.Input
 	// 的模型能力位构成图片输入双门，任一说 false 就拒绝带图请求，而不是悄悄丢图（03 §5.5）。
 	ImagesAllowed *bool `json:"imagesAllowed,omitempty"`

@@ -13,9 +13,11 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -75,6 +77,9 @@ type Config struct {
 	WorkspaceFor func(*http.Request) string
 	// CookieSecure 控制工作区选择 cookie 的 Secure 属性。
 	CookieSecure bool
+	// WorkspacesChanged 在 FilePicker 新增工作区后回调，参数是完整列表。
+	// 回调在内部工作区锁内执行，必须快速返回，且不能回头调用 Server。
+	WorkspacesChanged func([]string)
 	// ProductName 是产品名（如 ada-go Headless），进顶栏 chip 与页面标题。
 	ProductName string
 	// BrandName 是品牌名（如 ada-go），进侧栏品牌位与页面标题；默认 ada-go。
@@ -101,6 +106,11 @@ type Server struct {
 	cfg     Config
 	tmpl    *template.Template
 	handler http.Handler
+
+	// workspaces 是配置工作区 + 本次会话通过 FilePicker 打开的工作区。
+	// 索引仍是 cookie 的值；动态追加只在本次 Gateway 生命周期内有效。
+	workspaceMu sync.RWMutex
+	workspaces  []string
 }
 
 // New 解析内嵌模板并构造路由。Supervisor 是必需依赖。
@@ -160,7 +170,7 @@ func New(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("web: 解析内嵌模板失败: %w", err)
 	}
-	s := &Server{cfg: cfg, tmpl: tmpl}
+	s := &Server{cfg: cfg, tmpl: tmpl, workspaces: append([]string(nil), cfg.Workspaces...)}
 	s.handler = s.routes()
 	if cfg.Protect != nil {
 		s.handler = cfg.Protect(s.handler)
@@ -208,6 +218,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /workspace", s.handleWorkspaceGet)
 	mux.HandleFunc("POST /workspaces/select", s.handleWorkspaceSelect)
 	mux.HandleFunc("POST /workspace", s.handleWorkspaceSelect)
+	mux.HandleFunc("POST /api/workspace/select", s.handleWorkspaceOpen)
+	mux.HandleFunc("GET /api/fs/list", s.handleFSList)
 	mux.HandleFunc("GET /extensions", s.handleExtensions)
 	mux.HandleFunc("GET /extensions/{id}", s.handlePluginDetail)
 	mux.HandleFunc("POST /extensions/reload", s.handleExtensionsReload)
@@ -246,6 +258,12 @@ const JSClientCookieName = "adag_js"
 // acquire 按当前请求的工作区取一次 Core 客户端，返回成对的释放函数。
 func (s *Server) acquire(ctx context.Context, r *http.Request) (contracts.CoreClient, func(), error) {
 	workspace, _ := s.resolveWorkspace(r)
+	return s.acquireWorkspace(ctx, workspace)
+}
+
+// acquireWorkspace 明确指定工作区取 Core；新建任务时请求体里的 workspace
+// 尚未写进 cookie，不能走 resolveWorkspace。
+func (s *Server) acquireWorkspace(ctx context.Context, workspace string) (contracts.CoreClient, func(), error) {
 	c, err := s.cfg.Supervisor.Acquire(ctx, workspace)
 	if err != nil {
 		return nil, nil, err
@@ -257,6 +275,16 @@ func (s *Server) acquire(ctx context.Context, r *http.Request) (contracts.CoreCl
 // call 在单次请求内取客户端并调用一个方法。
 func (s *Server) call(r *http.Request, method string, params any) (json.RawMessage, error) {
 	c, release, err := s.acquire(r.Context(), r)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return c.Call(r.Context(), method, params)
+}
+
+// callWorkspace 与 call 相同，但显式指定工作区（用于“先选工作区，再建线程”）。
+func (s *Server) callWorkspace(r *http.Request, workspace, method string, params any) (json.RawMessage, error) {
+	c, release, err := s.acquireWorkspace(r.Context(), workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +343,7 @@ func (s *Server) base(r *http.Request, page, title string, threads []threadSumma
 		WorkspaceName:       name,
 		WorkspaceIndex:      index,
 		Workspaces:          s.workspaceOptions(),
-		ShowWorkspacePicker: len(s.cfg.Workspaces) > 1,
+		ShowWorkspacePicker: len(s.workspaceList()) > 1,
 		Gateway:             gateway,
 		ActiveThreadID:      activeThreadID,
 		Connected:           connected,
@@ -377,21 +405,66 @@ func normalizeWorkspaceList(single string, many []string) []string {
 }
 
 // resolveWorkspace 返回当前请求的工作区及索引。
-// 优先使用注入的 WorkspaceFor；否则按 cookie 索引解析；任何异常回退到默认。
+// 优先使用 cookie 索引（工作区列表包含本次会话打开的工作区）；没有有效
+// cookie 时才回退 WorkspaceFor。WorkspaceFor 由 Gateway 注入，只认识启动
+// 时配置的工作区，不能让它盖掉 FilePicker 新登记的工作区。
 func (s *Server) resolveWorkspace(r *http.Request) (string, int) {
-	list := s.cfg.Workspaces
+	list := s.workspaceList()
 	if len(list) == 0 {
 		return s.cfg.Workspace, 0
 	}
+	if index, ok := workspaceIndexFromCookie(r, len(list)); ok {
+		return list[index], index
+	}
 	if s.cfg.WorkspaceFor != nil {
 		if workspace := s.cfg.WorkspaceFor(r); workspace != "" {
-			if i := workspaceIndex(list, workspace); i >= 0 {
+			if i := workspaceIndexFolded(list, workspace); i >= 0 {
 				return list[i], i
 			}
 		}
 	}
-	index := workspaceIndexFromCookie(r, len(list))
-	return list[index], index
+	return list[0], 0
+}
+
+// WorkspaceForRequest 返回与页面渲染一致的工作区路径（含 FilePicker 动态登记）。
+// Gateway 的 SSE、插件渲染桥等旁路入口必须使用它，否则切到新工作区后
+// 页面读的是新 Core、事件流却连在旧 Core 上，表现为会话页一直空白。
+func (s *Server) WorkspaceForRequest(r *http.Request) string {
+	workspace, _ := s.resolveWorkspace(r)
+	return workspace
+}
+
+// workspaceList 返回配置工作区 + 本次会话打开的工作区（只读副本）。
+func (s *Server) workspaceList() []string {
+	s.workspaceMu.RLock()
+	defer s.workspaceMu.RUnlock()
+	return append([]string(nil), s.workspaces...)
+}
+
+// registerWorkspace 把 FilePicker 选中的目录登记成本次会话的工作区。
+// 已存在（按真实路径比较）时复用原索引；否则追加到列表末尾。
+func (s *Server) registerWorkspace(path string) (int, bool) {
+	real, err := realPath(path)
+	if err != nil {
+		return -1, false
+	}
+	info, err := os.Stat(real)
+	if err != nil || !info.IsDir() {
+		return -1, false
+	}
+	s.workspaceMu.Lock()
+	defer s.workspaceMu.Unlock()
+	for i, candidate := range s.workspaces {
+		if candidateReal, err := realPath(candidate); err == nil && samePath(candidateReal, real) {
+			return i, true
+		}
+	}
+	s.workspaces = append(s.workspaces, real)
+	index := len(s.workspaces) - 1
+	if s.cfg.WorkspacesChanged != nil {
+		s.cfg.WorkspacesChanged(append([]string(nil), s.workspaces...))
+	}
+	return index, true
 }
 
 func workspaceIndex(list []string, workspace string) int {
@@ -403,26 +476,27 @@ func workspaceIndex(list []string, workspace string) int {
 	return -1
 }
 
-// workspaceIndexFromCookie 读取 adag_workspace（索引）；缺失或越界返回 0。
-func workspaceIndexFromCookie(r *http.Request, size int) int {
-	if size <= 1 {
-		return 0
+// workspaceIndexFromCookie 读取 adag_workspace（索引）；缺失或越界返回 false。
+func workspaceIndexFromCookie(r *http.Request, size int) (int, bool) {
+	if size <= 0 {
+		return 0, false
 	}
 	c, err := r.Cookie(WorkspaceCookieName)
 	if err != nil {
-		return 0
+		return 0, false
 	}
 	index, err := strconv.Atoi(strings.TrimSpace(c.Value))
 	if err != nil || index < 0 || index >= size {
-		return 0
+		return 0, false
 	}
-	return index
+	return index, true
 }
 
 // workspaceOptions 生成选择器选项：显示 basename 与完整路径。
 func (s *Server) workspaceOptions() []workspaceOption {
-	options := make([]workspaceOption, 0, len(s.cfg.Workspaces))
-	for i, workspace := range s.cfg.Workspaces {
+	list := s.workspaceList()
+	options := make([]workspaceOption, 0, len(list))
+	for i, workspace := range list {
 		name := filepath.Base(workspace)
 		if name == "" || name == "." || name == string(filepath.Separator) {
 			name = workspace

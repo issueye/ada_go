@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:5d7e3726b0eb27a9) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:4328739e9e2e7db1) by plugins/official/build.mjs — do not edit
 // provider-admin 后端：供应商配置的增删改查、模型拉取与当前模型切换。
 //
 // 数据面经宿主能力 model.admin 提供（ctx.providers）：
@@ -17,6 +17,7 @@
                    
                          
                              
+                            
                      
  
 
@@ -25,6 +26,8 @@
                        
                     
                    
+                 
+                                   
                      
                      
                       
@@ -50,6 +53,8 @@
                    
                   
                         
+                 
+                                   
                      
                            
  
@@ -98,6 +103,10 @@ export default function (agent          )       {
       baseUrl: String(body.baseUrl || "").trim(),
       apiKey: body.apiKey === undefined ? "" : String(body.apiKey),
       clearApiKey: body.clearApiKey === true,
+      proxy: String(body.proxy || "").trim(),
+      headers: body.headers && typeof body.headers === "object" && !Array.isArray(body.headers)
+        ? (body.headers                          )
+        : {},
       disabled: body.disabled === true,
       models: Array.isArray(body.models) ? (body.models                   ) : [],
     };
