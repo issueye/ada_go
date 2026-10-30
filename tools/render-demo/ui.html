@@ -1,0 +1,314 @@
+<!doctype html>
+<!--
+  本地冒烟页：直接以 file:// 打开。这里用了内联脚本与演示布局 CSS，
+  script-src 'self' / style-src 'self' 的网关 CSP 会拒绝；生产页面请把
+  脚本与样式放到同源静态文件里。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ada-ui smoke</title>
+<link rel="stylesheet" href="../../internal/gateway/web/static/tokens.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/app.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/components.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/layout.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/widgets.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/shell.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/pages.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/app-local.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ada-ui.css">
+<style>
+  /* 仅演示页布局：不属于组件库 */
+  body { padding: 24px; }
+  .demo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  .demo-stack { display: flex; flex-direction: column; gap: 8px; }
+  .demo-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  #log { margin-top: 16px; background: var(--ph-subtle); padding: 12px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<svg class="ada-sprite" aria-hidden="true" focusable="false" width="0" height="0">
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m3 7 2 2 4-4"/><path d="m3 17 2 2 4-4"/><path d="M13 6h8M13 12h8M13 18h8"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-bulb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.6.5.9 1.2.9 2h5.4c0-.8.3-1.5.9-2A6 6 0 0 0 12 3Z"/></symbol>
+  <symbol id="i-check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 4.5-5"/></symbol>
+  <symbol id="i-x-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6M9 9l6 6"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></symbol>
+</svg>
+
+<div id="app"></div>
+<pre id="log"></pre>
+
+<script src="../../internal/gateway/web/static/ada-render.js"></script>
+<script src="../../internal/gateway/web/static/ada-select.js"></script>
+<script src="../../internal/gateway/web/static/ada-modal.js"></script>
+<script src="../../internal/gateway/web/static/ada-ui.js"></script>
+<script>
+(async function () {
+  var log = [];
+  var failed = 0;
+
+  function check(name, fn) {
+    try {
+      fn();
+      log.push('PASS ' + name);
+    } catch (error) {
+      failed += 1;
+      log.push('FAIL ' + name + ': ' + (error && error.message ? error.message : error));
+    }
+  }
+
+  function assert(condition, message) {
+    if (!condition) throw new Error(message || 'assertion failed');
+  }
+
+  function text(node) {
+    return node ? node.textContent : '';
+  }
+
+  function q(selector) {
+    return document.querySelector(selector);
+  }
+
+  function qa(selector) {
+    return Array.prototype.slice.call(document.querySelectorAll(selector));
+  }
+
+  var app = null;
+  try {
+    app = AdaUI.createApp({
+    data: function () {
+      return {
+        name: 'Ada',
+        model: 'b',
+        options: [
+          { value: 'a', label: '模型 A' },
+          { value: 'b', label: '模型 B' },
+          { value: 'c', label: '模型 C' }
+        ],
+        slider: 40,
+        enabled: true,
+        agree: false,
+        choice: 'a',
+        activeTab: 'overview',
+        modalOpen: false,
+        lastCommand: '',
+        tabs: [
+          { key: 'overview', label: '概览', count: 2, icon: 'i-list' },
+          { key: 'details', label: '详情' }
+        ],
+        dropdownItems: [
+          { label: '重命名', value: 'rename', icon: 'i-search' },
+          { label: '删除', value: 'delete', icon: 'i-x-circle', danger: true },
+          { separator: true },
+          { label: '打开文档', value: 'docs', href: '#docs' }
+        ],
+        columns: [
+          { key: 'name', label: '名称' },
+          { key: 'age', label: '年龄', render: function (row) { return row.age + ' 岁'; } }
+        ],
+        rows: [
+          { id: 'a', name: 'Ada', age: 36 },
+          { id: 'b', name: 'Linus', age: 54 }
+        ]
+      };
+    },
+    methods: {
+      bump: function () { this.slider = this.slider >= 100 ? 0 : this.slider + 10; },
+      onCommand: function (item) {
+        this.lastCommand = item.value || item.label;
+        AdaUI.toast('已选择：' + (item.label || item.value), { tone: 'info', duration: 2400 });
+      },
+      openModal: function () { this.modalOpen = true; },
+      confirm: function () { AdaUI.toast('已确认', { tone: 'success', duration: 2400 }); },
+      notify: function () { AdaUI.toast('这是一条消息', { tone: 'success', title: '成功', duration: 3000 }); }
+    },
+    template:
+      '<div class="ada-wrap ada-wrap--page">' +
+      '<div class="section-head"><div><h1 class="page-title">ada-ui 组件冒烟</h1>' +
+      '<p class="page-sub">基于 ada-render.js 的单文件组件层；class 与 DOM 复用现有 ada-* 基线。</p></div>' +
+      '<div class="demo-row"><span class="badge badge-brand">' + AdaUI.version + '</span></div></div>' +
+      '<div class="demo-grid">' +
+
+      '<ui-card title="按钮 Button" subtitle="变体 / 尺寸 / 图标 / loading / 禁用">' +
+      '<div class="demo-row">' +
+      '<ui-button variant="primary" @click="bump">主按钮</ui-button>' +
+      '<ui-button variant="secondary">次按钮</ui-button>' +
+      '<ui-button variant="ghost">幽灵</ui-button>' +
+      '<ui-button variant="danger">危险</ui-button>' +
+      '</div>' +
+      '<div class="demo-row">' +
+      '<ui-button size="sm" icon="i-plus" label="小号"></ui-button>' +
+      '<ui-button size="md" icon="i-search" loading label="加载中"></ui-button>' +
+      '<ui-button size="lg" disabled label="禁用"></ui-button>' +
+      '<ui-button href="#docs" icon-right="i-chevron-down" label="链接"></ui-button>' +
+      '</div>' +
+      '</ui-card>' +
+
+      '<ui-card title="输入 Input / Textarea">' +
+      '<div class="demo-stack">' +
+      '<ui-input v-model="name" label="名称" hint="用于侧栏显示"></ui-input>' +
+      '<ui-input v-model="name" label="错误态" error="名称不能为空"></ui-input>' +
+      '<ui-textarea v-model="name" label="多行" hint="Textarea 是 Input 的别名"></ui-textarea>' +
+      '<p class="text-xs text-muted">当前值：<span class="demo-name">{{ name }}</span></p>' +
+      '</div>' +
+      '</ui-card>' +
+
+      '<ui-card title="选择 Select / Dropdown">' +
+      '<div class="demo-stack">' +
+      '<ui-select v-model="model" :options="options" label="模型"></ui-select>' +
+      '<ui-select v-model="model" :options="options" label="原生降级" native></ui-select>' +
+      '<ui-dropdown label="更多操作" icon="i-folder" :items="dropdownItems" @select="onCommand"></ui-dropdown>' +
+      '<p class="text-xs text-muted">最近命令：<span class="demo-command">{{ lastCommand }}</span></p>' +
+      '</div>' +
+      '</ui-card>' +
+
+      '<ui-card title="页签 Tabs" subtitle="键盘方向键 / 具名 slot">' +
+      '<ui-tabs v-model="activeTab" :tabs="tabs">' +
+      '<template #overview><div class="demo-stack"><p class="demo-tab-overview">概览内容</p><ui-button size="sm">概览操作</ui-button></div></template>' +
+      '<template #details><p class="demo-tab-details">详情内容</p></template>' +
+      '</ui-tabs>' +
+      '</ui-card>' +
+
+      '<ui-card title="图标 / 徽标 / 空状态">' +
+      '<div class="demo-row">' +
+      '<ui-icon name="i-search" :size="18"></ui-icon>' +
+      '<ui-icon name="i-chat" :size="18"></ui-icon>' +
+      '<ui-badge tone="neutral" label="neutral"></ui-badge>' +
+      '<ui-badge tone="brand" label="brand"></ui-badge>' +
+      '<ui-badge tone="success" label="success"></ui-badge>' +
+      '<ui-badge tone="warn" label="warn"></ui-badge>' +
+      '<ui-badge tone="danger" label="danger"></ui-badge>' +
+      '</div>' +
+      '<ui-empty icon="i-chat" title="没有内容" description="这里是空状态说明。"></ui-empty>' +
+      '</ui-card>' +
+
+      '<ui-card title="滑块 / 进度 / 开关 / 选择项">' +
+      '<div class="demo-stack">' +
+      '<ui-slider v-model="slider" label="音量" suffix="%"></ui-slider>' +
+      '<ui-progress :value="slider" label="音量" show-value></ui-progress>' +
+      '<div class="demo-row">' +
+      '<ui-switch v-model="enabled" label="启用"></ui-switch>' +
+      '<ui-checkbox v-model="agree" label="同意"></ui-checkbox>' +
+      '<ui-radio v-model="choice" value="a" name="choice" label="选项 A"></ui-radio>' +
+      '<ui-radio v-model="choice" value="b" name="choice" label="选项 B"></ui-radio>' +
+      '</div>' +
+      '<p class="text-xs text-muted">开关 {{ enabled ? "开" : "关" }}；选择 {{ choice }}</p>' +
+      '</div>' +
+      '</ui-card>' +
+
+      '<ui-card title="表格 Table" subtitle="列 render / keyed 行 / 空态">' +
+      '<ui-table :columns="columns" :rows="rows"></ui-table>' +
+      '</ui-card>' +
+
+      '<ui-card title="反馈 Message / Notice / Toast">' +
+      '<div class="demo-stack">' +
+      '<ui-message tone="info" title="提示">这是一条信息提示。</ui-message>' +
+      '<ui-message tone="warn" title="注意" closable>这是一条可关闭的警告。</ui-message>' +
+      '<ui-notice tone="danger">这是一个内联 Notice。</ui-notice>' +
+      '<div class="demo-row">' +
+      '<ui-button size="sm" @click="notify">弹出 Toast</ui-button>' +
+      '<ui-button size="sm" variant="secondary" @click="openModal">打开弹窗</ui-button>' +
+      '</div>' +
+      '</div>' +
+      '</ui-card>' +
+
+      '</div>' +
+
+      '<ui-modal v-model="modalOpen" id="demo-modal" title="确认操作" @confirm="confirm">' +
+      '<p>这是一个基于现有 &lt;ada-modal&gt; 的组件封装。</p>' +
+      '</ui-modal>' +
+      '</div>'
+  });
+
+    app.mount('#app');
+  } catch (error) {
+    failed += 1;
+    app = null;
+    log.push('FAIL mount: ' + (error && error.stack ? error.stack : error));
+  }
+
+  if (app) {
+  try {
+    check('Button 渲染', function () {
+      assert(qa('.ada-btn').length >= 8);
+      assert(text(q('.ada-btn--primary')) === '主按钮');
+    });
+    check('Input v-model 初始值', function () {
+      assert(q('.ada-input').value === 'Ada');
+      assert(text(q('.demo-name')) === 'Ada');
+    });
+    check('Select 当前值', function () {
+      assert(text(q('.ada-select__label')) === '模型 B');
+    });
+    check('Tabs 具名 slot', function () {
+      assert(qa('[role="tab"]').length === 2);
+      assert(text(q('.demo-tab-overview')) === '概览内容');
+    });
+    check('Table 行渲染', function () {
+      assert(qa('.table tbody tr').length === 2);
+      assert(text(qa('.table tbody td')[1]) === '36 岁');
+    });
+    check('Progress 百分比', function () {
+      assert(text(q('.ada-progress__value')) === '40%');
+    });
+    check('Modal 初始关闭', function () {
+      assert(q('ada-modal').hasAttribute('hidden'));
+    });
+
+    // 交互：改输入
+    var input = q('.ada-input');
+    input.value = 'Grace';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await AdaRender.nextTick();
+    check('Input 输入更新', function () { assert(text(q('.demo-name')) === 'Grace'); });
+
+    // 交互：点主按钮推进滑块
+    q('.ada-btn--primary').click();
+    await AdaRender.nextTick();
+    check('Button 点击更新', function () { assert(text(q('.ada-progress__value')) === '50%'); });
+
+    // 交互：切换页签
+    qa('[role="tab"]')[1].click();
+    await AdaRender.nextTick();
+    check('Tabs 切换', function () {
+      assert(qa('[role="tab"]')[1].getAttribute('aria-selected') === 'true');
+      assert(text(q('.demo-tab-details')) === '详情内容');
+    });
+
+    // 交互：打开/关闭弹窗
+    var openButton = qa('.ada-btn').filter(function (button) {
+      return button.textContent.trim() === '打开弹窗';
+    })[0];
+    openButton.click();
+    await AdaRender.nextTick();
+    check('Modal 打开', function () { assert(!q('ada-modal').hasAttribute('hidden')); });
+    var cancel = q('ada-modal .ada-modal__actions .ada-btn--secondary');
+    if (cancel) cancel.click();
+    await AdaRender.nextTick();
+    check('Modal 取消关闭', function () { assert(q('ada-modal').hasAttribute('hidden')); });
+
+    // 交互：Dropdown 选择
+    var details = q('details.ada-dropdown');
+    details.open = true;
+    qa('.ada-row-menu__item')[0].click();
+    await AdaRender.nextTick();
+    check('Dropdown 选择', function () { assert(text(q('.demo-command')) === 'rename'); });
+  } catch (error) {
+    failed += 1;
+    log.push('FAIL fatal: ' + (error && error.stack ? error.stack : error));
+  }
+  }
+
+  document.getElementById('log').textContent = log.join('\n');
+  window.__ADA_UI_RESULT__ = { failed: failed, log: log };
+  document.title = failed === 0 ? 'ada-ui smoke: PASS' : 'ada-ui smoke: FAIL';
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,99 @@
+<!doctype html>
+<!--
+  概览岛冒烟页：模拟 /overview 的 SSR 容器与 /partials/dashboard.json。
+  直接以 file:// 打开；生产页面由 Go 模板输出同样的 data-ada-island 容器。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>overview island smoke</title>
+<link rel="stylesheet" href="../../internal/gateway/web/static/tokens.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/app.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/components.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/layout.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/widgets.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/shell.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/pages.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/app-local.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ada-ui.css">
+<style>
+  body { padding: 24px; }
+  #log { margin-top: 16px; background: var(--ph-subtle); padding: 12px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<svg class="ada-sprite" aria-hidden="true" focusable="false" width="0" height="0">
+  <symbol id="i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/></symbol>
+  <symbol id="i-x-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6M9 9l6 6"/></symbol>
+</svg>
+
+<main class="ada-main">
+  <div class="ada-scroll"><div class="ada-wrap ada-wrap--page">
+    <div id="dashboard-live" data-ada-island="overview" data-ada-state='{"stats":[{"label":"会话","value":"1","hint":"本地会话总数","tone":"brand"}],"recent":[{"id":"th_1","title":"第一个会话","workspace":"/tmp/ws","updatedLabel":"刚刚"}]}'>
+      <div class="card p-4"><span class="badge badge-brand">会话</span><p class="mt-3 text-2xl font-semibold">1</p><p class="mt-1 text-xs text-muted">本地会话总数</p></div>
+    </div>
+  </div></div>
+</main>
+<pre id="log"></pre>
+
+<script src="../../internal/gateway/web/static/ada-render.js"></script>
+<script src="../../internal/gateway/web/static/ada-select.js"></script>
+<script src="../../internal/gateway/web/static/ada-modal.js"></script>
+<script src="../../internal/gateway/web/static/ada-ui.js"></script>
+<script>
+  // 模拟 /partials/dashboard.json；真实页面由 gateway 提供。
+  window.__fetchCount = 0;
+  window.fetch = function () {
+    window.__fetchCount += 1;
+    return Promise.resolve({
+      ok: true,
+      json: function () {
+        return Promise.resolve({
+          stats: [
+            { label: "会话", value: "3", hint: "本地会话总数", tone: "brand" },
+            { label: "最近活动", value: "2 分钟前", hint: "最后一个会话的更新时间", tone: "neutral" },
+            { label: "工作区", value: "2", hint: "Gateway 配置的工作区", tone: "neutral" },
+            { label: "插件", value: "5", hint: "前端与后端插件总数", tone: "brand" }
+          ],
+          recent: [
+            { id: "th_1", title: "第一个会话", workspace: "/tmp/ws", updatedLabel: "刚刚" },
+            { id: "th_2", title: "第二个会话", workspace: "/tmp/ws", updatedLabel: "1 小时前" }
+          ]
+        });
+      }
+    });
+  };
+</script>
+<script src="../../internal/gateway/web/static/islands.js"></script>
+<script>
+  (async function () {
+    const log = [];
+    let failed = 0;
+    function check(name, fn) {
+      try { fn(); log.push("PASS " + name); }
+      catch (error) { failed += 1; log.push("FAIL " + name + ": " + (error && error.message ? error.message : error)); }
+    }
+    function assert(condition, message) { if (!condition) throw new Error(message || "assertion failed"); }
+    function q(selector) { return document.querySelector(selector); }
+    function qa(selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)); }
+    function text(node) { return node ? node.textContent : ""; }
+
+    await new Promise((resolve) => {
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", resolve);
+      else resolve();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    check("island marked mounted", function () { assert(q("#dashboard-live").getAttribute("data-ada-mounted") === "1"); });
+    check("stats cards rendered", function () { assert(qa("#dashboard-live .card").length >= 5); assert(text(q("#dashboard-live .card .badge")) === "会话"); });
+    check("recent table rendered", function () { assert(qa("#dashboard-live .table tbody tr").length === 2); assert(text(qa("#dashboard-live .table tbody td")[1]) === "第一个会话"); });
+    check("poll fetched dashboard.json", function () { assert(window.__fetchCount >= 1); });
+
+    document.getElementById("log").textContent = log.join("\n");
+    window.__OVERVIEW_RESULT__ = { failed: failed, log: log };
+    document.title = failed === 0 ? "overview island smoke: PASS" : "overview island smoke: FAIL";
+  })();
+</script>
+</body>
+</html>

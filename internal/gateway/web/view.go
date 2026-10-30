@@ -148,6 +148,7 @@ type toolPayload struct {
 type baseData struct {
 	Title               string
 	Page                string // chat | overview | extensions | ext:<id>
+	NeedsUI             bool   // 页面含 AdaUI 客户端岛时才加载引擎/组件资源
 	ProductName         string
 	BrandName           string
 	ProductBadge        string
@@ -360,22 +361,31 @@ type overviewData struct {
 	baseData
 	Stats  []overviewStat
 	Recent []overviewThread
+	// StateJSON 是给浏览器岛（AdaUI）的初始状态；无 JS 时仍渲染 Stats/Recent。
+	StateJSON string
+}
+
+// dashboardState 是 /partials/dashboard.json 与概览岛共用的数据形态。
+type dashboardState struct {
+	Stats  []overviewStat   `json:"stats"`
+	Recent []overviewThread `json:"recent"`
 }
 
 type overviewStat struct {
-	Label string
-	Value string
-	Hint  string
-	Tone  string // neutral | brand | warn
+	Label string `json:"label"`
+	Value string `json:"value"`
+	Hint  string `json:"hint"`
+	Tone  string `json:"tone"` // neutral | brand | warn
 }
 
 type overviewThread struct {
-	ID        string
-	Title     string
-	Workspace string
-	Mode      string
-	Running   bool
-	ItemCount int
+	ID           string `json:"id"`
+	Title        string `json:"title"`
+	Workspace    string `json:"workspace"`
+	Mode         string `json:"mode"`
+	Running      bool   `json:"running"`
+	ItemCount    int    `json:"itemCount"`
+	UpdatedLabel string `json:"updatedLabel"`
 }
 
 // workspacesData 是工作区页（/workspaces）：磁盘/常用位置 + 最近工作区 + 目录浏览。
@@ -421,31 +431,40 @@ type extensionsData struct {
 	baseData
 	Plugins     []pluginRow
 	PluginCount int
+	// StateJSON 是给浏览器岛的初始状态；无 JS 时仍渲染 Plugins。
+	StateJSON string
+}
+
+// extensionsState 是插件列表岛与 /partials/extensions.json 共用的数据形态。
+type extensionsState struct {
+	Plugins []pluginRow `json:"plugins"`
+	Count   int         `json:"count"`
+	CSRF    string      `json:"csrf"`
 }
 
 // pluginRow 是插件列表/详情的一行：同一个 id 的前端与后端能力合并成一条。
 // 前端/后端归属（Frontend/Backend）只在详情页展示，列表里不分区。
 type pluginRow struct {
-	ID           string
-	Name         string
-	Version      string
-	Description  string
-	Source       string
-	Status       string
-	StatusLabel  string
-	StatusTone   string
-	Error        string
-	Enabled      bool
-	Frontend     bool
-	Backend      bool
-	Tools        int
-	Hooks        int
-	Skills       int
-	Slots        int
-	Pages        int
-	Nav          int
-	FirstPage    string
-	HasDashboard bool
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Version      string `json:"version"`
+	Description  string `json:"description"`
+	Source       string `json:"source"`
+	Status       string `json:"status"`
+	StatusLabel  string `json:"statusLabel"`
+	StatusTone   string `json:"statusTone"`
+	Error        string `json:"error"`
+	Enabled      bool   `json:"enabled"`
+	Frontend     bool   `json:"frontend"`
+	Backend      bool   `json:"backend"`
+	Tools        int    `json:"tools"`
+	Hooks        int    `json:"hooks"`
+	Skills       int    `json:"skills"`
+	Slots        int    `json:"slots"`
+	Pages        int    `json:"pages"`
+	Nav          int    `json:"nav"`
+	FirstPage    string `json:"firstPage"`
+	HasDashboard bool   `json:"hasDashboard"`
 }
 
 // pluginDetailData 是 /extensions/{id} 的详情页。

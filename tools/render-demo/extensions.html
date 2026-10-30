@@ -1,0 +1,85 @@
+<!doctype html>
+<!--
+  插件岛冒烟页：模拟 /extensions 的 SSR 容器与 data-ada-state。
+  直接以 file:// 打开；生产页面由 Go 模板输出同样的容器。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>extensions island smoke</title>
+<link rel="stylesheet" href="../../internal/gateway/web/static/tokens.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/app.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/components.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/layout.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/widgets.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/shell.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ui/pages.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/app-local.css">
+<link rel="stylesheet" href="../../internal/gateway/web/static/ada-ui.css">
+<style>
+  body { padding: 24px; }
+  #log { margin-top: 16px; background: var(--ph-subtle); padding: 12px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<svg class="ada-sprite" aria-hidden="true" focusable="false" width="0" height="0">
+  <symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v6M15 3v6"/><path d="M6 9h12v3a6 6 0 0 1-12 0Z"/><path d="M12 18v3"/></symbol>
+  <symbol id="i-x-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6M9 9l6 6"/></symbol>
+</svg>
+
+<main class="ada-main">
+  <div class="ada-scroll"><div class="ada-wrap ada-wrap--page">
+    <div id="extensions-island" data-ada-island="extensions" data-ada-state='{"plugins":[{"id":"tools-fs","name":"文件工具","version":"1.2.0","status":"ready","statusLabel":"就绪","statusTone":"success","enabled":true,"backend":true,"tools":2,"pages":0,"slots":0,"hasDashboard":false},{"id":"ui-demo","name":"演示前端","version":"0.1.0","status":"ready","statusLabel":"就绪","statusTone":"success","enabled":true,"frontend":true,"tools":0,"pages":1,"slots":2,"hasDashboard":true}],"count":2,"csrf":"csrf-token"}'>
+      <div class="empty-state"><p class="text-sm font-medium text-ink">SSR 回退</p></div>
+    </div>
+  </div></div>
+</main>
+<pre id="log"></pre>
+
+<script src="../../internal/gateway/web/static/ada-render.js"></script>
+<script src="../../internal/gateway/web/static/ada-select.js"></script>
+<script src="../../internal/gateway/web/static/ada-modal.js"></script>
+<script src="../../internal/gateway/web/static/ada-ui.js"></script>
+<script src="../../internal/gateway/web/static/islands.js"></script>
+<script>
+  (async function () {
+    const log = [];
+    let failed = 0;
+    function check(name, fn) {
+      try { fn(); log.push("PASS " + name); }
+      catch (error) { failed += 1; log.push("FAIL " + name + ": " + (error && error.message ? error.message : error)); }
+    }
+    function assert(condition, message) { if (!condition) throw new Error(message || "assertion failed"); }
+    function q(selector) { return document.querySelector(selector); }
+    function qa(selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)); }
+    function text(node) { return node ? node.textContent : ""; }
+
+    await new Promise((resolve) => {
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", resolve);
+      else resolve();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    check("island marked mounted", function () { assert(q("#extensions-island").getAttribute("data-ada-mounted") === "1"); });
+    check("table rows", function () { assert(qa("#extensions-island .table tbody tr").length === 2); });
+    check("plugin name and link", function () {
+      assert(text(qa("#extensions-island .table tbody td")[0]).includes("文件工具"));
+      assert(q("#extensions-island a[href='/extensions/tools-fs']"));
+    });
+    check("status badge", function () { assert(qa("#extensions-island .badge-success").length === 2); });
+    check("disable form with csrf", function () {
+      const form = q("#extensions-island form[action='/extensions/tools-fs/disable']");
+      assert(form);
+      assert(form.querySelector("input[name='csrf_token']").value === "csrf-token");
+      assert(form.querySelector("button[type='submit']"));
+    });
+    check("detail link", function () { assert(q("#extensions-island a[href='/extensions/ui-demo']")); });
+
+    document.getElementById("log").textContent = log.join("\n");
+    window.__EXTENSIONS_RESULT__ = { failed: failed, log: log };
+    document.title = failed === 0 ? "extensions island smoke: PASS" : "extensions island smoke: FAIL";
+  })();
+</script>
+</body>
+</html>

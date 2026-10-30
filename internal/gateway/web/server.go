@@ -183,6 +183,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /threads", s.handleCreateThread)
 	mux.HandleFunc("GET /overview", s.handleOverview)
 	mux.HandleFunc("GET /partials/dashboard", s.handleOverviewPartial)
+	mux.HandleFunc("GET /partials/dashboard.json", s.handleOverviewJSON)
+	mux.HandleFunc("GET /partials/extensions.json", s.handleExtensionsJSON)
 	mux.HandleFunc("GET /threads/{id}", s.handleThread)
 	mux.HandleFunc("POST /threads/{id}/send", s.handleTurn)
 	mux.HandleFunc("POST /threads/{id}/abort", s.handleCancel)

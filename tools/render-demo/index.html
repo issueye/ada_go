@@ -1,0 +1,180 @@
+<!doctype html>
+<!--
+  本地冒烟页：直接以 file:// 打开。不要挂到网关 CSP 下——这里用了内联脚本，
+  script-src 'self' 会拒绝；生产岛屿脚本必须是独立的同源 .js 文件。
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ada-render smoke</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 24px; }
+  #log { background: #f4f4f4; padding: 12px; white-space: pre-wrap; }
+  .done { text-decoration: line-through; color: #777; }
+  .card { border: 1px solid #ccc; padding: 8px; margin: 8px 0; }
+</style>
+</head>
+<body>
+<h1>ada-render smoke</h1>
+<div id="app"></div>
+<div id="hydrated"></div>
+<pre id="log"></pre>
+<script src="../../internal/gateway/web/static/ada-render.js"></script>
+<script>
+(async function () {
+  var log = [];
+  var failed = 0;
+
+  function check(name, fn) {
+    try {
+      fn();
+      log.push('PASS ' + name);
+    } catch (error) {
+      failed += 1;
+      log.push('FAIL ' + name + ': ' + (error && error.message ? error.message : error));
+    }
+  }
+
+  function assert(condition, message) {
+    if (!condition) throw new Error(message || 'assertion failed');
+  }
+
+  function text(node) {
+    return node ? node.textContent : '';
+  }
+
+  function qs(selector) {
+    return document.querySelector(selector);
+  }
+
+  try {
+    var MyCard = {
+      props: ['title'],
+      template: '<article class="card"><h2>{{ title }}</h2><slot name="footer">fallback</slot><button class="pick" @click="$emit(\'pick\', title)">pick</button></article>'
+    };
+
+    var app = AdaRender.createApp({
+      components: { MyCard: MyCard },
+      data: function () {
+        return {
+          title: 'Engine',
+          count: 0,
+          name: '',
+          items: [
+            { id: 'a', name: 'Alpha', done: false },
+            { id: 'b', name: 'Beta', done: true }
+          ]
+        };
+      },
+      computed: {
+        doubled: function () { return this.count * 2; }
+      },
+      methods: {
+        bump: function () { this.count += 1; },
+        toggle: function (index) { this.items[index].done = !this.items[index].done; }
+      },
+      template: '<div class="app">' +
+        '<h1>{{ title }}</h1>' +
+        '<p class="count">{{ count }} / {{ doubled }}</p>' +
+        '<button class="inc" @click.prevent="bump">+1</button>' +
+        '<ul class="list">' +
+          '<li v-for="(item, i) in items" :key="item.id" :class="{ done: item.done }">' +
+            '<span class="name">{{ i + 1 }}. {{ item.name }}</span>' +
+            '<button class="toggle" @click="toggle(i)">toggle</button>' +
+          '</li>' +
+        '</ul>' +
+        '<p class="summary" v-if="items.length === 0">empty</p>' +
+        '<p class="summary" v-else>{{ items.length }} items</p>' +
+        '<label>name <input class="input" v-model.trim="name"></label>' +
+        '<p class="echo">hello {{ name || "anonymous" }}</p>' +
+        '<my-card v-for="item in items" :key="\'c\' + item.id" :title="item.name" @pick="bump">' +
+          '<template #footer><em>{{ item.name }}</em></template>' +
+        '</my-card>' +
+      '</div>'
+    });
+
+    var root = document.getElementById('app');
+    app.mount(root);
+
+    check('initial title', function () { assert(text(qs('.app h1')) === 'Engine'); });
+    check('initial count', function () { assert(text(qs('.count')) === '0 / 0'); });
+    check('v-for rows', function () { assert(document.querySelectorAll('.list li').length === 2); });
+    check('v-if else', function () { assert(text(qs('.summary')) === '2 items'); });
+    check('component renders named slot', function () { assert(text(qs('.card em')) === 'Alpha'); });
+
+    qs('.inc').click();
+    await AdaRender.nextTick();
+    check('click updates count and computed', function () { assert(text(qs('.count')) === '1 / 2'); });
+
+    qs('.list li:nth-child(1) .toggle').click();
+    await AdaRender.nextTick();
+    check('v-for index method', function () {
+      assert(qs('.list li:nth-child(1)').className.indexOf('done') !== -1);
+    });
+
+    var input = qs('.input');
+    input.value = '  Ada  ';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await AdaRender.nextTick();
+    check('v-model.trim', function () { assert(text(qs('.echo')) === 'hello Ada'); });
+
+    qs('.card .pick').click();
+    await AdaRender.nextTick();
+    check('component emit', function () { assert(text(qs('.count')) === '2 / 4'); });
+
+    var ssr = AdaRender.renderToJSON({
+      data: function () { return { name: 'Ada' }; },
+      template: '<div class="ssr"><span>{{ name }}</span></div>'
+    });
+    check('renderToJSON expands a template component', function () {
+      assert(ssr.t === 'div');
+      assert(ssr.p.class === 'ssr');
+      assert(ssr.c[0].t === 'span');
+      assert(ssr.c[0].c[0].t === '#text');
+      assert(ssr.c[0].c[0].v === 'Ada');
+    });
+
+    check('v-html is opt-in', function () {
+      var temp = document.createElement('div');
+      document.body.appendChild(temp);
+      var rejected = false;
+      try {
+        AdaRender.createApp({
+          data: function () { return { html: '<b>x</b>' }; },
+          template: '<div v-html="html"></div>'
+        }).mount(temp);
+      } catch (error) {
+        rejected = /v-html/.test(String(error && error.message ? error.message : error));
+      }
+      temp.remove();
+      assert(rejected, 'v-html should be rejected without allowHTML');
+    });
+
+    var hroot = document.getElementById('hydrated');
+    hroot.innerHTML = '<div class="server"><span class="msg">hello</span></div>';
+    var serverDiv = hroot.firstChild;
+    var serverSpan = serverDiv.firstChild;
+    var hApp = AdaRender.createApp({
+      data: function () { return { message: 'hello' }; },
+      template: '<div class="server"><span class="msg">{{ message }}</span></div>'
+    });
+    hApp.mount(hroot, { hydrate: true });
+    check('hydrate reuses root', function () { assert(hroot.firstChild === serverDiv); });
+    check('hydrate reuses span', function () { assert(serverDiv.firstChild === serverSpan); });
+
+    hApp._instance.data.message = 'bye';
+    await AdaRender.nextTick();
+    check('hydrate updates in place', function () { assert(text(qs('.server .msg')) === 'bye'); });
+  } catch (error) {
+    failed += 1;
+    log.push('FAIL fatal: ' + (error && error.stack ? error.stack : error));
+  }
+
+  document.getElementById('log').textContent = log.join('\n');
+  window.__ADA_RESULT__ = { failed: failed, log: log };
+  document.title = failed === 0 ? 'ada-render smoke: PASS' : 'ada-render smoke: FAIL';
+})();
+</script>
+</body>
+</html>

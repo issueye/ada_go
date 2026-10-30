@@ -19,6 +19,8 @@
 
 明确不做：SPA、客户端路由、React hydration、客户端插件运行时、CSS-in-JS、运行时 Tailwind 扫描。
 
+> 可选扩展：[14-render-engine.md](14-render-engine.md) 提供单文件 VNode 运行时，用于**标记过的交互岛**的 hydrate 与结构化增量；[15-ui-components.md](15-ui-components.md) 在其上提供 Button/Input/Select/Tabs/Table/Modal/Toast 等组件。目前 `/overview`、`/extensions` 已启用客户端岛，其它页面仍走本节 SSR/无 JS 基线。
+
 **UI 来源**：视觉语言、设计令牌、组件、DOM 结构、class 名、插槽位置与交互规则全部以 `E:\codes\rust_projects\a_da` 的 `design/tokens.css` 与 `crates/agent-web` 为准；ada-go 只替换实现技术（Askama → `html/template`，Rust 组件 → Go 组件，OXC+Boa → esbuild+moejs），不重新设计界面。细节见 [7.7](#77-ui-与设计元语直接复用-a_da)。
 
 ### 7.2 页面与布局
@@ -286,7 +288,7 @@ ada-go 的界面不是“参考 a_da 风格”，而是**直接使用 a_da 的 U
 | `components.css` / `layout.css` / `widgets.css` / `shell.css` / `pages.css` | `internal/gateway/web/static/ui/` | 原样复制；引用顺序保持 components → layout → widgets → shell → pages |
 | `ada-select.js` / `ada-modal.js` | `internal/gateway/web/static/` | 原样复制；`<ada-select>` / `<ada-modal>` 的 Web Components 行为不变 |
 | `components.js` / `app.js` / `chat-live.js` / `theme.js` | `internal/gateway/web/static/` | `components.js`（组件行为）、`theme.js` 原样复制；`app.js`（外壳：提示条/确认弹窗/侧栏）以 a_da 为基线，含「窄屏初始关闭抽屉」的本地补丁；`chat-live.js` 由 ada-go 维护，消费 `/events/{id}` 的 SSE 增量 |
-| `htmx.min.js` / `logo.png` | `internal/gateway/web/static/` | 原样复制；概览页每 5 秒 `hx-get="/partials/dashboard"` 换新。不引入 Alpine：仓库不再加载/分发 `alpine.min.js` |
+| `htmx.min.js` / `logo.png` | `internal/gateway/web/static/` | 原样复制；htmx 保留给后续局部片段，概览页已改为 AdaUI 岛轮询 `/partials/dashboard.json`。不引入 Alpine：仓库不再加载/分发 `alpine.min.js` |
 | `ui/icons.rs` | `internal/gateway/web/ui.go` | 同一组线性 SVG path、同一 stroke 1.75 与尺寸档位；模板经 `{{icon "…"}}` 或 sprite `<use>` 引用 |
 | `ui/components.rs` / `rows.rs` | `internal/gateway/web/ui.go` + `templates/` | Go 组件函数与模板输出 a_da **相同的 `ada-*` 标签、class 与 `data-*` 状态** |
 | `templates/*.html`、`partials/transcript.html` | `internal/gateway/web/templates/` | 手写 Go 模板，DOM 层级与 class 不变；Askama 语法换成 `html/template` |
@@ -367,7 +369,7 @@ Todo 卡片是插件的前端段，不是基座组件：`plugins/official/tools-
 | 路由 | 页面 | 数据来源 |
 |---|---|---|
 | `GET /`、`GET /threads`、`GET /threads/{id}` | 对话页 / 会话页 | `thread.list`、`thread.get`、`thread.entries` |
-| `GET /overview`、`GET /partials/dashboard` | 概览（统计卡、最近会话、插件卡片；htmx 每 5 秒换新） | `thread.list`、`plugin.list`、`dashboard.widgets` 插槽 |
+| `GET /overview`、`GET /partials/dashboard.json` | 概览（统计卡、最近会话、插件卡片；AdaUI 岛每 5 秒轮询 JSON） | `thread.list`、`plugin.list`、`dashboard.widgets` 插槽 |
 | `GET /workspaces` | 工作区选择（目录浏览限制在当前工作区子树内） | Gateway 配置 + `os.ReadDir` |
 | `GET /extensions` | 插件列表（全部随包/已安装插件合并成一张表，不分区；产品未声明的随包插件显示为「未启用 / unused」，不误报 failed） | `PluginLister`、`plugin.list`、`extensions.list` 插槽 |
 | `GET /extensions/{id}` | 插件详情（前端/后端归属、能力计数、启停、打开插件页面） | 同上 |

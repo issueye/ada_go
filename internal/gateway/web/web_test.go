@@ -1050,6 +1050,110 @@ func TestAllTwelveSlotsHostedAcrossPages(t *testing.T) {
 	}
 }
 
+// 概览页是第一个 AdaUI 客户端岛：SSR 回退仍在，同时暴露 JSON 状态与轮询接口。
+func TestOverviewIslandAndDashboardJSON(t *testing.T) {
+	core := newFakeCore().on("thread.list", `{
+	  "threads":[{"id":"th_1","title":"第一个会话","updatedAt":"2026-10-28T10:00:00Z","archived":false}],
+	  "nextCursor":"","hasMore":false
+	}`)
+	srv, _ := newServer(t, core)
+
+	body := serve(t, srv, "GET", "/overview", nil).Body.String()
+	for _, want := range []string{
+		`data-ada-island="overview"`,
+		`data-ada-state=`,
+		`ada-render.js`,
+		`ada-ui.js`,
+		`islands.js`,
+		`ada-ui.css`,
+		`第一个会话`,
+	} {
+		wantContains(t, body, want)
+	}
+	// 旧 htmx 轮询必须让位给岛，否则会把客户端 DOM 整段换掉。
+	wantNotContains(t, body, `hx-get="/partials/dashboard"`)
+
+	rec := serve(t, srv, "GET", "/partials/dashboard.json", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /partials/dashboard.json = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
+		t.Fatalf("dashboard.json Content-Type = %q", got)
+	}
+	var state struct {
+		Stats []struct {
+			Label string `json:"label"`
+			Value string `json:"value"`
+			Hint  string `json:"hint"`
+			Tone  string `json:"tone"`
+		} `json:"stats"`
+		Recent []struct {
+			ID           string `json:"id"`
+			Title        string `json:"title"`
+			UpdatedLabel string `json:"updatedLabel"`
+		} `json:"recent"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &state); err != nil {
+		t.Fatalf("dashboard.json 不是合法 JSON: %v\n%s", err, rec.Body.String())
+	}
+	if len(state.Stats) != 4 {
+		t.Fatalf("stats 数量 = %d, want 4", len(state.Stats))
+	}
+	if len(state.Recent) != 1 || state.Recent[0].ID != "th_1" || state.Recent[0].Title != "第一个会话" {
+		t.Fatalf("recent = %+v", state.Recent)
+	}
+	if state.Recent[0].UpdatedLabel == "" {
+		t.Fatal("recent.updatedLabel 为空")
+	}
+}
+
+// 插件列表是第二个 AdaUI 客户端岛；SSR 表格仍在，JSON 供客户端/刷新使用。
+func TestExtensionsIslandAndJSON(t *testing.T) {
+	core := newFakeCore().
+		on("thread.list", emptyThreadList).
+		on("plugin.list", `{"plugins":[{"id":"tools-fs","name":"文件工具","version":"1.2.0","enabled":true,"status":"ready","contributions":{"tools":["read"],"frontend":false,"backend":true}}]}`)
+	srv, _ := newServer(t, core)
+
+	body := serve(t, srv, "GET", "/extensions", nil).Body.String()
+	for _, want := range []string{
+		`data-ada-island="extensions"`,
+		`data-ada-state=`,
+		`文件工具`,
+		`ada-render.js`,
+		`ada-ui.js`,
+		`islands.js`,
+	} {
+		wantContains(t, body, want)
+	}
+
+	rec := serve(t, srv, "GET", "/partials/extensions.json", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /partials/extensions.json = %d, want 200", rec.Code)
+	}
+	var state struct {
+		Plugins []struct {
+			ID      string `json:"id"`
+			Name    string `json:"name"`
+			Enabled bool   `json:"enabled"`
+			Backend bool   `json:"backend"`
+		} `json:"plugins"`
+		Count int    `json:"count"`
+		CSRF  string `json:"csrf"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &state); err != nil {
+		t.Fatalf("extensions.json 不是合法 JSON: %v\n%s", err, rec.Body.String())
+	}
+	if state.Count != 1 || len(state.Plugins) != 1 {
+		t.Fatalf("plugins/count = %+v/%d", state.Plugins, state.Count)
+	}
+	if state.Plugins[0].ID != "tools-fs" || state.Plugins[0].Name != "文件工具" || !state.Plugins[0].Backend {
+		t.Fatalf("plugin = %+v", state.Plugins[0])
+	}
+	if state.CSRF != "csrf-token" {
+		t.Fatalf("csrf = %q, want csrf-token", state.CSRF)
+	}
+}
+
 // a_da 外壳与 M2 组件的关键 class 必须真的出现在 DOM 里。
 func TestThreadPageUsesAdaShellAndComponentDOM(t *testing.T) {
 	core := newFakeCore().

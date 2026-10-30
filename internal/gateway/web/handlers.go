@@ -964,16 +964,19 @@ func (s *Server) handleOverviewPartial(w http.ResponseWriter, r *http.Request) {
 	s.render(w, http.StatusOK, "overview_partial", s.overviewData(r, threads))
 }
 
-func (s *Server) overviewData(r *http.Request, threads []threadSummaryDTO) overviewData {
+func (s *Server) overviewDashboard(r *http.Request, threads []threadSummaryDTO) dashboardState {
+	workspace, _ := s.resolveWorkspace(r)
 	recent := make([]overviewThread, 0, 8)
 	for i, t := range threads {
 		if i >= 8 {
 			break
 		}
 		recent = append(recent, overviewThread{
-			ID:        t.ID,
-			Title:     t.Title,
-			ItemCount: 0,
+			ID:           t.ID,
+			Title:        t.Title,
+			Workspace:    workspace,
+			ItemCount:    0,
+			UpdatedLabel: relativeTime(parseTimeMS(t.UpdatedAt)),
 		})
 	}
 	newest := int64(0)
@@ -987,17 +990,44 @@ func (s *Server) overviewData(r *http.Request, threads []threadSummaryDTO) overv
 		lastActivity = relativeTime(newest)
 	}
 	pluginCount := len(s.collectPlugins(r))
-	stats := []overviewStat{
-		{Label: "会话", Value: strconv.Itoa(len(threads)), Hint: "本地会话总数", Tone: "brand"},
-		{Label: "最近活动", Value: lastActivity, Hint: "最后一个会话的更新时间", Tone: "neutral"},
-		{Label: "工作区", Value: strconv.Itoa(len(s.cfg.Workspaces)), Hint: "Gateway 配置的工作区", Tone: "neutral"},
-		{Label: "插件", Value: strconv.Itoa(pluginCount), Hint: "前端与后端插件总数", Tone: "brand"},
+	return dashboardState{
+		Stats: []overviewStat{
+			{Label: "会话", Value: strconv.Itoa(len(threads)), Hint: "本地会话总数", Tone: "brand"},
+			{Label: "最近活动", Value: lastActivity, Hint: "最后一个会话的更新时间", Tone: "neutral"},
+			{Label: "工作区", Value: strconv.Itoa(len(s.cfg.Workspaces)), Hint: "Gateway 配置的工作区", Tone: "neutral"},
+			{Label: "插件", Value: strconv.Itoa(pluginCount), Hint: "前端与后端插件总数", Tone: "brand"},
+		},
+		Recent: recent,
 	}
+}
+
+func (s *Server) overviewData(r *http.Request, threads []threadSummaryDTO) overviewData {
+	state := s.overviewDashboard(r, threads)
+	raw, err := json.Marshal(state)
+	if err != nil {
+		raw = []byte(`{"stats":[],"recent":[]}`)
+	}
+	base := s.base(r, "overview", "概览", threads, "", true)
+	base.NeedsUI = true
 	return overviewData{
-		baseData: s.base(r, "overview", "概览", threads, "", true),
-		Stats:    stats,
-		Recent:   recent,
+		baseData:  base,
+		Stats:     state.Stats,
+		Recent:    state.Recent,
+		StateJSON: string(raw),
 	}
+}
+
+// handleOverviewJSON 是概览岛的轮询接口；与 SSR 片段共用同一份数据投影。
+func (s *Server) handleOverviewJSON(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	threads, err := s.listThreads(r, 200)
+	if err != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": publicReason(err)})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(s.overviewDashboard(r, threads))
 }
 
 // ---- 插件 ----------------------------------------------------------------
@@ -1005,13 +1035,37 @@ func (s *Server) overviewData(r *http.Request, threads []threadSummaryDTO) overv
 // handleExtensions 渲染插件页：前端与后端插件合并成一份列表（列表里不分区）。
 func (s *Server) handleExtensions(w http.ResponseWriter, r *http.Request) {
 	threads, err := s.listThreads(r, 50)
-	plugins := s.collectPlugins(r)
+	state := s.extensionsState(r)
+	raw, marshalErr := json.Marshal(state)
+	if marshalErr != nil {
+		raw = []byte(`{"plugins":[],"count":0,"csrf":""}`)
+	}
+	base := s.base(r, "extensions", "插件", threads, "", err == nil)
+	base.NeedsUI = true
 	data := extensionsData{
-		baseData:    s.base(r, "extensions", "插件", threads, "", err == nil),
-		Plugins:     plugins,
-		PluginCount: len(plugins),
+		baseData:    base,
+		Plugins:     state.Plugins,
+		PluginCount: state.Count,
+		StateJSON:   string(raw),
 	}
 	s.render(w, http.StatusOK, "extensions", data)
+}
+
+// extensionsState 合并插件列表与 CSRF，供 SSR 岛与 JSON 接口共用。
+func (s *Server) extensionsState(r *http.Request) extensionsState {
+	plugins := s.collectPlugins(r)
+	return extensionsState{
+		Plugins: plugins,
+		Count:   len(plugins),
+		CSRF:    s.csrf(r),
+	}
+}
+
+// handleExtensionsJSON 是插件列表岛的刷新接口（只读）。
+func (s *Server) handleExtensionsJSON(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(s.extensionsState(r))
 }
 
 // handlePluginDetail 渲染单个插件的信息：前端/后端归属只在这里展示。

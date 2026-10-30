@@ -10,8 +10,19 @@
         <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/">去对话</a>
       </div>
 
-      <div id="dashboard-live" hx-get="/partials/dashboard" hx-trigger="every 5s" hx-swap="innerHTML">
+      <div id="dashboard-live" data-ada-island="overview" data-ada-state="{{.StateJSON}}">
         {{template "overview_partial" .}}
+      </div>
+
+      <div class="mt-4">
+        <div class="section-head">
+          <div>
+            <h2 class="section-title">插件贡献</h2>
+            <p class="section-sub">来自插件的 dashboard 片段</p>
+          </div>
+          <a class="link text-xs" href="/extensions">管理扩展</a>
+        </div>
+        <div class="ada-slot-host">{{slot "dashboard.widgets" .Slots.DashboardWidgets .SlotCounts.DashboardWidgets ""}}</div>
       </div>
     </div>
   </div>
@@ -53,16 +64,5 @@
   {{else}}
   <div class="px-4 py-8 text-center text-xs text-faint">还没有会话。去「对话」页新建一个。</div>
   {{end}}
-</div>
-
-<div class="mt-4">
-  <div class="section-head">
-    <div>
-      <h2 class="section-title">插件贡献</h2>
-      <p class="section-sub">来自插件的 dashboard 片段</p>
-    </div>
-    <a class="link text-xs" href="/extensions">管理扩展</a>
-  </div>
-  <div class="ada-slot-host">{{slot "dashboard.widgets" .Slots.DashboardWidgets .SlotCounts.DashboardWidgets ""}}</div>
 </div>
 {{end}}

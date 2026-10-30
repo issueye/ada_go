@@ -9,6 +9,7 @@
 SHELL := sh
 
 GO            ?= go
+NODE          ?= node
 BIN           ?= bin
 MODULE        := github.com/adag/ada-go
 VERSION_PKG   := $(MODULE)/internal/version
@@ -29,12 +30,13 @@ RELEASE_VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || git 
 RELEASE_DIR     := $(BIN)/release
 RELEASE_LDFLAGS := $(LDFLAGS) -X $(VERSION_PKG).Version=$(RELEASE_VERSION)
 
-.PHONY: help setup build test race vet lint gen verify doctor gate tidy cross release
+.PHONY: help setup build test test-js race vet lint gen verify doctor gate tidy cross release
 
 help:
 	@echo "setup     准备相邻 moejs 检出（校验 tag）+ 下载依赖"
 	@echo "build     构建全部包（ldflags 注入 Revision/BuildTime）"
 	@echo "test      go test ./..."
+	@echo "test-js   Node tests for the VNode renderer and ada-ui components"
 	@echo "race      go test -race ./...（Windows 腿见 gate/test 的 M0 已知限制说明）"
 	@echo "vet       go vet ./..."
 	@echo "lint      staticcheck ./...（配置 staticcheck.conf；@latest 钉版本由 M5 处理）"
@@ -56,6 +58,9 @@ build:
 
 test:
 	$(GO) test ./...
+
+test-js:
+	$(NODE) --test internal/gateway/web/testdata/ada-render.test.js internal/gateway/web/testdata/ada-ui.test.js
 
 # M0 已知限制：-race 依赖 cgo，Windows 无 MSVC/clang 工具链时跑不了（11 §13.2 无 cgo）；
 # CI 与 ci-gate.sh 的 Windows 腿自动降级为 test，M5 发布加固时补 windows race。

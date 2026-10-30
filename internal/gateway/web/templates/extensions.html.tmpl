@@ -16,61 +16,67 @@
         </form>
       </div>
 
-      {{if .Plugins}}
-      <div class="card overflow-hidden">
-        <div class="overflow-x-auto">
-          <table class="table">
-            <thead><tr><th>插件</th><th>版本</th><th>状态</th><th>能力</th><th>操作</th></tr></thead>
-            <tbody>
-              {{range .Plugins}}
-              <tr>
-                <td>
-                  <a class="font-medium text-ink" href="/extensions/{{.ID}}">{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</a>
-                  <p class="mt-1 font-mono text-xs text-faint">{{.ID}}</p>
-                  {{if .Error}}<p class="mt-1 text-xs text-danger-ink">{{.Error}}</p>{{end}}
-                </td>
-                <td>{{if .Version}}<span class="badge badge-neutral badge-mono">v{{.Version}}</span>{{else}}<span class="text-xs text-faint">—</span>{{end}}</td>
-                <td>
-                  <span class="badge badge-{{.StatusTone}}" title="{{.Status}}">{{.StatusLabel}}</span>
-                </td>
-                <td class="text-xs text-muted">
-                  {{if .Tools}}<span class="mr-3">{{.Tools}} 工具</span>{{end}}
-                  {{if .Pages}}<span class="mr-3">{{.Pages}} 页面</span>{{end}}
-                  {{if .Slots}}<span class="mr-3">{{.Slots}} 插槽</span>{{end}}
-                  {{if .HasDashboard}}<span class="badge badge-neutral">dashboard</span>{{end}}
-                  {{if and (not .Tools) (not .Pages) (not .Slots) (not .HasDashboard)}}<span class="text-faint">—</span>{{end}}
-                </td>
-                <td>
-                  <div class="flex items-center gap-2">
-                    {{if and .Backend (ne .Status "unused")}}
-                      {{if .Enabled}}
-                      <form method="post" action="/extensions/{{.ID}}/disable">
-                        {{template "csrf" $}}
-                        <button class="ada-btn ada-btn--secondary ada-btn--sm" type="submit">停用</button>
-                      </form>
-                      {{else}}
-                      <form method="post" action="/extensions/{{.ID}}/enable">
-                        {{template "csrf" $}}
-                        <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit">启用</button>
-                      </form>
-                      {{end}}
-                    {{end}}
-                    <a class="link text-xs" href="/extensions/{{.ID}}">详情</a>
-                  </div>
-                </td>
-              </tr>
-              {{end}}
-            </tbody>
-          </table>
-        </div>
+      <div id="extensions-island" data-ada-island="extensions" data-ada-state="{{.StateJSON}}">
+        {{template "extensions_partial" .}}
       </div>
-      {{else}}
-      <div class="empty-state">
-        <p class="text-sm font-medium text-ink">没有插件</p>
-        <p class="mt-1 text-xs text-faint">插件可能尚未装配，或网关暂时不可用。查看服务端日志确认。</p>
-      </div>
-      {{end}}
       {{slot "extensions.list" .Slots.ExtensionsList .SlotCounts.ExtensionsList ""}}
     </div>
   </div>
 {{template "shell_end" .}}{{end}}
+
+{{define "extensions_partial"}}
+{{if .Plugins}}
+<div class="card overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="table">
+      <thead><tr><th>插件</th><th>版本</th><th>状态</th><th>能力</th><th>操作</th></tr></thead>
+      <tbody>
+        {{range .Plugins}}
+        <tr>
+          <td>
+            <a class="font-medium text-ink" href="/extensions/{{.ID}}">{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</a>
+            <p class="mt-1 font-mono text-xs text-faint">{{.ID}}</p>
+            {{if .Error}}<p class="mt-1 text-xs text-danger-ink">{{.Error}}</p>{{end}}
+          </td>
+          <td>{{if .Version}}<span class="badge badge-neutral badge-mono">v{{.Version}}</span>{{else}}<span class="text-xs text-faint">—</span>{{end}}</td>
+          <td>
+            <span class="badge badge-{{.StatusTone}}" title="{{.Status}}">{{.StatusLabel}}</span>
+          </td>
+          <td class="text-xs text-muted">
+            {{if .Tools}}<span class="mr-3">{{.Tools}} 工具</span>{{end}}
+            {{if .Pages}}<span class="mr-3">{{.Pages}} 页面</span>{{end}}
+            {{if .Slots}}<span class="mr-3">{{.Slots}} 插槽</span>{{end}}
+            {{if .HasDashboard}}<span class="badge badge-neutral">dashboard</span>{{end}}
+            {{if and (not .Tools) (not .Pages) (not .Slots) (not .HasDashboard)}}<span class="text-faint">—</span>{{end}}
+          </td>
+          <td>
+            <div class="flex items-center gap-2">
+              {{if and .Backend (ne .Status "unused")}}
+                {{if .Enabled}}
+                <form method="post" action="/extensions/{{.ID}}/disable">
+                  {{template "csrf" $}}
+                  <button class="ada-btn ada-btn--secondary ada-btn--sm" type="submit">停用</button>
+                </form>
+                {{else}}
+                <form method="post" action="/extensions/{{.ID}}/enable">
+                  {{template "csrf" $}}
+                  <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit">启用</button>
+                </form>
+                {{end}}
+              {{end}}
+              <a class="link text-xs" href="/extensions/{{.ID}}">详情</a>
+            </div>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{else}}
+<div class="empty-state">
+  <p class="text-sm font-medium text-ink">没有插件</p>
+  <p class="mt-1 text-xs text-faint">插件可能尚未装配，或网关暂时不可用。查看服务端日志确认。</p>
+</div>
+{{end}}
+{{end}}

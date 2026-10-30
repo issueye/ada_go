@@ -1,0 +1,304 @@
+/*
+ * ada-ui.js 的补充样式层
+ * ---------------------------------------------------------------------------
+ * 只补项目基线里还没有视觉定义的控件（滑块、进度、开关、选择项、Toast、
+ * 下拉面板修正、表格修饰），其余全部复用 app.css / ui/components.css /
+ * ui/widgets.css / ui/layout.css / ui/shell.css。颜色只来自 --ph-*，
+ * 尺寸只来自 --ada-*；不写内联 style，不使用 dark: 变体。
+ */
+
+/* ── 按钮 ─────────────────────────────────────────────────────────────── */
+.ada-btn--block {
+  width: 100%;
+}
+
+/* ── 表单 ─────────────────────────────────────────────────────────────── */
+.ada-field__hint--error {
+  color: var(--ph-danger-ink);
+}
+
+.ada-select[data-disabled="true"] .ada-select__trigger {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* 复选框 / 单选框：用原生 input + accent-color，键盘与表单语义保持浏览器行为 */
+.ada-choice {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--ada-space-2);
+  color: var(--ph-muted);
+  font-size: var(--ada-text-base);
+  cursor: pointer;
+}
+.ada-choice.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.ada-choice__input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--ph-brand);
+  cursor: inherit;
+}
+.ada-choice__input:focus-visible {
+  outline: 2px solid var(--ada-focus-border);
+  outline-offset: 2px;
+  border-radius: var(--ada-radius-sm);
+}
+.ada-choice__label {
+  line-height: 1.5;
+  min-width: 0;
+}
+
+/* 开关：隐藏原生 checkbox，用 track/thumb 表达状态；读屏仍拿到 checkbox */
+.ada-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ada-space-2);
+  color: var(--ph-muted);
+  font-size: var(--ada-text-base);
+  cursor: pointer;
+}
+.ada-switch.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.ada-switch__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.ada-switch__track {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 36px;
+  height: 20px;
+  border-radius: var(--ada-radius-pill);
+  background: var(--ph-line-strong);
+  transition: background var(--ada-transition);
+}
+.ada-switch__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--ph-surface);
+  box-shadow: var(--ada-shadow-raised);
+  transition: transform var(--ada-transition);
+}
+.ada-switch__input:checked + .ada-switch__track {
+  background: var(--ph-brand);
+}
+.ada-switch__input:checked + .ada-switch__track .ada-switch__thumb {
+  transform: translateX(16px);
+}
+.ada-switch__input:focus-visible + .ada-switch__track {
+  outline: 2px solid var(--ada-focus-border);
+  outline-offset: 2px;
+}
+.ada-switch__label {
+  line-height: 1.5;
+  min-width: 0;
+}
+
+/* 滑块：原生 range + accent-color；轨道/拇指由浏览器绘制，避免第二套视觉 */
+.ada-slider-field {
+  gap: var(--ada-space-2);
+}
+.ada-slider__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ada-space-2);
+}
+.ada-slider__value {
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.ada-slider {
+  width: 100%;
+  accent-color: var(--ph-brand);
+  cursor: pointer;
+}
+.ada-slider:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* 进度条：原生 progress，值/最大值由引擎写入属性，不写内联宽度 */
+.ada-progress-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ada-space-1);
+}
+.ada-progress__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ada-space-2);
+}
+.ada-progress__value {
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.ada-progress {
+  width: 100%;
+  height: 8px;
+  border: 0;
+  border-radius: var(--ada-radius-pill);
+  background: var(--ph-subtle);
+  overflow: hidden;
+  appearance: none;
+}
+.ada-progress::-webkit-progress-bar {
+  border-radius: var(--ada-radius-pill);
+  background: var(--ph-subtle);
+}
+.ada-progress::-webkit-progress-value {
+  border-radius: var(--ada-radius-pill);
+  background: var(--ph-brand);
+}
+.ada-progress::-moz-progress-bar {
+  border-radius: var(--ada-radius-pill);
+  background: var(--ph-brand);
+}
+.ada-progress--sm {
+  height: 4px;
+}
+.ada-progress--lg {
+  height: 12px;
+}
+.ada-progress--success::-webkit-progress-value {
+  background: var(--ph-success-ink);
+}
+.ada-progress--success::-moz-progress-bar {
+  background: var(--ph-success-ink);
+}
+.ada-progress--warn::-webkit-progress-value {
+  background: var(--ph-warn-ink);
+}
+.ada-progress--warn::-moz-progress-bar {
+  background: var(--ph-warn-ink);
+}
+.ada-progress--danger::-webkit-progress-value {
+  background: var(--ph-danger-ink);
+}
+.ada-progress--danger::-moz-progress-bar {
+  background: var(--ph-danger-ink);
+}
+
+/* ── 下拉按钮：复用 .ada-row-menu 的面板与条目，只补对齐与分隔线 ───────── */
+.ada-dropdown__summary {
+  list-style: none;
+  cursor: pointer;
+}
+.ada-dropdown__summary::-webkit-details-marker {
+  display: none;
+}
+.ada-dropdown__trigger {
+  cursor: pointer;
+}
+.ada-dropdown[data-disabled="true"] .ada-dropdown__trigger {
+  opacity: 0.55;
+  pointer-events: none;
+}
+.ada-dropdown__panel {
+  right: 0;
+  left: auto;
+}
+.ada-dropdown--left .ada-dropdown__panel {
+  right: auto;
+  left: 0;
+}
+.ada-dropdown__separator {
+  height: 1px;
+  margin: var(--ada-space-1) 2px;
+  background: var(--ph-line);
+}
+
+/* ── 页签：现有 CSS 只管列表与选中态，这里补面板间距 ─────────────────── */
+.ada-tabs__panel {
+  padding-top: var(--ada-space-3);
+}
+
+/* ── 表格：现有 .table / .ada-table-wrap 之上补状态修饰 ───────────────── */
+.ada-table--striped tbody tr:nth-child(even) {
+  background: var(--ph-subtle);
+}
+.ada-table--hover tbody tr:hover {
+  background: var(--ph-subtle);
+}
+.ada-table__empty {
+  padding: var(--ada-space-6) var(--ada-space-3);
+  color: var(--ph-faint);
+  text-align: center;
+}
+.ada-table__empty .ada-run-status__spin {
+  margin-right: var(--ada-space-1);
+  vertical-align: -2px;
+}
+
+/* ── Toast：浮动在右上角，复用 .alert 的颜色与 .alert-dismiss 的关闭键 ── */
+.ada-toast-stack {
+  position: fixed;
+  top: 66px;
+  right: 16px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ada-space-2);
+  width: min(360px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.ada-toast {
+  pointer-events: auto;
+  box-shadow: var(--ph-shadow);
+  animation: ada-toast-in var(--ada-transition);
+}
+.ada-toast--closing {
+  opacity: 0;
+  transform: translateX(8px);
+  transition: opacity var(--ada-transition), transform var(--ada-transition);
+}
+@keyframes ada-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@media (max-width: 640px) {
+  .ada-toast-stack {
+    top: 60px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ada-toast {
+    animation: none;
+  }
+  .ada-switch__track,
+  .ada-switch__thumb {
+    transition: none;
+  }
+}
