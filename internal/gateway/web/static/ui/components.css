@@ -1374,7 +1374,7 @@ details:not([open]) > :not(summary) {
   flex-wrap: wrap;
   gap: 6px 18px;
   max-width: 860px;
-  margin: 0px auto 8px;
+  margin: 8px auto 8px;
   color: var(--ph-faint);
   font-size: var(--ada-text-sm);
 }
