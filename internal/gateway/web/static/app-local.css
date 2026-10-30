@@ -1111,3 +1111,197 @@ html:not(.js) .ada-select [data-select-menu] {
   z-index: 2;
   background: var(--ph-surface);
 }
+
+/* ── 插件详情：左侧两个分区（信息/目录），右侧内容 ─────────────────── */
+.ada-plugin-detail {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.ada-plugin-detail__side {
+  position: sticky;
+  top: 12px;
+}
+.ada-plugin-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ada-plugin-nav__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-elevated);
+  color: var(--ph-ink);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.ada-plugin-nav__item:hover {
+  border-color: var(--ph-line-strong);
+  background: var(--ph-subtle);
+}
+.ada-plugin-nav__item.is-active {
+  border-color: var(--ph-brand);
+  background: var(--ph-brand-soft);
+}
+.ada-plugin-nav__icon {
+  display: flex;
+  margin-top: 1px;
+  color: var(--ph-muted);
+}
+.ada-plugin-nav__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ada-plugin-nav__text strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.ada-plugin-nav__text small {
+  color: var(--ph-muted);
+  font-size: 12px;
+}
+.ada-plugin-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+.ada-plugin-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-subtle);
+}
+.ada-plugin-stat__value {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--ph-ink);
+}
+.ada-plugin-stat__label {
+  font-size: 12px;
+  color: var(--ph-muted);
+}
+.ada-plugin-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin: 14px 0 0;
+}
+.ada-plugin-meta > div {
+  min-width: 0;
+}
+.ada-plugin-meta dt {
+  font-size: 12px;
+  color: var(--ph-muted);
+}
+.ada-plugin-meta dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--ph-ink);
+  overflow-wrap: anywhere;
+}
+.ada-plugin-meta__wide {
+  grid-column: 1 / -1;
+}
+.ada-plugin-meta__mono {
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: 12px;
+}
+.ada-plugin-section {
+  margin-top: 18px;
+}
+.ada-plugin-section__title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ph-ink);
+}
+.ada-plugin-section__meta {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ph-faint);
+}
+.ada-plugin-readme {
+  padding: 10px 12px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-subtle);
+  max-height: 420px;
+  overflow: auto;
+}
+.ada-plugin-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-sm);
+  overflow: hidden;
+}
+.ada-plugin-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--ph-line);
+  font-size: 12px;
+}
+.ada-plugin-file:last-child {
+  border-bottom: 0;
+}
+.ada-plugin-file:hover {
+  background: var(--ph-subtle);
+}
+.ada-plugin-file__icon {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--ph-faint);
+}
+.ada-plugin-file__path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ph-ink);
+  font-family: var(--mono-font, Consolas, monospace);
+}
+.ada-plugin-file__size {
+  flex-shrink: 0;
+  color: var(--ph-faint);
+}
+.ada-plugin-file--d1 { padding-left: 24px; }
+.ada-plugin-file--d2 { padding-left: 38px; }
+.ada-plugin-file--d3 { padding-left: 52px; }
+.ada-plugin-file--d4 { padding-left: 66px; }
+
+@media (max-width: 900px) {
+  .ada-plugin-detail {
+    grid-template-columns: 1fr;
+  }
+  .ada-plugin-detail__side {
+    position: static;
+  }
+  .ada-plugin-nav {
+    flex-direction: row;
+  }
+  .ada-plugin-nav__item {
+    flex: 1 1 0;
+  }
+}

@@ -22,15 +22,18 @@ import (
 
 // pluginSummaryDTO 对应 Core plugin.list 的一行（只声明 SSR 用到的字段）。
 type pluginSummaryDTO struct {
-	ID            string         `json:"id"`
-	Name          string         `json:"name"`
-	Version       string         `json:"version"`
-	Trust         string         `json:"trust"`
-	Source        string         `json:"source"`
-	Enabled       bool           `json:"enabled"`
-	Status        string         `json:"status"`
-	LastError     string         `json:"lastError"`
-	Contributions map[string]any `json:"contributions"`
+	ID            string          `json:"id"`
+	Name          string          `json:"name"`
+	Version       string          `json:"version"`
+	APIVersion    int             `json:"apiVersion"`
+	Trust         string          `json:"trust"`
+	Source        string          `json:"source"`
+	Enabled       bool            `json:"enabled"`
+	Status        string          `json:"status"`
+	LastError     string          `json:"lastError"`
+	Readme        string          `json:"readme"`
+	Files         []pluginFileDTO `json:"files"`
+	Contributions map[string]any  `json:"contributions"`
 }
 
 type pluginListResult struct {
@@ -1134,7 +1137,7 @@ func (s *Server) overviewDashboard(r *http.Request, threads []threadSummaryDTO) 
 	if newest > 0 {
 		lastActivity = relativeTime(newest)
 	}
-	pluginCount := len(s.collectPlugins(r))
+	pluginCount := len(s.collectPlugins(r, ""))
 	return dashboardState{
 		Stats: []overviewStat{
 			{Label: "会话", Value: strconv.Itoa(len(threads)), Hint: "本地会话总数", Tone: "brand"},
@@ -1198,7 +1201,7 @@ func (s *Server) handleExtensions(w http.ResponseWriter, r *http.Request) {
 
 // extensionsState 合并插件列表与 CSRF，供 SSR 岛与 JSON 接口共用。
 func (s *Server) extensionsState(r *http.Request) extensionsState {
-	plugins := s.collectPlugins(r)
+	plugins := s.collectPlugins(r, "")
 	return extensionsState{
 		Plugins: plugins,
 		Count:   len(plugins),
@@ -1216,10 +1219,11 @@ func (s *Server) handleExtensionsJSON(w http.ResponseWriter, r *http.Request) {
 // handlePluginDetail 渲染单个插件的信息：前端/后端归属只在这里展示。
 func (s *Server) handlePluginDetail(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.PathValue("id"))
-	for _, p := range s.collectPlugins(r) {
+	for _, p := range s.collectPlugins(r, id) {
 		if p.ID != id {
 			continue
 		}
+		p.ReadmeNodes = markdownNodesJSON(p.Readme)
 		threads, err := s.listThreads(r, 50)
 		state := pluginDetailState{Plugin: p, CSRF: s.csrf(r)}
 		raw, marshalErr := json.Marshal(state)
@@ -1241,7 +1245,7 @@ func (s *Server) handlePluginDetail(w http.ResponseWriter, r *http.Request) {
 
 // collectPlugins 合并前端插件（渲染桥）与后端插件（Core plugin.list）。
 // 同一个 id 同时具备两段能力时合并成一条；前端/后端标记只在详情页展示。
-func (s *Server) collectPlugins(r *http.Request) []pluginRow {
+func (s *Server) collectPlugins(r *http.Request, detailID string) []pluginRow {
 	byID := make(map[string]*pluginRow)
 	order := make([]string, 0, 8)
 	upsert := func(id string) *pluginRow {
@@ -1276,7 +1280,11 @@ func (s *Server) collectPlugins(r *http.Request) []pluginRow {
 			}
 		}
 	}
-	if raw, err := s.call(r, "plugin.list", map[string]any{}); err == nil {
+	listParams := map[string]any{}
+	if detailID != "" {
+		listParams["detailId"] = detailID
+	}
+	if raw, err := s.call(r, "plugin.list", listParams); err == nil {
 		var res pluginListResult
 		if json.Unmarshal(raw, &res) == nil {
 			for _, p := range res.Plugins {
@@ -1291,9 +1299,20 @@ func (s *Server) collectPlugins(r *http.Request) []pluginRow {
 					row.Version = p.Version
 				}
 				row.Source = pluginScope(p.Source, p.Trust)
+				row.Trust = p.Trust
+				row.APIVersion = p.APIVersion
 				row.Status = p.Status
 				row.Enabled = p.Enabled
 				row.Error = p.LastError
+				row.Readme = p.Readme
+				row.Files = make([]pluginFileDTO, 0, len(p.Files))
+				for _, f := range p.Files {
+					row.Files = append(row.Files, pluginFileDTO{
+						Path: f.Path, Size: f.Size, Dir: f.Dir, Depth: f.Depth,
+						SizeLabel:  humanBytes(f.Size),
+						DepthClass: pluginDepthClass(f.Depth),
+					})
+				}
 				row.Tools = contributionCount(p.Contributions["tools"])
 				row.Hooks = contributionCount(p.Contributions["hooks"])
 				row.Skills = contributionCount(p.Contributions["skills"])
@@ -1480,6 +1499,31 @@ func pluginStatusView(status string, enabled bool) (label, tone string) {
 
 func urlQueryEscape(s string) string {
 	return url.QueryEscape(s)
+}
+
+// humanBytes 给文件清单显示一个紧凑大小（插件详情页）。
+func humanBytes(n int64) string {
+	switch {
+	case n < 0:
+		return "—"
+	case n < 1024:
+		return fmt.Sprintf("%d B", n)
+	case n < 1024*1024:
+		return fmt.Sprintf("%.1f KB", float64(n)/1024)
+	default:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1024*1024))
+	}
+}
+
+// pluginDepthClass 把目录深度映射到固定的缩进 class（CSP 不允许内联 style）。
+func pluginDepthClass(depth int) string {
+	if depth < 0 {
+		depth = 0
+	}
+	if depth > 4 {
+		depth = 4
+	}
+	return fmt.Sprintf("ada-plugin-file--d%d", depth)
 }
 
 func withinRoot(root, candidate string) bool {

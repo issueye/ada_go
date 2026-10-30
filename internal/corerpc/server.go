@@ -841,10 +841,14 @@ func (s *Server) handleToolList(ctx context.Context, _ json.RawMessage) (any, er
 // 缺省 true（协议默认值），显式传 false 时跳过被用户禁用的插件。
 func (s *Server) handlePluginList(ctx context.Context, raw json.RawMessage) (any, error) {
 	var p struct {
-		IncludeDisabled *bool `json:"includeDisabled"`
+		IncludeDisabled *bool  `json:"includeDisabled"`
+		DetailID        string `json:"detailId"`
 	}
 	_ = decode(raw, &p)
 	views := s.sess.PluginViews(ctx)
+	if strings.TrimSpace(p.DetailID) != "" {
+		views = s.sess.PluginViewsDetailed(ctx, strings.TrimSpace(p.DetailID))
+	}
 	out := make([]proto.PluginSummary, 0, len(views))
 	for _, v := range views {
 		if v.Status == "disabled" && p.IncludeDisabled != nil && !*p.IncludeDisabled {
@@ -1674,10 +1678,15 @@ func pluginSummary(inst interface {
 // pluginViewJSON 把 cli.PluginView 编成 plugin.list 的行。
 // Source 已进协议（spec PluginSummary.source，M3 安装/发现）。
 func pluginViewJSON(v cli.PluginView) proto.PluginSummary {
+	files := make([]proto.PluginFile, 0, len(v.Files))
+	for _, f := range v.Files {
+		files = append(files, proto.PluginFile{Path: f.Path, Size: f.Size, Dir: f.Dir, Depth: f.Depth})
+	}
 	return proto.PluginSummary{
 		ID: v.ID, Name: v.Name, Version: v.Version, APIVersion: v.APIVersion,
 		Trust: v.Trust, Enabled: v.Enabled, Status: v.Status,
 		Fingerprint: v.Fingerprint, LastError: v.LastError, Source: v.Source,
+		Readme: v.Readme, Files: files,
 		Contributions: map[string]any{
 			"tools": v.Tools, "hooks": v.Hooks, "skills": v.Skills,
 			"frontend": v.Frontend, "backend": v.Backend,

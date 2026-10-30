@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -2182,13 +2183,46 @@ type PluginView struct {
 	// Frontend / Backend 标明清单段；统一插件包可以两者都为真。
 	Frontend bool
 	Backend  bool
+	// Readme 是插件 README 正文；没有 README 时回退为清单 description。
+	Readme string
+	// Files 是插件包内文件清单（详情页「插件目录」）。
+	Files []PluginFile
+}
+
+// PluginFile 是插件包内一个文件（相对路径，不含宿主绝对路径）。
+type PluginFile struct {
+	Path  string
+	Size  int64
+	Dir   bool
+	Depth int
 }
 
 // PluginViews 列出随包 + 第三方插件的当前状态（plugin.list 的数据源）。
 //
 // 列表是「全部随包/已安装插件」而不是「当前产品装配的插件」：
 // 产品未声明的随包插件用中性状态 unused 表示，不伪装成 failed。
+// README/文件清单只在详情请求（detailID 非空）时计算，避免每次列表/门禁
+// 轮询都去读盘或展开包内容。
 func (s *Session) PluginViews(ctx context.Context) []PluginView {
+	return s.pluginViews(ctx, "")
+}
+
+// PluginViewDetail 返回单个插件的完整视图（含 README 与文件清单）。
+func (s *Session) PluginViewDetail(ctx context.Context, id string) (PluginView, bool) {
+	for _, v := range s.pluginViews(ctx, id) {
+		if v.ID == id {
+			return v, true
+		}
+	}
+	return PluginView{}, false
+}
+
+// PluginViewsDetailed 返回全部插件视图，但只为 detailID 计算 README/文件清单。
+func (s *Session) PluginViewsDetailed(ctx context.Context, detailID string) []PluginView {
+	return s.pluginViews(ctx, detailID)
+}
+
+func (s *Session) pluginViews(ctx context.Context, detailID string) []PluginView {
 	s.mu.Lock()
 	asm := s.asm
 	base := s.baseScripts
@@ -2209,6 +2243,12 @@ func (s *Session) PluginViews(ctx context.Context) []PluginView {
 	}
 
 	meta := s.listPluginMeta(ctx)
+	frontByID := make(map[string]host.Script, len(frontend))
+	for _, sc := range frontend {
+		if sc.Manifest != nil {
+			frontByID[sc.Manifest.ID] = sc
+		}
+	}
 	out := make([]PluginView, 0, len(base)+len(frontend)+len(discovered)+len(failed))
 	seen := map[string]bool{}
 	for _, sc := range base {
@@ -2221,6 +2261,15 @@ func (s *Session) PluginViews(ctx context.Context) []PluginView {
 		v := pluginViewOf(sc, "", nil, rec, hasRec, asm)
 		v.Backend = true
 		v.Frontend = sc.Manifest.Frontend != nil
+		if detailID != "" && detailID == id {
+			var front *host.Script
+			if f, ok := frontByID[id]; ok {
+				front = &f
+			}
+			baseScript := sc
+			v.Files = pluginFiles(&baseScript, front, "")
+			v.Readme = pluginReadme("", &baseScript)
+		}
 		if !productIDs[id] {
 			// 随包但当前产品未声明：只有用户显式启用过才进入装配；
 			// 否则用中性状态 unused 表示，可查看、可启用，但不是故障。
@@ -2256,10 +2305,15 @@ func (s *Session) PluginViews(ctx context.Context) []PluginView {
 				status = "unused"
 			}
 		}
+		frontScript := sc
 		v := PluginView{
 			ID: id, Name: sc.Manifest.Name, Version: sc.Manifest.Version,
 			APIVersion: sc.Manifest.APIVersion, Trust: string(sc.Manifest.Trust),
 			Enabled: enabled, Frontend: true, Status: status,
+		}
+		if detailID != "" && detailID == id {
+			v.Files = pluginFiles(nil, &frontScript, "")
+			v.Readme = pluginReadme("", &frontScript)
 		}
 		out = append(out, v)
 	}
@@ -2273,6 +2327,10 @@ func (s *Session) PluginViews(ctx context.Context) []PluginView {
 		v := pluginViewOf(p.Script, p.Source, &p, rec, hasRec, asm)
 		v.Backend = true
 		v.Frontend = p.Script.Manifest != nil && p.Script.Manifest.Frontend != nil
+		if detailID != "" && detailID == id {
+			v.Files = pluginFiles(nil, nil, p.Dir)
+			v.Readme = pluginReadme(p.Dir, &p.Script)
+		}
 		out = append(out, v)
 	}
 	for id, msg := range failed {
@@ -2290,6 +2348,138 @@ func (s *Session) PluginViews(ctx context.Context) []PluginView {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+const (
+	maxPluginFiles  = 300
+	maxReadmeBytes  = 256 << 10
+	pluginReadmeDoc = "README.md"
+)
+
+// pluginFiles 生成插件包内的文件清单（详情页「插件目录」）。
+//
+// 第三方插件有真实目录，直接走文件系统；随包官方插件只有嵌入的加载单元，
+// 用 manifest + Source + Bundle + StaticAssets 还原出等价的包内路径。
+func pluginFiles(base, front *host.Script, dir string) []PluginFile {
+	if dir != "" {
+		return walkPluginFiles(dir)
+	}
+	sizes := map[string]int64{}
+	var manifest *plugins.Manifest
+	if base != nil && base.Manifest != nil {
+		manifest = base.Manifest
+	} else if front != nil {
+		manifest = front.Manifest
+	}
+	if manifest != nil {
+		if raw, err := json.MarshalIndent(manifest, "", "  "); err == nil {
+			sizes["plugin.json"] = int64(len(raw))
+		}
+	}
+	if base != nil {
+		if base.Source != "" {
+			// 官方后端插件的 Source 就是构建产物 dist/index.js。
+			sizes["dist/index.js"] = int64(len(base.Source))
+		}
+		for name, data := range base.StaticAssets {
+			sizes[strings.TrimPrefix(name, "./")] = int64(len(data))
+		}
+		if base.Readme != "" {
+			sizes["README.md"] = int64(len(base.Readme))
+		}
+	}
+	if front != nil {
+		for name, src := range front.Bundle {
+			sizes[strings.TrimPrefix(name, "./")] = int64(len(src))
+		}
+		for name, data := range front.StaticAssets {
+			path := strings.TrimPrefix(name, "./")
+			// 官方前端包的 StaticAssets 键相对 static/ 目录（todo.css）；
+			// 目录视图还原成包内真实路径 static/todo.css。
+			if !strings.HasPrefix(path, "static/") && !strings.HasPrefix(path, "skills/") {
+				path = "static/" + path
+			}
+			sizes[path] = int64(len(data))
+		}
+		if front.Readme != "" {
+			sizes["README.md"] = int64(len(front.Readme))
+		}
+	}
+	return sortedPluginFiles(sizes)
+}
+
+func walkPluginFiles(dir string) []PluginFile {
+	sizes := map[string]int64{}
+	count := 0
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || path == dir {
+			return nil
+		}
+		rel, relErr := filepath.Rel(dir, path)
+		if relErr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			switch d.Name() {
+			case "node_modules", ".git", ".cache":
+				return fs.SkipDir
+			}
+			if strings.HasPrefix(d.Name(), ".") {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return nil
+		}
+		info, infoErr := d.Info()
+		if infoErr != nil {
+			return nil
+		}
+		sizes[rel] = info.Size()
+		count++
+		if count >= maxPluginFiles {
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return sortedPluginFiles(sizes)
+}
+
+func sortedPluginFiles(sizes map[string]int64) []PluginFile {
+	out := make([]PluginFile, 0, len(sizes))
+	for path, size := range sizes {
+		out = append(out, PluginFile{Path: path, Size: size, Depth: strings.Count(path, "/")})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out
+}
+
+// pluginReadme 读插件 README；没有 README 时回退为清单 description。
+func pluginReadme(dir string, sc *host.Script) string {
+	if sc != nil && strings.TrimSpace(sc.Readme) != "" {
+		return clipBytes(sc.Readme, maxReadmeBytes)
+	}
+	if dir != "" {
+		for _, name := range []string{pluginReadmeDoc, "readme.md", "README.MD"} {
+			data, err := os.ReadFile(filepath.Join(dir, name))
+			if err == nil {
+				return clipBytes(string(data), maxReadmeBytes)
+			}
+		}
+	}
+	if sc != nil && sc.Manifest != nil {
+		return sc.Manifest.Description
+	}
+	return ""
+}
+
+func clipBytes(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "\n\n…（README 已截断）"
 }
 
 // pluginViewOf 把一份脚本 + 元信息 + 运行时状态合成一行视图。

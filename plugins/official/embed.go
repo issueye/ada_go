@@ -28,7 +28,7 @@ import (
 	"github.com/adag/ada-go/internal/plugins/host"
 )
 
-//go:embed */plugin.json */dist/index.js
+//go:embed */plugin.json */dist/index.js */README.md
 var files embed.FS
 
 //go:embed */skills/*/SKILL.md
@@ -146,7 +146,17 @@ func load(id string) (host.Script, error) {
 		EntryName:    host.EntryScheme + "://" + id + "/index.js",
 		Source:       string(src),
 		StaticAssets: assets,
+		Readme:       loadReadme(id),
 	}, nil
+}
+
+// loadReadme 读取官方插件的 README.md；没有该文件时返回空串。
+func loadReadme(id string) string {
+	data, err := files.ReadFile(id + "/README.md")
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // loadManifest 读取并校验一个官方插件的清单（与第三方同一条校验路径）。
@@ -224,6 +234,7 @@ func loadFrontend(id string, m *plugins.Manifest) (host.Script, error) {
 		Manifest:     m,
 		Bundle:       bundle,
 		StaticAssets: assets,
+		Readme:       loadReadme(id),
 	}
 	// 清单引用的模板必须真实存在：缺件是打包错误而不是运行期才发现。
 	if m.Frontend != nil {

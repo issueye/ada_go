@@ -492,6 +492,8 @@ type pluginRow struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
 	Version      string `json:"version"`
+	APIVersion   int    `json:"apiVersion,omitempty"`
+	Trust        string `json:"trust,omitempty"`
 	Description  string `json:"description"`
 	Source       string `json:"source"`
 	Status       string `json:"status"`
@@ -509,6 +511,22 @@ type pluginRow struct {
 	Nav          int    `json:"nav"`
 	FirstPage    string `json:"firstPage"`
 	HasDashboard bool   `json:"hasDashboard"`
+	// Readme 是插件 README（无 README 时回退为清单说明）；ReadmeNodes 是
+	// 给前端 ui-markdown 的 VNode 数据（详情页岛直接渲染，不再跑一次 Markdown）。
+	Readme      string          `json:"readme,omitempty"`
+	ReadmeNodes json.RawMessage `json:"readmeNodes,omitempty"`
+	// Files 是插件包内文件清单（详情页「插件目录」）。
+	Files []pluginFileDTO `json:"files,omitempty"`
+}
+
+// pluginFileDTO 是插件包内一个文件（相对路径）。
+type pluginFileDTO struct {
+	Path       string `json:"path"`
+	Size       int64  `json:"size"`
+	Dir        bool   `json:"dir,omitempty"`
+	Depth      int    `json:"depth,omitempty"`
+	SizeLabel  string `json:"sizeLabel,omitempty"`
+	DepthClass string `json:"depthClass,omitempty"`
 }
 
 // pluginDetailData 是 /extensions/{id} 的详情页。

@@ -1423,6 +1423,55 @@ func TestPluginsUnifiedListAndDetail(t *testing.T) {
 	}
 }
 
+// 插件详情：左侧两个分区（信息/目录），右侧渲染统计、README 与文件清单；
+// README/文件只对详情请求带 detailId 拉取，列表轮询保持轻量。
+func TestPluginDetailShowsReadmeAndFiles(t *testing.T) {
+	core := newFakeCore().
+		on("thread.list", emptyThreadList).
+		on("plugin.list", `{"plugins":[{
+			"id":"tools-fs","name":"文件工具","version":"1.2.0","apiVersion":1,"trust":"builtin",
+			"enabled":true,"status":"ready",
+			"readme":"# 文件工具\n\n读写工作区文件。",
+			"files":[
+				{"path":"plugin.json","size":120},
+				{"path":"static/todo.css","size":2048,"depth":1}
+			],
+			"contributions":{"tools":["read"],"frontend":true,"backend":true}
+		}]}`)
+	ui := &stubUI{list: []web.FrontendPluginInfo{{
+		ID: "tools-fs", Name: "文件工具", Version: "1.2.0", Status: "ready",
+		PageCount: 2, SlotCount: 3, NavCount: 1,
+	}}}
+	srv, _ := newServerWithUI(t, core, ui)
+
+	body := serve(t, srv, "GET", "/extensions/tools-fs", nil).Body.String()
+	for _, want := range []string{
+		`class="ada-plugin-detail"`,
+		"插件信息",
+		"插件目录",
+		`ada-plugin-stat__value">2`, // 页面
+		`ada-plugin-stat__value">3`, // 插槽
+		"README",
+		"<h1>文件工具</h1>",
+		"static/todo.css",
+		"2.0 KB",
+		"readmeNodes",
+	} {
+		wantContains(t, body, want)
+	}
+	if call, ok := core.lastCall("plugin.list"); !ok || call.Params["detailId"] != "tools-fs" {
+		t.Fatalf("详情页 plugin.list 没有带 detailId: %+v", call.Params)
+	}
+
+	// 列表页不需要 README/文件，不应每次轮询都读盘。
+	serve(t, srv, "GET", "/extensions", nil)
+	if call, ok := core.lastCall("plugin.list"); ok {
+		if _, has := call.Params["detailId"]; has {
+			t.Fatalf("列表页不应请求 detailId: %+v", call.Params)
+		}
+	}
+}
+
 // 业务拒绝（例如禁用唯一审批策略插件）回到插件页用提示条说明，而不是 502 错误页。
 func TestPluginToggleRejectionShowsFlash(t *testing.T) {
 	core := newFakeCore().

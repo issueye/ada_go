@@ -11,73 +11,121 @@
       </div>
 
       <div id="plugin-detail-island" data-ada-island="plugin-detail" data-ada-state="{{.StateJSON}}">
-      <div class="card p-4">
-        <div class="flex flex-wrap items-center gap-2">
-          {{if .Plugin.Frontend}}<span class="badge badge-brand">前端插件</span>{{end}}
-          {{if .Plugin.Backend}}<span class="badge badge-neutral">后端插件</span>{{end}}
-          <span class="badge badge-{{.Plugin.StatusTone}}">{{.Plugin.StatusLabel}}</span>
-          {{if .Plugin.Status}}<span class="badge badge-neutral badge-mono">{{.Plugin.Status}}</span>{{end}}
+      <div class="ada-plugin-detail">
+        <aside class="ada-plugin-detail__side">
+          <nav class="ada-plugin-nav" aria-label="插件详情分区">
+            <a class="ada-plugin-nav__item is-active" href="#plugin-info" data-plugin-section="info">
+              <span class="ada-plugin-nav__icon">{{icon "i-plug" 14}}</span>
+              <span class="ada-plugin-nav__text"><strong>插件信息</strong><small>版本、能力与 README</small></span>
+            </a>
+            <a class="ada-plugin-nav__item" href="#plugin-files" data-plugin-section="files">
+              <span class="ada-plugin-nav__icon">{{icon "i-folder" 14}}</span>
+              <span class="ada-plugin-nav__text"><strong>插件目录</strong><small>{{len .Plugin.Files}} 个文件</small></span>
+            </a>
+          </nav>
+        </aside>
+
+        <div class="ada-plugin-detail__main">
+          <section id="plugin-info" class="card p-4 ada-plugin-panel" data-plugin-panel="info">
+            <div class="flex flex-wrap items-center gap-2">
+              {{if .Plugin.Frontend}}<span class="badge badge-brand">前端插件</span>{{end}}
+              {{if .Plugin.Backend}}<span class="badge badge-neutral">后端插件</span>{{end}}
+              <span class="badge badge-{{.Plugin.StatusTone}}">{{.Plugin.StatusLabel}}</span>
+              {{if .Plugin.Status}}<span class="badge badge-neutral badge-mono">{{.Plugin.Status}}</span>{{end}}
+            </div>
+
+            {{if eq .Plugin.Status "unused"}}<p class="mt-2 text-xs text-muted">当前产品没有默认启用这个插件；可在插件列表或本页手动启用。</p>{{end}}
+            {{if and .Plugin.Description (ne .Plugin.Readme .Plugin.Description)}}<p class="mt-2 text-sm leading-6 text-muted">{{.Plugin.Description}}</p>{{end}}
+
+            <div class="ada-plugin-stats">
+              <div class="ada-plugin-stat">
+                <span class="ada-plugin-stat__value">{{.Plugin.Pages}}</span>
+                <span class="ada-plugin-stat__label">页面</span>
+              </div>
+              <div class="ada-plugin-stat">
+                <span class="ada-plugin-stat__value">{{.Plugin.Tools}}</span>
+                <span class="ada-plugin-stat__label">工具</span>
+              </div>
+              <div class="ada-plugin-stat">
+                <span class="ada-plugin-stat__value">{{.Plugin.Slots}}</span>
+                <span class="ada-plugin-stat__label">插槽</span>
+              </div>
+            </div>
+
+            <dl class="ada-plugin-meta">
+              <div>
+                <dt>版本</dt>
+                <dd>{{if .Plugin.Version}}v{{.Plugin.Version}}{{else}}—{{end}}</dd>
+              </div>
+              <div>
+                <dt>API 版本</dt>
+                <dd>{{if .Plugin.APIVersion}}{{.Plugin.APIVersion}}{{else}}—{{end}}</dd>
+              </div>
+              <div>
+                <dt>信任级别</dt>
+                <dd>{{if .Plugin.Trust}}{{.Plugin.Trust}}{{else}}—{{end}}</dd>
+              </div>
+              <div>
+                <dt>来源</dt>
+                <dd>{{if .Plugin.Source}}{{.Plugin.Source}}{{else}}随包{{end}}</dd>
+              </div>
+              {{if .Plugin.Hooks}}<div><dt>钩子</dt><dd>{{.Plugin.Hooks}}</dd></div>{{end}}
+              {{if .Plugin.Skills}}<div><dt>技能</dt><dd>{{.Plugin.Skills}}</dd></div>{{end}}
+              {{if .Plugin.Nav}}<div><dt>导航</dt><dd>{{.Plugin.Nav}}</dd></div>{{end}}
+              <div class="ada-plugin-meta__wide">
+                <dt>插件 ID</dt>
+                <dd class="ada-plugin-meta__mono">{{.Plugin.ID}}</dd>
+              </div>
+            </dl>
+
+            <div class="ada-plugin-section">
+              <h2 class="ada-plugin-section__title">README</h2>
+              {{if .Plugin.Readme}}
+              <div class="markdown-body ada-markdown ada-plugin-readme">{{markdown .Plugin.Readme}}</div>
+              {{else}}
+              <p class="text-sm text-muted">这个插件没有提供 README。</p>
+              {{end}}
+            </div>
+
+            {{if .Plugin.Error}}<p class="mt-3 text-xs text-danger-ink">{{.Plugin.Error}}</p>{{end}}
+
+            <div class="mt-4 flex flex-wrap items-center gap-2">
+              {{if .Plugin.Enabled}}
+              <form method="post" action="/extensions/{{.Plugin.ID}}/disable">
+                {{template "csrf" .}}
+                <button class="ada-btn ada-btn--secondary ada-btn--sm" type="submit">停用</button>
+              </form>
+              {{else}}
+              <form method="post" action="/extensions/{{.Plugin.ID}}/enable">
+                {{template "csrf" .}}
+                <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit">启用</button>
+              </form>
+              {{end}}
+              {{if .Plugin.FirstPage}}
+              <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/ext/{{.Plugin.ID}}/{{.Plugin.FirstPage}}">{{icon "i-external" 13}}打开插件页面</a>
+              {{end}}
+            </div>
+          </section>
+
+          <section id="plugin-files" class="card p-4 ada-plugin-panel" data-plugin-panel="files">
+            <div class="ada-plugin-section">
+              <h2 class="ada-plugin-section__title">插件目录 <span class="ada-plugin-section__meta">{{len .Plugin.Files}} 个文件</span></h2>
+              {{if .Plugin.Files}}
+              <ul class="ada-plugin-files">
+                {{range .Plugin.Files}}
+                <li class="ada-plugin-file {{.DepthClass}}">
+                  <span class="ada-plugin-file__icon">{{icon "i-file" 13}}</span>
+                  <code class="ada-plugin-file__path">{{.Path}}</code>
+                  <span class="ada-plugin-file__size">{{.SizeLabel}}</span>
+                </li>
+                {{end}}
+              </ul>
+              {{else}}
+              <p class="text-sm text-muted">这个插件没有可展示的包内文件。</p>
+              {{end}}
+            </div>
+          </section>
         </div>
-
-        {{if eq .Plugin.Status "unused"}}<p class="mt-2 text-xs text-muted">当前产品没有默认启用这个插件；可在插件列表或本页手动启用。</p>{{end}}
-
-        {{if .Plugin.Description}}<p class="mt-2 text-sm leading-6 text-muted">{{.Plugin.Description}}</p>{{end}}
-
-        <dl class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {{if .Plugin.Source}}
-          <div>
-            <dt class="text-xs text-muted">来源</dt>
-            <dd class="mt-1 text-sm text-ink">{{.Plugin.Source}}</dd>
-          </div>
-          {{end}}
-          {{if .Plugin.Frontend}}
-          <div>
-            <dt class="text-xs text-muted">页面</dt>
-            <dd class="mt-1 text-sm text-ink">{{.Plugin.Pages}}</dd>
-          </div>
-          <div>
-            <dt class="text-xs text-muted">插槽</dt>
-            <dd class="mt-1 text-sm text-ink">{{.Plugin.Slots}}</dd>
-          </div>
-          <div>
-            <dt class="text-xs text-muted">导航</dt>
-            <dd class="mt-1 text-sm text-ink">{{.Plugin.Nav}}</dd>
-          </div>
-          {{end}}
-          {{if .Plugin.Backend}}
-          <div>
-            <dt class="text-xs text-muted">工具</dt>
-            <dd class="mt-1 text-sm text-ink">{{.Plugin.Tools}}</dd>
-          </div>
-          <div>
-            <dt class="text-xs text-muted">钩子</dt>
-            <dd class="mt-1 text-sm text-ink">{{.Plugin.Hooks}}</dd>
-          </div>
-          <div>
-            <dt class="text-xs text-muted">技能</dt>
-            <dd class="mt-1 text-sm text-ink">{{.Plugin.Skills}}</dd>
-          </div>
-          {{end}}
-        </dl>
-
-        {{if .Plugin.Error}}<p class="mt-3 text-xs text-danger-ink">{{.Plugin.Error}}</p>{{end}}
-      </div>
-
-      <div class="mt-4 flex flex-wrap items-center gap-2">
-        {{if .Plugin.Enabled}}
-        <form method="post" action="/extensions/{{.Plugin.ID}}/disable">
-          {{template "csrf" .}}
-          <button class="ada-btn ada-btn--secondary ada-btn--sm" type="submit">停用</button>
-        </form>
-        {{else}}
-        <form method="post" action="/extensions/{{.Plugin.ID}}/enable">
-          {{template "csrf" .}}
-          <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit">启用</button>
-        </form>
-        {{end}}
-        {{if .Plugin.FirstPage}}
-        <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/ext/{{.Plugin.ID}}/{{.Plugin.FirstPage}}">{{icon "i-external" 13}}打开插件页面</a>
-        {{end}}
       </div>
       </div>
     </div>

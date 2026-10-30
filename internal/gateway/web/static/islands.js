@@ -420,18 +420,46 @@
     if (!initial.plugin || !initial.plugin.id) return;
     element.setAttribute('data-ada-mounted', '1');
     var plugin = initial.plugin;
+    plugin.versionLabel = plugin.version ? 'v' + plugin.version : '—';
+    plugin.apiVersionLabel = plugin.apiVersion ? String(plugin.apiVersion) : '—';
+    plugin.trustLabel = plugin.trust || '—';
+    plugin.sourceLabel = plugin.source || '随包';
+    plugin.showDescription = !!plugin.description && plugin.description !== plugin.readme;
+    plugin.readmeNodes = Array.isArray(plugin.readmeNodes) ? plugin.readmeNodes : [];
+    plugin.files = Array.isArray(plugin.files) ? plugin.files : [];
 
     var app = AdaUI.createApp({
       data: function () {
         return {
+          section: 'info',
           plugin: plugin,
           csrf: typeof initial.csrf === 'string' ? initial.csrf : ''
         };
       },
+      methods: {
+        select: function (section) {
+          this.section = section;
+        }
+      },
       template:
-        '<div>' +
-        '<template v-if="plugin && plugin.id">' +
-        '<ui-card>' +
+        '<div class="ada-plugin-detail">' +
+        '<aside class="ada-plugin-detail__side">' +
+        '<nav class="ada-plugin-nav" aria-label="插件详情分区">' +
+        '<button type="button" class="ada-plugin-nav__item" ' +
+        ':class="{ \'is-active\': section === \'info\' }" @click="select(\'info\')">' +
+        '<span class="ada-plugin-nav__icon"><ui-icon name="i-plug" :size="14"></ui-icon></span>' +
+        '<span class="ada-plugin-nav__text"><strong>插件信息</strong><small>版本、能力与 README</small></span>' +
+        '</button>' +
+        '<button type="button" class="ada-plugin-nav__item" ' +
+        ':class="{ \'is-active\': section === \'files\' }" @click="select(\'files\')">' +
+        '<span class="ada-plugin-nav__icon"><ui-icon name="i-folder" :size="14"></ui-icon></span>' +
+        '<span class="ada-plugin-nav__text"><strong>插件目录</strong><small>{{ plugin.files.length }} 个文件</small></span>' +
+        '</button>' +
+        '</nav>' +
+        '</aside>' +
+        '<div class="ada-plugin-detail__main">' +
+
+        '<section v-if="section === \'info\'" class="card p-4 ada-plugin-panel">' +
         '<div class="flex flex-wrap items-center gap-2">' +
         '<ui-badge v-if="plugin.frontend" tone="brand" label="前端插件"></ui-badge>' +
         '<ui-badge v-if="plugin.backend" tone="neutral" label="后端插件"></ui-badge>' +
@@ -439,25 +467,35 @@
         '<ui-badge v-if="plugin.status" tone="neutral" mono :label="plugin.status"></ui-badge>' +
         '</div>' +
         '<p v-if="plugin.status === \'unused\'" class="mt-2 text-xs text-muted">当前产品没有默认启用这个插件；可在插件列表或本页手动启用。</p>' +
-        '<p v-if="plugin.description" class="mt-2 text-sm leading-6 text-muted">{{ plugin.description }}</p>' +
-        '<dl class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">' +
-        '<div v-if="plugin.source"><dt class="text-xs text-muted">来源</dt><dd class="mt-1 text-sm text-ink">{{ plugin.source }}</dd></div>' +
-        '<template v-if="plugin.frontend">' +
-        '<div><dt class="text-xs text-muted">页面</dt><dd class="mt-1 text-sm text-ink">{{ plugin.pages }}</dd></div>' +
-        '<div><dt class="text-xs text-muted">插槽</dt><dd class="mt-1 text-sm text-ink">{{ plugin.slots }}</dd></div>' +
-        '<div><dt class="text-xs text-muted">导航</dt><dd class="mt-1 text-sm text-ink">{{ plugin.nav }}</dd></div>' +
-        '</template>' +
-        '<template v-if="plugin.backend">' +
-        '<div><dt class="text-xs text-muted">工具</dt><dd class="mt-1 text-sm text-ink">{{ plugin.tools }}</dd></div>' +
-        '<div><dt class="text-xs text-muted">钩子</dt><dd class="mt-1 text-sm text-ink">{{ plugin.hooks }}</dd></div>' +
-        '<div><dt class="text-xs text-muted">技能</dt><dd class="mt-1 text-sm text-ink">{{ plugin.skills }}</dd></div>' +
-        '</template>' +
+        '<p v-if="plugin.showDescription" class="mt-2 text-sm leading-6 text-muted">{{ plugin.description }}</p>' +
+        '<div class="ada-plugin-stats">' +
+        '<div class="ada-plugin-stat"><span class="ada-plugin-stat__value">{{ plugin.pages }}</span><span class="ada-plugin-stat__label">页面</span></div>' +
+        '<div class="ada-plugin-stat"><span class="ada-plugin-stat__value">{{ plugin.tools }}</span><span class="ada-plugin-stat__label">工具</span></div>' +
+        '<div class="ada-plugin-stat"><span class="ada-plugin-stat__value">{{ plugin.slots }}</span><span class="ada-plugin-stat__label">插槽</span></div>' +
+        '</div>' +
+        '<dl class="ada-plugin-meta">' +
+        '<div><dt>版本</dt><dd>{{ plugin.versionLabel }}</dd></div>' +
+        '<div><dt>API 版本</dt><dd>{{ plugin.apiVersionLabel }}</dd></div>' +
+        '<div><dt>信任级别</dt><dd>{{ plugin.trustLabel }}</dd></div>' +
+        '<div><dt>来源</dt><dd>{{ plugin.sourceLabel }}</dd></div>' +
+        '<div v-if="plugin.hooks"><dt>钩子</dt><dd>{{ plugin.hooks }}</dd></div>' +
+        '<div v-if="plugin.skills"><dt>技能</dt><dd>{{ plugin.skills }}</dd></div>' +
+        '<div v-if="plugin.nav"><dt>导航</dt><dd>{{ plugin.nav }}</dd></div>' +
+        '<div class="ada-plugin-meta__wide"><dt>插件 ID</dt><dd class="ada-plugin-meta__mono">{{ plugin.id }}</dd></div>' +
         '</dl>' +
+        '<div class="ada-plugin-section">' +
+        '<h2 class="ada-plugin-section__title">README</h2>' +
+        '<div v-if="plugin.readmeNodes.length" class="markdown-body ada-markdown ada-plugin-readme">' +
+        '<ui-markdown :nodes="plugin.readmeNodes"></ui-markdown>' +
+        '</div>' +
+        '<div v-else-if="plugin.readme" class="markdown-body ada-markdown ada-plugin-readme">' +
+        '<ui-markdown :text="plugin.readme"></ui-markdown>' +
+        '</div>' +
+        '<p v-else class="text-sm text-muted">这个插件没有提供 README。</p>' +
+        '</div>' +
         '<p v-if="plugin.error" class="mt-3 text-xs text-danger-ink">{{ plugin.error }}</p>' +
-        '</ui-card>' +
         '<div class="mt-4 flex flex-wrap items-center gap-2">' +
-        '<form method="post" ' +
-        ':action="plugin.enabled ? \'/extensions/\' + plugin.id + \'/disable\' : \'/extensions/\' + plugin.id + \'/enable\'">' +
+        '<form method="post" :action="plugin.enabled ? \'/extensions/\' + plugin.id + \'/disable\' : \'/extensions/\' + plugin.id + \'/enable\'">' +
         '<input type="hidden" name="csrf_token" :value="csrf">' +
         '<ui-button type="submit" :variant="plugin.enabled ? \'secondary\' : \'primary\'" size="sm" ' +
         ':label="plugin.enabled ? \'停用\' : \'启用\'"></ui-button>' +
@@ -465,7 +503,24 @@
         '<ui-button v-if="plugin.firstPage" :href="\'/ext/\' + plugin.id + \'/\' + plugin.firstPage" ' +
         'variant="secondary" size="sm" icon="i-external" label="打开插件页面"></ui-button>' +
         '</div>' +
-        '</template>' +
+        '</section>' +
+
+        '<section v-if="section === \'files\'" class="card p-4 ada-plugin-panel">' +
+        '<div class="ada-plugin-section">' +
+        '<h2 class="ada-plugin-section__title">插件目录 <span class="ada-plugin-section__meta">{{ plugin.files.length }} 个文件</span></h2>' +
+        '<ul v-if="plugin.files.length" class="ada-plugin-files">' +
+        '<li v-for="f in plugin.files" :key="f.path" class="ada-plugin-file" ' +
+        ':class="f.depthClass || \'ada-plugin-file--d0\'">' +
+        '<span class="ada-plugin-file__icon"><ui-icon name="i-file" :size="13"></ui-icon></span>' +
+        '<code class="ada-plugin-file__path">{{ f.path }}</code>' +
+        '<span class="ada-plugin-file__size">{{ f.sizeLabel }}</span>' +
+        '</li>' +
+        '</ul>' +
+        '<p v-else class="text-sm text-muted">这个插件没有可展示的包内文件。</p>' +
+        '</div>' +
+        '</section>' +
+
+        '</div>' +
         '</div>'
     });
 

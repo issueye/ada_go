@@ -178,12 +178,17 @@ func loadOne(dir, dirName, source string) (Plugin, *Warning) {
 	if err != nil {
 		return fail("计算目录指纹失败: %v", err)
 	}
+	readme := ""
+	if data, rerr := os.ReadFile(filepath.Join(dir, "README.md")); rerr == nil {
+		readme = string(data)
+	}
 	script := host.Script{
 		Manifest:     m,
 		EntryName:    host.EntryScheme + "://" + m.ID + "/" + m.Backend.Entry,
 		Source:       string(src),
 		Bundle:       bundle,
 		StaticAssets: assets,
+		Readme:       readme,
 	}
 	return Plugin{Script: script, Fingerprint: fp, Source: source, Dir: dir}, nil
 }

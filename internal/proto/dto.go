@@ -293,8 +293,20 @@ type PluginSummary struct {
 	Fingerprint string `json:"fingerprint"`
 	LastError   string `json:"lastError,omitempty"`
 	// Source 是第三方插件的来源（workspace|global）；随包插件省略（M3 安装/发现）。
-	Source        string         `json:"source,omitempty"`
+	Source string `json:"source,omitempty"`
+	// Readme 是插件 README 正文（随包插件无 README 时回退为清单说明）。
+	Readme string `json:"readme,omitempty"`
+	// Files 是插件包内的文件清单（相对路径，不含宿主绝对路径）。
+	Files         []PluginFile   `json:"files,omitempty"`
 	Contributions map[string]any `json:"contributions,omitempty"`
+}
+
+// PluginFile 是插件包内一个文件（详情页「插件目录」用）。
+type PluginFile struct {
+	Path  string `json:"path"`
+	Size  int64  `json:"size"`
+	Dir   bool   `json:"dir,omitempty"`
+	Depth int    `json:"depth,omitempty"`
 }
 
 // ModelRef 是模型选择的最小引用；能力声明见 ModelInfo。

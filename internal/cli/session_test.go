@@ -157,6 +157,43 @@ func viewOf(sess *cli.Session, ctx context.Context, id string) (cli.PluginView, 
 	return cli.PluginView{}, false
 }
 
+// 插件详情（README/文件清单）只为目标插件计算；随包插件用嵌入内容还原包内路径。
+func TestPluginViewDetailFilesAndReadme(t *testing.T) {
+	cfg := testConfig(t, "")
+	ctx := context.Background()
+	sess, err := cli.Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer sess.Close(ctx)
+
+	view, ok := sess.PluginViewDetail(ctx, "tools-plan")
+	if !ok {
+		t.Fatal("找不到 tools-plan")
+	}
+	if !strings.Contains(view.Readme, "# 任务计划") {
+		t.Fatalf("详情视图没有读到插件 README: %q", view.Readme)
+	}
+	paths := map[string]bool{}
+	for _, f := range view.Files {
+		paths[f.Path] = true
+	}
+	for _, want := range []string{"README.md", "plugin.json", "dist/index.js", "slot.tsx", "static/todo.css"} {
+		if !paths[want] {
+			t.Fatalf("文件清单缺少 %q（现有：%v）", want, paths)
+		}
+	}
+
+	// 列表视图保持轻量：不计算 README/文件。
+	lean, ok := viewOf(sess, ctx, "tools-plan")
+	if !ok {
+		t.Fatal("列表视图里没有 tools-plan")
+	}
+	if len(lean.Files) != 0 || lean.Readme != "" {
+		t.Fatalf("列表视图不应带详情数据: files=%d readme=%d", len(lean.Files), len(lean.Readme))
+	}
+}
+
 // 插件工具必须能从 ctx.threadId 拿到会话 ID（tools-plan 按会话读写 TODO 文件）。
 // 这里跑完整引擎/执行器路径，防止归属只在 Rollback 工具上注入的回归。
 func TestSessionPluginToolReceivesThreadID(t *testing.T) {

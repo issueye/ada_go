@@ -63,6 +63,8 @@ type Script struct {
 	Bundle map[string]string
 	// StaticAssets 是插件包内静态资源的只读视图（plugin://<id>/…）。
 	StaticAssets map[string][]byte
+	// Readme 是插件包内 README.md 的原文（可选；详情页展示用）。
+	Readme string
 }
 
 // CapabilitySet 是装配期算出的「这个插件实际能拿到什么」。
