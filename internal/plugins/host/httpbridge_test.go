@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -17,11 +16,7 @@ import (
 
 func bridgeFor(t *testing.T, srv *httptest.Server) *host.Bridge {
 	t.Helper()
-	u, err := url.Parse(srv.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := host.NewHTTPBridge(host.HTTPBridgeConfig{AllowHosts: []string{u.Host}, IdleTimeout: time.Second})
+	b, err := host.NewHTTPBridge(host.HTTPBridgeConfig{IdleTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +37,7 @@ func TestBridgeUsesPerRequestProxy(t *testing.T) {
 	}))
 	defer proxy.Close()
 
-	b, err := host.NewHTTPBridge(host.HTTPBridgeConfig{AllowHosts: []string{"api.example.com"}})
+	b, err := host.NewHTTPBridge(host.HTTPBridgeConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,31 +55,18 @@ func TestBridgeUsesPerRequestProxy(t *testing.T) {
 	}
 }
 
-func TestHTTPBridgeAllowlist(t *testing.T) {
+// host 黑白名单暂未启用（后续以插件形式实现）：任意 host 都可出网，
+// 只保留协议/重定向/上限边界。原 allowlist 用例已随功能移除。
+func TestHTTPBridgeAnyHost(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"ok":true}`)
 	}))
 	defer srv.Close()
 
-	b, err := host.NewHTTPBridge(host.HTTPBridgeConfig{AllowHosts: []string{"example.invalid"}})
+	b := bridgeFor(t, srv)
+	res, err := b.JSON(context.Background(), "GET", srv.URL, nil, "", 1024)
 	if err != nil {
-		t.Fatal(err)
-	}
-	defer b.Close()
-	if _, err := b.JSON(context.Background(), "GET", srv.URL, nil, "", 1024); err == nil {
-		t.Fatal("allowlist 之外的 host 必须被拒绝")
-	}
-	// 用户配置的供应商端点可以在运行期加入 allowlist。
-	u, _ := url.Parse(srv.URL)
-	b.AllowHost(u.Host)
-	if res, err := b.JSON(context.Background(), "GET", srv.URL, nil, "", 1024); err != nil || res.Status != 200 {
-		t.Fatalf("AllowHost 后请求失败: %v %+v", err, res)
-	}
-
-	ok := bridgeFor(t, srv)
-	res, err := ok.JSON(context.Background(), "GET", srv.URL, nil, "", 1024)
-	if err != nil {
-		t.Fatalf("allowlist 内请求失败: %v", err)
+		t.Fatalf("请求失败: %v", err)
 	}
 	if res.Status != 200 || string(res.Body) != `{"ok":true}` {
 		t.Fatalf("响应 = %d %s", res.Status, res.Body)

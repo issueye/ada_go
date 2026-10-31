@@ -186,6 +186,84 @@ type Context struct {
 	RemoveProvider func(ctx context.Context, providerID string) error
 	// FetchProviderModels 用已保存的端点/密钥拉取 /models（capability: model.admin）。
 	FetchProviderModels func(ctx context.Context, providerID string) ([]ProviderModel, error)
+	// InstallPlugin 把一份插件骨架写入全局插件根（capability: plugin.admin；仅 builtin）。
+	// 宿主负责 id/相对路径校验、大小上限与「不覆盖已有插件」；脚本拿不到任意文件写权限。
+	InstallPlugin func(ctx context.Context, spec PluginInstallSpec) (PluginInstallResult, error)
+	// CheckPlugin 汇报插件的健康状态（capability: plugin.admin；仅 builtin）。
+	// pluginID 为空时返回全部插件的摘要；非空时返回单个插件的完整诊断报告
+	// （发现位置、清单、启停决策、装配状态与入口预加载结果）。
+	CheckPlugin func(ctx context.Context, pluginID string) (PluginCheckResult, error)
+	// RemovePlugin 删除一个已安装插件的目录（capability: plugin.admin；仅 builtin）。
+	// 工作区副本优先于全局副本；随包插件不可移除。生效需重载。
+	RemovePlugin func(ctx context.Context, pluginID string) (PluginRemoveResult, error)
+}
+
+// PluginFileSpec 是安装骨架里的一个文件：path 是插件目录内的相对路径。
+type PluginFileSpec struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+// PluginInstallSpec 是 ctx.pluginAdmin.install 的入参。
+type PluginInstallSpec struct {
+	ID    string           `json:"id"`
+	Files []PluginFileSpec `json:"files"`
+}
+
+// PluginInstallResult 是安装结果：dir 是全局根下的插件目录（本机绝对路径，
+// 仅用于展示，脚本没有它的读写能力）。
+type PluginInstallResult struct {
+	ID    string   `json:"id"`
+	Dir   string   `json:"dir"`
+	Files []string `json:"files"`
+}
+
+// PluginCheckSummary 是插件健康清单里的一行（check_plugin 不带 id 时）。
+type PluginCheckSummary struct {
+	ID        string `json:"id"`
+	Source    string `json:"source,omitempty"`
+	Status    string `json:"status"`
+	Enabled   bool   `json:"enabled"`
+	LastError string `json:"lastError,omitempty"`
+}
+
+// PluginCheckItem 是诊断报告里的一项检查。
+type PluginCheckItem struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// PluginCheckReport 是单个插件的完整诊断报告。
+type PluginCheckReport struct {
+	ID           string            `json:"id"`
+	Found        bool              `json:"found"`
+	Name         string            `json:"name,omitempty"`
+	Version      string            `json:"version,omitempty"`
+	Trust        string            `json:"trust,omitempty"`
+	Source       string            `json:"source,omitempty"` // bundled | global | workspace
+	Dir          string            `json:"dir,omitempty"`
+	Entry        string            `json:"entry,omitempty"`
+	Capabilities []string          `json:"capabilities,omitempty"`
+	Enabled      bool              `json:"enabled"`
+	Status       string            `json:"status,omitempty"`
+	LastError    string            `json:"lastError,omitempty"`
+	Tools        []string          `json:"tools,omitempty"`
+	Files        []string          `json:"files,omitempty"`
+	Checks       []PluginCheckItem `json:"checks,omitempty"`
+}
+
+// PluginCheckResult 是 ctx.pluginAdmin.check 的返回：id 为空时只有 Plugins 摘要。
+type PluginCheckResult struct {
+	Plugins []PluginCheckSummary `json:"plugins,omitempty"`
+	Report  *PluginCheckReport   `json:"report,omitempty"`
+}
+
+// PluginRemoveResult 是移除结果：source 说明删掉的是哪一份副本。
+type PluginRemoveResult struct {
+	ID     string `json:"id"`
+	Dir    string `json:"dir"`
+	Source string `json:"source"` // workspace | global
 }
 
 // ModelRef 是当前模型的引用。

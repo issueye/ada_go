@@ -49,7 +49,8 @@ type Config struct {
 	Provider  string
 	Model     string
 	BaseURL   string
-	// AllowHosts 追加出网 allowlist；为空时只允许 BaseURL 的 host（或 api.openai.com）。
+	// AllowHosts 已废弃：出网 host 黑白名单暂未启用（后续以插件形式实现）。
+	// 字段保留是为了兼容旧的组合根赋值，值会被忽略。
 	AllowHosts []string
 	// Fake 使用确定性回显模型，不需要 API key。
 	Fake bool
@@ -82,6 +83,9 @@ type Config struct {
 	//   - 显式传 DataDir：<DataDir>/providers.json（测试/隔离数据目录）；
 	//   - 默认数据目录：~/.adago/providers.json（切换工作区共享同一套供应商）。
 	ProvidersPath string
+	// PluginStatePath 是全局插件启停状态（plugins.json）的位置；空时取
+	// ~/.adago/plugins.json（ADAGO_HOME 优先）。测试用显式路径隔离真实主目录。
+	PluginStatePath string
 	// Log 接收插件日志；nil 时丢弃。
 	Log func(level, msg string, fields map[string]any)
 	// Debug 开启出网调试：把每次 provider/ctx.fetch 请求与响应摘要（密钥已脱敏）
@@ -300,6 +304,11 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 	hc.SaveProvider = s.saveProviderFromPlugin
 	hc.RemoveProvider = s.removeProviderFromPlugin
 	hc.FetchProviderModels = s.fetchModelsFromPlugin
+	// 插件安装（plugin.admin）：骨架统一写入全局插件根 ~/.adago/plugins/<id>/。
+	hc.InstallPlugin = s.installPluginGlobally
+	// 插件健康检查（plugin.admin）：诊断报告（发现/启停/装配/入口预加载）。
+	hc.CheckPlugin = s.checkPlugin
+	hc.RemovePlugin = s.removePlugin
 	// M5 检查点：宿主 fs 写入前把被覆盖文件备份进持久化账目（changes/）。
 	s.changes = toolkit.NewChangeQueue()
 	s.changeStore = newChangeStore(dataDir)
@@ -1094,9 +1103,6 @@ func (s *Session) applyProviderConfigs(asm *app.Assembly) {
 		}
 	}
 	migrateProviderThinkingLevels(cfgs)
-	for _, c := range cfgs {
-		s.allowProviderHost(c)
-	}
 	asm.Providers.SetConfigs(cfgs)
 	s.providersMu.Lock()
 	s.providerConfigs = cloneProviderConfigs(cfgs)
@@ -1117,9 +1123,6 @@ func (s *Session) RefreshProviderConfigs() {
 		return
 	}
 	migrateProviderThinkingLevels(cfgs)
-	for _, c := range cfgs {
-		s.allowProviderHost(c)
-	}
 	asm.Providers.SetConfigs(cfgs)
 	s.providersMu.Lock()
 	s.providerConfigs = cloneProviderConfigs(cfgs)
@@ -1400,7 +1403,6 @@ func (s *Session) saveProviderFromPlugin(ctx context.Context, in host.ProviderIn
 	if err := s.providerStore.Save(cfgs); err != nil {
 		return host.ProviderInfo{}, fmt.Errorf("保存供应商失败: %w", err)
 	}
-	s.allowProviderHost(cfg)
 	s.providerConfigs = cloneProviderConfigs(cfgs)
 	if asm := s.Assembly(); asm != nil && asm.Providers != nil {
 		asm.Providers.SetConfigs(cfgs)
@@ -1936,16 +1938,9 @@ func (s *Session) stateOp(ctx context.Context, op host.StateOp) (json.RawMessage
 }
 
 func buildHTTPBridge(cfg Config, debugLog *host.DebugLog) (httpBridge, error) {
-	allow := append([]string(nil), cfg.AllowHosts...)
-	if cfg.BaseURL != "" {
-		if u, err := urlHost(cfg.BaseURL); err == nil && u != "" {
-			allow = append(allow, u)
-		}
-	}
-	if len(allow) == 0 {
-		allow = []string{"api.openai.com"}
-	}
-	bcfg := host.HTTPBridgeConfig{AllowHosts: allow, DebugLog: debugLog}
+	// host 黑白名单暂未启用（后续以插件形式实现，见 AGENTS.md）：
+	// 出网不限目标主机；协议/上限/超时由桥兜底。
+	bcfg := host.HTTPBridgeConfig{DebugLog: debugLog}
 	b, err := host.NewHTTPBridge(bcfg)
 	return b, err
 }
@@ -1953,40 +1948,7 @@ func buildHTTPBridge(cfg Config, debugLog *host.DebugLog) (httpBridge, error) {
 // httpBridge 让调用方能在关闭时释放连接池；领域侧只依赖 host.HTTPBridge。
 type httpBridge interface {
 	host.HTTPBridge
-	AllowHost(host string)
 	Close()
-}
-
-// allowProviderHost 把供应商端点加入出网 allowlist；空 BaseURL 时按协议默认域名。
-func (s *Session) allowProviderHost(c provider.Config) {
-	if s.httpBridge == nil {
-		return
-	}
-	raw := strings.TrimSpace(c.BaseURL)
-	hostName := ""
-	if raw != "" {
-		if h, err := urlHost(raw); err == nil {
-			hostName = h
-		}
-	} else if c.Protocol == provider.ProtocolAnthropic {
-		hostName = "api.anthropic.com"
-	} else {
-		hostName = "api.openai.com"
-	}
-	if hostName != "" {
-		s.httpBridge.AllowHost(hostName)
-	}
-}
-
-func urlHost(raw string) (string, error) {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "", err
-	}
-	if u.Host == "" {
-		return "", nil
-	}
-	return u.Host, nil
 }
 
 // loadSecrets 读取 ~/.adago/secrets.toml（形如 openai_api_key = "sk-..."）。
@@ -2241,6 +2203,8 @@ func (s *Session) listPluginMeta(ctx context.Context) map[string]sqlite.PluginMe
 	for _, r := range rows {
 		out[r.ID] = r
 	}
+	// 启用状态的真源在 JSON（全局共享 + 工作区覆盖）；SQLite 只剩运行元信息。
+	s.overlayPluginState(ctx, out)
 	return out
 }
 
@@ -2310,13 +2274,10 @@ func productIDSet(p *coreapp.Product) map[string]bool {
 }
 
 // syncPluginMeta 把当前发现的插件写进 plugin_meta（6.9：id+版本+指纹）：
-// 新插件缺省 enabled；已有记录保留用户启用状态；本次装配失败被隔离的插件
-// 记录 last_error，健康的插件清掉旧错误。随包插件同样落一行（否则 setEnabled
-// 会因缺行失败），指纹取嵌入 bundle 的哈希。
-//
-// 产品默认与用户显式选择分开：user_set=0 时随包插件的 enabled 由产品声明决定
-// （声明=启用，未声明=未启用）；user_set=1 时以用户的选择为准。这样旧版本给
-// 所有随包插件写下的 enabled=1 不会把未声明插件误当成已启用。
+// enabled 只落「产品默认」（声明=启用；第三方缺省启用），user_set 恒为 0 ——
+// 启用决策的真源是 JSON 状态（全局 ~/.adago/plugins.json + 工作区
+// .adag/plugins.json，见 plugin_state.go），读取时由 listPluginMeta 叠加，
+// 出现在 JSON 里即视为用户显式选择并覆盖本行的 enabled。
 func (s *Session) syncPluginMeta(ctx context.Context, discovered []discovery.Plugin, meta map[string]sqlite.PluginMetaRecord, failures map[string]string) error {
 	productIDs := productIDSet(s.product)
 	for _, sc := range s.baseScripts {
@@ -2324,17 +2285,12 @@ func (s *Session) syncPluginMeta(ctx context.Context, discovered []discovery.Plu
 			continue
 		}
 		id := sc.Manifest.ID
-		inProduct := productIDs[id]
-		enabled, userSet, lastErr := inProduct, false, ""
+		lastErr := ""
 		if rec, ok := meta[id]; ok {
-			userSet = rec.UserSet
 			lastErr = rec.LastError
-			if userSet {
-				enabled = rec.Enabled
-			}
 		}
 		rec := sqlite.PluginMetaRecord{
-			ID: id, Version: sc.Manifest.Version, Enabled: enabled, UserSet: userSet,
+			ID: id, Version: sc.Manifest.Version, Enabled: productIDs[id],
 			Fingerprint: fingerprintScript(sc), LastError: lastErr,
 		}
 		if err := s.store.UpsertPluginMeta(ctx, rec); err != nil {
@@ -2346,17 +2302,12 @@ func (s *Session) syncPluginMeta(ctx context.Context, discovered []discovery.Plu
 		if id == "" || p.Script.Manifest == nil {
 			continue
 		}
-		enabled, userSet := true, false
-		if rec, ok := meta[id]; ok {
-			enabled = rec.Enabled
-			userSet = rec.UserSet
-		}
 		lastErr := ""
 		if msg, bad := failures[id]; bad {
 			lastErr = msg
 		}
 		rec := sqlite.PluginMetaRecord{
-			ID: id, Version: p.Script.Manifest.Version, Enabled: enabled, UserSet: userSet,
+			ID: id, Version: p.Script.Manifest.Version, Enabled: true,
 			Fingerprint: p.Fingerprint, LastError: lastErr,
 		}
 		if err := s.store.UpsertPluginMeta(ctx, rec); err != nil {
@@ -2479,6 +2430,10 @@ type PluginView struct {
 	Hooks []string
 	// Skills 是随包技能名（6.7 的 contributions.skills 计数来源）。
 	Skills []string
+	// Entry 是后端入口相对路径；ManifestCapabilities 是声明的能力位。
+	// check_plugin 的诊断报告用。
+	Entry                string
+	ManifestCapabilities []string
 	// Frontend / Backend 标明清单段；统一插件包可以两者都为真。
 	Frontend bool
 	Backend  bool
@@ -2847,6 +2802,12 @@ func pluginViewOf(sc host.Script, source string, p *discovery.Plugin, rec sqlite
 	v.APIVersion = m.APIVersion
 	v.Trust = string(m.Trust)
 	v.Enabled = !recOK || rec.Enabled
+	if m.Backend != nil {
+		v.Entry = m.Backend.Entry
+		for _, cap := range m.Backend.Capabilities {
+			v.ManifestCapabilities = append(v.ManifestCapabilities, string(cap))
+		}
+	}
 	if p != nil {
 		v.Fingerprint = p.Fingerprint
 	} else {
@@ -3006,7 +2967,7 @@ func (s *Session) SetPluginEnabled(ctx context.Context, pluginID string, enabled
 	}
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
-	script, _, fp, ok := s.lookupPlugin(pluginID)
+	script, _, _, ok := s.lookupPlugin(pluginID)
 	if !ok {
 		return PluginView{}, fmt.Errorf("cli: 没有发现插件 %q", pluginID)
 	}
@@ -3014,30 +2975,27 @@ func (s *Session) SetPluginEnabled(ctx context.Context, pluginID string, enabled
 		return PluginView{}, domain.NewError(domain.CodePluginDenied,
 			fmt.Sprintf("插件 %s 是审批策略插件，目录里仍有写/执行工具，禁用会被拒绝（失败关闭，5.4）", pluginID))
 	}
-	meta := s.listPluginMeta(ctx)
-	prev, hadPrev := meta[pluginID]
-	prevEnabled := true
-	prevUserSet := false
-	if hadPrev {
-		prevEnabled = prev.Enabled
-		prevUserSet = prev.UserSet
+	// 启停状态的真源是 JSON：默认写全局（~/.adago/plugins.json，跨工作区共享）；
+	// 工作区已有覆盖文件（.adag/plugins.json）时继续写工作区，保持该工作区的
+	// 单独启停语义。SQLite 不再存启用决策。
+	wsPath := workspacePluginStatePath(s.cfg.Workspace)
+	path := s.globalPluginStatePath()
+	if path == "" {
+		// 主目录不可用：退回工作区文件，保证启停仍可用。
+		path = wsPath
+	} else if _, exists, err := loadPluginStateFile(wsPath); err == nil && exists {
+		path = wsPath
 	}
-	rec := sqlite.PluginMetaRecord{
-		ID: pluginID, Version: manifestVersionOf(script), Enabled: enabled, UserSet: true, Fingerprint: fp,
-	}
-	if err := s.store.UpsertPluginMeta(ctx, rec); err != nil {
+	prev, hadPrev, err := setPluginStateEntry(path, pluginID, enabled)
+	if err != nil {
 		return PluginView{}, err
 	}
 	if err := s.reloadAssembly(ctx); err != nil {
-		// 回滚 meta，与仍在运行的旧代保持一致。
-		rollback := rec
-		rollback.Enabled = prevEnabled
-		rollback.UserSet = prevUserSet
-		rollback.LastError = prev.LastError
-		_ = s.store.UpsertPluginMeta(ctx, rollback)
+		// 回滚 JSON，与仍在运行的旧代保持一致。
+		restorePluginStateEntry(path, pluginID, prev, hadPrev)
 		return PluginView{}, err
 	}
-	// 审计（09 §10：插件禁用/启用）：成功才记，失败路径上面已回滚 meta。
+	// 审计（09 §10：插件禁用/启用）：成功才记，失败路径上面已回滚。
 	s.audit(ctx, "plugin.changed", "", pluginID, map[string]any{"enabled": enabled})
 	return s.viewFor(ctx, pluginID), nil
 }
@@ -3052,6 +3010,7 @@ func manifestVersionOf(sc host.Script) string {
 
 // ListPluginMetaOffline 用只读连接读取插件启用状态（adag plugin list 用）。
 // 数据库还不存在时返回空表：插件目录可以先安装、后启动。
+// 启用决策叠加 JSON 状态（工作区 .adag/plugins.json 覆盖全局 plugins.json）。
 func ListPluginMetaOffline(ctx context.Context, workspace, dataDir string) (map[string]sqlite.PluginMetaRecord, error) {
 	abs, dir, err := paths(workspace, dataDir)
 	if err != nil {
@@ -3072,6 +3031,23 @@ func ListPluginMetaOffline(ctx context.Context, workspace, dataDir string) (map[
 	out := map[string]sqlite.PluginMetaRecord{}
 	for _, rec := range rows {
 		out[rec.ID] = rec
+	}
+	wsEntries, wsExists, _ := loadPluginStateFile(workspacePluginStatePath(abs))
+	globalEntries, _, _ := loadPluginStateFile(globalPluginStatePath())
+	apply := func(entries map[string]pluginStateEntry) {
+		for id, entry := range entries {
+			rec, ok := out[id]
+			if !ok {
+				rec = sqlite.PluginMetaRecord{ID: id}
+			}
+			rec.Enabled = entry.Enabled
+			rec.UserSet = true
+			out[id] = rec
+		}
+	}
+	apply(globalEntries)
+	if wsExists {
+		apply(wsEntries)
 	}
 	return out, nil
 }

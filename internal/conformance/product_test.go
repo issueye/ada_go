@@ -12,7 +12,7 @@ import (
 )
 
 // codingPlugins 是 08 §8.6 与 development-plan §1.1 冻结的官方插件清单
-// （12 项：11 个后端实例；tools-plan/tools-ask 的后端与卡片同属一个插件，provider-admin / plugin-creator 同时提供 route 后端与页面，token-usage 是纯前端）。
+// （12 项：11 个后端实例；tools-plan/tools-ask 的后端与卡片同属一个插件，provider-admin / plugin-helper 同时提供 route 后端与页面，token-usage 是纯前端）。
 // 只出现在测试代码里：基座源码不认得它们（1.5.5 的硬边界），选择权在产品声明。
 var codingPlugins = []string{
 	"provider-openai-chat",
@@ -26,7 +26,7 @@ var codingPlugins = []string{
 	"persona-coding",
 	"provider-admin",
 	"token-usage",
-	"plugin-creator",
+	"plugin-helper",
 }
 
 // TestProductDeclarations 断言产品声明这一侧的契约（08 §8.6、M0.3/M0.4 交付物）：

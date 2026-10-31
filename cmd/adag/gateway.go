@@ -39,8 +39,6 @@ func runGateway(args []string, stdout io.Writer) error {
 	parentPID := fs.Int("parent-pid", 0, "父进程 pid（父进程消失时网关自行退出；桌面壳/测试用）")
 	maxCores := fs.Int("max-cores", 8, "同时存活的 Core 上限")
 	idle := fs.Duration("idle-reap", gateway.DefaultIdle, "空闲 Core 回收时间")
-	var allowHosts stringList
-	fs.Var(&allowHosts, "allow-host", "Core 额外出网 host/端口（可重复）")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -60,7 +58,7 @@ func runGateway(args []string, stdout io.Writer) error {
 	cfg := gateway.Config{
 		Workspaces: workspaces, Product: *product,
 		Provider: *provider, Model: *model, BaseURL: *baseURL,
-		DataDir: *dataDir, AllowHosts: allowHosts, Fake: *fake,
+		DataDir: *dataDir, Fake: *fake,
 		Debug:     debugRequested(*debug),
 		Token:     accessToken,
 		CoreToken: strings.TrimSpace(os.Getenv("ADAG_CORE_TOKEN")),

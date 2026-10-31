@@ -37,9 +37,7 @@ type Options struct {
 	Model    string
 	BaseURL  string
 	DataDir  string
-	// AllowHosts 是额外出网 host 白名单（可重复的 --allow-host）。
 	Fake       bool
-	AllowHosts []string
 	// Debug 给 Core 加 --debug，并把其 stderr 一并转发到网关 stderr。
 	Debug bool
 	// ParentPID 是传给 Core 的父进程 pid；0 表示取当前进程 pid。

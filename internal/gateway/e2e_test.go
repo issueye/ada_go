@@ -154,8 +154,15 @@ func startGateway(t *testing.T, bin, repo, workspace, dataDir string) *gatewayPr
 	)
 	// 在仓库根运行，让 defaultProductPath 能找到 products/headless.agent.json。
 	cmd.Dir = repo
-	// 去掉令牌类环境变量，确保本次 Gateway 自动生成 token 并回显在握手行里。
-	cmd.Env = envWithout("ADAG_GATEWAY_TOKEN", "ADAG_CORE_TOKEN")
+	// 去掉令牌类环境变量，确保本次 Gateway 自动生成 token 并回显在握手行里；
+	// HOME/USERPROFILE 指向临时目录，发现层不扫真实 ~/.adago/plugins。
+	home, homeErr := os.MkdirTemp("", "adago-e2e-home-")
+	if homeErr != nil {
+		t.Fatalf("创建临时主目录失败: %v", homeErr)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
+	cmd.Env = append(envWithout("ADAG_GATEWAY_TOKEN", "ADAG_CORE_TOKEN"),
+		"HOME="+home, "USERPROFILE="+home)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

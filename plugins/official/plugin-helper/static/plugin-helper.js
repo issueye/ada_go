@@ -1,5 +1,5 @@
 /*
- * 创建插件（plugin-creator）的浏览器端。
+ * 插件助手（plugin-helper）的浏览器端：安装向导。
  *
  * 表单提交到本插件 route POST /create；后端负责校验 id、检查目录是否已存在、
  * 写入 plugin.json / index.ts / README.md。成功后调用基座的插件重载接口，
@@ -42,7 +42,7 @@
   function updatePath() {
     if (!pathNode || !idInput) return;
     var id = String(idInput.value || "").trim().toLowerCase();
-    pathNode.textContent = ".adago/plugins/" + (id || "<id>");
+    pathNode.textContent = "~/.adago/plugins/" + (id || "<id>");
   }
 
   function reloadPlugins() {
@@ -87,7 +87,7 @@
     status("正在创建插件…");
 
     window
-      .adaAPI("plugin-creator", "/create", { method: "POST", body: body })
+      .adaAPI("plugin-helper", "/create", { method: "POST", body: body })
       .then(function (result) {
         status("已创建 " + result.path + "，正在重载插件…", "success");
         return reloadPlugins()

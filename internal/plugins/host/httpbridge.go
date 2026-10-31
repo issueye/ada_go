@@ -2,8 +2,10 @@ package host
 
 // 宿主出网桥（03 §5.5、09 §9.1）：provider 与 ctx.fetch 的唯一出口。
 //
-// 这里集中执行：协议/主机/端口 allowlist、重定向逐跳检查、建连/空闲/总时长、
-// 取消贯穿、响应大小上限与 SSE 帧解析。插件侧看不到 socket、DNS 或 TLS 细节。
+// 这里集中执行：协议检查、重定向逐跳检查、建连/空闲/总时长、取消贯穿、
+// 响应大小上限与 SSE 帧解析。插件侧看不到 socket、DNS 或 TLS 细节。
+// host 黑白名单暂未启用（后续以插件形式实现，见 AGENTS.md）：
+// 当前只要协议合法即可出网，边界由响应上限与超时兜底。
 
 import (
 	"bufio"
@@ -25,10 +27,6 @@ import (
 
 // HTTPBridgeConfig 是桥的边界参数；零值取安全默认。
 type HTTPBridgeConfig struct {
-	// AllowHosts 是 host 或 host:port 白名单；支持 *.example.com 后缀。
-	// AllowAnyHost 为 true 时跳过主机检查（只应在受控测试中使用）。
-	AllowHosts   []string
-	AllowAnyHost bool
 	// ConnectTimeout 覆盖建连与响应头；IdleTimeout 是 SSE 两次事件之间的上限；
 	// TotalTimeout 是整次请求的上限。
 	ConnectTimeout time.Duration
@@ -49,9 +47,6 @@ type HTTPBridgeConfig struct {
 
 // Bridge 实现 host.HTTPBridge（出网唯一出口）。
 type Bridge struct {
-	allowAny bool
-	mu       sync.RWMutex
-	allow    []string
 	connect  time.Duration
 	idle     time.Duration
 	total    time.Duration
@@ -67,12 +62,10 @@ type Bridge struct {
 
 var _ HTTPBridge = (*Bridge)(nil)
 
-// NewHTTPBridge 创建出网桥。未给 allowlist 且未显式 AllowAnyHost 时拒绝创建：
-// 「默认没有任何网络」是安全边界，而不是运行时再提醒。
+// NewHTTPBridge 创建出网桥。
+// host 黑白名单暂未启用（后续以插件形式实现）：当前不限制目标主机，
+// 协议（http/https）、重定向跳数、响应上限与超时仍然生效。
 func NewHTTPBridge(cfg HTTPBridgeConfig) (*Bridge, error) {
-	if !cfg.AllowAnyHost && len(cfg.AllowHosts) == 0 {
-		return nil, errors.New("host: HTTP 桥需要 allowlist（或显式 AllowAnyHost=true）")
-	}
 	connect := cfg.ConnectTimeout
 	if connect <= 0 {
 		connect = domain.ProviderConnectTimeout
@@ -98,7 +91,6 @@ func NewHTTPBridge(cfg HTTPBridgeConfig) (*Bridge, error) {
 		debugLog = NewDebugLog(cfg.DebugWriter)
 	}
 	b := &Bridge{
-		allowAny: cfg.AllowAnyHost, allow: append([]string(nil), cfg.AllowHosts...),
 		connect: connect, idle: idle, total: total, maxJSON: maxJSON, maxSSE: maxSSE,
 		debug:        debugLog,
 		proxyClients: map[string]*http.Client{},
@@ -170,26 +162,6 @@ func (b *Bridge) clientForProxy(proxy string) (*http.Client, error) {
 	c := &http.Client{Transport: transport, CheckRedirect: b.checkRedirect}
 	b.proxyClients[proxy] = c
 	return c, nil
-}
-
-// AllowHost 动态追加一个 host/host:port 白名单项（用户配置的供应商端点）。
-// 供应商配置可以在运行期新增/修改，因此 allowlist 不能只在装配期算一次。
-func (b *Bridge) AllowHost(host string) {
-	if b == nil {
-		return
-	}
-	host = strings.TrimSpace(host)
-	if host == "" {
-		return
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for _, entry := range b.allow {
-		if strings.EqualFold(strings.TrimSpace(entry), host) {
-			return
-		}
-	}
-	b.allow = append(b.allow, host)
 }
 
 // Close 释放连接池（测试与 Core 退出时调用）。
@@ -430,7 +402,8 @@ func (b *Bridge) sseWithClient(ctx context.Context, client *http.Client, method,
 	}
 }
 
-// checkURL 做协议与 allowlist 检查（也被重定向回调复用）。
+// checkURL 做协议检查（也被重定向回调复用）。
+// host 黑白名单暂未启用（后续以插件形式实现）：当前不限目标主机。
 func (b *Bridge) checkURL(u *url.URL) error {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return domain.NewError(domain.CodeProviderError, "HTTP 桥只允许 http(s)，收到 "+u.Scheme)
@@ -438,37 +411,7 @@ func (b *Bridge) checkURL(u *url.URL) error {
 	if u.User != nil {
 		return domain.NewError(domain.CodeProviderError, "HTTP URL 不允许内嵌用户信息")
 	}
-	if b.allowAny {
-		return nil
-	}
-	host := strings.ToLower(u.Host)
-	hostname := strings.ToLower(u.Hostname())
-	b.mu.RLock()
-	allow := append([]string(nil), b.allow...)
-	b.mu.RUnlock()
-	for _, entry := range allow {
-		entry = strings.ToLower(strings.TrimSpace(entry))
-		if entry == "" {
-			continue
-		}
-		if strings.HasPrefix(entry, "*.") {
-			if strings.HasSuffix(hostname, entry[1:]) && hostname != entry[2:] {
-				return nil
-			}
-			continue
-		}
-		if strings.Contains(entry, ":") {
-			if host == entry {
-				return nil
-			}
-			continue
-		}
-		if hostname == entry {
-			return nil
-		}
-	}
-	return domain.NewError(domain.CodeProviderError,
-		fmt.Sprintf("HTTP 目标 %s 不在 allowlist 内", u.Host))
+	return nil
 }
 
 // HTTPError 是 SSE/JSON 的非 2xx 结果；provider 桥按 Status 决定是否重试。

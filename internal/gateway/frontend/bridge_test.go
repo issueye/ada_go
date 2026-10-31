@@ -337,7 +337,7 @@ func TestBridgeAssetsAndBindings(t *testing.T) {
 	}
 	scripts := b.Scripts()
 	wantScripts := []string{
-		"/ext/plugin-creator/static/plugin-creator.js?v=",
+		"/ext/plugin-helper/static/plugin-helper.js?v=",
 		"/ext/provider-admin/static/provider-admin.js?v=",
 	}
 	if len(scripts) != len(wantScripts) {

@@ -167,8 +167,6 @@ func cmdCore(args []string, stdout io.Writer) error {
 	dataDir := fs.String("data-dir", "", "数据目录（默认 ~/.adago/workspaces/<hash>）")
 	fake := fs.Bool("fake", false, "使用确定性回显模型（不需要密钥）")
 	debug := fs.Bool("debug", false, "把每次出网请求/响应摘要写到 stderr（密钥脱敏；也可设 ADAG_DEBUG=1）")
-	var allowHosts stringList
-	fs.Var(&allowHosts, "allow-host", "额外出网 host/端口（可重复）")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -182,7 +180,7 @@ func cmdCore(args []string, stdout io.Writer) error {
 		ws = "."
 	}
 	if *selfCheck {
-		bridge, berr := host.NewHTTPBridge(host.HTTPBridgeConfig{AllowHosts: []string{"api.openai.com"}})
+		bridge, berr := host.NewHTTPBridge(host.HTTPBridgeConfig{})
 		if berr != nil {
 			return berr
 		}
@@ -249,7 +247,6 @@ func cmdCore(args []string, stdout io.Writer) error {
 		Provider:   *provider,
 		Model:      *model,
 		BaseURL:    *baseURL,
-		AllowHosts: allowHosts,
 		Fake:       *fake,
 		Debug:      debugRequested(*debug),
 		// Core 由 Gateway 托管：交互由网页里的托盘回答（没有终端 stdin）。

@@ -31,7 +31,9 @@ func testConfig(t *testing.T, model string) cli.Config {
 		Product:   productPath(t),
 		Scripts:   scripts,
 		Fake:      model == "",
-		In:        strings.NewReader(""),
+		// 插件启停的全局状态（plugins.json）指向临时目录，测试不写真实主目录。
+		PluginStatePath: filepath.Join(data, "plugins.json"),
+		In:              strings.NewReader(""),
 	}
 }
 

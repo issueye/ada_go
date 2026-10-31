@@ -5,7 +5,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -16,12 +15,7 @@ import (
 // debugBridge 创建把调试输出写到 buf 的桥。
 func debugBridge(t *testing.T, srv *httptest.Server, buf *bytes.Buffer) *host.Bridge {
 	t.Helper()
-	u, err := url.Parse(srv.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
 	b, err := host.NewHTTPBridge(host.HTTPBridgeConfig{
-		AllowHosts:  []string{u.Host},
 		IdleTimeout: time.Second,
 		DebugWriter: buf,
 	})
@@ -111,12 +105,10 @@ func TestHTTPBridgeDebugLogsSSEStatusWithoutBody(t *testing.T) {
 
 func TestHTTPBridgeDebugLogsNetworkError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	u, _ := url.Parse(srv.URL)
 	srv.Close() // 立即关闭，制造连接失败
 
 	var buf bytes.Buffer
 	b, err := host.NewHTTPBridge(host.HTTPBridgeConfig{
-		AllowHosts:  []string{u.Host},
 		DebugWriter: &buf,
 	})
 	if err != nil {

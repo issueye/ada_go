@@ -56,7 +56,6 @@ func addSessionFlags(fs *flag.FlagSet, f *sessionFlags, interactive bool) {
 	fs.BoolVar(&f.interactive, "interactive", interactive, "把审批/提问转到终端（默认 chat 开启，print 关闭）")
 	fs.StringVar(&f.events, "events", "", "把领域事件写成 JSONL 文件")
 	fs.StringVar(&f.thread, "thread", "", "继续已有线程")
-	fs.Var(&f.allowHosts, "allow-host", "额外出网 host/端口（可重复）")
 }
 
 func defaultProductPath() string {
@@ -78,7 +77,6 @@ func (f *sessionFlags) open(ctx context.Context, interactive bool) (*cli.Session
 		Provider:    f.provider,
 		Model:       f.model,
 		BaseURL:     f.baseURL,
-		AllowHosts:  f.allowHosts,
 		Fake:        f.fake,
 		Debug:       debugRequested(f.debug),
 		Interactive: interactive,

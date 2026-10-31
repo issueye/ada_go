@@ -599,6 +599,47 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 		set("providers", engine.ObjectValue(providers))
 	}
 
+	// pluginAdmin：capability: plugin.admin。只暴露全局安装与健康检查入口；
+	// id/路径/大小校验与「不覆盖」由宿主实现，脚本拿不到任意文件写权限。
+	if p.caps.Has(plugins.CapPluginAdmin) && (hc.InstallPlugin != nil || hc.CheckPlugin != nil) {
+		admin := r.NewObject()
+		if hc.InstallPlugin != nil {
+			_ = admin.SetProp(r, r.KeyFromGoString("install"), rt.Function("pluginAdmin.install", 1,
+				func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+					raw, err := rt.AppendJSON(nil, moejs.Arg(args, 0))
+					if err != nil {
+						return moejs.Undefined(), r.TypeError("pluginAdmin.install(spec): spec 不可 JSON 序列化: %v", err)
+					}
+					var spec PluginInstallSpec
+					if err := json.Unmarshal(raw, &spec); err != nil {
+						return moejs.Undefined(), r.TypeError("pluginAdmin.install(spec): spec 形状非法: %v", err)
+					}
+					return p.hostAsync(c, "pluginAdmin.install", func(ctx context.Context) (any, error) {
+						return hc.InstallPlugin(ctx, spec)
+					}), nil
+				}))
+		}
+		if hc.CheckPlugin != nil {
+			_ = admin.SetProp(r, r.KeyFromGoString("check"), rt.Function("pluginAdmin.check", 1,
+				func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+					pluginID := strings.TrimSpace(moejs.Arg(args, 0).String())
+					return p.hostAsync(c, "pluginAdmin.check", func(ctx context.Context) (any, error) {
+						return hc.CheckPlugin(ctx, pluginID)
+					}), nil
+				}))
+		}
+		if hc.RemovePlugin != nil {
+			_ = admin.SetProp(r, r.KeyFromGoString("remove"), rt.Function("pluginAdmin.remove", 1,
+				func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+					pluginID := strings.TrimSpace(moejs.Arg(args, 0).String())
+					return p.hostAsync(c, "pluginAdmin.remove", func(ctx context.Context) (any, error) {
+						return hc.RemovePlugin(ctx, pluginID)
+					}), nil
+				}))
+		}
+		set("pluginAdmin", engine.ObjectValue(admin))
+	}
+
 	// SSE 路由的 ctx.sse.send(data, event?)：只在流式调用上安装，普通 route
 	// 看不到它（防止把长连接误当成请求/响应接口）。
 	if c.kind == callRouteStream {
@@ -833,12 +874,13 @@ func (p *Instance) fetchPromise(rt *mojsRuntime, c *call, hc Context, args []moe
 		if err != nil {
 			return nil, err
 		}
-		text := string(res.Body)
+		// text 必须是字符串属性而不是 Go 函数：FromGo 不支持 func 值，
+		// 夹带函数会让整个 Promise 结算失败（FromGo: unsupported Go type）。
 		return map[string]any{
 			"status":  res.Status,
 			"headers": res.Headers,
 			"ok":      res.Status >= 200 && res.Status < 300,
-			"text":    func() string { return text },
+			"text":    string(res.Body),
 		}, nil
 	}), nil
 }

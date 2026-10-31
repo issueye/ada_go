@@ -28,7 +28,6 @@ type SpawnSpec struct {
 	Model      string
 	BaseURL    string
 	DataDir    string
-	AllowHosts []string
 	Fake       bool
 	// Debug 给 Core 加 --debug；子进程 stderr 同时转发到网关 stderr。
 	Debug     bool
@@ -73,7 +72,6 @@ func (s *Supervisor) startEntry(ctx context.Context, e *entry) (
 		Model:      s.opts.Model,
 		BaseURL:    s.opts.BaseURL,
 		DataDir:    s.opts.DataDir,
-		AllowHosts: append([]string(nil), s.opts.AllowHosts...),
 		Fake:       s.opts.Fake,
 		Debug:      s.opts.Debug,
 		ParentPID:  s.opts.ParentPID,
@@ -289,9 +287,6 @@ func execSpawn(ctx context.Context, spec SpawnSpec) (Process, error) {
 	}
 	if spec.Debug {
 		args = append(args, "--debug")
-	}
-	for _, h := range spec.AllowHosts {
-		args = append(args, "--allow-host", h)
 	}
 
 	cmd := exec.CommandContext(ctx, spec.Binary, args...)

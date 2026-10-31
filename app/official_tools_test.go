@@ -52,7 +52,7 @@ func codingProductIn(t *testing.T, ws string) *app.Assembly {
 			frontendIDs[sc.Manifest.ID] = true
 		}
 	}
-	bridge, err := host.NewHTTPBridge(host.HTTPBridgeConfig{AllowHosts: []string{"api.openai.com"}})
+	bridge, err := host.NewHTTPBridge(host.HTTPBridgeConfig{})
 	if err != nil {
 		t.Fatalf("NewHTTPBridge: %v", err)
 	}
@@ -71,7 +71,7 @@ func codingProductIn(t *testing.T, ws string) *app.Assembly {
 }
 
 // TestCodingProductAssembles 钉 coding 产品的装配：14 个声明插件全部就位
-// （11 个后端实例 + 4 个前端声明；provider-admin / plugin-creator 同时有 route 后端与页面），
+// （11 个后端实例 + 4 个前端声明；provider-admin / plugin-helper 同时有 route 后端与页面），
 // read_skill 在目录里，persona-coding 的提示词片段已结算。
 func TestCodingProductAssembles(t *testing.T) {
 	asm := codingProduct(t)
@@ -80,7 +80,7 @@ func TestCodingProductAssembles(t *testing.T) {
 		t.Fatalf("后端插件数 = %d，期望 11（provider-admin 的 route 后端也装配；前端插件走 Gateway）: %v",
 			len(asm.Plugins), pluginIDsOf(asm))
 	}
-	wantFrontend := []string{"tools-plan", "tools-ask", "provider-admin", "token-usage", "plugin-creator"}
+	wantFrontend := []string{"tools-plan", "tools-ask", "provider-admin", "token-usage", "plugin-helper"}
 	if len(asm.FrontendDecls) != len(wantFrontend) {
 		t.Fatalf("前端声明 = %v，期望 %v", asm.FrontendDecls, wantFrontend)
 	}

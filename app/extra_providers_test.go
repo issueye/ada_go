@@ -31,8 +31,7 @@ func streamAssembly(t *testing.T, pluginID, serverURL string) *app.Assembly {
 	t.Helper()
 	ws := tempDir(t)
 	bridge, err := host.NewHTTPBridge(host.HTTPBridgeConfig{
-		AllowAnyHost: true,
-	})
+			})
 	if err != nil {
 		t.Fatal(err)
 	}

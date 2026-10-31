@@ -173,33 +173,35 @@ func TestSessionSkillWorkspaceOverridesPlugin(t *testing.T) {
 	}
 }
 
-// TestSessionHeadlessNoReadSkill 钉门控：headless（skills=false）不注册 read_skill，
-// 系统提示也不注入技能段（门控只管注入与 read_skill；skill.list 的发现语义独立——
-// 磁盘上的技能仍然可见，但模型侧没有任何入口）。
-func TestSessionHeadlessNoReadSkill(t *testing.T) {
+// TestSessionHeadlessSkillReadable 钉 headless 的新门控：skills=true 且
+// plugin-helper 带了随包技能后，read_skill 注册、系统提示注入技能段、
+// 正文可读（门控本身的反面用例在 app 的 TestReadSkillGatedByCapability）。
+func TestSessionHeadlessSkillReadable(t *testing.T) {
 	ws := t.TempDir()
-	writeWorkspaceSkill(t, ws, "some-skill", "一个技能", "正文")
-
 	fake := testkit.NewFakeProvider(testkit.NewScriptedModel(testkit.TextTurn("好的")))
 	sess := openWithProduct(t, productPath(t), ws, fake)
 	ctx := context.Background()
 	if term, err := sess.Run(ctx, "hello"); err != nil || term != domain.TerminalCompleted {
 		t.Fatalf("Run = %s / %v", term, err)
 	}
-	if _, ok := sess.Assembly().Tools.Lookup(ctx, "read_skill"); ok {
-		t.Fatal("skills=false 的产品不得注册 read_skill")
+	if _, ok := sess.Assembly().Tools.Lookup(ctx, "read_skill"); !ok {
+		t.Fatal("skills=true 的 headless 必须注册 read_skill")
 	}
 	reqs := fake.Requests()
 	if len(reqs) == 0 {
 		t.Fatal("没有模型请求")
 	}
-	if strings.Contains(reqs[0].System, "可用技能") || strings.Contains(reqs[0].System, "<skill ") {
-		t.Fatalf("skills=false 的系统提示不应有技能段: %.200s", reqs[0].System)
+	if !strings.Contains(reqs[0].System, "可用技能") || !strings.Contains(reqs[0].System, "create-plugin") {
+		t.Fatalf("系统提示应注入 create-plugin 技能简介: %.400s", reqs[0].System)
 	}
-	// 工具目录里也不该有任何技能工具（tools-skill 不在 headless 声明里）。
+	_, content, _, ok := sess.ReadSkill("create-plugin")
+	if !ok || !strings.Contains(content, "create_plugin") {
+		t.Fatalf("read_skill 应返回创建插件技能正文: %q", content)
+	}
+	// 工具目录里仍然不该有 tools-skill（它只在 coding 声明）。
 	for _, d := range sess.Assembly().Tools.List(ctx) {
 		if d.Name == "skill_search" {
-			t.Fatal("skills=false 的产品不应装配 tools-skill")
+			t.Fatal("headless 未声明 tools-skill，不应装配")
 		}
 	}
 }

@@ -231,6 +231,9 @@ const (
 	// CapModelAdmin 允许读取供应商/模型目录并切换当前模型（仅 builtin）。
 	// 它不授予任何出网、文件或执行权限，也不暴露密钥。
 	CapModelAdmin Capability = "model.admin"
+	// CapPluginAdmin 允许把插件骨架写入全局插件根 ~/.adago/plugins（仅 builtin）。
+	// 宿主负责 id/路径校验与「不覆盖」语义；它不授予任意文件写权限。
+	CapPluginAdmin Capability = "plugin.admin"
 	// CapBackendRead 是前端能力：预取只读后端动作结果。
 	CapBackendRead Capability = "backend.read"
 	// CapFrontendScript 是前端能力：加载插件自带 JS（默认关闭，仍受 CSP 限制）。
@@ -240,7 +243,7 @@ const (
 // backendCapabilities 是后端可声明的能力白名单。
 var backendCapabilities = []Capability{
 	CapFSRead, CapFSWrite, CapNetFetch, CapNetSSE,
-	CapExec, CapState, CapUIAsk, CapSubagentInvoke, CapModelAdmin,
+	CapExec, CapState, CapUIAsk, CapSubagentInvoke, CapModelAdmin, CapPluginAdmin,
 }
 
 // frontendCapabilities 是前端可声明的能力白名单。
@@ -269,7 +272,7 @@ func (c Capability) MinTrust() Trust {
 	switch c {
 	case CapExec, CapNetSSE, CapUIAsk:
 		return TrustVerified
-	case CapSubagentInvoke, CapModelAdmin:
+	case CapSubagentInvoke, CapModelAdmin, CapPluginAdmin:
 		return TrustBuiltin
 	default:
 		return TrustThirdParty

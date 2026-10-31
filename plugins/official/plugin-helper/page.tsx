@@ -1,16 +1,17 @@
 /**
- * 创建插件（official/plugin-creator）：工作区插件脚手架向导。
+ * 插件助手（official/plugin-helper）：插件安装向导 + 健康检查入口页。
  *
  * 表单只负责收集 id/名称/描述/工具名；落盘与路径校验都在后端 route 完成。
- * 创建成功后由 plugin-creator.js 自动重载插件列表并跳到新插件详情页。
+ * 创建成功后由 plugin-helper.js 自动重载插件列表并跳到新插件详情页；
+ * 诊断（check_plugin）走后端 route/工具，不在本页重复实现。
  */
 export default function Page(_props: any) {
   return (
-    <div class="pc-page" data-plugin-creator>
+    <div class="pc-page" data-plugin-helper>
       <div class="pc-head">
         <div class="pc-head__text">
-          <h1 class="pc-title">创建插件</h1>
-          <p class="pc-sub">在工作区 <code>.adago/plugins</code> 下生成一个可直接加载的第三方插件骨架。</p>
+          <h1 class="pc-title">插件助手</h1>
+          <p class="pc-sub">在全局插件目录 <code>~/.adago/plugins</code> 下生成一个可直接加载的第三方插件骨架，跨工作区共享。</p>
         </div>
         <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/extensions">返回插件列表</a>
       </div>
@@ -49,13 +50,13 @@ export default function Page(_props: any) {
 
         <div class="card pc-preview" role="complementary" aria-label="创建预览">
           <h2 class="pc-preview__title">将创建</h2>
-          <code class="pc-preview__path" data-pc-path>.adago/plugins/&lt;id&gt;</code>
+          <code class="pc-preview__path" data-pc-path>~/.adago/plugins/&lt;id&gt;</code>
           <ul class="pc-preview__files">
             <li><code>plugin.json</code><span>清单：third-party、index.ts 入口</span></li>
             <li><code>index.ts</code><span>注册一个只读回显工具</span></li>
             <li><code>README.md</code><span>使用与开发约束</span></li>
           </ul>
-          <p class="pc-preview__note">新插件默认未启用；创建后可在插件详情页点“启用”。需要文件/网络等能力时，编辑清单里的 <code>backend.capabilities</code>。</p>
+          <p class="pc-preview__note">新插件默认未启用；创建后可在插件详情页点“启用”。也可以直接在对话里说「创建一个 XXX 插件」，AI 会生成代码并调用 <code>create_plugin</code> 工具；需要文件/网络等能力时，编辑清单里的 <code>backend.capabilities</code>。</p>
         </div>
       </div>
     </div>

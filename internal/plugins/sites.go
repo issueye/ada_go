@@ -70,6 +70,12 @@ var installSites = map[Capability]InstallSite{
 		EnforcedBy:    "只读目录不含密钥；切换复用 model.set 的解析与线程校验，插件不能指定目录外模型",
 		Milestone:     "M5",
 	},
+	CapPluginAdmin: {
+		Capability: CapPluginAdmin, HostInstall: "安装全局插件安装桥：把骨架写入 ~/.adago/plugins/<id>/（仅 builtin）",
+		ScriptSurface: "ctx.pluginAdmin.install({ id, files: [{ path, content }] })",
+		EnforcedBy:    "宿主校验 id/相对路径/大小上限，拒绝覆盖已有插件；不授予任意文件写权限",
+		Milestone:     "M5",
+	},
 	CapBackendRead: {
 		Capability: CapBackendRead, HostInstall: "Gateway 侧预取只读后端动作结果（最多 16 个、并发 4、单个 300ms、缓存 8s）",
 		ScriptSurface: "props.data.backend.<插件 id>.<binding>",
