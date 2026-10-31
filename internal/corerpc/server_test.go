@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adag/ada-go/internal/domain"
 	"github.com/coder/websocket"
 
 	"github.com/adag/ada-go/internal/cli"
@@ -98,6 +99,8 @@ func dial(t *testing.T, url, token string) *rpcClient {
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
+	// 与服务端同一读上限：thread.entries 可能携带图片 base64（7.7.4）。
+	conn.SetReadLimit(domain.RPCMessageMaxBytes)
 	c := &rpcClient{conn: conn, pending: map[int64]chan wireResponse{}, events: make(chan wireResponse, 1024)}
 	t.Cleanup(func() { _ = conn.Close(websocket.StatusNormalClosure, "") })
 	go c.readLoop()

@@ -45,12 +45,15 @@
             <span class="ada-newtask__mark"><img src="{{asset "logo.png"}}" alt="" width="40" height="40" decoding="async"></span>
             <h2 class="ada-newtask__greeting">{{.Greeting}}</h2>
             <p class="ada-newtask__desc">描述你要完成的任务，agent 会在选定的工作区里开始工作。</p>
-            <form class="ada-newtask__form" method="post" action="/threads" data-new-task>
+            <form class="ada-newtask__form" method="post" action="/threads" data-new-task enctype="multipart/form-data">
               {{template "csrf" .}}
               <div class="ada-composer__card ada-newtask__card">
-                <textarea class="ada-composer__input" name="text" rows="2" maxlength="65536" placeholder="向 {{.ProductName}} 提问，或描述一个任务…" aria-label="任务描述" required></textarea>
+                <div class="ada-composer__thumbs" data-image-thumbs hidden></div>
+                <textarea class="ada-composer__input" name="text" rows="2" maxlength="65536" placeholder="向 {{.ProductName}} 提问，或描述一个任务…" aria-label="任务描述"></textarea>
+                <input class="ada-composer__image-input" id="ada-image-input-new" type="file" name="images" multiple accept="image/png,image/jpeg,image/webp,image/gif" aria-hidden="true" tabindex="-1">
                 <div class="ada-composer__bar">
                   <div class="ada-composer__group ada-composer__group--left">
+                    <label class="ada-composer__attach" for="ada-image-input-new" title="添加图片" aria-label="添加图片">{{icon "i-image" 14}}</label>
                     <div class="ada-newtask__ws-controls" data-workspace-controls hidden>
                       <button class="ada-tool ada-tool--workspace" type="button" data-file-picker-open title="选择工作区：{{.Workspace}}">
                         {{icon "i-folder" 14}}<span class="ada-tool__label" data-workspace-label>{{.WorkspaceName}}</span>{{icon "i-chevron-down" 12}}
@@ -112,12 +115,16 @@
   </div>
 
   {{if .Thread.ID}}
-  <form class="ada-composer" method="post" action="/threads/{{.Thread.ID}}/send">
+  <form class="ada-composer" method="post" action="/threads/{{.Thread.ID}}/send" enctype="multipart/form-data">
     {{template "csrf" .}}
     <div class="ada-composer__card">
+      {{/* 缩略图位置与新建任务页保持一致：始终在输入框上方。 */}}
+      <div class="ada-composer__thumbs" data-image-thumbs hidden></div>
       <textarea class="ada-composer__input" name="text" rows="2" maxlength="65536" placeholder="向 {{.ProductName}} 提问，或指派一个任务…" aria-label="消息输入框" required></textarea>
       <div class="ada-composer__bar">
         <div class="ada-composer__group ada-composer__group--left">
+          <input class="ada-composer__image-input" id="ada-image-input-{{.Thread.ID}}" type="file" name="images" multiple accept="image/png,image/jpeg,image/webp,image/gif" aria-hidden="true" tabindex="-1">
+          <label class="ada-composer__attach" for="ada-image-input-{{.Thread.ID}}" title="添加图片" aria-label="添加图片">{{icon "i-image" 14}}</label>
           <details class="ada-plus">
             <summary class="ada-plus__button" title="更多操作" aria-label="更多操作">{{icon "i-plus" 14}}</summary>
             <div class="ada-plus__panel">
@@ -175,7 +182,7 @@
   {{end}}
 {{template "shell_end" .}}{{end}}
 
-{{define "parts_user"}}{{range .Parts}}{{if eq .Type "thinking"}}{{template "thinking" .}}{{else if eq .Type "image"}}<span class="ada-msg__images">[图片]</span>{{else}}<div class="part-text">{{.Text}}</div>{{end}}{{end}}{{end}}
+{{define "parts_user"}}{{range .Parts}}{{if eq .Type "thinking"}}{{template "thinking" .}}{{else if eq .Type "image"}}<button class="ada-msg__image" type="button" data-image-viewer aria-label="查看图片"><img loading="lazy" alt="图片" src="data:{{.Mime}};base64,{{.Data}}"></button>{{else}}<div class="part-text">{{.Text}}</div>{{end}}{{end}}{{end}}
 
 {{define "parts_assistant"}}{{range .Parts}}{{if eq .Type "thinking"}}{{template "thinking" .}}{{else if eq .Type "image"}}<span class="ada-msg__images">[图片]</span>{{else}}<div class="part-text">{{markdown .Text}}</div>{{end}}{{end}}{{end}}
 

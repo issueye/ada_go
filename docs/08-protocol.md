@@ -10,7 +10,7 @@
 
 - Gateway ↔ Core：JSON-RPC 2.0 over WebSocket，Gateway 作为客户端，Core 作为服务端。
 - 请求/响应带递增 id；事件是 JSON-RPC notification（无 id），方法与 `evt.` 前缀。
-- 单条消息上限 2MB；文本增量合并后发送；心跳 ping/pong 15s；30s 无 pong 判定断线。
+- 单条消息上限 16MB（容纳 turn.start/thread.entries 的图片部件，7.7.4）；文本增量合并后发送；心跳 ping/pong 15s；30s 无 pong 判定断线。
 - Core 断线：Gateway 标记实例 `failed`，在途 RPC 返回 `core_unavailable`；自动重连一次，失败则重启 Core。
 - 事件序号：线程内 `seq` 单调递增；工作区级事件用独立 `workspaceSeq`。所有事件可重放，至少保留到对应 run 结束。
 

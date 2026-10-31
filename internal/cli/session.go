@@ -494,24 +494,24 @@ func (s *Session) Run(ctx context.Context, prompt string) (domain.TerminalReason
 	if err != nil {
 		return domain.TerminalError, err
 	}
-	return s.RunInThread(ctx, s.CurrentThread(), runID, prompt)
+	return s.RunInThread(ctx, s.CurrentThread(), runID, prompt, nil)
 }
 
 // RunInThread 在指定线程上跑一轮（不改变 CLI 的当前线程）。
 //
 // Core RPC 用它支持多线程；线程身份经 ctx 传给插件 State，避免并发轮次互相串台。
-func (s *Session) RunInThread(ctx context.Context, threadID, runID, prompt string) (domain.TerminalReason, error) {
-	return s.runInThread(ctx, threadID, runID, prompt, nil)
+func (s *Session) RunInThread(ctx context.Context, threadID, runID, prompt string, images []domain.Part) (domain.TerminalReason, error) {
+	return s.runInThread(ctx, threadID, runID, prompt, images, nil)
 }
 
 // RunInThreadReady 与 RunInThread 相同，但在登记活跃轮次之后关闭 ready，
 // 让 corerpc 能等轮次真正可被 steer 之后再返回 turn.start（避免紧接的
 // turn.steer 被误判成没有运行中轮次）。ready 为 nil 时与 RunInThread 等价。
-func (s *Session) RunInThreadReady(ctx context.Context, threadID, runID, prompt string, ready chan<- struct{}) (domain.TerminalReason, error) {
-	return s.runInThread(ctx, threadID, runID, prompt, ready)
+func (s *Session) RunInThreadReady(ctx context.Context, threadID, runID, prompt string, images []domain.Part, ready chan<- struct{}) (domain.TerminalReason, error) {
+	return s.runInThread(ctx, threadID, runID, prompt, images, ready)
 }
 
-func (s *Session) runInThread(ctx context.Context, threadID, runID, prompt string, ready chan<- struct{}) (domain.TerminalReason, error) {
+func (s *Session) runInThread(ctx context.Context, threadID, runID, prompt string, images []domain.Part, ready chan<- struct{}) (domain.TerminalReason, error) {
 	// 入参不合法时也关闭 ready，调用方不会永久等待。
 	fail := func(err error) (domain.TerminalReason, error) {
 		if ready != nil {
@@ -540,21 +540,23 @@ func (s *Session) runInThread(ctx context.Context, threadID, runID, prompt strin
 		return domain.TerminalError, modelErr
 	}
 	runCtx := withRun(withThread(ctx, threadID), runID)
-	return engine.Run(runCtx, deps, s.newTurnSpec(threadID, runID, prompt)), nil
+	return engine.Run(runCtx, deps, s.newTurnSpec(threadID, runID, prompt, images)), nil
 }
 
 // newTurnSpec 把产品策略与当前模型合成引擎输入。
 //
 // 策略与模型覆盖都在 Session 内以锁保护；这里只读一次快照，避免并发调用
 // workspace.updatePolicy/model.set 时把半更新的值送进轮次。
-func (s *Session) newTurnSpec(threadID, runID, prompt string) engine.TurnSpec {
+func (s *Session) newTurnSpec(threadID, runID, prompt string, images []domain.Part) engine.TurnSpec {
 	policies := s.Policies()
 	spec := engine.TurnSpec{
 		ThreadID: threadID,
 		RunID:    runID,
+		// 图片部件跟在正文后面：双门校验（产品能力 + 模型 input）在 turn.start 做。
 		UserInput: domain.Message{
-			Role:  domain.RoleUser,
-			Parts: []domain.Part{{Type: domain.PartText, Text: prompt}},
+			Role: domain.RoleUser,
+			Parts: append([]domain.Part{{Type: domain.PartText, Text: prompt}},
+				images...),
 		},
 		Model:           s.ModelRefFor(threadID),
 		LoopRepeatLimit: policies.LoopRepeatLimit,
@@ -632,7 +634,7 @@ func (s *Session) EndTurn(threadID string) {
 //
 // 只有线程存在运行中轮次时才接受；否则返回 core_unavailable，而不是静默收下
 // 再在轮次结束时丢掉。
-func (s *Session) EnqueueSteering(threadID, text string) (int, error) {
+func (s *Session) EnqueueSteering(threadID, text string, images []domain.Part) (int, error) {
 	threadID = strings.TrimSpace(threadID)
 	if threadID == "" {
 		return 0, errors.New("cli: 中途消息需要 threadId")
@@ -650,8 +652,9 @@ func (s *Session) EnqueueSteering(threadID, text string) (int, error) {
 		s.steerQueues = map[string][]domain.Message{}
 	}
 	s.steerQueues[threadID] = append(s.steerQueues[threadID], domain.Message{
-		Role:  domain.RoleUser,
-		Parts: []domain.Part{{Type: domain.PartText, Text: text}},
+		Role: domain.RoleUser,
+		Parts: append([]domain.Part{{Type: domain.PartText, Text: text}},
+			images...),
 	})
 	return len(s.steerQueues[threadID]), nil
 }

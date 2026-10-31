@@ -34,7 +34,7 @@ func TestSessionSteeringQueueConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			pos, err := sess.EnqueueSteering(threadID, fmt.Sprintf("中途消息-%d", i))
+			pos, err := sess.EnqueueSteering(threadID, fmt.Sprintf("中途消息-%d", i), nil)
 			if err != nil {
 				errs <- err
 				return
@@ -72,14 +72,14 @@ func TestSessionSteeringQueueConcurrent(t *testing.T) {
 	}
 
 	// 轮次结束：残留消息必须被丢弃，之后的入队必须明确失败（不静默）。
-	if _, err := sess.EnqueueSteering(threadID, "未排空的残留"); err != nil {
+	if _, err := sess.EnqueueSteering(threadID, "未排空的残留", nil); err != nil {
 		t.Fatalf("运行中入队失败: %v", err)
 	}
 	sess.EndTurn(threadID)
 	if left := sess.DrainSteering(context.Background(), threadID); len(left) != 0 {
 		t.Fatalf("轮次结束后仍有 %d 条残留消息", len(left))
 	}
-	if _, err := sess.EnqueueSteering(threadID, "结束后"); err == nil {
+	if _, err := sess.EnqueueSteering(threadID, "结束后", nil); err == nil {
 		t.Fatal("轮次结束后仍接受 steering 入队")
 	}
 }

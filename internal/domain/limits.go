@@ -59,8 +59,10 @@ const (
 	// 截断并标 truncated，完整内容走 thread.entries 或工具详情）。
 	PatchFieldTruncateBytes = 32 << 10
 
-	// RPCMessageMaxBytes 是 Gateway↔Core 单条 WebSocket 消息上限（08 §8.1：2MB）。
-	RPCMessageMaxBytes = 2 << 20
+	// RPCMessageMaxBytes 是 Gateway↔Core 单条 WebSocket 消息上限。
+	// 16MB：容纳 turn.start/thread.entries 携带的图片部件
+	//（≤4 张 × 8MB base64 膨胀后 ~10.6MB/张，取整包余量）。
+	RPCMessageMaxBytes = 16 << 20
 
 	// LoopRepeatLimit 是“相同工具+相同参数+相同回执”在同一轮内的累计次数阈值：达到后回
 	// loop_detected 错误回执提示模型换方法（02 §5.3：3 次；按指纹累计，repeatable 不计数）。

@@ -328,7 +328,7 @@ func TestReloadWaitsForInflightTurn(t *testing.T) {
 	ready := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		_, err := sess.RunInThreadReady(ctx, th.ID, runID, "阻塞中", ready)
+		_, err := sess.RunInThreadReady(ctx, th.ID, runID, "阻塞中", nil, ready)
 		done <- err
 	}()
 	<-ready         // 轮次已登记活跃

@@ -63,6 +63,10 @@ func assetURL(name string) string {
 // maxFormBytes 是 Gateway 表单请求体上限（09 §9.5：请求体 1MB）。
 const maxFormBytes = 1 << 20
 
+// maxMultipartMemory 是图片表单的内存阈值：超过部分 ParseMultipartForm
+// 自动落临时文件。整包上限由安全中间件的 MaxBodyBytes（48MB）兜底。
+const maxMultipartMemory = 8 << 20
+
 // Config 是 SSR 宿主的装配参数。所有外部依赖都从组合根注入，
 // 本包不直接 import supervisor、security、sse 等并行开发中的包。
 type Config struct {

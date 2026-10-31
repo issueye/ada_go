@@ -259,6 +259,9 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 	mw, err := security.New(security.Config{
 		Token: accessToken, Secure: cfg.Secure,
 		AllowedOrigins: cfg.AllowedOrigins, LoginPath: "/login",
+		// 图片输入（7.7.4）：multipart 表单携带 ≤4 张 × 8MB 图片（base64 膨胀后
+		// ~10.6MB/张），1MB 默认上限会把它挡在安全中间件里。
+		MaxBodyBytes: 48 << 20,
 	})
 	if err != nil {
 		if ownSup {

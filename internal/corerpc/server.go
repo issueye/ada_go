@@ -543,10 +543,11 @@ func (s *Server) handleTurnStart(ctx context.Context, raw json.RawMessage) (any,
 	if p.ThreadID == "" || len(p.IdempotencyKey) < 8 {
 		return nil, invalid("turn.start: 需要 threadId，且 idempotencyKey 至少 8 个字符")
 	}
-	if len(p.Images) > 0 {
-		return nil, invalid("turn.start: M2 第一切片暂不支持图片输入")
+	images, imgErr := s.decodeTurnImages(p.ThreadID, p.Images)
+	if imgErr != nil {
+		return nil, invalid("turn.start: " + imgErr.Error())
 	}
-	if strings.TrimSpace(p.Text) == "" {
+	if strings.TrimSpace(p.Text) == "" && len(images) == 0 {
 		return nil, invalid("turn.start: text 与 images 至少其一非空")
 	}
 	if err := s.sess.ModelError(); err != nil {
@@ -581,7 +582,7 @@ func (s *Server) handleTurnStart(ctx context.Context, raw json.RawMessage) (any,
 	// 误判成「没有运行中轮次」。登记/注销由 RunInThread 成对完成。
 	ready := make(chan struct{})
 	go func() {
-		term, err := s.sess.RunInThreadReady(runCtx, p.ThreadID, runID, p.Text, ready)
+		term, err := s.sess.RunInThreadReady(runCtx, p.ThreadID, runID, p.Text, images, ready)
 		s.mu.Lock()
 		if cur := s.runs[p.ThreadID]; cur != nil && cur.runID == runID {
 			cur.status = "terminal"
@@ -642,7 +643,7 @@ func (s *Server) handleTurnGet(_ context.Context, raw json.RawMessage) (any, err
 //
 // 只有在 runs 表里存在 running 状态的轮次时才接受；没有运行中轮次返回
 // core_unavailable（1002），与协议 errors: ["invalid_params","core_unavailable"]
-// 对齐。images 在 M2 第一切片暂不支持，非空按 invalid_params 拒绝。
+// 对齐。images 支持 ≤4 张图片，双门校验失败按 invalid_params 拒绝。
 func (s *Server) handleTurnSteer(_ context.Context, raw json.RawMessage) (any, error) {
 	var p struct {
 		ThreadID string            `json:"threadId"`
@@ -656,10 +657,11 @@ func (s *Server) handleTurnSteer(_ context.Context, raw json.RawMessage) (any, e
 		return nil, invalid("turn.steer: 需要 threadId")
 	}
 	threadID := strings.TrimSpace(p.ThreadID)
-	if len(p.Images) > 0 {
-		return nil, invalid("turn.steer: M2 第一切片暂不支持图片输入")
+	images, imgErr := s.decodeTurnImages(p.ThreadID, p.Images)
+	if imgErr != nil {
+		return nil, invalid("turn.steer: " + imgErr.Error())
 	}
-	if strings.TrimSpace(p.Text) == "" {
+	if strings.TrimSpace(p.Text) == "" && len(images) == 0 {
 		return nil, invalid("turn.steer: text 与 images 至少其一非空")
 	}
 	if utf8.RuneCountInString(p.Text) > 65536 {
@@ -675,11 +677,80 @@ func (s *Server) handleTurnSteer(_ context.Context, raw json.RawMessage) (any, e
 			"该线程没有运行中轮次，无法排队中途消息"))
 	}
 
-	position, err := s.sess.EnqueueSteering(threadID, p.Text)
+	position, err := s.sess.EnqueueSteering(threadID, p.Text, images)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	return map[string]any{"queued": true, "position": position}, nil
+}
+
+// decodeTurnImages 把 turn.start/steer 的 images 参数解码成消息部件，并执行
+// 双门校验（产品 capabilities.images + 模型 input 含 image）。规格：≤4 张，
+// PNG/JPEG/WebP/GIF，单张解码后 ≤8MB。
+func (s *Server) decodeTurnImages(threadID string, raw []json.RawMessage) ([]domain.Part, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	if len(raw) > 4 {
+		return nil, errors.New("图片最多 4 张")
+	}
+	allowedMime := map[string]bool{
+		"image/png": true, "image/jpeg": true, "image/webp": true, "image/gif": true,
+	}
+	out := make([]domain.Part, 0, len(raw))
+	for i, item := range raw {
+		var part domain.Part
+		if err := json.Unmarshal(item, &part); err != nil {
+			return nil, fmt.Errorf("第 %d 张图片不是合法 JSON", i+1)
+		}
+		if part.Type != domain.PartImage {
+			return nil, fmt.Errorf("第 %d 个 images 元素必须是 image 部件", i+1)
+		}
+		part.Mime = strings.ToLower(strings.TrimSpace(part.Mime))
+		if !allowedMime[part.Mime] {
+			return nil, fmt.Errorf("第 %d 张图片的 MIME %q 不支持（PNG/JPEG/WebP/GIF）", i+1, part.Mime)
+		}
+		data, err := base64.StdEncoding.DecodeString(part.Data)
+		if err != nil {
+			return nil, fmt.Errorf("第 %d 张图片不是合法 base64", i+1)
+		}
+		if len(data) == 0 {
+			return nil, fmt.Errorf("第 %d 张图片内容为空", i+1)
+		}
+		if len(data) > 8<<20 {
+			return nil, fmt.Errorf("第 %d 张图片超过 8MB 上限", i+1)
+		}
+		out = append(out, domain.Part{Type: domain.PartImage, Mime: part.Mime, Data: part.Data})
+	}
+	if err := s.imagesGate(threadID); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// imagesGate 是图片输入的双门：产品 capabilities.images 与当前模型 input。
+// 模型不在供应商目录里（如测试注入的 fake）时无法判定，放行由运行期报错兜底。
+func (s *Server) imagesGate(threadID string) error {
+	if !s.sess.Product().Capabilities.Images {
+		return errors.New("当前产品未开启图片输入（capabilities.images=false）")
+	}
+	ref := s.sess.ModelRefFor(threadID)
+	asm := s.sess.Assembly()
+	if asm == nil || asm.Providers == nil {
+		return nil
+	}
+	for _, m := range asm.Providers.Models(ref.ProviderID) {
+		if m.ID != ref.ModelID {
+			continue
+		}
+		for _, input := range m.Input {
+			if input == "image" {
+				return nil
+			}
+		}
+		return fmt.Errorf("当前模型 %s 不支持图片输入", ref.ModelID)
+	}
+	return nil
 }
 
 // ---- interaction ----

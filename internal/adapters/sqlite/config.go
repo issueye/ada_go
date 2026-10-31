@@ -42,8 +42,9 @@ const (
 	MaxPathDepth = 100_000
 	// MaxStateValueBytes 是 plugin_state 单值上限（ports/state.go：编码后 1MB，同 05 §6.3）。
 	MaxStateValueBytes = 1 << 20
-	// MaxPayloadBytes 是 entry payload 上限（与 08 §8.1 的 RPC 单条 2MB 同源）。
-	MaxPayloadBytes = 2 << 20
+	// MaxPayloadBytes 是 entry payload 上限（与 08 §8.1 的 RPC 单条 16MB 同源，
+	// 容纳 turn.start/thread.entries 携带的图片部件，7.7.4）。
+	MaxPayloadBytes = 16 << 20
 	// DefaultThreadListLimit 是 thread.list 的默认分页尺寸（08 §8.2）。
 	DefaultThreadListLimit = 50
 	// MaxThreadListLimit 是 thread.list 的分页上限。

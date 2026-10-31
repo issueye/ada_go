@@ -351,6 +351,10 @@ type transcriptPayload struct {
 type partView struct {
 	Type string // text | thinking | image
 	Text string
+	// Mime/Data 仅在 Type=image 时有值：data URL 的两半，
+	// 模板拼成 src="data:{{.Mime}};base64,{{.Data}}" 渲染消息里的图片。
+	Mime string
+	Data string
 }
 
 type toolView struct {
@@ -818,7 +822,8 @@ func messageItem(raw json.RawMessage, role, at string) transcriptItem {
 			}
 			parts = append(parts, partView{Type: "thinking", Text: clip(p.Text, maxPartBytes)})
 		case "image":
-			parts = append(parts, partView{Type: "image"})
+			// Data 直接进模板渲染 data URL；不截断（截断会让图片解码失败）。
+			parts = append(parts, partView{Type: "image", Mime: p.Mime, Data: p.Data})
 		default:
 			if strings.TrimSpace(p.Text) == "" {
 				continue

@@ -1740,3 +1740,41 @@ html.js .ada-newtask__ws-native {
     height: 260px;
   }
 }
+
+/* ── 聊天输入框图片附件 ─────────────────────────────────────────────── */
+
+.ada-composer__image-input {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ada-composer__attach {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-elevated);
+  color: var(--ph-muted);
+  cursor: pointer;
+}
+
+.ada-composer__attach:hover {
+  border-color: var(--ph-line-strong);
+  color: var(--ph-ink);
+}
+
+.ada-composer__thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 16px 0;
+}
+
+/* .ada-composer__thumb / .ada-msg__image 的尺寸与比例在 ui/components.css 统一维护，
+   这里不要再覆盖，否则预览与消息里的图片会呈现出不同的裁切效果。 */

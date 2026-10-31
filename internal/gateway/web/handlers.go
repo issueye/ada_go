@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -268,15 +270,16 @@ func jsClient(r *http.Request) bool {
 // 先按所选工作区 thread.create，再在同一 Core 上 turn.start。两步都成功
 // 才跳会话页；turn.start 失败时线程已经建好，回跳并显示错误提示。
 func (s *Server) handleCreateThread(w http.ResponseWriter, r *http.Request) {
-	if err := s.parseForm(w, r); err != nil {
-		s.renderError(w, r, http.StatusBadRequest, "无法读取表单",
-			"请求体不是有效的表单，可能超过 1MB 上限。请返回后重试。",
-			err.Error(), "/", "返回")
+	images, form, imgErr := s.parseTurnForm(w, r)
+	if imgErr != nil {
+		s.renderError(w, r, http.StatusBadRequest, "无法读取表单或图片",
+			"请求体无效：可能超过大小上限（整包 48MB，图片单张 8MB、最多 4 张）。请返回后重试。",
+			imgErr.Error(), "/", "返回")
 		return
 	}
 
 	workspace, index := s.resolveWorkspace(r)
-	if raw := strings.TrimSpace(r.PostFormValue("workspace")); raw != "" {
+	if raw := strings.TrimSpace(form.Get("workspace")); raw != "" {
 		idx, ok := s.registerWorkspace(raw)
 		if !ok {
 			s.renderError(w, r, http.StatusBadRequest, "这个目录不能作为工作区",
@@ -294,7 +297,7 @@ func (s *Server) handleCreateThread(w http.ResponseWriter, r *http.Request) {
 
 	// 无 JS 时模型选择器用原生 select 提交；有 JS 时选中的那一刻已通过
 	// /model/select 切换，这里不会有值。模型是工作区级（还没有线程）。
-	if rawModel := strings.TrimSpace(r.PostFormValue("model")); rawModel != "" {
+	if rawModel := strings.TrimSpace(form.Get("model")); rawModel != "" {
 		providerID, modelID, ok := strings.Cut(rawModel, "|")
 		if ok && providerID != "" && modelID != "" {
 			params := map[string]any{
@@ -307,8 +310,11 @@ func (s *Server) handleCreateThread(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	text := strings.TrimSpace(r.PostFormValue("text"))
-	title := strings.TrimSpace(r.PostFormValue("title"))
+	text := strings.TrimSpace(form.Get("text"))
+	if text == "" && len(images) > 0 {
+		text = "（图片任务）"
+	}
+	title := strings.TrimSpace(form.Get("title"))
 	if title == "" {
 		title = titleFromTask(text)
 	}
@@ -333,11 +339,14 @@ func (s *Server) handleCreateThread(w http.ResponseWriter, r *http.Request) {
 	// 后续页面、SSE 与会话请求都要落到同一个工作区：先写 cookie 再跳转。
 	s.setWorkspaceCookie(w, index)
 
-	if text != "" {
+	if text != "" || len(images) > 0 {
 		params := map[string]any{
 			"threadId":       res.Thread.ID,
 			"idempotencyKey": newIdempotencyKey(),
 			"text":           text,
+		}
+		if len(images) > 0 {
+			params["images"] = images
 		}
 		if _, err := s.callWorkspace(r, workspace, "turn.start", params); err != nil {
 			redirect(w, flashRedirect(threadPath(res.Thread.ID), "error", cleanRPCError(err)))
@@ -728,18 +737,23 @@ func newPluginStreamID() string {
 //   - finishing     → 提示轮次正在收尾。
 func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := s.parseForm(w, r); err != nil {
-		s.renderError(w, r, http.StatusBadRequest, "无法读取表单",
-			"请求体不是有效的表单，可能超过 1MB 上限。请返回后重试。",
-			err.Error(), threadPath(id), "返回")
+
+	// 图片输入：multipart 表单（附件按钮/粘贴/拖拽），文本与图片一起提交。
+	// 上限：单张 ≤8MB（解码后）、最多 4 张、整包 ≤40MB；文本路径仍走 1MB 表单上限。
+	images, form, imgErr := s.parseTurnForm(w, r)
+	if imgErr != nil {
+		s.renderError(w, r, http.StatusBadRequest, "无法读取表单或图片",
+			"请求体无效：可能超过大小上限（文本 1MB，图片单张 8MB、最多 4 张）。请返回后重试。",
+			imgErr.Error(), threadPath(id), "返回会话")
 		return
 	}
-	text := r.PostFormValue("text")
-	if strings.TrimSpace(text) == "" {
+	text := strings.TrimSpace(form.Get("text"))
+	if strings.TrimSpace(text) == "" && len(images) == 0 {
 		s.renderError(w, r, http.StatusBadRequest, "消息不能为空",
-			"请输入消息正文后再发送。", "", threadPath(id), "返回会话")
+			"请输入消息正文或附加图片后再发送。", "", threadPath(id), "返回会话")
 		return
 	}
+	_ = form
 
 	// 无 JS 的浏览器用 <noscript> 里的原生 select 提交 model（provider|model）；
 	// 有 JS 时模型在选中的那一刻已经通过 /model/select 切换，这里不会有值。
@@ -766,10 +780,17 @@ func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 		"idempotencyKey": key,
 		"text":           text,
 	}
+	if len(images) > 0 {
+		startParams["images"] = images
+	}
 
 	switch s.turnStatus(r, id) {
 	case "running":
-		if _, err := s.call(r, "turn.steer", map[string]any{"threadId": id, "text": text}); err != nil {
+		steerParams := map[string]any{"threadId": id, "text": text}
+		if len(images) > 0 {
+			steerParams["images"] = images
+		}
+		if _, err := s.call(r, "turn.steer", steerParams); err != nil {
 			// 轮次可能在 turn.get 与 turn.steer 之间结束。此时消息并没有进队，
 			// 退回 turn.start 比把一条本来能发的消息变成错误页更合理。
 			if _, startErr := s.call(r, "turn.start", startParams); startErr != nil {
@@ -795,6 +816,68 @@ func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirect(w, threadPath(id))
+}
+
+// parseTurnForm 解析发送表单：multipart（带图片）与 urlencoded（纯文本）双形态。
+// 返回文本字段与已校验的图片部件（base64 + mime，直接透传 turn.start/steer）。
+func (s *Server) parseTurnForm(w http.ResponseWriter, r *http.Request) ([]map[string]any, url.Values, error) {
+	form := url.Values{}
+	images := []map[string]any{}
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
+		if err := r.ParseForm(); err != nil {
+			return nil, nil, err
+		}
+		for key, vals := range r.PostForm {
+			form[key] = vals
+		}
+		return images, form, nil
+	}
+	// multipart：整包上限由安全中间件包 48MB（gateway.MaxBodyBytes 同源）。
+	// 安全中间件的 CSRF 检查会先 ParseMultipartForm 消费请求体，这里复用缓存。
+	if err := r.ParseMultipartForm(maxMultipartMemory); err != nil {
+		if errors.Is(err, http.ErrNotMultipart) {
+			return nil, nil, err
+		}
+		return nil, nil, err
+	}
+	allowedMime := map[string]bool{
+		"image/png": true, "image/jpeg": true, "image/webp": true, "image/gif": true,
+	}
+	for key, vals := range r.MultipartForm.Value {
+		form[key] = append(form[key], vals...)
+	}
+	for _, fh := range r.MultipartForm.File["images"] {
+		if len(images) >= 4 {
+			return nil, nil, errors.New("图片最多 4 张")
+		}
+		file, err := fh.Open()
+		if err != nil {
+			return nil, nil, err
+		}
+		data, err := io.ReadAll(io.LimitReader(file, (8<<20)+1))
+		_ = file.Close()
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(data) == 0 {
+			return nil, nil, errors.New("图片内容为空")
+		}
+		if len(data) > 8<<20 {
+			return nil, nil, fmt.Errorf("图片 %s 超过 8MB 上限", fh.Filename)
+		}
+		mime := strings.ToLower(http.DetectContentType(data))
+		mime = strings.Split(mime, ";")[0]
+		if !allowedMime[mime] {
+			return nil, nil, fmt.Errorf("图片 %s 的类型 %s 不支持（PNG/JPEG/WebP/GIF）", fh.Filename, mime)
+		}
+		images = append(images, map[string]any{
+			"type": "image",
+			"mime": mime,
+			"data": base64.StdEncoding.EncodeToString(data),
+		})
+	}
+	return images, form, nil
 }
 
 // turnStatus 读取线程当前轮次状态；读不到返回空串，让调用方按空闲处理
