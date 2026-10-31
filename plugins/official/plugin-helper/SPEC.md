@@ -108,7 +108,12 @@ agent.route({ method: "POST", path: "/items", sse: false, handler(req, ctx) { ..
 
 ```ts
 agent.registerPrompt({ id: "persona", content: "...", priority?: 10 });   // 系统提示片段
-agent.registerProvider({ id: "openai", models: [ModelInfo], stream(req, ctx) {} }); // 仅 builtin/verified
+agent.registerProvider({
+  id: "openai", models: [ModelInfo],
+  protocol: "openai_chat", defaultBaseUrl: "https://api.openai.com/v1",
+  secretName: "openai_api_key", displayName: "OpenAI Chat",
+  stream(req, ctx) {},
+}); // 仅 builtin/verified；元数据用于播种默认供应商，基座不写死端点/密钥名
 agent.on("tool.beforeCall", fn, { priority?: 0, action?: "deny" });       // 策略钩子，见 docs 06 §6.6
 ```
 

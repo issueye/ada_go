@@ -80,6 +80,10 @@ interface ProviderContext {
 interface ProviderDef {
   id: string;
   models: ProviderModelInfo[];
+  protocol?: string;
+  defaultBaseUrl?: string;
+  secretName?: string;
+  displayName?: string;
   stream(req: ProviderRequest, ctx: ProviderContext): Promise<void>;
 }
 
@@ -394,6 +398,10 @@ export default function (agent: AgentAPI): void {
   agent.registerProvider({
     id: "openai-responses",
     models,
+    protocol: "openai_responses",
+    defaultBaseUrl: DEFAULT_BASE_URL,
+    secretName: SECRET_NAME,
+    displayName: "OpenAI Responses",
     stream(req, ctx) {
       return streamOnce(req, ctx);
     },

@@ -24,6 +24,9 @@ ada-go/
       host/node/           能力位 → stdlib.Config、env 白名单、Node 错误归一化
     coreproto/             JSON-RPC 服务端、事件发射、投影
     coreapp/               通用装配器：接收插件集合 → 目录/引擎（不 import plugins/official/）
+    corecontracts/         Core RPC 与 CLI 共享的轻量类型（不依赖 cli/app）
+    cli/                   会话运行时（CLI 与 Core 共用；组合根的消费方）
+    corerpc/               JSON-RPC over WebSocket（只依赖 Session 接口）
     gateway/
       gateway.go            Gateway 装配、路由与生命周期
       contracts/            对外契约
@@ -46,7 +49,7 @@ ada-go/
         slot.tsx/page.tsx    前端模板（可选）
         dist/                构建产物，随 Electron resources 发布
       provider-openai-chat/ provider-anthropic-messages/ provider-openai-responses/
-      tools-fs/ tools-shell/ tools-git/ tools-plan/ tools-ask/ tools-skill/ tools-subagent/
+      tools-fs/ tools-shell/ tools-git/ tools-plan/ tools-ask/ tools-skill/ tools-subagent/（v1.5）
       policy-default/
       persona-coding/ provider-admin/ token-usage/ ui-hello-tsx/
     hello-tsx/ task-plan/ ask-user/   第三方示例（装时编译）

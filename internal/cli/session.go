@@ -29,6 +29,7 @@ import (
 	"github.com/adag/ada-go/internal/adapters"
 	"github.com/adag/ada-go/internal/adapters/sqlite"
 	"github.com/adag/ada-go/internal/coreapp"
+	"github.com/adag/ada-go/internal/corecontracts"
 	"github.com/adag/ada-go/internal/coreproto"
 	"github.com/adag/ada-go/internal/devfake"
 	"github.com/adag/ada-go/internal/domain"
@@ -156,14 +157,7 @@ type Session struct {
 
 // PolicyUpdate 是 workspace.updatePolicy 的合并输入。
 // 字段为 nil 表示保持当前值；非 nil 时覆盖并校验。
-type PolicyUpdate struct {
-	ToolTimeoutMS   *int
-	TurnTimeoutMS   *int
-	MaxTurnTokens   *int
-	LoopRepeatLimit *int
-	LoopAbortLimit  *int
-	ParallelTools   *int
-}
+type PolicyUpdate = corecontracts.PolicyUpdate
 
 // threadCtxKey 把「本次工具调用属于哪个线程」传给 stateOp。
 // engine 的工具执行使用轮次 ctx，宿主 State 闭包能拿到它；这比 Session 上的
@@ -698,6 +692,51 @@ func (s *Session) Assembly() *app.Assembly {
 	return s.asm
 }
 
+// Plugins 返回当前装配的插件实例（Core RPC 的 hello/debug 统计用）。
+func (s *Session) Plugins() []*host.Instance {
+	asm := s.Assembly()
+	if asm == nil {
+		return nil
+	}
+	return append([]*host.Instance(nil), asm.Plugins...)
+}
+
+// Tools 返回当前装配的工具描述符（tool.list 数据源）。
+func (s *Session) Tools(ctx context.Context) []domain.Descriptor {
+	asm := s.Assembly()
+	if asm == nil || asm.Tools == nil {
+		return nil
+	}
+	return asm.Tools.List(ctx)
+}
+
+// ProviderIDs 返回当前可用的 provider 实例 id（model.list 数据源）。
+func (s *Session) ProviderIDs() []string {
+	asm := s.Assembly()
+	if asm == nil || asm.Providers == nil {
+		return nil
+	}
+	return asm.Providers.Providers()
+}
+
+// ProviderModels 返回某个 provider 的模型能力。
+func (s *Session) ProviderModels(providerID string) []host.ModelInfo {
+	asm := s.Assembly()
+	if asm == nil || asm.Providers == nil {
+		return nil
+	}
+	return asm.Providers.Models(providerID)
+}
+
+// ProviderConfigs 返回当前供应商配置（provider.list 数据源）。
+func (s *Session) ProviderConfigs() []provider.Config {
+	asm := s.Assembly()
+	if asm == nil || asm.Providers == nil {
+		return nil
+	}
+	return asm.Providers.Configs()
+}
+
 // Store 返回工作区存储句柄（Core RPC 的线程/entry 查询复用它）。
 func (s *Session) Store() *sqlite.Store { return s.store }
 
@@ -794,12 +833,7 @@ func (s *Session) CallAction(ctx context.Context, pluginID, action string, input
 }
 
 // HTTPAPIError 是插件 HTTP 路由的业务状态错误（404/405），供 Core RPC 映射。
-type HTTPAPIError struct {
-	Status  int
-	Message string
-}
-
-func (e *HTTPAPIError) Error() string { return e.Message }
+type HTTPAPIError = corecontracts.HTTPAPIError
 
 // CallHTTPAPI 调用插件注册的动态 HTTP 路由（route）。
 // 路由表与插件实例都在当前装配里；404/405 转换成 HTTPAPIError。
@@ -1091,10 +1125,10 @@ func (s *Session) applyProviderConfigs(asm *app.Assembly) {
 		return
 	}
 	if !exists {
-		if legacy, ok := s.legacyProviderConfigs(); ok {
+		if legacy, ok := s.legacyProviderConfigs(asm); ok {
 			cfgs = legacy
 		} else {
-			cfgs = seedProviderConfigs(asm, s.BaseURL(), s.providerCredentialConfigured)
+			cfgs = seedProviderConfigs(asm, s.BaseURL(), s.hasSecret)
 		}
 		// 播种为空时不落盘：保留「尚未初始化」状态，之后打开其他工作区
 		// 仍有机会迁移到那里已有的用户配置。
@@ -1136,7 +1170,7 @@ func (s *Session) RefreshProviderConfigs() {
 // 优先当前工作区；否则扫描同级工作区，取最近修改的一份用户配置。
 // 只有确实含用户改动（密钥/代理/请求头/自定义端点或供应商）才迁移，
 // 避免把旧版本自动播种的 OpenAI 默认项带进共享配置。
-func (s *Session) legacyProviderConfigs() ([]provider.Config, bool) {
+func (s *Session) legacyProviderConfigs(asm *app.Assembly) ([]provider.Config, bool) {
 	path := s.providerStore.Path()
 	if strings.TrimSpace(path) == "" {
 		return nil, false
@@ -1145,7 +1179,7 @@ func (s *Session) legacyProviderConfigs() ([]provider.Config, bool) {
 	if samePath(path, current) {
 		return nil, false // 本来就用工作区配置，不需要迁移
 	}
-	if cfgs, ok := loadUserProviderConfigs(current); ok {
+	if cfgs, ok := s.loadUserProviderConfigs(asm, current); ok {
 		return cfgs, true
 	}
 	root := filepath.Dir(s.cfg.DataDir)
@@ -1163,7 +1197,7 @@ func (s *Session) legacyProviderConfigs() ([]provider.Config, bool) {
 		if samePath(candidate, path) {
 			continue
 		}
-		cfgs, ok := loadUserProviderConfigs(candidate)
+		cfgs, ok := s.loadUserProviderConfigs(asm, candidate)
 		if !ok {
 			continue
 		}
@@ -1189,16 +1223,16 @@ func samePath(a, b string) bool {
 }
 
 // loadUserProviderConfigs 读取一份旧配置；没有用户改动时视为「可重新播种」。
-// 内置 ID 且仍是默认端点/无密钥的条目是旧版本自动播种的，迁移时丢弃，
-// 避免升级后又冒出一套未配置的 GPT/Claude 供应商。
-func loadUserProviderConfigs(path string) ([]provider.Config, bool) {
+// 适配器默认端点由 provider 插件声明；仍是默认端点/无密钥的条目是旧版本自动播种的，
+// 迁移时丢弃，避免升级后又冒出一套未配置的供应商。
+func (s *Session) loadUserProviderConfigs(asm *app.Assembly, path string) ([]provider.Config, bool) {
 	cfgs, exists, err := provider.NewStore(path).Load()
 	if err != nil || !exists {
 		return nil, false
 	}
 	out := make([]provider.Config, 0, len(cfgs))
 	for _, c := range cfgs {
-		if userModifiedProvider(c) {
+		if s.userModifiedProvider(asm, c) {
 			out = append(out, c)
 		}
 	}
@@ -1208,50 +1242,49 @@ func loadUserProviderConfigs(path string) ([]provider.Config, bool) {
 	return out, true
 }
 
-func userModifiedProvider(c provider.Config) bool {
+func (s *Session) userModifiedProvider(asm *app.Assembly, c provider.Config) bool {
 	if strings.TrimSpace(c.APIKey) != "" || strings.TrimSpace(c.Proxy) != "" ||
 		len(c.Headers) > 0 || c.Disabled {
 		return true
 	}
-	if !seededProviderID(c.ID) {
+	meta, ok := adapterMetaIn(asm, c.Protocol)
+	if !ok {
 		return true
 	}
 	base := strings.TrimSpace(c.BaseURL)
-	return base != "" && !strings.EqualFold(base, defaultProviderBase(c.Protocol))
-}
-
-func seededProviderID(id string) bool {
-	switch id {
-	case "openai", "openai-responses", "anthropic":
-		return true
-	default:
-		return false
-	}
+	return base != "" && !strings.EqualFold(base, meta.DefaultBaseURL)
 }
 
 // seedProviderConfigs 用已装配的适配器声明播种默认供应商。
-// 只有显式 BaseURL 或对应密钥已配置时才播种；否则新工作区会凭空出现
-// 一套不可用的模型（用户并没有配置过这个供应商）。
-func seedProviderConfigs(asm *app.Assembly, baseURL string, hasCredential func(provider.Protocol) bool) []provider.Config {
+// 端点、密钥名与显示名由 provider 插件声明；只有显式 BaseURL 或对应密钥已配置时才播种，
+// 否则新工作区会凭空出现一套不可用的模型（用户并没有配置过这个供应商）。
+func seedProviderConfigs(asm *app.Assembly, baseURL string, hasCredential func(string) bool) []provider.Config {
 	out := make([]provider.Config, 0, len(asm.Providers.AdapterIDs()))
 	for _, id := range asm.Providers.AdapterIDs() {
-		models := asm.Providers.AdapterModels(id)
-		if len(models) == 0 {
+		meta, ok := asm.Providers.AdapterMeta(id)
+		if !ok || len(meta.Models) == 0 {
 			continue
 		}
-		protocol := provider.ProtocolForAdapter(id)
+		protocol := meta.Protocol
+		if protocol == "" {
+			protocol = provider.ProtocolForAdapter(id)
+		}
 		cfgBase := baseURL
 		if cfgBase == "" {
-			if hasCredential == nil || !hasCredential(protocol) {
+			if meta.SecretName == "" || hasCredential == nil || !hasCredential(meta.SecretName) {
 				continue
 			}
-			cfgBase = defaultProviderBase(protocol)
+			cfgBase = meta.DefaultBaseURL
+		}
+		name := meta.DisplayName
+		if name == "" {
+			name = id
 		}
 		cfg := provider.Config{
-			ID: id, Name: providerDisplayName(id), Protocol: protocol,
-			BaseURL: cfgBase, Models: make([]provider.Model, 0, len(models)),
+			ID: id, Name: name, Protocol: protocol,
+			BaseURL: cfgBase, Models: make([]provider.Model, 0, len(meta.Models)),
 		}
-		for _, m := range models {
+		for _, m := range meta.Models {
 			cfg.Models = append(cfg.Models, provider.Model{
 				ID: m.ID, DisplayName: m.DisplayName,
 				ContextWindow: m.ContextWindow, MaxOutput: m.MaxOutput,
@@ -1264,34 +1297,29 @@ func seedProviderConfigs(asm *app.Assembly, baseURL string, hasCredential func(p
 	return out
 }
 
-func defaultProviderBase(protocol provider.Protocol) string {
-	if protocol == provider.ProtocolAnthropic {
-		return "https://api.anthropic.com/v1"
-	}
-	return "https://api.openai.com/v1"
-}
-
-// providerCredentialConfigured 报告某个协议是否已通过环境变量/secrets 提供密钥。
-func (s *Session) providerCredentialConfigured(protocol provider.Protocol) bool {
-	name := "openai_api_key"
-	if protocol == provider.ProtocolAnthropic {
-		name = "anthropic_api_key"
+// hasSecret 报告某个密钥名是否已通过环境变量/secrets 提供。
+func (s *Session) hasSecret(name string) bool {
+	if strings.TrimSpace(name) == "" {
+		return false
 	}
 	_, ok := s.secret(name)
 	return ok
 }
 
-func providerDisplayName(adapterID string) string {
-	switch adapterID {
-	case "openai":
-		return "OpenAI Chat（兼容端点）"
-	case "openai-responses":
-		return "OpenAI Responses"
-	case "anthropic":
-		return "Anthropic Messages"
-	default:
-		return adapterID
+// adapterMetaForProtocol 按协议找当前装配里的适配器元数据。
+func (s *Session) adapterMetaForProtocol(protocol provider.Protocol) (provider.AdapterMeta, bool) {
+	return adapterMetaIn(s.Assembly(), protocol)
+}
+
+func adapterMetaIn(asm *app.Assembly, protocol provider.Protocol) (provider.AdapterMeta, bool) {
+	if asm == nil || asm.Providers == nil {
+		return provider.AdapterMeta{}, false
 	}
+	adapterID, ok := asm.Providers.AdapterIDForProtocol(protocol)
+	if !ok {
+		return provider.AdapterMeta{}, false
+	}
+	return asm.Providers.AdapterMeta(adapterID)
 }
 
 // ensureCurrentModel 在供应商/模型被删改后保证当前选择仍然有效；无效时选第一个可用模型。
@@ -1354,7 +1382,9 @@ func (s *Session) saveProviderFromPlugin(ctx context.Context, in host.ProviderIn
 		name = id
 	}
 	protocol := provider.Protocol(strings.TrimSpace(in.Protocol))
-	if !protocol.Valid() {
+	if asm := s.Assembly(); asm == nil || asm.Providers == nil {
+		return host.ProviderInfo{}, errors.New("供应商适配器尚未装配")
+	} else if _, ok := asm.Providers.AdapterIDForProtocol(protocol); !ok {
 		return host.ProviderInfo{}, fmt.Errorf("未知 API 格式: %s", in.Protocol)
 	}
 	baseURL := strings.TrimSpace(in.BaseURL)
@@ -1423,11 +1453,11 @@ func (s *Session) providerInfo(c provider.Config) host.ProviderInfo {
 	if info.HasAPIKey {
 		return info
 	}
-	name := "openai_api_key"
-	if c.Protocol == provider.ProtocolAnthropic {
-		name = "anthropic_api_key"
+	name := ""
+	if meta, ok := s.adapterMetaForProtocol(c.Protocol); ok {
+		name = meta.SecretName
 	}
-	if _, ok := s.secret(name); ok {
+	if s.hasSecret(name) {
 		info.HasAPIKey = true
 		info.APIKeyHint = "环境变量/secrets"
 	}
@@ -1481,22 +1511,14 @@ func (s *Session) fetchModelsFromPlugin(ctx context.Context, providerID string) 
 		return nil, fmt.Errorf("没有供应商 %s", providerID)
 	}
 
+	meta, _ := s.adapterMetaForProtocol(cfg.Protocol)
 	baseURL := strings.TrimSpace(cfg.BaseURL)
 	if baseURL == "" {
-		switch cfg.Protocol {
-		case provider.ProtocolAnthropic:
-			baseURL = "https://api.anthropic.com/v1"
-		default:
-			baseURL = "https://api.openai.com/v1"
-		}
+		baseURL = meta.DefaultBaseURL
 	}
 	key := strings.TrimSpace(cfg.APIKey)
-	if key == "" {
-		name := "openai_api_key"
-		if cfg.Protocol == provider.ProtocolAnthropic {
-			name = "anthropic_api_key"
-		}
-		if v, ok := s.secret(name); ok {
+	if key == "" && meta.SecretName != "" {
+		if v, ok := s.secret(meta.SecretName); ok {
 			key = strings.TrimSpace(v)
 		}
 	}
@@ -2414,44 +2436,10 @@ func (s *Session) discoveredSnapshot() []discovery.Plugin {
 }
 
 // PluginView 是 plugin.list 的一行：运行时摘要 + 发现层信息。
-type PluginView struct {
-	ID          string
-	Name        string
-	Version     string
-	APIVersion  int
-	Trust       string
-	Enabled     bool
-	Status      string // ready | degraded | disabled | failed | unused
-	Fingerprint string
-	LastError   string
-	// Source 是发现来源：""＝随包（官方）；workspace | global。
-	Source string
-	// Path 是插件所在的绝对目录（第三方或 Electron resources 里的官方插件）。
-	Path  string
-	Tools []string
-	Hooks []string
-	// Skills 是随包技能名（6.7 的 contributions.skills 计数来源）。
-	Skills []string
-	// Entry 是后端入口相对路径；ManifestCapabilities 是声明的能力位。
-	// check_plugin 的诊断报告用。
-	Entry                string
-	ManifestCapabilities []string
-	// Frontend / Backend 标明清单段；统一插件包可以两者都为真。
-	Frontend bool
-	Backend  bool
-	// Readme 是插件 README 正文；没有 README 时回退为清单 description。
-	Readme string
-	// Files 是插件包内文件清单（详情页「插件目录」）。
-	Files []PluginFile
-}
+type PluginView = corecontracts.PluginView
 
 // PluginFile 是插件包内一个文件（相对路径，不含宿主绝对路径）。
-type PluginFile struct {
-	Path  string
-	Size  int64
-	Dir   bool
-	Depth int
-}
+type PluginFile = corecontracts.PluginFile
 
 // PluginViews 列出随包 + 第三方插件的当前状态（plugin.list 的数据源）。
 //

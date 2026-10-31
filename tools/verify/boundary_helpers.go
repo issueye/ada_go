@@ -39,6 +39,11 @@ func checkDependencyDirection(root string) error {
 		{"internal/engine", []string{"internal/domain", "internal/ports"}, "engine 只依赖 ports 与 domain：不知道 moejs、不知道 SQLite、不知道 Gin（设计 3.3）"},
 		{"internal/diag", nil, "diag 是词汇表叶子，不依赖内部层"},
 		{"internal/version", []string{"internal/domain"}, "version 只依赖 domain"},
+		// Gateway 不进入执行内核；允许复用产品声明与前端渲染的共享基座包（设计 3.3）。
+		{"internal/gateway", []string{
+			"internal/coreapp", "internal/domain", "internal/gateway", "internal/plugins",
+			"internal/ports", "internal/proto", "internal/version", "internal/workspacepath",
+		}, "Gateway 不 import engine/toolkit/adapters/official（设计 3.3）"},
 	}
 	for _, r := range rules {
 		files, err := goFiles(filepath.Join(root, filepath.FromSlash(r.pkg)))
@@ -77,21 +82,24 @@ func checkDependencyDirection(root string) error {
 	return nil
 }
 
-// goFiles 列出目录下的非测试 Go 文件。
+// goFiles 列出目录（含子目录）下的非测试 Go 文件。
 func goFiles(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("verify: 读取目录失败 %s: %w", dir, err)
-	}
 	var out []string
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
-		name := e.Name()
+		if d.IsDir() {
+			return nil
+		}
+		name := d.Name()
 		if strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go") {
-			out = append(out, filepath.Join(dir, name))
+			out = append(out, path)
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	sort.Strings(out)
 	return out, nil

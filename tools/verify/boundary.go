@@ -1,8 +1,10 @@
 package verify
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -169,6 +171,49 @@ func strictAdjacentCount(line, key string) bool {
 	return false
 }
 
+// checkTransitiveOfficial 检查非组合根包没有通过传递依赖拿到官方插件加载器。
+//
+// 直接 import 检查只能覆盖 `import "plugins/official"`；`corerpc → cli → app → official`
+// 这类链路不会出现在任何一个文件的 import 里。这里用 go list 的 Deps 做闭包检查：
+// 允许 app（组合根）、internal/cli（CLI/组合消费方）、cmd/adag（入口）与 official 自身。
+func checkTransitiveOfficial(root string) error {
+	cmd := exec.Command("go", "list", "-deps",
+		"-f", `{{.ImportPath}}|{{join .Deps ","}}`, "./internal/...", "./cmd/...")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return fmt.Errorf("verify: go list 失败: %s", strings.TrimSpace(string(ee.Stderr)))
+		}
+		return fmt.Errorf("verify: go list 失败: %w", err)
+	}
+
+	official := modulePrefix + "plugins/official"
+	allowed := map[string]bool{
+		official:                      true,
+		modulePrefix + "app":          true,
+		modulePrefix + "internal/cli": true,
+		modulePrefix + "cmd/adag":     true,
+	}
+	var bad []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		pkg, deps, ok := strings.Cut(line, "|")
+		if !ok || !strings.Contains(deps, official) {
+			continue
+		}
+		if allowed[pkg] {
+			continue
+		}
+		bad = append(bad, pkg)
+	}
+	if len(bad) > 0 {
+		sort.Strings(bad)
+		return fmt.Errorf("verify: 非组合根/CLI 包传递依赖了 plugins/official：%s", strings.Join(bad, ", "))
+	}
+	return nil
+}
+
 // checkBoundary 实现设计 1.5.5 的六件事。
 func checkBoundary(root string) error {
 	var problems []string
@@ -246,7 +291,12 @@ func checkBoundary(root string) error {
 		problems = append(problems, err.Error())
 	}
 
-	// 5. 零插件启动：空基座必须真的能装配成「无工具、无供应商、有空态提示」的运行态。
+	// 5. 传递依赖：只有组合根 app、CLI 与 cmd/adag 可以依赖官方插件包。
+	if err := checkTransitiveOfficial(root); err != nil {
+		problems = append(problems, err.Error())
+	}
+
+	// 6. 零插件启动：空基座必须真的能装配成「无工具、无供应商、有空态提示」的运行态。
 	if err := emptyBaseBoots(root); err != nil {
 		problems = append(problems, err.Error())
 	}

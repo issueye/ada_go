@@ -60,7 +60,7 @@ M1 期间若领域层不再需要独立常量，可让 `domain` 改为引用 `di
 | 缺口 | 实测结论 | 处置 | 归属 |
 |---|---|---|---|
 | E-1 模块白名单 | 未知 `node:*` 静态与动态 import 都在链接期失败；`fs` 与 `node:fs` 同实例；但**裸名 `events` 也能解析**，且模块是「装完即全量」，无法只装一半 | 白名单落在**宿主 resolver**：ada-go 自己实现 `SetModuleLoader`，裸内置名一律归一到 `node:*` 后再按能力判定；不依赖上游开关 | M1-C/D |
-| E-4 fs 错误码 | **已符合**：`code`/`errno`（负 libuv 值）/`syscall`/`path` 齐全，`err.code === "ENOENT"` 可直接分支；symlink 越界按真实落点 EACCES（Linux 走 `openat2 RESOLVE_BENEATH`），宿主绝对路径不进脚本 | 上游无需改；文档 [12 §6.11.1](12-node-compat.md#6111-现状与待补) 里「E-4 待补」的措辞要更正为「已具备」 | M1-D 文档 |
+| E-4 fs 错误码 | **已符合**：`code`/`errno`（负 libuv 值）/`syscall`/`path` 齐全，`err.code === "ENOENT"` 可直接分支；symlink 越界按真实落点 EACCES（Linux 走 `openat2 RESOLVE_BENEATH`）。`node:fs` 不暴露宿主路径；`ctx.fs` 读成员按 2026-10-31 决策可读宿主路径 | 上游无需改；文档 [12 §6.11.1](12-node-compat.md#6111-现状与待补) 里「E-4 待补」的措辞要更正为「已具备」 | M1-D 文档 |
 | E-4 只读静态裁剪 | **不支持**：只读时写成员仍存在（`writable: true`），调用才抛 `EROFS`（不是 `ERR_ACCESS_DENIED`）；宿主可以用 import 钩子替换成员做到「访问即抛」，但 `node:fs` 模块体一次性读全部成员，任一成员抛错就让整个模块求值失败 | 退一步：宿主裁剪层实现「**调用即抛 `ERR_ACCESS_DENIED`**」，并在 [12 §6.12.1](12-node-compat.md#6121-安装) 把「访问即抛」改成「调用即抛 + 原因」；同时向上游提 issue（要求 binding 成员惰性化） | M1-C/D + 上游 issue |
 | E-5 child_process | 上游**根本没有** `node:child_process`：`spawn`/`exec` 不存在，没有绕过面；宿主用 1 个虚拟模块 + 2 个 NativeFunc 就能装出 `execFile/execFileSync`，实测无 shell（`shell:true` → `ERR_ACCESS_DENIED`）、程序 allowlist、cwd 越界拒绝、`maxBuffer` 夹逼、超时与取消都能杀进程树 | ada-go 自建该模块（**不 fork、不推上游**），矩阵里标 `ada-go 实现` | M1-C/D |
 | E-6 单次读写/目录上限 | 无：20MB 一次读进 64MB 堆成功；`readdir` 10500 条全量返回。上游的拒绝阈值实际等于 Runtime `MemoryLimit`，与堆耦合 | 宿主包装层夹 16MB / 10k，并显式返回 `ERR_FS_FILE_TOO_LARGE`；不改 `MemoryLimit` 语义 | M1-C/D |

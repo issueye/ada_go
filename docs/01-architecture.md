@@ -166,7 +166,7 @@ gateway
 
 - `domain` 不 import 任何适配器，不出现产品名。
 - `engine` 只依赖 `ports` 与 `domain`。
-- Gateway 不 import Core 的内部包，只 import `coreproto` 的 DTO 与生成的方法常量。
+- Gateway 不 import Core 的执行内核（`engine`/`toolkit`/`adapters`）与官方插件包；允许复用共享基座包 `coreapp`（产品声明）、`plugins/host`（前端渲染类型）、`plugins`、`proto`、`domain`、`version`、`workspacepath`，但不得调用工具或模型。
 - 插件运行时只通过 `ports.ScriptHost` 进入引擎；引擎不知道 moejs 的存在。
 
 ### 3.4 一次对话的时序

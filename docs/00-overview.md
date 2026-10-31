@@ -145,7 +145,7 @@ ada-go 是一个**本地优先、单二进制、插件优先**的 AI Agent 系�
 #### 1.5.5 空基座与官方产品
 
 - **空基座验收**：不装任何插件，`adag gateway` 能打开、能建线程、能显示“未配置供应商/无工具”的空态；不 panic、不白屏、不偷偷回退到硬编码工具。
-- **官方 coding 产品 = 基座 + 官方插件包**：`provider-openai-chat`、`provider-anthropic-messages`、`tools-fs`、`tools-shell`、`tools-git`、`tools-plan`、`tools-ask`、`tools-skill`、`tools-subagent`、`policy-default`、`persona-coding` 等。禁用任一官方插件，对应能力必须消失，基座不能有兜底实现。
+- **官方 coding 产品 = 基座 + 官方插件包**：`provider-openai-chat`、`provider-anthropic-messages`、`tools-fs`、`tools-shell`、`tools-git`、`tools-plan`、`tools-ask`、`tools-skill`、`tools-subagent`（v1.5）、`policy-default`、`persona-coding` 等。禁用任一官方插件，对应能力必须消失，基座不能有兜底实现。
 - **官方插件不是基座**：它们和第三方插件使用同一份清单、同一套能力、同一个 TS 运行时与装配器；区别只有信任级别（可用控制面钩子与受信能力）与随包发布。
 - **依赖方向**：官方插件与第三方一样，只依赖 `agent:*` / `ssr:*` 虚拟模块与公开类型，不 import 基座 Go 包；`app` 负责把磁盘上的 `plugins/official` 目录交给通用装配器。基座绝不 import 官方插件代码。
 - **门禁**：`adag verify boundary` 检查六件事——基座包不 import `plugins/official/*`；基座源码不出现官方插件 id；Core 方法集合与 `spec/proto.json` 完全一致；零插件启动测试通过；启用写/执行/网络工具时至少有一个 `role=tool-policy` 插件；不存在平行的 Go 插件注册 API。
@@ -155,7 +155,7 @@ ada-go 是一个**本地优先、单二进制、插件优先**的 AI Agent 系�
 
 - 插件不能替换交互托盘外壳、安全提示、登录页与错误页；这些属于基座 UI。托盘内的卡片内容可通过 `thread.tray` 接管，但外壳与安全操作始终由基座渲染。
 - 插件的前端输出只能是经过校验的 VNode；不能注入原始 HTML、内联脚本或内联样式。
-- 插件不能绕过 `Scope`、能力安装、交互请求桥；官方插件也不例外。
+- 插件不能绕过 `Scope`、能力安装、交互请求桥；官方插件也不例外。例外（2026-10-31 决策）：`ctx.fs` 的读成员（`readText`/`list`/`stat`/`exists`）允许宿主绝对路径，写入与 `exec` 的 cwd 仍受 `Scope` 约束。
 - 插件不能修改事件序号、快照窗口、错误码或 RPC 方法。
 - 插件不能伪造交互响应，也不能把超时/无 UI 解释为“允许”；策略插件只能依据真实用户响应或显式策略放行。
 - 插件的设置项不能改变 scope 根、密钥访问或能力授予；策略插件可以调整自己的询问规则，但不能提升宿主权限。

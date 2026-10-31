@@ -1,7 +1,7 @@
 // Package corerpc 是 Core 的 JSON-RPC 2.0 服务（M2 第一刀）。
 //
-// 它把已有的 coreproto dispatch 表接到 WebSocket 传输上，并把 cli.Session
-// 的会话/轮次/交互能力暴露成协议方法。事件走 JSON-RPC notification（evt.*），
+// 它把已有的 coreproto dispatch 表接到 WebSocket 传输上，并把 Session 的会话/轮次/交互能力
+// 暴露成协议方法。事件走 JSON-RPC notification（evt.*），
 // 由领域事件的 threadId/seq 补全后广播给所有已连接客户端。
 //
 // 边界：本包不碰 moejs、SQLite SQL 或 HTTP 出网；这些都在装配/适配层。
@@ -23,8 +23,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/adag/ada-go/internal/cli"
 	"github.com/adag/ada-go/internal/coreapp"
+	"github.com/adag/ada-go/internal/corecontracts"
 	"github.com/adag/ada-go/internal/coreproto"
 	"github.com/adag/ada-go/internal/diag"
 	"github.com/adag/ada-go/internal/domain"
@@ -37,7 +37,7 @@ import (
 
 // Options 是 Core RPC 服务的装配输入。
 type Options struct {
-	Session *cli.Session
+	Session Session
 	// Context 是服务根 context；轮次从它派生，Shutdown 时统一取消。
 	Context context.Context
 	// Token 非空时要求 Authorization: Bearer 或 ?token=；空表示只依赖回环绑定。
@@ -50,7 +50,7 @@ type Options struct {
 
 // Server 持有方法表、轮次账目与事件订阅。
 type Server struct {
-	sess    *cli.Session
+	sess    Session
 	core    *coreproto.Server
 	root    context.Context
 	token   string
@@ -97,7 +97,7 @@ type runInfo struct {
 // New 创建并注册方法实现；未注册的方法继续走 coreproto 的失败关闭桩。
 func New(opts Options) (*Server, error) {
 	if opts.Session == nil {
-		return nil, errors.New("corerpc: 需要已装配的 cli.Session")
+		return nil, errors.New("corerpc: 需要已装配的 Session")
 	}
 	readyAt := opts.ReadyAt
 	if readyAt.IsZero() {
@@ -216,8 +216,9 @@ func (s *Server) handleHello(_ context.Context, raw json.RawMessage) (any, error
 		return nil, invalid(fmt.Sprintf("system.hello: 协议版本 %d 与 Core %d 不一致", p.ProtoVersion, proto.ProtoVersion))
 	}
 	prod := s.sess.Product()
-	pluginsOut := make([]proto.PluginSummary, 0, len(s.sess.Assembly().Plugins))
-	for _, inst := range s.sess.Assembly().Plugins {
+	plugins := s.sess.Plugins()
+	pluginsOut := make([]proto.PluginSummary, 0, len(plugins))
+	for _, inst := range plugins {
 		pluginsOut = append(pluginsOut, pluginSummary(inst))
 	}
 	return proto.HelloResult{
@@ -255,7 +256,7 @@ func (s *Server) handleShutdown(_ context.Context, raw json.RawMessage) (any, er
 	}
 	return map[string]any{
 		"flushed":        true,
-		"runtimesClosed": len(s.sess.Assembly().Plugins),
+		"runtimesClosed": len(s.sess.Plugins()),
 		"durationMs":     time.Since(start).Milliseconds(),
 	}, nil
 }
@@ -302,9 +303,9 @@ func (s *Server) handleWorkspaceUpdatePolicy(_ context.Context, raw json.RawMess
 		}
 		modelRef = ref
 	}
-	var up cli.PolicyUpdate
+	var up corecontracts.PolicyUpdate
 	if p.Policies != nil {
-		up = cli.PolicyUpdate{
+		up = corecontracts.PolicyUpdate{
 			ToolTimeoutMS: p.Policies.ToolTimeoutMS, TurnTimeoutMS: p.Policies.TurnTimeoutMS,
 			MaxTurnTokens: p.Policies.MaxTurnTokens, LoopRepeatLimit: p.Policies.LoopRepeatLimit,
 			LoopAbortLimit: p.Policies.LoopAbortLimit, ParallelTools: p.Policies.ParallelTools,
@@ -734,11 +735,7 @@ func (s *Server) imagesGate(threadID string) error {
 		return errors.New("当前产品未开启图片输入（capabilities.images=false）")
 	}
 	ref := s.sess.ModelRefFor(threadID)
-	asm := s.sess.Assembly()
-	if asm == nil || asm.Providers == nil {
-		return nil
-	}
-	for _, m := range asm.Providers.Models(ref.ProviderID) {
+	for _, m := range s.sess.ProviderModels(ref.ProviderID) {
 		if m.ID != ref.ModelID {
 			continue
 		}
@@ -797,16 +794,13 @@ func (s *Server) handleModelList(_ context.Context, raw json.RawMessage) (any, e
 	}
 	_ = decode(raw, &p)
 	s.sess.RefreshProviderConfigs()
-	asm := s.sess.Assembly()
 	models := []map[string]any{}
-	if asm.Providers != nil {
-		for _, pid := range asm.Providers.Providers() {
-			for _, m := range asm.Providers.Models(pid) {
-				models = append(models, map[string]any{
-					"model": proto.ModelRef{ProviderID: pid, ModelID: m.ID},
-					"info":  modelInfo(m),
-				})
-			}
+	for _, pid := range s.sess.ProviderIDs() {
+		for _, m := range s.sess.ProviderModels(pid) {
+			models = append(models, map[string]any{
+				"model": proto.ModelRef{ProviderID: pid, ModelID: m.ID},
+				"info":  modelInfo(m),
+			})
 		}
 	}
 	cur := s.sess.ModelRef()
@@ -843,16 +837,14 @@ func (s *Server) handleModelSet(ctx context.Context, raw json.RawMessage) (any, 
 	level := strings.ToLower(strings.TrimSpace(p.Model.ThinkingLevel))
 	if level != "" {
 		valid := false
-		if asm := s.sess.Assembly(); asm != nil && asm.Providers != nil {
-			for _, m := range asm.Providers.Models(p.Model.ProviderID) {
-				if m.ID != p.Model.ModelID {
-					continue
-				}
-				for _, allowed := range m.ThinkingLevels {
-					if strings.EqualFold(allowed, level) {
-						valid = true
-						break
-					}
+		for _, m := range s.sess.ProviderModels(p.Model.ProviderID) {
+			if m.ID != p.Model.ModelID {
+				continue
+			}
+			for _, allowed := range m.ThinkingLevels {
+				if strings.EqualFold(allowed, level) {
+					valid = true
+					break
 				}
 			}
 		}
@@ -880,46 +872,43 @@ func (s *Server) handleModelSet(ctx context.Context, raw json.RawMessage) (any, 
 }
 
 func (s *Server) handleProviderList(context.Context, json.RawMessage) (any, error) {
-	asm := s.sess.Assembly()
+	cfgs := s.sess.ProviderConfigs()
 	out := []map[string]any{}
-	if asm.Providers != nil {
-		cfgs := asm.Providers.Configs()
-		if len(cfgs) > 0 {
-			cur := s.sess.ModelRef()
-			for _, c := range cfgs {
-				models := []proto.ModelInfo{}
-				for _, m := range c.Models {
-					if !m.Disabled {
-						models = append(models, modelInfo(m.Info()))
-					}
+	if len(cfgs) > 0 {
+		cur := s.sess.ModelRef()
+		for _, c := range cfgs {
+			models := []proto.ModelInfo{}
+			for _, m := range c.Models {
+				if !m.Disabled {
+					models = append(models, modelInfo(m.Info()))
 				}
-				baseURL := c.BaseURL
-				if baseURL == "" {
-					baseURL = s.sess.BaseURL()
-				}
-				out = append(out, map[string]any{
-					"id": c.ID, "displayName": c.Name, "baseUrl": baseURL,
-					"active": cur.ProviderID == c.ID, "models": models,
-				})
 			}
-		} else {
-			for _, pid := range asm.Providers.Providers() {
-				models := []proto.ModelInfo{}
-				for _, m := range asm.Providers.Models(pid) {
-					models = append(models, modelInfo(m))
-				}
-				out = append(out, map[string]any{
-					"id": pid, "displayName": pid, "baseUrl": s.sess.BaseURL(),
-					"active": true, "models": models,
-				})
+			baseURL := c.BaseURL
+			if baseURL == "" {
+				baseURL = s.sess.BaseURL()
 			}
+			out = append(out, map[string]any{
+				"id": c.ID, "displayName": c.Name, "baseUrl": baseURL,
+				"active": cur.ProviderID == c.ID, "models": models,
+			})
+		}
+	} else {
+		for _, pid := range s.sess.ProviderIDs() {
+			models := []proto.ModelInfo{}
+			for _, m := range s.sess.ProviderModels(pid) {
+				models = append(models, modelInfo(m))
+			}
+			out = append(out, map[string]any{
+				"id": pid, "displayName": pid, "baseUrl": s.sess.BaseURL(),
+				"active": true, "models": models,
+			})
 		}
 	}
 	return map[string]any{"providers": out}, nil
 }
 
 func (s *Server) handleToolList(ctx context.Context, _ json.RawMessage) (any, error) {
-	descs := s.sess.Assembly().Tools.List(ctx)
+	descs := s.sess.Tools(ctx)
 	out := make([]proto.ToolDescriptor, 0, len(descs))
 	for _, d := range descs {
 		out = append(out, proto.ToolDescriptor{
@@ -1033,7 +1022,7 @@ func (s *Server) handlePluginHTTP(ctx context.Context, raw json.RawMessage) (any
 	}
 	out, err := s.sess.CallHTTPAPI(ctx, pluginID, method, path, envRaw, p.ThreadID)
 	if err != nil {
-		var he *cli.HTTPAPIError
+		var he *corecontracts.HTTPAPIError
 		if errors.As(err, &he) {
 			res := map[string]any{"ok": false, "error": he.Message, "status": he.Status}
 			switch he.Status {
@@ -1096,7 +1085,7 @@ func (s *Server) handlePluginHTTPStream(_ context.Context, raw json.RawMessage) 
 		// 同步校验路由存在且是 SSE：Gateway 在写响应头之前就能返回 404/405/406。
 		if err := s.sess.CheckHTTPAPIStream(pluginID, method, path); err != nil {
 			status, message := 502, err.Error()
-			var he *cli.HTTPAPIError
+			var he *corecontracts.HTTPAPIError
 			if errors.As(err, &he) {
 				status, message = he.Status, he.Message
 			}
@@ -1477,7 +1466,7 @@ func (s *Server) handleChangeRevert(ctx context.Context, raw json.RawMessage) (a
 	if p.Scope == "file" && strings.TrimSpace(p.Path) == "" {
 		return nil, invalid("change.revert: scope=file 需要 path")
 	}
-	res, err := s.sess.Revert(ctx, cli.RevertRequest{
+	res, err := s.sess.Revert(ctx, corecontracts.RevertRequest{
 		ThreadID: p.ThreadID, Scope: p.Scope, CheckpointID: p.CheckpointID, Path: p.Path,
 	})
 	if err != nil {
@@ -1748,11 +1737,10 @@ func pluginSummary(inst interface {
 	}
 }
 
-// pluginViewJSON 把 cli.PluginView 编成 plugin.list 的行。
+// pluginViewJSON 把 corecontracts.PluginView 编成 plugin.list 的行。
 //
-// pluginViewJSON 把 cli.PluginView 编成 plugin.list 的行。
 // Source 已进协议（spec PluginSummary.source，M3 安装/发现）。
-func pluginViewJSON(v cli.PluginView) proto.PluginSummary {
+func pluginViewJSON(v corecontracts.PluginView) proto.PluginSummary {
 	files := make([]proto.PluginFile, 0, len(v.Files))
 	for _, f := range v.Files {
 		files = append(files, proto.PluginFile{Path: f.Path, Size: f.Size, Dir: f.Dir, Depth: f.Depth})

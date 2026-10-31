@@ -162,7 +162,11 @@ func (r *Registry) ConfigAvailable(providerID string) bool {
 }
 
 func (r *Registry) configAvailableLocked(c Config) bool {
-	reg, ok := r.byID[c.Protocol.AdapterID()]
+	adapter, ok := r.adapterIDForProtocolLocked(c.Protocol)
+	if !ok {
+		return false
+	}
+	reg, ok := r.byID[adapter]
 	if !ok {
 		return false
 	}
@@ -216,6 +220,64 @@ func (r *Registry) AdapterModels(adapterID string) []host.ModelInfo {
 		return nil
 	}
 	return append([]host.ModelInfo(nil), reg.def.Models...)
+}
+
+// AdapterMeta 是 provider 插件为某个适配器声明的配置元数据。
+type AdapterMeta struct {
+	ID             string
+	Protocol       Protocol
+	DefaultBaseURL string
+	SecretName     string
+	DisplayName    string
+	Models         []host.ModelInfo
+}
+
+// AdapterMeta 返回适配器的元数据（端点/密钥名/显示名由插件声明，基座不写死）。
+func (r *Registry) AdapterMeta(adapterID string) (AdapterMeta, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	reg, ok := r.byID[adapterID]
+	if !ok {
+		return AdapterMeta{}, false
+	}
+	protocol := Protocol(strings.TrimSpace(reg.def.Protocol))
+	if protocol == "" {
+		protocol = ProtocolForAdapter(adapterID)
+	}
+	return AdapterMeta{
+		ID:             adapterID,
+		Protocol:       protocol,
+		DefaultBaseURL: reg.def.DefaultBaseURL,
+		SecretName:     reg.def.SecretName,
+		DisplayName:    reg.def.DisplayName,
+		Models:         append([]host.ModelInfo(nil), reg.def.Models...),
+	}, true
+}
+
+// AdapterIDForProtocol 返回协议对应的适配器 id；由插件声明的 protocol 决定。
+func (r *Registry) AdapterIDForProtocol(protocol Protocol) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.adapterIDForProtocolLocked(protocol)
+}
+
+func (r *Registry) adapterIDForProtocolLocked(protocol Protocol) (string, bool) {
+	ids := make([]string, 0, len(r.byID))
+	for id := range r.byID {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		reg := r.byID[id]
+		p := Protocol(strings.TrimSpace(reg.def.Protocol))
+		if p == "" {
+			p = ProtocolForAdapter(id)
+		}
+		if p == protocol {
+			return id, true
+		}
+	}
+	return "", false
 }
 
 // Stream 实现 ports.ModelClient：解析 provider → 启动插件流 → 等到首个增量或首错。
@@ -331,7 +393,11 @@ func (r *Registry) resolve(req ports.Request) (registration, *host.Instance, hos
 			return registration{}, nil, host.ModelInfo{}, nil, domain.NewError(domain.CodeProviderError,
 				"供应商已停用: "+cfg.Name)
 		}
-		adapter := cfg.Protocol.AdapterID()
+		adapter, ok := r.adapterIDForProtocolLocked(cfg.Protocol)
+		if !ok {
+			return registration{}, nil, host.ModelInfo{}, nil, domain.NewError(domain.CodeCoreUnavailable,
+				"供应商 "+cfg.Name+" 需要的适配器未加载（协议 "+string(cfg.Protocol)+"）")
+		}
 		reg, ok := r.byID[adapter]
 		if !ok {
 			return registration{}, nil, host.ModelInfo{}, nil, domain.NewError(domain.CodeCoreUnavailable,

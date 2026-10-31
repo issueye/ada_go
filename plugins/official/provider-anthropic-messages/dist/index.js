@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:7f37f7d6d7e33b2c) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:464dd93da78e40ae) by plugins/official/build.mjs — do not edit
 // provider-anthropic-messages —— 官方插件：Anthropic Messages API 的流式协议映射（03 §5.5）。
 //
 // 这一层只做「SSE 事件 → 归一化 Delta」：TLS、代理、重定向、超时、取消、
@@ -81,6 +81,10 @@
                        
              
                               
+                    
+                          
+                      
+                       
                                                                     
  
 
@@ -435,6 +439,10 @@ export default function (agent          )       {
   agent.registerProvider({
     id: "anthropic",
     models,
+    protocol: "anthropic",
+    defaultBaseUrl: DEFAULT_BASE_URL,
+    secretName: SECRET_NAME,
+    displayName: "Anthropic Messages",
     stream(req, ctx) {
       return streamOnce(req, ctx);
     },

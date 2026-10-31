@@ -43,6 +43,13 @@ type ToolDef struct {
 type ProviderDef struct {
 	ID     string      `json:"id"`
 	Models []ModelInfo `json:"models"`
+	// Protocol 是供应商配置里的协议标识（如 openai_chat / anthropic）。
+	Protocol string `json:"protocol,omitempty"`
+	// DefaultBaseURL / SecretName / DisplayName 供宿主播种默认供应商；
+	// 基座不再写死具体供应商的端点与密钥名。
+	DefaultBaseURL string `json:"defaultBaseUrl,omitempty"`
+	SecretName     string `json:"secretName,omitempty"`
+	DisplayName    string `json:"displayName,omitempty"`
 	// Stream 是脚本侧 provider 的句柄；ctx.http 由 CapabilitySet 决定。
 	Stream HandlerRef `json:"-"`
 }

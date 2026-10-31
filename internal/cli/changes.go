@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/adag/ada-go/internal/adapters/sqlite"
+	"github.com/adag/ada-go/internal/corecontracts"
 	"github.com/adag/ada-go/internal/domain"
 	"github.com/adag/ada-go/internal/plugins/host"
 	"github.com/adag/ada-go/internal/proto"
@@ -372,11 +373,7 @@ func workspaceRel(virtual string) (string, error) {
 }
 
 // ChangePage 是 change.list 的分页结果。
-type ChangePage struct {
-	ChangeSets []proto.ChangeSet
-	NextCursor string
-	HasMore    bool
-}
+type ChangePage = corecontracts.ChangePage
 
 // Changes 列检查点账目（change.list 数据源）。threadID 为空列本工作区全部；
 // cursor 是 base64 的偏移量；limit ≤ 0 取 50，上限 200（与协议一致）。
@@ -447,14 +444,7 @@ func decodeOffsetCursor(cur string) (int, error) {
 }
 
 // RevertRequest 是 change.revert 的领域入参（scope: item | file | all）。
-type RevertRequest struct {
-	ThreadID string
-	Scope    string
-	// CheckpointID 是 scope=item 时的检查点 id（chk_...）；scope=all/file 时忽略。
-	CheckpointID string
-	// Path 是 scope=file 时的单文件路径（脚本视图或工作区相对均可）。
-	Path string
-}
+type RevertRequest = corecontracts.RevertRequest
 
 // Revert 回滚检查点（change.revert 数据源）。
 //
