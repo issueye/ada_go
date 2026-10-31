@@ -21,12 +21,12 @@ LDFLAGS       := -X $(VERSION_PKG).Revision=$(REVISION) -X $(VERSION_PKG).BuildT
 
 MOEJS_TAG     ?= v0.1.0-alpha.11
 
-# 发布版本号：git tag 优先于 rev（M5）。HEAD 恰在 tag 上用 tag（如 v1.0.0），
+# 发布版本号：git tag 优先于 rev（M5）。HEAD 恰在 tag 上用 tag（如 v0.1.0），
 # 否则落回短哈希；没有 git 时用 version 包默认值。发版打 tag 后 make release 自动拾取，
-# 本地验证可用 RELEASE_VERSION=v1.0.0 覆盖。
+# 本地验证可用 RELEASE_VERSION=v0.1.0 覆盖。
 # 注意：recipe 内的字符串保持 ASCII——mingw32-make 在 Windows 上按系统代码页传参，
 # 中文 recipe 字符串会让 sh 的引号配对错乱（注释不受影响）。
-RELEASE_VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo 1.0.0)
+RELEASE_VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo 0.1.0)
 RELEASE_DIR     := $(BIN)/release
 RELEASE_LDFLAGS := $(LDFLAGS) -X $(VERSION_PKG).Version=$(RELEASE_VERSION)
 

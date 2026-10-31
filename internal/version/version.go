@@ -34,7 +34,7 @@ const Binary = "adag"
 // Revision/BuildTime 由 build/cross 注入）。
 //
 //	CGO_ENABLED=0 go build -trimpath \
-//	  -ldflags "-X github.com/adag/ada-go/internal/version.Version=1.0.0 \
+//	  -ldflags "-X github.com/adag/ada-go/internal/version.Version=0.1.0 \
 //	            -X github.com/adag/ada-go/internal/version.Revision=$(git rev-parse --short HEAD) \
 //	            -X github.com/adag/ada-go/internal/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 //	  ./cmd/adag
@@ -42,9 +42,9 @@ const Binary = "adag"
 // 发布产物一律 GOWORK=off 构建（development-plan §7.1）；Revision/BuildTime
 // 是 /healthz 与 system.hello 的版本字段真源（01 §4.2、08 §8.2）。
 var (
-	// Version 是发布版本号（semver；当前发布 1.0.0）。git tag 优先：
+	// Version 是发布版本号（semver；项目尚未进入稳定期，当前为 0.1.0）。git tag 优先：
 	// make release 用 git describe --tags 覆盖，本地构建落回默认值。
-	Version = "1.0.0"
+	Version = "0.1.0"
 	// Revision 是 git commit（短哈希）。
 	Revision = "dev"
 	// BuildTime 是 UTC 构建时刻（RFC3339）。
