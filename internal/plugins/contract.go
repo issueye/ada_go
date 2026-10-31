@@ -217,7 +217,7 @@ const (
 	// CapFSRead / CapFSWrite 安装受限 fs（根固定工作区；只读时写成员访问即抛 ERR_ACCESS_DENIED）。
 	CapFSRead  Capability = "fs.read"
 	CapFSWrite Capability = "fs.write"
-	// CapNetFetch 是 allowlist 内的出网；provider 流式协议走 CapNetSSE。
+	// CapNetFetch 是出网能力（当前不限目标主机，host 策略待插件化）；provider 流式协议走 CapNetSSE。
 	CapNetFetch Capability = "net.fetch"
 	CapNetSSE   Capability = "net.sse"
 	// CapExec 只映射到 execFile（无 shell），且仅 builtin/verified。

@@ -192,7 +192,7 @@ M4 同时依赖 M2 的页面宿主与 M3 的完整装配/信任模型。若 M3 �
 
 #### E. Provider 桥与 OpenAI Chat（5–7 人日）
 
-- 实现宿主 `ctx.http.sse/json`：allowlist、超时、取消、响应大小与 TLS/代理单点执行。
+- 实现宿主 `ctx.http.sse/json`：协议校验、超时、取消、响应大小与 TLS/代理单点执行（host 黑白名单暂缓，见 `AGENTS.md`）。
 - 实现 TS `provider-openai-chat`：统一 text/thinking/tool_call/usage/finish 增量、显式终止信号、参数片段组装。
 - 实现基座重试包装：只在首个增量前对 429/5xx/网络错误重试。
 - 录制 SSE 夹具，覆盖分片、乱序、缺终止、错误帧与长流取消。

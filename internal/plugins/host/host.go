@@ -368,7 +368,7 @@ type UIResolution struct {
 
 // HTTPBridge 是宿主执行的出站调用（provider 唯一出口，03 §5.5）。
 type HTTPBridge interface {
-	// JSON 发一次请求并返回解析后的响应体；allowlist、大小、超时、重定向由宿主执行。
+	// JSON 发一次请求并返回解析后的响应体；协议、大小、超时、重定向由宿主执行。
 	JSON(ctx context.Context, method, url string, headers map[string]string, body string, maxBytes int) (HTTPResult, error)
 	// SSE 逐事件回调，直到显式终止或 ctx 取消。
 	SSE(ctx context.Context, method, url string, headers map[string]string, body string, onEvent func(event, data string) error) (HTTPResult, error)

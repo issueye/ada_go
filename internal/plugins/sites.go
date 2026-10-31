@@ -29,9 +29,9 @@ var installSites = map[Capability]InstallSite{
 		Milestone:     "M1-C",
 	},
 	CapNetFetch: {
-		Capability: CapNetFetch, HostInstall: "安装 allowlist 代理的 fetch",
+		Capability: CapNetFetch, HostInstall: "安装出网代理的 fetch（当前不限目标主机）",
 		ScriptSurface: "ctx.fetch",
-		EnforcedBy:    "宿主 allowlist：协议、主机、端口、逐跳重定向与响应体上限（09 §9.5）",
+		EnforcedBy:    "宿主桥：协议 http(s)、逐跳重定向 ≤5、响应体 ≤16MB、超时与取消（09 §9.5；host 策略待插件化）",
 		Milestone:     "M1-C",
 	},
 	CapNetSSE: {

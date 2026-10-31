@@ -138,7 +138,7 @@ ada-go 是一个**本地优先、单二进制、插件优先**的 AI Agent 系�
 | 协议 | 方法、事件、错误码 | 不可扩展 | `spec/proto.json` |
 | 存储 | SQLite、线程/entry | 仅 scoped KV | `ctx.state` |
 | 进程 | 监督、进程树终止原语 | 不能直接起进程 | `exec` 能力 |
-| 网络 | 除模型外无出站 | 允许列表内的 fetch | `net.fetch` |
+| 网络 | 无隐式出站 | 按能力使用 fetch（当前不限目标主机） | `net.fetch` |
 | 密钥 | broker、脱敏 | 按名申请 | `secrets` |
 | 日志 | 统一格式、审计、轮转 | 只能写结构化日志 | `ctx.log` |
 

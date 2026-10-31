@@ -7,6 +7,9 @@
 *.test
 *.log
 
+# 本地临时调试文件（.tmp* 由 go 工具链忽略，但不要进入版本库）
+.tmp*
+
 # SQLite 本地状态
 *.db
 *.db-wal

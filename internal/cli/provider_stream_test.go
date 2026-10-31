@@ -16,8 +16,8 @@ import (
 	"github.com/adag/ada-go/plugins/official"
 )
 
-// 配置里的供应商端点不在启动参数 allowlist 里时，Session 也要在加载配置后放行，
-// 否则添加自定义供应商后第一次对话必然报 “HTTP 目标 ... 不在 allowlist 内”。
+// 自定义供应商端点（当前无 host 黑白名单）加载配置后应能直接发起流式请求，
+// 不能因端点不在启动参数里而被拒绝。
 func TestConfiguredProviderStreamAllowsConfiguredHost(t *testing.T) {
 	var gotAuth, gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

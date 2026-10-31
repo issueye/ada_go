@@ -1,6 +1,6 @@
 {
   "name": "ada-go-desktop",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0",
   "author": "ada-go",
   "private": true,
   "description": "ada-go desktop shell: Electron host that supervises `adag gateway` and loads the SSR UI",

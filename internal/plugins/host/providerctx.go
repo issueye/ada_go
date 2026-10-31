@@ -4,7 +4,7 @@ package host
 //
 // 这两个成员只在 callProvider 上安装。emit 把归一化增量交给宿主桥；
 // http 把 SSE/JSON 请求交给 host.HTTPBridge —— TLS、代理、重定向、超时、
-// allowlist 与响应大小都在桥里执行，插件只做「SSE 事件 → 增量」的协议映射。
+// 响应大小与出网边界都在桥里执行，插件只做「SSE 事件 → 增量」的协议映射。
 //
 // 一个关键约束：ctx.http.sse 的 onEvent 回调必须回到 owner goroutine 上执行，
 // 而 SSE 读取在另一个 goroutine 上。这里的 deliverEvent 用「投递任务 + 回执通道」
@@ -153,7 +153,7 @@ type httpInit struct {
 	proxy    string
 }
 
-// parseHTTPInit 读取 (url, init) 参数；只做形状校验，allowlist 与期限留给桥。
+// parseHTTPInit 读取 (url, init) 参数；只做形状校验，出网边界与期限留给桥。
 func parseHTTPInit(rt *mojsRuntime, args []moejs.Value) (httpInit, error) {
 	out := httpInit{url: strings.TrimSpace(moejs.Arg(args, 0).String()), method: "GET"}
 	if out.url == "" {

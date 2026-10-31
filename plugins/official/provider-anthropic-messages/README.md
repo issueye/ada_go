@@ -1,6 +1,6 @@
 # Anthropic Messages 供应商（provider-anthropic-messages）
 
-Anthropic Messages API 的流式协议适配器：只做「SSE 事件 → 归一化 Delta」的映射。TLS、代理、重定向、超时、取消、allowlist 与响应大小都由宿主的 `ctx.http.sse` 执行。
+Anthropic Messages API 的流式协议适配器：只做「SSE 事件 → 归一化 Delta」的映射。TLS、代理、重定向、超时、取消与响应大小都由宿主的 `ctx.http.sse` 执行（当前不限目标主机）。
 
 ## 插件信息
 

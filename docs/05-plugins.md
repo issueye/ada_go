@@ -84,7 +84,7 @@ plugins/my-plugin/
 
 ### 6.3 后端插件 API
 
-后端插件从虚拟模块 `agent:api` 导入类型；运行时能力由宿主注入，插件不直接持有任何 IO 句柄。Node 兼容子集的类型在 `sdk/node.d.ts`，与 [6.12](12-node-compat.md#612-node-兼容原生库) 的安装矩阵一致：类型里存在不代表当前 Runtime 有能力，能力位仍以清单为准。
+后端插件从虚拟模块 `agent:api` 导入类型；运行时能力由宿主注入，插件不直接持有任何 IO 句柄。仓库当前没有独立的 `sdk/` 类型包，官方插件在各自 `index.ts` 顶部本地声明所用类型形状；Node 兼容子集以 [6.12](12-node-compat.md#612-node-兼容原生库) 的安装矩阵为准：类型里存在不代表当前 Runtime 有能力，能力位仍以清单为准。
 
 ```ts
 export default function (agent: AgentAPI): void | Promise<void>;

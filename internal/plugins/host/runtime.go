@@ -927,7 +927,7 @@ func (p *Instance) hostAsyncTimeout(c *call, name string, timeout time.Duration,
 				c.budget.resume()
 			}
 			if err != nil {
-				// 业务错误（HTTP 状态、allowlist、取消）保持原样穿过 Promise，
+				// 业务错误（HTTP 状态、出网边界、取消）保持原样穿过 Promise，
 				// 让 provider 桥能按错误码决定是否重试（03 §5.5）。
 				var de *domain.Error
 				if errors.As(err, &de) {

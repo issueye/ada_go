@@ -1,8 +1,8 @@
-// generated from index.ts (sha256:24418f779e359c39) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:66007cf08c50b0f6) by plugins/official/build.mjs — do not edit
 // provider-openai-chat —— 官方插件：OpenAI Chat Completions 的流式协议映射（03 §5.5）。
 //
-// 这一层只做「SSE 事件 → 归一化 Delta」：TLS、代理、重定向、超时、取消、allowlist、
-// 响应大小全在宿主的 ctx.http.sse 里执行。兼容端点（DeepSeek/Ollama/Moonshot 等）
+// 这一层只做「SSE 事件 → 归一化 Delta」：TLS、代理、重定向、超时、取消、
+// 响应大小全在宿主的 ctx.http.sse 里执行（当前不限目标主机）。兼容端点（DeepSeek/Ollama/Moonshot 等）
 // 由产品配置的 baseUrl 复用同一适配器，插件不读全局配置。
 //
 // 终止信号必须显式：只有收到 data: [DONE] 才算完成；EOF 没有 [DONE] 是协议错误。

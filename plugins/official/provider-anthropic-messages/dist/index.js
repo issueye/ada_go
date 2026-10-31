@@ -1,8 +1,8 @@
-// generated from index.ts (sha256:ae73e71c9d8d2335) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:7f37f7d6d7e33b2c) by plugins/official/build.mjs — do not edit
 // provider-anthropic-messages —— 官方插件：Anthropic Messages API 的流式协议映射（03 §5.5）。
 //
-// 这一层只做「SSE 事件 → 归一化 Delta」：TLS、代理、重定向、超时、取消、allowlist、
-// 响应大小全在宿主的 ctx.http.sse 里执行。system 走顶层字段；工具参数按 content block
+// 这一层只做「SSE 事件 → 归一化 Delta」：TLS、代理、重定向、超时、取消、
+// 响应大小全在宿主的 ctx.http.sse 里执行（当前不限目标主机）。system 走顶层字段；工具参数按 content block
 // index 用 input_json_delta 累积；usage 由 message_start（输入/缓存）与 message_delta
 // （输出）合成一条。baseUrl 允许网关类兼容端点覆盖，插件不读全局配置。
 //

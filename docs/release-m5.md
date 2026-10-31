@@ -1,15 +1,18 @@
-# M5 发布清单（v1.0.0-rc.1）
+# M5 发布清单（v1.0.0）
 
 > 对应章节：[09-security-operations.md](09-security-operations.md)（审计与备份）、
 > [development-plan.md §4.6](development-plan.md)（M5 退出标准）、
 > [performance.md](performance.md)（性能基线）。
+>
+> 发布口径：`v1.0.0-rc.1` 之后累计的 47 个提交（2026-10-30 至 2026-10-31）已通过
+> 全量门禁，HEAD 直接收口为 `v1.0.0`；rc.1 保留为历史候选标签。
 
 ## 1. 版本与构建
 
-- 版本号真源：`internal/version` 的 `Version`（默认 `1.0.0-rc.1`）；
+- 版本号真源：`internal/version` 的 `Version`（默认 `1.0.0`）；
   `make release` 注入规则是 **git tag 优先于 rev**：HEAD 恰好落在 tag 上时用
-  `git describe --tags --exact-match`（如 `v1.0.0-rc.1`），否则落回短哈希；
-  也可显式覆盖：`make release RELEASE_VERSION=v1.0.0-rc.1`。
+  `git describe --tags --exact-match`（如 `v1.0.0`），否则落回短哈希；
+  也可显式覆盖：`make release RELEASE_VERSION=v1.0.0`。
   `Revision`/`BuildTime` 照旧由 ldflags 注入（01 §4.2、08 §8.2 的版本字段）。
 - 构建命令：`make release`（GOWORK=off、CGO_ENABLED=0，与 CI release 矩阵同口径）。
   注意：Makefile 的 recipe 字符串保持 ASCII——mingw32-make 在 Windows 上按系统
@@ -69,6 +72,7 @@ adag audit list --limit 50 [--since 2026-10-01T00:00:00Z]
 
 | 限制 | 说明 | 计划 |
 |---|---|---|
+| 出网 host 黑白名单未启用 | 按 2026-10-31 决策，宿主 HTTP 桥不限制目标主机；`net.fetch`/provider 端点只要协议为 http(s) 即可访问，仅保留重定向 ≤5、响应 ≤16MB、超时与取消边界 | 后续以网络策略插件实现（见 `AGENTS.md`） |
 | race 仅 CI Linux | `-race` 依赖 cgo；Windows 本机无 MSVC/clang 时降级为普通测试（Makefile M0 注释） | CI 矩阵补 Windows race 腿 |
 | 非回环 TLS 未做 | gateway/core 只承诺回环绑定；非回环监听要求 `ADAG_CORE_TOKEN`，但没有 TLS 终结 | v1.1（反代终止 TLS 是受支持部署） |
 | 插件市场未做 | 插件安装走本地目录/zip（`adag plugin install`）；无签名/市场分发 | v1.1+ |

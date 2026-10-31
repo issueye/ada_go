@@ -201,7 +201,7 @@ func baseForLog(p string) string {
 // capsState 是一个 Runtime 的能力安装结果：resolver 判定、上限、审计与宿主回调都在这一份状态里。
 //
 // ctx.fs / ctx.http / node:fs / node:child_process 共用同一个 capsState，
-// 因此「一条访问路径」不是口头承诺：同一 Scope、同一 allowlist、同一审计器、同一能力位。
+// 因此「一条访问路径」不是口头承诺：同一 Scope、同一出网边界、同一审计器、同一能力位。
 type capsState struct {
 	rt     *mojsRuntime
 	loop   *mojsLoop

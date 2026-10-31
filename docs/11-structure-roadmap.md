@@ -14,7 +14,6 @@ ada-go/
   go.sum
   cmd/adag/                main：gateway / core / plugin / doctor / verify
   app/                     组合根：产品声明 + 磁盘 plugins/official/ → coreapp
-  sdk/                     TS 插件类型：agent.d.ts、ssr.d.ts、node.d.ts（Node 兼容子集）、tsconfig
   internal/
     domain/                消息、Part、工具描述符/回执、事件、错误、失败方向
     engine/                RunTurn、终止条件、工具前钩子编排
@@ -26,12 +25,15 @@ ada-go/
     coreproto/             JSON-RPC 服务端、事件发射、投影
     coreapp/               通用装配器：接收插件集合 → 目录/引擎（不 import plugins/official/）
     gateway/
-      server/              Gin、中间件、路由
-      registry/            工作区键、实例表、LRU、回收
+      gateway.go            Gateway 装配、路由与生命周期
+      contracts/            对外契约
+      security/             token、配对码、cookie、CSRF、Origin
       supervisor/          spawn、握手、重启、父进程心跳
       relay/               WS 客户端、请求多路复用、事件扇出
-      auth/                token、配对码、cookie、CSRF、Origin
-      web/                 SSR handlers、SSE hub、投影缓存、ui/（Go 组件、icons.go）
+      sse/                 SSE hub
+      web/                 SSR handlers、模板、静态资源、投影缓存、ui/（Go 组件、icons.go）
+        templates/         layout、chat、workspaces、overview、extensions、plugin、error
+        static/            tokens.css、app.css、ui/、ada-*.js、icons.svg
       frontend/            esbuild、moejs render、VNode、插槽注册表
     proto/                 生成的方法常量、DTO、错误码
     diag/                  诊断码词汇表
@@ -48,13 +50,6 @@ ada-go/
       policy-default/
       persona-coding/ provider-admin/ token-usage/ ui-hello-tsx/
     hello-tsx/ task-plan/ ask-user/   第三方示例（装时编译）
-  web/
-    templates/             layout、chat、workspaces、overview、extensions、plugin、error（DOM 与 a_da 同构）
-    static/
-      tokens.css           a_da token 原样副本；颜色唯一真源
-      app.css              a_da 预编译产物（token + 工具类；不在本仓库跑 Tailwind）
-      ui/                  components/layout/widgets/shell/pages.css 原样副本
-      ada-select.js ada-modal.js components.js chat.js theme.js icons.svg
   products/
     coding.agent.json
     skeleton.agent.json

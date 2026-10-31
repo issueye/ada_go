@@ -202,7 +202,7 @@ Node 代码大量依赖 `err.code` 分支，因此错误形状是兼容契约的
 - **无环境权限**：L2 模块不向脚本暴露原生句柄；文件、网络、命令都在宿主构造的边界内（Root/ReadOnly、Fetch.Allow、Run.Allow、Env），并统一审计。插件不能通过 Node 模块拿到第二条访问路径。
 - **文件**：根固定为工作区；`..` 与 symlink 按真实落点检查；插件目录只读；密钥目录永不授予。单次读写 16MB、目录 10k 条、路径 4096 字节；超限报错而不是截断。
 - **环境变量**：`backend.env` 是白名单，只把列出的名字注入 `process.env`；值在装配期冻结。`ADAG_*` 与密钥名是保留名，清单声明也会被拒绝。密钥不走环境变量，走 `ctx.secret(name)`；`process.env` 中永远不出现密钥。
-- **网络**：默认没有任何网络模块。`ctx.fetch` 受 `net.fetch` 与宿主 allowlist 约束（协议、主机、端口、重定向逐跳检查、响应体上限）；provider 的 `ctx.http.sse` 受 `net.sse` 约束，只有 builtin/verified 可用。没有 `listen`、没有原始 socket。
+- **网络**：默认没有任何网络模块。`ctx.fetch` 受 `net.fetch` 约束（协议必须 http(s)、重定向 ≤5 跳、响应体 ≤16MB、超时与取消贯穿；当前不限制目标主机，host 策略留待网络策略插件）；provider 的 `ctx.http.sse` 受 `net.sse` 约束，只有 builtin/verified 可用。没有 `listen`、没有原始 socket。
 - **命令**：`child_process` 只有 `execFile`，仅 `exec` 能力且仅 builtin/verified；`Run.Allow` 再按程序名与参数检查；`cwd` 使用虚拟根并由宿主映射到工作区，越界拒绝；环境变量白名单；120s 超时；4MB 输出；取消时杀整棵进程树。`exec`/`execSync` 因走 shell 而禁用。
 - **随机与时间**：`crypto` 的随机源由宿主注入；时间、locale、时区由宿主固定，避免插件用时间侧信道或不可复现行为。
 - **内存**：插件 Runtime 64MB（脚本堆）。宿主为一次调用分配的 Go 侧缓冲另计，单次不超过 16MB；所有 Buffer 在调用结束释放。Runtime 超内存即重建，插件标记 `degraded`。

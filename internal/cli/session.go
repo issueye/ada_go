@@ -120,7 +120,7 @@ type Session struct {
 	baseScripts []host.Script
 	product     *coreapp.Product
 	appDeps     app.Deps
-	// httpBridge 是插件出网桥；供应商配置变更时动态追加 allowlist。
+	// httpBridge 是插件出网桥；供应商配置变更时无需重建（当前不做 host 黑白名单）。
 	httpBridge httpBridge
 	// debug 与 httpBridge 共用同一序号，--debug 时输出每次出网请求。
 	debug *host.DebugLog
