@@ -63,6 +63,8 @@ type Script struct {
 	Bundle map[string]string
 	// StaticAssets 是插件包内静态资源的只读视图（plugin://<id>/…）。
 	StaticAssets map[string][]byte
+	// Root 是插件包在宿主上的绝对目录（可选）；技能路径按它拼出 SKILL.md 的绝对路径。
+	Root string
 	// Readme 是插件包内 README.md 的原文（可选；详情页展示用）。
 	Readme string
 }
@@ -160,7 +162,7 @@ type Context struct {
 	HTTP HTTPBridge
 	// Log 写结构化日志；密钥一律脱敏。
 	Log func(level, msg string, fields map[string]any)
-	// Skills 返回当前装配里全部技能的只读元数据（6.7：不含正文，正文走 read_skill）。
+	// Skills 返回当前装配里全部技能的只读元数据（6.7：name/description/path，不含正文）。
 	// 这是基座向插件开放的唯一技能通道（技能搜索类工具用它）；
 	// nil 表示本次装配未启用技能，ctx.skills 不存在。
 	Skills func() []domain.SkillMeta

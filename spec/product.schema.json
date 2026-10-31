@@ -43,8 +43,8 @@
       "properties": {
         "skills": {
           "type": "boolean",
-          "description": "技能装配开关：扫描 plugins/<id>/skills/ 与工作区 .adago/skills/，注入 name/description 并挂 read_skill（§6.7）。",
-          "x-consumer": "coreapp: 技能装配与系统提示 XML 片段注入；false 时 read_skill 不进工具目录"
+          "description": "技能装配开关：扫描 plugins/<id>/skills/ 与工作区 .adago/skills/，注入 name/description/path（§6.7），正文由模型用 read_file 按 path 读取。",
+          "x-consumer": "coreapp: 技能装配与系统提示 XML 片段注入；false 时技能元数据不注入、ctx.skills 不存在"
         },
         "images": {
           "type": "boolean",

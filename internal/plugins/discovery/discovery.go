@@ -188,6 +188,7 @@ func loadOne(dir, dirName, source string) (Plugin, *Warning) {
 		Source:       string(src),
 		Bundle:       bundle,
 		StaticAssets: assets,
+		Root:         dir,
 		Readme:       readme,
 	}
 	return Plugin{Script: script, Fingerprint: fp, Source: source, Dir: dir}, nil

@@ -143,7 +143,7 @@ cfg := stdlib.Config{
 
 | 模块 | 能力位 | 兼容范围 | 偏差与边界 |
 |---|---|---|---|
-| `fs`、`fs/promises` | `fs.read` / `fs.write` | `readFile`/`writeFile`/`appendFile`/`readdir`/`stat`/`lstat`/`mkdir`/`rm`/`rename`/`copyFile`/`realpath`/`readlink`/`existsSync`；同步与 promise 两种形状；`createReadStream`/`createWriteStream`（Web Streams） | 根固定为工作区，脚本视图 `/`；symlink 越界拒绝；单次读写 16MB、目录 10k 条；不提供回调形式；v1 不开放 `watch`、文件描述符、`chmod`/`chown`/`utimes` |
+| `fs`、`fs/promises` | `fs.read` / `fs.write` | `readFile`/`writeFile`/`appendFile`/`readdir`/`stat`/`lstat`/`mkdir`/`rm`/`rename`/`copyFile`/`realpath`/`readlink`/`existsSync`；同步与 promise 两种形状；`createReadStream`/`createWriteStream`（Web Streams） | 根固定为工作区，脚本视图 `/`；symlink 越界拒绝；单次读写 16MB、目录 10k 条；不提供回调形式；v1 不开放 `watch`、文件描述符、`chmod`/`chown`/`utimes`。例外：`ctx.fs` 的读成员（`readText`/`list`/`stat`/`exists`）不限制路径；写仍固定工作区 |
 | `process` | 始终（只读子集） | `argv`、`env`（白名单）、`cwd`、`platform`、`arch`、`version`/`versions`、`pid`、`hrtime`、`nextTick`、`stdout`/`stderr` | `cwd` 是虚拟根 `/`；`env` 只含 `backend.env`；`exit` 抛异常；没有 `kill`、`binding`、`dlopen`、`setuid`、`umask` |
 | `os` | 始终（受限） | `platform`、`arch`、`EOL`、`cpus`、`tmpdir` | `hostname`/`homedir` 为空；没有 `networkInterfaces`、`userInfo`、`loadavg` |
 | `child_process` | `exec`，仅 builtin/verified | `execFile`/`execFileSync`；参数数组、`cwd`、`env`、`timeout`、`maxBuffer` | 不安装 `spawn`/`fork`；`exec`/`execSync` 因走 shell 而被拒绝（`Run.Shell=false`）；`cwd` 使用虚拟根并由宿主映射到工作区，越界拒绝；捕获上限 4MB，超时 120s，杀整棵进程树；进入模型回执仍按 50KB/2000 行截断 |
@@ -200,7 +200,7 @@ Node 代码大量依赖 `err.code` 分支，因此错误形状是兼容契约的
 ## 6.13 安全与资源边界
 
 - **无环境权限**：L2 模块不向脚本暴露原生句柄；文件、网络、命令都在宿主构造的边界内（Root/ReadOnly、Fetch.Allow、Run.Allow、Env），并统一审计。插件不能通过 Node 模块拿到第二条访问路径。
-- **文件**：根固定为工作区；`..` 与 symlink 按真实落点检查；插件目录只读；密钥目录永不授予。单次读写 16MB、目录 10k 条、路径 4096 字节；超限报错而不是截断。
+- **文件**：写操作与 `exec` 的 cwd 固定在工作区；`..` 与 symlink 按真实落点检查；插件目录只读；密钥目录永不授予。`ctx.fs` 的读成员（`readText`/`list`/`stat`/`exists`）不限制目标路径（agent 的 `read_file`/`list_files`/`search_files` 可读宿主任意文件；`node:fs` 模块仍按上游挂载点限制）。单次读写 16MB、目录 10k 条、路径 4096 字节；超限报错而不是截断。
 - **环境变量**：`backend.env` 是白名单，只把列出的名字注入 `process.env`；值在装配期冻结。`ADAG_*` 与密钥名是保留名，清单声明也会被拒绝。密钥不走环境变量，走 `ctx.secret(name)`；`process.env` 中永远不出现密钥。
 - **网络**：默认没有任何网络模块。`ctx.fetch` 受 `net.fetch` 约束（协议必须 http(s)、重定向 ≤5 跳、响应体 ≤16MB、超时与取消贯穿；当前不限制目标主机，host 策略留待网络策略插件）；provider 的 `ctx.http.sse` 受 `net.sse` 约束，只有 builtin/verified 可用。没有 `listen`、没有原始 socket。
 - **命令**：`child_process` 只有 `execFile`，仅 `exec` 能力且仅 builtin/verified；`Run.Allow` 再按程序名与参数检查；`cwd` 使用虚拟根并由宿主映射到工作区，越界拒绝；环境变量白名单；120s 超时；4MB 输出；取消时杀整棵进程树。`exec`/`execSync` 因走 shell 而禁用。

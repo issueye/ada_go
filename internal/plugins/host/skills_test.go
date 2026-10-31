@@ -3,6 +3,7 @@ package host
 // 技能发现（6.7）的单元验收：frontmatter 解析、包内扫描、非法技能跳过并告警。
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,28 +12,22 @@ import (
 
 func TestParseSkillOK(t *testing.T) {
 	raw := "---\nname: clean-code\ndescription: \"改动纪律：先读后改。\"\n---\n\n# 正文标题\n\n第一步。\n"
-	meta, body, err := ParseSkill("clean-code", raw)
+	meta, err := ParseSkill("clean-code", raw)
 	if err != nil {
 		t.Fatalf("ParseSkill: %v", err)
 	}
 	if meta.Name != "clean-code" || meta.Description != "改动纪律：先读后改。" {
 		t.Fatalf("meta = %+v", meta)
 	}
-	if body != "\n# 正文标题\n\n第一步。\n" && strings.TrimSpace(body) != "# 正文标题\n\n第一步。" {
-		t.Fatalf("body = %q", body)
-	}
-	if strings.Contains(body, "description") {
-		t.Fatalf("正文不应包含 frontmatter: %q", body)
-	}
 }
 
 func TestParseSkillNameOptionalButMustMatch(t *testing.T) {
 	// 缺 name 字段：名字以目录名为准，允许（Agent Skills 的 name 只用于校验一致性）。
-	if _, _, err := ParseSkill("my-skill", "---\ndescription: ok\n---\n正文"); err != nil {
+	if _, err := ParseSkill("my-skill", "---\ndescription: ok\n---\n正文"); err != nil {
 		t.Fatalf("缺 name 应允许: %v", err)
 	}
 	// name 与目录名不一致：拒绝。
-	if _, _, err := ParseSkill("my-skill", "---\nname: other\ndescription: ok\n---\n正文"); err == nil {
+	if _, err := ParseSkill("my-skill", "---\nname: other\ndescription: ok\n---\n正文"); err == nil {
 		t.Fatal("name 与目录名不一致必须报错")
 	}
 }
@@ -51,7 +46,7 @@ func TestParseSkillRejects(t *testing.T) {
 		{"description 超长", "a", "---\ndescription: " + strings.Repeat("长", 1100) + "\n---\n正文", "1024"},
 	}
 	for _, tc := range cases {
-		_, _, err := ParseSkill(tc.dirName, tc.raw)
+		_, err := ParseSkill(tc.dirName, tc.raw)
 		if err == nil {
 			t.Fatalf("%s: 期望报错", tc.name)
 		}
@@ -62,8 +57,10 @@ func TestParseSkillRejects(t *testing.T) {
 }
 
 func TestScriptSkillsScan(t *testing.T) {
+	root := t.TempDir()
 	script := Script{
 		Manifest: &plugins.Manifest{ID: "demo"},
+		Root:     root,
 		StaticAssets: map[string][]byte{
 			"skills/beta/SKILL.md":      []byte("---\nname: beta\ndescription: 第二个\n---\nB 正文"),
 			"skills/alpha/SKILL.md":     []byte("---\ndescription: 第一个\n---\nA 正文"),
@@ -83,8 +80,9 @@ func TestScriptSkillsScan(t *testing.T) {
 	if skills[0].Meta.Origin != SkillOriginPlugin || skills[0].Meta.PluginID != "demo" {
 		t.Fatalf("origin/pluginId 未填: %+v", skills[0].Meta)
 	}
-	if skills[0].Body != "\nA 正文" && strings.TrimSpace(skills[0].Body) != "A 正文" {
-		t.Fatalf("body = %q", skills[0].Body)
+	wantPath := filepath.Join(root, "skills", "alpha", "SKILL.md")
+	if skills[0].Meta.Path != wantPath {
+		t.Fatalf("path = %q，期望 %q", skills[0].Meta.Path, wantPath)
 	}
 	if len(warns) != 2 {
 		t.Fatalf("两个非法技能都应记警告: %v", warns)

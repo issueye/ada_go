@@ -190,7 +190,6 @@ func (s *Server) register() error {
 		"plugin.httpStream":      s.handlePluginHTTPStream,
 		"action.invoke":          s.handleActionInvoke,
 		"skill.list":             s.handleSkillList,
-		"skill.read":             s.handleSkillRead,
 		"usage.get":              s.handleUsageGet,
 		"change.list":            s.handleChangeList,
 		"change.revert":          s.handleChangeRevert,
@@ -1235,14 +1234,17 @@ func (s *Server) handleActionInvoke(ctx context.Context, raw json.RawMessage) (a
 	return map[string]any{"ok": true, "result": result}, nil
 }
 
-// ---- skill（6.7：装配期只注入 name/description，正文按需披露）----
+// ---- skill（6.7：装配期注入 name/description/path，正文由模型用 read_file 读取）----
 
-// skillSummaryJSON 把一条技能元数据编成 spec 的 SkillSummary（不含正文：渐进披露）。
+// skillSummaryJSON 把一条技能元数据编成 spec 的 SkillSummary（含绝对路径，不含正文）。
 func skillSummaryJSON(m domain.SkillMeta) map[string]any {
 	out := map[string]any{
 		"name":        m.Name,
 		"description": m.Description,
 		"origin":      m.Origin,
+	}
+	if m.Path != "" {
+		out["path"] = m.Path
 	}
 	if m.PluginID != "" {
 		out["pluginId"] = m.PluginID
@@ -1265,31 +1267,6 @@ func (s *Server) handleSkillList(_ context.Context, raw json.RawMessage) (any, e
 	out := map[string]any{"skills": skills}
 	if len(conflicts) > 0 {
 		out["conflicts"] = conflicts
-	}
-	return out, nil
-}
-
-// handleSkillRead 读取一个技能的 SKILL.md 正文（frontmatter 之后；模型工具
-// read_skill 走同一实现）。截断到 16KB 并标 truncated。
-func (s *Server) handleSkillRead(_ context.Context, raw json.RawMessage) (any, error) {
-	var p struct {
-		Name string `json:"name"`
-	}
-	if err := decode(raw, &p); err != nil {
-		return nil, invalid("skill.read: " + err.Error())
-	}
-	name := strings.TrimSpace(p.Name)
-	if name == "" {
-		return nil, invalid("skill.read: 需要非空的 name")
-	}
-	meta, content, truncated, ok := s.sess.ReadSkill(name)
-	if !ok {
-		return nil, invalid(fmt.Sprintf("skill.read: 没有名为 %q 的技能（skill.list 查看可用技能）", name))
-	}
-	out := map[string]any{
-		"skill":     skillSummaryJSON(meta),
-		"content":   content,
-		"truncated": truncated,
 	}
 	return out, nil
 }

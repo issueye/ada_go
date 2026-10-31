@@ -1,7 +1,7 @@
 // Package toolkit 是工具机制的唯一实现处：描述符注册表、参数校验、执行包装、
 // 结构化回执、文件变更队列与检查点登记（设计 1.5.1「工具机制」）。
 //
-// 这里刻意「零具体工具」：fs/shell/git/todo/ask/read_skill 全部来自插件贡献（1.5.2）。
+// 这里刻意「零具体工具」：fs/shell/git/todo/ask 等全部来自插件贡献（1.5.2）。
 // 依赖方向：只 import 标准库 + internal/domain；不 import engine/ports 之外的内部层，
 // 也不 import 任何插件宿主——工具怎么被执行由调用方注入的 Invoker 决定（M1-C 是 moejs 宿主）。
 package toolkit

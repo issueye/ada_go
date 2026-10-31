@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:3b8d0a6cdf855dde) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:c92478fa93a0f2dc) by plugins/official/build.mjs — do not edit
 // tools-fs —— 官方插件：工作区内的文件读写（05 §6.3、02 §5.4 的 tools-fs）。
 //
 // 边界不在这一层：真正的根、只读、symlink 落点、16MB/10k 上限与审计都由宿主的
@@ -73,11 +73,14 @@ function byteLength(s        )         {
   return n;
 }
 
-// normalizePath 只做显示层的归一（折叠重复斜杠与 ./），真正的 scope 校验在宿主。
+// normalizePath 归一工作区路径；宿主绝对路径原样交给宿主（read_file 可读技能文件等）。
 function normalizePath(input         , workspace        )         {
   const raw = String(input ?? "").trim();
   if (raw.length === 0) fail("ERR_INVALID_ARG_TYPE", "path 必须是非空字符串");
   const base = workspace && workspace.length > 0 ? workspace : "/workspace";
+  // 宿主绝对路径：Windows 盘符/UNC，或不在挂载点下的 Unix 绝对路径。
+  if (/^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith("\\\\")) return raw;
+  if (raw.startsWith("/") && raw !== base && !raw.startsWith(base + "/")) return raw;
   const abs = raw.startsWith("/") ? raw : `${base}/${raw}`;
   const parts           = [];
   for (const seg of abs.split("/")) {
@@ -129,13 +132,14 @@ export default function (agent          )       {
   agent.registerTool({
     name: "read_file",
     description:
-      "读取工作区内一个文本文件。可以按行偏移与行数分段读（大文件先读一段，再决定要不要继续）。" +
+      "读取一个文本文件（工作区路径或宿主绝对路径，例如技能 SKILL.md 的 path）。" +
+      "可以按行偏移与行数分段读（大文件先读一段，再决定要不要继续）。" +
       "单次输出上限 50KB；被截断时返回文本里会有省略提示。",
     access: "read",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "文件路径（虚拟路径或相对工作区的路径）" },
+        path: { type: "string", description: "文件路径（相对工作区、虚拟绝对路径，或宿主绝对路径）" },
         offset: { type: "number", description: "起始行号（0 起，缺省 0）" },
         limit: { type: "number", description: `最多读多少行（缺省 ${MAX_READ_LINES}，上限 ${MAX_READ_LINES}）` },
       },
@@ -249,7 +253,7 @@ export default function (agent          )       {
   agent.registerTool({
     name: "list_files",
     description:
-      "列出目录内容（dir/file、大小）。recursive 为 true 时递归，深度上限 " +
+      "列出目录内容（dir/file、大小；可传工作区路径或宿主绝对路径）。recursive 为 true 时递归，深度上限 " +
       MAX_WALK_DEPTH +
       " 层、条目上限 " +
       MAX_LIST_ENTRIES +
@@ -258,7 +262,7 @@ export default function (agent          )       {
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "目录路径（缺省工作区根）" },
+        path: { type: "string", description: "目录路径（缺省工作区根；可为宿主绝对路径）" },
         recursive: { type: "boolean", description: "是否递归子目录（缺省 false）" },
       },
     },
@@ -310,14 +314,14 @@ export default function (agent          )       {
   agent.registerTool({
     name: "search_files",
     description:
-      "在工作区内按子串搜索文本文件，返回 `路径:行号: 内容`。跳过二进制文件与大于 256KB 的文件；" +
+      "按子串搜索文本文件（工作区路径或宿主绝对路径），返回 `路径:行号: 内容`。跳过二进制文件与大于 256KB 的文件；" +
       "结果条数有上限。",
     access: "read",
     parameters: {
       type: "object",
       properties: {
         pattern: { type: "string", description: "要查找的子串（区分大小写）" },
-        path: { type: "string", description: "搜索起点（缺省工作区根）" },
+        path: { type: "string", description: "搜索起点（缺省工作区根；可为宿主绝对路径）" },
         maxResults: { type: "number", description: "最多返回多少条（缺省 100，上限 500）" },
       },
       required: ["pattern"],

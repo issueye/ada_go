@@ -26,7 +26,7 @@ type PromptSource interface {
 	Fragments(ctx context.Context) []PromptFragment
 }
 
-// SkillSource 提供技能元数据（6.7：装配期只注入 name/description，正文按需 read_skill）。
+// SkillSource 提供技能元数据（6.7：装配期注入 name/description/path，正文由模型用 read_file 读取）。
 type SkillSource interface {
 	Metas(ctx context.Context) []domain.SkillMeta
 }
@@ -74,7 +74,7 @@ func buildSystem(ctx context.Context, spec TurnSpec, prompts PromptSource, skill
 
 	if skills != nil {
 		if meta := skillXML(skills.Metas(ctx)); meta != "" {
-			b.WriteString("\n\n可用技能（需要正文时用 read_skill 按名读取）：\n")
+			b.WriteString("\n\n可用技能：\n")
 			b.WriteString(meta)
 		}
 	}
@@ -100,7 +100,13 @@ func skillXML(metas []domain.SkillMeta) string {
 		b.WriteString(escapeXMLAttr(m.Name))
 		b.WriteString("\" description=\"")
 		b.WriteString(escapeXMLAttr(m.Description))
-		b.WriteString("\"/>\n")
+		b.WriteString("\"")
+		if m.Path != "" {
+			b.WriteString(" path=\"")
+			b.WriteString(escapeXMLAttr(m.Path))
+			b.WriteString("\"")
+		}
+		b.WriteString("/>\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

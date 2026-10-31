@@ -82,6 +82,38 @@ export default function (agent) {}
 	}
 }
 
+// TestFSGuardReadsUnrestrictedWritesScoped 钉 2026-10-31 决策：
+// agent 的读（ctx.fs.readText/list/stat/exists）不限制目标路径；写路径仍受工作区 Scope 约束。
+func TestFSGuardReadsUnrestrictedWritesScoped(t *testing.T) {
+	outside := filepath.Join(t.TempDir(), "note.txt")
+	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	trusted := testCaps(t, plugins.TrustBuiltin, plugins.CapFSRead, plugins.CapFSWrite)
+	g, err := newFSGuard(&capsState{caps: trusted})
+	if err != nil {
+		t.Fatalf("newFSGuard: %v", err)
+	}
+	if got, err := g.readPath(outside); err != nil || got != filepath.Clean(outside) {
+		t.Fatalf("builtin readPath(%q) = %q / %v", outside, got, err)
+	}
+	// 写路径（realPath）仍必须拒绝工作区外路径。
+	if _, err := g.realPath(outside); err == nil {
+		t.Fatal("realPath 不应放行工作区外路径")
+	}
+
+	// 读不再按信任级别限制：第三方同样可以读宿主绝对路径。
+	third := testCaps(t, plugins.TrustThirdParty, plugins.CapFSRead)
+	g2, err := newFSGuard(&capsState{caps: third})
+	if err != nil {
+		t.Fatalf("newFSGuard(third): %v", err)
+	}
+	if got, err := g2.readPath(outside); err != nil || got != filepath.Clean(outside) {
+		t.Fatalf("third-party readPath(%q) = %q / %v", outside, got, err)
+	}
+}
+
 // TestChildProcessExecFileSync 钉 E-5：execFile 真的执行、且没有 spawn/exec。
 func TestChildProcessExecFileSync(t *testing.T) {
 	caps := testCaps(t, plugins.TrustVerified, plugins.CapExec)

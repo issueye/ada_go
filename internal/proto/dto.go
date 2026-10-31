@@ -349,10 +349,11 @@ type ProviderSummary struct {
 	Models      []ModelInfo `json:"models"`
 }
 
-// SkillSummary 是技能元数据（装配期只注入 name/description，正文按需读，6.7）。
+// SkillSummary 是技能元数据（装配期注入 name/description/path，正文由模型用 read_file 读取，6.7）。
 type SkillSummary struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Path        string `json:"path,omitempty"`
 	Origin      string `json:"origin"` // plugin | workspace
 	PluginID    string `json:"pluginId,omitempty"`
 }

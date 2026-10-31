@@ -85,7 +85,6 @@ const (
 	MethodPluginHttp            = "plugin.http"            // 调用插件注册的动态 HTTP API（route；GET/POST，JSON 入参/出参）
 	MethodPluginHttpStream      = "plugin.httpStream"      // 插件 route 的 SSE 流（prepare 订阅 → start 启动 → cancel 取消；GET 专用）
 	MethodSkillList             = "skill.list"             // 技能元数据（插件目录与工作区目录合并，同名工作区优先）
-	MethodSkillRead             = "skill.read"             // 读取 SKILL.md 正文（模型工具 read_skill 走同一实现）
 	MethodActionInvoke          = "action.invoke"          // 前端动作 → 后端动作（用户点击触发；不进模型、不受 tool.beforeCall 约束）
 	MethodChangeList            = "change.list"            // 检查点与变更清单
 	MethodChangeRevert          = "change.revert"          // 回滚卡片/文件/全部；返回恢复/删除/跳过/失效四份清单，不谎报成功
@@ -178,7 +177,6 @@ var Methods = []MethodMeta{
 	{Name: "plugin.http", Group: "plugin", Summary: "调用插件注册的动态 HTTP API（route；GET/POST，JSON 入参/出参）", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "plugin.httpStream", Group: "plugin", Summary: "插件 route 的 SSE 流（prepare 订阅 → start 启动 → cancel 取消；GET 专用）", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "skill.list", Group: "skill", Summary: "技能元数据（插件目录与工作区目录合并，同名工作区优先）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
-	{Name: "skill.read", Group: "skill", Summary: "读取 SKILL.md 正文（模型工具 read_skill 走同一实现）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "action.invoke", Group: "action", Summary: "前端动作 → 后端动作（用户点击触发；不进模型、不受 tool.beforeCall 约束）", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "change.list", Group: "change", Summary: "检查点与变更清单", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "change.revert", Group: "change", Summary: "回滚卡片/文件/全部；返回恢复/删除/跳过/失效四份清单，不谎报成功", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
@@ -312,7 +310,7 @@ var MethodsByGroup = map[string][]string{
 	"model":       {"model.list", "model.set"},
 	"plugin":      {"plugin.list", "plugin.reload", "plugin.setEnabled", "plugin.http", "plugin.httpStream"},
 	"provider":    {"provider.list"},
-	"skill":       {"skill.list", "skill.read"},
+	"skill":       {"skill.list"},
 	"system":      {"system.hello", "system.ping", "system.shutdown"},
 	"thread":      {"thread.create", "thread.list", "thread.get", "thread.entries", "thread.rename", "thread.archive", "thread.branch", "thread.delete"},
 	"tool":        {"tool.list"},

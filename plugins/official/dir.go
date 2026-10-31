@@ -190,6 +190,7 @@ func loadBackendDir(dir string, m *plugins.Manifest) (host.Script, error) {
 		EntryName:    host.EntryScheme + "://" + m.ID + "/index.js",
 		Source:       string(src),
 		StaticAssets: assets,
+		Root:         absDir(dir),
 		Readme:       readOptionalText(filepath.Join(dir, "README.md")),
 	}, nil
 }

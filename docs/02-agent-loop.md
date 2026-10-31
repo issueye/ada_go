@@ -115,12 +115,12 @@ type Receipt struct {
 
 | 能力包 | 工具 | 说明 |
 |---|---|---|
-| `tools-fs` | `read_file`、`write_file`、`edit_file`、`list_files`、`search_files` | 路径全部经 Scope；编辑要求唯一匹配 |
+| `tools-fs` | `read_file`、`write_file`、`edit_file`、`list_files`、`search_files` | 读可访问宿主任意路径；写仍受 Scope；编辑要求唯一匹配 |
 | `tools-shell` | `run_command`、`run_background`、`check_task`、`kill_task` | 超时杀进程树；后台任务有 id；`check_task` 标记 `repeatable`；默认由 `policy-default` 询问 |
 | `tools-git` | `git` | 单工具 + `action`：status/diff/log/show/blame/add/commit/checkout/restore/reset/stash/branch/merge/push/pull；写动作交给策略插件 |
 | `tools-plan` | `update_plan`、`read_plan` | 维护线程级任务计划；同一插件的前端段把它渲染成 Todo 卡片 |
 | `tools-ask` | `ask_user` | 向用户提问；前端段在交互托盘里渲染提问卡片 |
-| `tools-skill` | `read_skill` | 按需读取 SKILL.md 正文 |
+| `tools-skill` | `skill_search` | 按关键词检索技能；正文由模型按提示里的 path 用 `read_file` 读取 |
 | `tools-subagent` | `invoke_subagent` | v1.5；委派子智能体 |
 
 这些是 TS 实现的官方插件（`trust=builtin`），构建期预编译成 `dist/`，桌面打包随 Electron `resources` 发布；运行时与第三方插件走同一个 moejs 宿主、同一份描述符注册表与同一套装配。信任级别只决定可用能力与钩子等级，不改变注册方式。禁用 `tools-fs` 后 `read_file` 必须从模型工具表中消失，基座不能偷偷补一个同名实现。

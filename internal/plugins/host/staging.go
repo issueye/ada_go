@@ -46,7 +46,7 @@ func newStaging(p *Instance) *Staging {
 		Frontend: FrontendContribution{Actions: map[string]plugins.ActionBinding{}},
 	}
 	// 技能发现（6.7）：装配期扫描插件包内 skills/<name>/SKILL.md，只结算
-	// name/description 元数据（正文由装配方收进 read_skill 的数据表，按需披露）。
+	// name/description 元数据（正文不进基座，模型按路径用 read_file 读取）。
 	// 单个技能非法跳过并记警告，不中断装配。
 	skills, skillWarns := ScriptSkills(p.script)
 	for _, w := range skillWarns {

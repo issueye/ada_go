@@ -121,10 +121,10 @@ agent.on("tool.beforeCall", fn, { priority?: 0, action?: "deny" });       // 策
 | `settings` | — | 产品/用户配置透传的对象 |
 | `state.get/set/delete(key[, value])` | `state` | 线程级命名空间 KV；值为可 JSON 序列化数据 |
 | `secret(name)` | 清单 `secrets` | 未声明的名字返回 undefined |
-| `fs.readText/writeText/list/stat/exists` | `fs.read`（写需 `fs.write`） | 以工作区为根；见 §6 上限；覆盖写入进检查点 |
+| `fs.readText/writeText/list/stat/exists` | `fs.read`（写需 `fs.write`） | 读可访问任意路径；写以工作区为根；见 §6 上限；覆盖写入进检查点 |
 | `exec.execFile/execFileSync` | `exec`（builtin/verified） | 无 shell；输出 4MB / 超时 120s |
 | `ui.available / confirm / select / input` | `ui.ask`（builtin/verified） | 通用用户交互 |
-| `skills()` | 产品 `skills: true` | 只读技能元数据；正文走基座 `read_skill` |
+| `skills()` | 产品 `skills: true` | 只读技能元数据 `{ name, description, path, origin }`；正文用 `read_file` 按 path 读取 |
 | `pluginAdmin.install({ id, files })` | `plugin.admin`（builtin） | 把骨架写入全局 `~/.adago/plugins/<id>/`；宿主校验 id/相对路径/大小并拒绝覆盖 |
 | `http` / `emit` | provider 专用 | 出网桥与归一化增量（03 §5.5） |
 
@@ -166,7 +166,6 @@ JSON 用 `JSON.parse(res.text)`；响应 ≤16MB。
 | `net.fetch` 响应 | 16MB |
 | exec 输出 / 超时 | 4MB / 120s |
 | route 请求体 / 响应 | 1MB / 64KB |
-| 技能正文（read_skill） | 16KB 截断 |
 | Runtime 内存 / 调用深度 / 定时器 | 64MB / 2000 / 256 |
 
 ## 7. 生命周期

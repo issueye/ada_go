@@ -3,16 +3,16 @@ package host
 // 本文件是技能发现（06 §6.7）：插件包内 skills/<name>/SKILL.md 的扫描与 frontmatter 解析。
 //
 // 边界：
-//   - 装配期只解析出 name/description（进系统提示的 XML 片段）；正文与元数据一起
-//     交给装配方（app 的技能表），正文只经基座 read_skill / skill.read 按需披露，
-//     不进 RPC 摘要、不进日志（渐进披露）。
+//   - 装配期只解析出 name/description/path（进系统提示的 XML 片段）；正文不进入
+//     基座内存，模型按提示里的绝对路径用 read_file 直接读取。
 //   - 单个 SKILL.md 的问题（缺字段、名字与目录不符、超长）跳过并记警告，不中断装配
 //     ——与插件发现层「其余插件不受影响」同一原则；不存在任何技能不是错误。
-//   - 正文来源是 Script.StaticAssets（键 = 相对路径 skills/<name>/SKILL.md）：第三方
-//     插件由 discovery.sideFiles 收集，官方插件由 embed.go 收集，两条路径形状一致。
+//   - 来源是 Script.StaticAssets（键 = 相对路径 skills/<name>/SKILL.md）：第三方
+//     插件由 discovery.sideFiles 收集，官方插件由 dir.go 收集，两条路径形状一致。
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -38,33 +38,31 @@ const (
 	// MaxSkillDescription 是 description 的长度上限（6.7：不超过 1024 字符）。
 	MaxSkillDescription = 1024
 	// MaxSkillFileBytes 是单个 SKILL.md 的大小上限：技能是提示料不是数据集，
-	// 超限视为打包错误（正文另有 16KB 的读取截断，见 app 的 read_skill）。
+	// 超限视为打包错误。
 	MaxSkillFileBytes = 256 << 10
 )
 
-// Skill 是一次扫描的产物：元数据 + SKILL.md 正文（frontmatter 之后）。
-// 正文不进 Contribution.Skills（那里只放元数据），供装配方建 read_skill 的数据表。
+// Skill 是一次扫描的产物：元数据（含 SKILL.md 绝对路径）。
 type Skill struct {
 	Meta domain.SkillMeta
-	Body string
 }
 
-// ParseSkill 解析一份 SKILL.md：frontmatter 取 name/description，正文取分隔线之后。
+// ParseSkill 解析一份 SKILL.md：frontmatter 取 name/description，正文不保留。
 //
 // dirName 是技能目录名（Agent Skills 约定：frontmatter 的 name 必须等于它）。
-// origin/pluginId 由调用方补齐；这里只做形状校验。frontmatter 是「简单 YAML」：
+// origin/pluginId/path 由调用方补齐；这里只做形状校验。frontmatter 是「简单 YAML」：
 // 只认顶层 `key: value` 行与单/双引号包裹的值，不支持嵌套与多行——技能约定只用到这两项。
-func ParseSkill(dirName, raw string) (domain.SkillMeta, string, error) {
+func ParseSkill(dirName, raw string) (domain.SkillMeta, error) {
 	name := strings.TrimSpace(dirName)
 	if !skillNameRe.MatchString(name) {
-		return domain.SkillMeta{}, "", fmt.Errorf("技能目录名 %q 不满足 1–64 位小写字母/数字/连字符", dirName)
+		return domain.SkillMeta{}, fmt.Errorf("技能目录名 %q 不满足 1–64 位小写字母/数字/连字符", dirName)
 	}
 	if len(raw) > MaxSkillFileBytes {
-		return domain.SkillMeta{}, "", fmt.Errorf("SKILL.md 超过 %d 字节上限", MaxSkillFileBytes)
+		return domain.SkillMeta{}, fmt.Errorf("SKILL.md 超过 %d 字节上限", MaxSkillFileBytes)
 	}
-	front, body, err := splitFrontmatter(raw)
+	front, _, err := splitFrontmatter(raw)
 	if err != nil {
-		return domain.SkillMeta{}, "", err
+		return domain.SkillMeta{}, err
 	}
 	fields := parseFrontmatterFields(front)
 	desc := ""
@@ -72,15 +70,15 @@ func ParseSkill(dirName, raw string) (domain.SkillMeta, string, error) {
 		desc = v
 	}
 	if desc == "" {
-		return domain.SkillMeta{}, "", fmt.Errorf("frontmatter 缺少 description（6.7）")
+		return domain.SkillMeta{}, fmt.Errorf("frontmatter 缺少 description（6.7）")
 	}
 	if r := []rune(desc); len(r) > MaxSkillDescription {
-		return domain.SkillMeta{}, "", fmt.Errorf("description 超过 %d 字符", MaxSkillDescription)
+		return domain.SkillMeta{}, fmt.Errorf("description 超过 %d 字符", MaxSkillDescription)
 	}
 	if v, ok := fields["name"]; ok && v != name {
-		return domain.SkillMeta{}, "", fmt.Errorf("frontmatter name %q 与目录名 %q 不一致（Agent Skills 约定）", v, name)
+		return domain.SkillMeta{}, fmt.Errorf("frontmatter name %q 与目录名 %q 不一致（Agent Skills 约定）", v, name)
 	}
-	return domain.SkillMeta{Name: name, Description: desc}, body, nil
+	return domain.SkillMeta{Name: name, Description: desc}, nil
 }
 
 // splitFrontmatter 按 `---` 开头/结尾两行切出 frontmatter；没有 frontmatter 是错误
@@ -152,14 +150,23 @@ func ScriptSkills(script Script) (skills []Skill, warnings []string) {
 			warnings = append(warnings, fmt.Sprintf("技能文件 %s 的路径形状非法（期望 skills/<name>/SKILL.md），已跳过", rel))
 			continue
 		}
-		meta, body, err := ParseSkill(mid, string(raw))
+		meta, err := ParseSkill(mid, string(raw))
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("技能 %s 解析失败，已跳过: %v", rel, err))
 			continue
 		}
 		meta.Origin = SkillOriginPlugin
 		meta.PluginID = id
-		skills = append(skills, Skill{Meta: meta, Body: body})
+		if script.Root != "" {
+			root := script.Root
+			if !filepath.IsAbs(root) {
+				if abs, aerr := filepath.Abs(root); aerr == nil {
+					root = abs
+				}
+			}
+			meta.Path = filepath.Join(root, filepath.FromSlash(rel))
+		}
+		skills = append(skills, Skill{Meta: meta})
 	}
 	// StaticAssets 是 map：按名字排序，保证同一装配下技能顺序可复现。
 	sort.Slice(skills, func(i, j int) bool { return skills[i].Meta.Name < skills[j].Meta.Name })

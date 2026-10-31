@@ -1,19 +1,16 @@
-// generated from index.ts (sha256:057f0a3541c42f2e) by plugins/official/build.mjs — do not edit
-// tools-skill —— 官方插件：技能搜索（6.7 的 tools-skill，保持薄）。
+// generated from index.ts (sha256:fb7a273d7554d5a5) by plugins/official/build.mjs — do not edit
+// tools-skill —— 官方插件：技能检索（6.7）。
 //
-// 基座已经把 name/description 注入系统提示，并提供了按名读正文的 read_skill
-// （基座工具，不属于任何插件）。本插件只补一件事：当技能多、模型记不全时，
-// 按关键词在已装配技能的 name/description 里做子串匹配，返回候选列表。
-// 它不读正文、不做安装（M3 的安装走 CLI/zip）：正文永远走 read_skill。
-//
-// 技能表来自 ctx.skills（宿主按装配注入的只读元数据；不含正文）。宿主没有提供时
-// （老宿主或技能能力未启用）工具直接失败，而不是悄悄返回空列表。
+// 基座在装配期把 name/description/path 注入系统提示；正文不进入基座内存。
+// 本插件只提供搜索：当技能多、模型记不全时，按关键词在 name/description 里做子串匹配，
+// 返回候选列表；需要正文时模型用 read_file 读取 XML 里的 path。
 
                      
                
                       
                                  
                     
+                
  
 
                        
@@ -26,14 +23,25 @@
                       
                      
                                                 
+                     
                                                     
+ 
+
+                     
+             
+                  
+                    
  
 
                     
                                    
+                                        
  
 
 const MAX_RESULTS = 50;
+const SKILL_READ_HINT =
+  "系统提示里的「可用技能」带有 name、description 与 path。需要某个技能的完整正文时，" +
+  "直接用 read_file 读取该技能的 path；不要一次读完所有技能。";
 
 function fail(code        , message        )        {
   const e = new Error(message);
@@ -41,7 +49,7 @@ function fail(code        , message        )        {
   throw e;
 }
 
-// matchSkill 单字段子串匹配（大小写不敏感；中缀即可，不做分词）。
+// matches 单字段子串匹配（大小写不敏感；中缀即可，不做分词）。
 function matches(haystack        , needle        )          {
   return haystack.toLowerCase().indexOf(needle.toLowerCase()) >= 0;
 }
@@ -51,7 +59,7 @@ export default function (agent          )       {
     name: "skill_search",
     description:
       "按关键词搜索已装配的技能（匹配技能名与简介的子串）。返回候选列表后，" +
-      "用 read_skill 读取正文的完整指引。当前装配没有任何技能时返回空列表。",
+      "用 read_file 读取对应 path 获取正文。当前装配没有任何技能时返回空列表。",
     access: "read",
     parameters: {
       type: "object",
@@ -82,8 +90,18 @@ export default function (agent          )       {
 
       return {
         content: [{ type: "text", text: body }],
-        details: { query, total: all.length, hits: hits.length, truncated: hits.length > shown.length },
+        details: {
+          query,
+          total: all.length,
+          hits: hits.length,
+          truncated: hits.length > shown.length,
+          paths: shown.map((s) => s.path).filter((p)              => typeof p === "string" && p.length > 0),
+        },
       };
     },
   });
+
+  if (agent.registerPrompt) {
+    agent.registerPrompt({ id: "skills-read", content: SKILL_READ_HINT, priority: 20 });
+  }
 }

@@ -295,9 +295,8 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 		hc.UI = s.uiAsk
 	}
 	hc.State = s.stateOp
-	// 给插件的只读技能通道（6.7）：官方的技能搜索工具用它做匹配；
-	// 快照随每次装配更新，调用时读当前值。
-	hc.Skills = s.skillsMetaSnapshot
+	// 技能通道（6.7）由 app.Assemble 按产品 capabilities.skills 注入：
+	// ctx.skills 只给 name/description/path；正文由模型用 read_file 按路径读取。
 	// 供应商管理（model.admin）：目录只读、不含密钥；切换复用 model.set 的解析。
 	hc.Providers = s.providerCatalog
 	hc.SelectModel = s.selectModelFromPlugin

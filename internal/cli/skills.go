@@ -3,13 +3,13 @@ package cli
 // 本文件是技能的会话侧接线（06 §6.7）。
 //
 // 技能表本身在装配期由 app 结算（app.settleSkills：插件贡献 + 工作区
-// .adago/skills，同名工作区优先；read_skill 由 app 按产品 capabilities.skills
-// 与非空表注册）。这里只做三件事：
+// .adago/skills，同名工作区优先；只保留 name/description/absolute path，
+// 正文由模型用 read_file 按路径读取）。这里只做三件事：
 //
 //   - 把装配的技能表接成 engine.Deps.Skills（产品 capabilities.skills=true 时）；
 //   - 把各插件 registerPrompt 的贡献接成 engine.Deps.Prompts
 //     （引擎按 priority/pluginID 稳定排序，安全前言永远在最前）；
-//   - 给 skill.list / skill.read RPC 提供数据源（与基座 read_skill 同一实现）。
+//   - 给 skill.list RPC 提供数据源。
 
 import (
 	"context"
@@ -32,14 +32,8 @@ func (s *Session) SkillSummaries() ([]domain.SkillMeta, []string) {
 	return asm.Skills(), asm.SkillConflicts()
 }
 
-// ReadSkill 读取一个技能的元数据与正文（skill.read 数据源；基座 read_skill 走同一实现）。
-// 第四个返回值为 false 表示技能不存在；正文已按 16KB 截断并带标记。
-func (s *Session) ReadSkill(name string) (domain.SkillMeta, string, bool, bool) {
-	return s.Assembly().ReadSkill(name)
-}
-
 // skillsMetaSnapshot 是 host.Context.Skills 的实现：给插件的只读元数据
-// （不含正文；正文只能走 read_skill）。快照随装配切换。
+// （name/description/path，不含正文）。快照随装配切换。
 func (s *Session) skillsMetaSnapshot() []domain.SkillMeta {
 	return s.Assembly().Skills()
 }

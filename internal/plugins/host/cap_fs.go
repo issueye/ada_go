@@ -107,6 +107,13 @@ func (g *fsGuard) realPath(virtual string) (string, error) {
 	if v == "" {
 		return "", throwCodedPath(g, fmt.Errorf("路径为空"))
 	}
+	if filepath.IsAbs(filepath.FromSlash(v)) {
+		// 宿主绝对路径不进入写/目录操作；只有 readText 的 readPath 会放行。
+		clean := path.Clean(v)
+		if clean != g.mount && !strings.HasPrefix(clean, g.mount+"/") {
+			return "", throwCodedPath(g, fmt.Errorf("路径 %q 越出工作区根（挂载点 %s）", baseForLog(v), g.mount))
+		}
+	}
 	var clean string
 	if strings.HasPrefix(v, "/") {
 		// 绝对虚拟路径必须落在挂载点下：/workspace/../etc 这种不重解释，直接拒绝。
@@ -134,6 +141,17 @@ func (g *fsGuard) realPath(virtual string) (string, error) {
 		return "", throwCodedPath(g, fmt.Errorf("路径 %q 越出工作区根", baseForLog(virtual)))
 	}
 	return abs, nil
+}
+
+// readPath 解析读操作的目标：允许宿主绝对路径（agent 的 read_file/list/search 等），
+// 其余情况仍走工作区 Scope。写操作永远走 realPath，不受影响。
+func (g *fsGuard) readPath(virtual string) (string, error) {
+	cleaned := filepath.Clean(strings.TrimSpace(virtual))
+	normalized := strings.ReplaceAll(strings.TrimSpace(virtual), "\\", "/")
+	if filepath.IsAbs(cleaned) && normalized != g.mount && !strings.HasPrefix(normalized, g.mount+"/") {
+		return cleaned, nil
+	}
+	return g.realPath(virtual)
 }
 
 func throwCodedPath(g *fsGuard, err error) error {
@@ -413,7 +431,12 @@ func ctxFSMember(st *capsState, hc Context) moejs.NativeFunc {
 		go func() {
 			settle(func(rt *mojsRuntime) (moejs.Value, error) {
 				r := rt.Realm()
-				real, err := guard.realPath(virtual)
+				// 读操作（readText/list/stat/exists）不限制目标路径；写入仍受工作区 Scope 约束。
+				resolve := guard.readPath
+				if op == "writeText" {
+					resolve = guard.realPath
+				}
+				real, err := resolve(virtual)
 				if err != nil {
 					return moejs.Undefined(), err
 				}

@@ -11,14 +11,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/adag/ada-go/app"
-	"github.com/adag/ada-go/internal/adapters"
 	"github.com/adag/ada-go/internal/coreapp"
 	"github.com/adag/ada-go/internal/domain"
 	"github.com/adag/ada-go/internal/plugins/host"
-	"github.com/adag/ada-go/internal/toolkit"
 	"github.com/adag/ada-go/plugins/official"
 )
 
@@ -72,7 +69,7 @@ func codingProductIn(t *testing.T, ws string) *app.Assembly {
 
 // TestCodingProductAssembles 钉 coding 产品的装配：14 个声明插件全部就位
 // （11 个后端实例 + 4 个前端声明；provider-admin / plugin-helper 同时有 route 后端与页面），
-// read_skill 在目录里，persona-coding 的提示词片段已结算。
+// tools-skill 贡献 skill_search，persona-coding 的提示词片段已结算。
 func TestCodingProductAssembles(t *testing.T) {
 	asm := codingProduct(t)
 
@@ -89,10 +86,10 @@ func TestCodingProductAssembles(t *testing.T) {
 			t.Fatalf("前端声明[%d] = %q，期望 %q（全部：%v）", i, asm.FrontendDecls[i], id, asm.FrontendDecls)
 		}
 	}
-	if _, ok := asm.Tools.Lookup(context.Background(), "read_skill"); !ok {
-		t.Fatalf("coding 产品（skills=true）必须有基座工具 read_skill，现有 %v", toolNames(asm))
+	if _, ok := asm.Tools.Lookup(context.Background(), "skill_search"); !ok {
+		t.Fatalf("coding 产品（skills=true）必须有 tools-skill 贡献的 skill_search，现有 %v", toolNames(asm))
 	}
-	for _, name := range []string{"git_status", "git_diff", "git_log", "ask_user", "skill_search"} {
+	for _, name := range []string{"git_status", "git_diff", "git_log", "ask_user"} {
 		if _, ok := asm.Tools.Lookup(context.Background(), name); !ok {
 			t.Fatalf("缺少工具 %s，现有 %v", name, toolNames(asm))
 		}
@@ -124,101 +121,49 @@ func TestCodingProductAssembles(t *testing.T) {
 	}
 }
 
-// TestReadSkillBaseTool 钉 read_skill：命中返回正文（frontmatter 之后）、未知技能报错、
-// 截断在 16KB。调用走真实 Executor → toolInvoker → 基座函数路径。
-func TestReadSkillBaseTool(t *testing.T) {
+// TestSkillsExposeReadablePaths 钉 6.7 的新契约：装配期只暴露 name/description/path，
+// 正文不进基座；模型按 path 用 read_file 直接读取。
+func TestSkillsExposeReadablePaths(t *testing.T) {
 	ws := tempDir(t)
-	// 工作区技能：正文远超 16KB，验证截断与 rune 边界。
 	dir := filepath.Join(ws, ".adago", "skills", "deploy-notes")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := strings.Repeat("部署步骤。", 5000)
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"),
-		[]byte("---\nname: deploy-notes\ndescription: 部署注意事项\n---\n"+body), 0o600); err != nil {
+		[]byte("---\nname: deploy-notes\ndescription: 部署注意事项\n---\n部署步骤正文"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	asm := codingProductIn(t, ws)
-	exec, err := toolkit.NewExecutor(toolkit.ExecutorConfig{
-		Catalog:   asm.Tools,
-		Invoker:   asm.ToolInvoker(),
-		Clock:     adapters.SystemClock{},
-		HasPolicy: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	run := func(args string) domain.Result {
-		t.Helper()
-		return exec.Execute(context.Background(), domain.ToolCall{
-			CallID: "c1", Tool: "read_skill", Args: json.RawMessage(args),
-		})
+	byName := map[string]domain.SkillMeta{}
+	for _, m := range asm.Skills() {
+		byName[m.Name] = m
 	}
 
-	// 命中随包技能：正文不含 frontmatter。
-	res := run(`{"skill":"clean-code"}`)
-	if res.Receipt.Status != domain.ReceiptOK || !strings.Contains(res.Content[0].Text, "先读后改") {
-		t.Fatalf("read_skill(clean-code) = %#v", res)
+	// 插件随包技能：path 指向插件包内的 SKILL.md，文件可读。
+	clean, ok := byName["clean-code"]
+	if !ok {
+		t.Fatalf("缺少 persona-coding 的随包技能 clean-code: %+v", asm.Skills())
 	}
-	// 命中工作区技能：16KB 截断（按 rune 边界，不产生非法 UTF-8），truncated 标记。
-	res = run(`{"skill":"deploy-notes"}`)
-	if res.Receipt.Status != domain.ReceiptOK {
-		t.Fatalf("read_skill(deploy-notes) 回执 = %#v", res.Receipt)
+	if !filepath.IsAbs(clean.Path) {
+		t.Fatalf("clean-code path 不是绝对路径: %q", clean.Path)
 	}
-	text := res.Content[0].Text
-	if len(text) > 16<<10+64 {
-		t.Fatalf("正文应截断到 16KB 附近，得到 %d 字节", len(text))
+	body, err := os.ReadFile(clean.Path)
+	if err != nil {
+		t.Fatalf("按 path 读取 clean-code 失败（%s）: %v", clean.Path, err)
 	}
-	if !utf8.ValidString(text) {
-		t.Fatal("截断不能产生非法 UTF-8")
-	}
-	if got, ok := res.Details["truncated"].(bool); !ok || !got {
-		t.Fatalf("超长正文应标 truncated: %#v", res.Details)
-	}
-	// 未知技能：错误回执（INV-5），点名技能名。
-	res = run(`{"skill":"no-such"}`)
-	if res.Receipt.Status != domain.ReceiptError || !strings.Contains(res.Content[0].Text, "no-such") {
-		t.Fatalf("未知技能应错误回执: %#v", res)
-	}
-}
-
-// TestReadSkillGatedByCapability 钉 6.7 的门控：capabilities.skills=false 不注册
-// read_skill；skills=true 但没有任何技能（插件没带、工作区也没有）时同样不注册。
-func TestReadSkillGatedByCapability(t *testing.T) {
-	// skills=false：即使插件带了技能（policy-default 没有，用 tools-fs）也不注册。
-	p := testProduct(t, "tools-fs", "policy-default")
-	hc := host.Context{Workspace: tempDir(t), Log: func(string, string, map[string]any) {}}
-	asm := assemble(t, p, hc, nil)
-	for _, name := range toolNames(asm) {
-		if name == "read_skill" {
-			t.Fatal("skills=false 的产品不得注册 read_skill")
-		}
+	if !strings.Contains(string(body), "先读后改") {
+		t.Fatalf("clean-code 正文不对: %.200s", body)
 	}
 
-	// skills=true 但装配里没有任何技能：不注册（空技能不给模型一个必失败的入口）。
-	p2 := testProduct(t, "tools-fs", "policy-default")
-	raw, err := json.Marshal(map[string]any{
-		"id": "test2", "name": "测试产品2", "plugins": []string{"tools-fs", "policy-default"},
-		"capabilities": map[string]any{"skills": true, "images": true, "subagents": false},
-		"identity":     map[string]any{"name": "ada-go", "locale": "zh-CN"},
-		"policies": map[string]any{
-			"toolTimeoutMs": 120000, "turnTimeoutMs": 0, "maxTurnTokens": 0,
-			"loopRepeatLimit": 3, "loopAbortLimit": 5, "parallelTools": 1,
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
+	// 工作区技能：path 指向工作区 .adago/skills 下的文件。
+	deploy, ok := byName["deploy-notes"]
+	if !ok || !filepath.IsAbs(deploy.Path) {
+		t.Fatalf("deploy-notes 路径不对: %+v", deploy)
 	}
-	p2, err = coreapp.ParseProduct(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	asm2 := assemble(t, p2, host.Context{Workspace: tempDir(t), Log: func(string, string, map[string]any) {}}, nil)
-	for _, name := range toolNames(asm2) {
-		if name == "read_skill" {
-			t.Fatal("空技能的装配不得注册 read_skill")
-		}
+	body, err = os.ReadFile(deploy.Path)
+	if err != nil || !strings.Contains(string(body), "部署步骤正文") {
+		t.Fatalf("按 path 读取 deploy-notes = %q / %v", body, err)
 	}
 }
 

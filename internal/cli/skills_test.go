@@ -1,10 +1,12 @@
 package cli_test
 
-// 技能的会话侧验收（6.7）：deps.Skills / deps.Prompts 注入、read_skill 门控与执行、
-// 工作区覆盖插件技能的冲突语义。全部走真实装配（官方插件 × moejs × SQLite × 引擎）。
+// 技能的会话侧验收（6.7）：deps.Skills / deps.Prompts 注入、name/description/path
+// 注入系统提示、read_file 按 path 读取正文，以及工作区覆盖插件技能的冲突语义。
+// 全部走真实装配（官方插件 × moejs × SQLite × 引擎）。
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,15 +68,16 @@ func writeWorkspaceSkill(t *testing.T, ws, name, description, body string) {
 }
 
 // TestSessionCodingSkillsInjection 钉 coding 产品（skills=true）的注入语义：
-//   - 系统提示 = 安全前言（最前）+ persona 片段 + 技能元数据 XML；
-//   - read_skill 在工具目录里，模型调用后拿到正文（frontmatter 之后）；
+//   - 系统提示 = 安全前言（最前）+ persona 片段 + 技能元数据 XML（含绝对 path）；
+//   - 模型按 path 调用 read_file，工具结果里拿到正文；
 //   - 技能表 = 插件贡献（clean-code）+ 工作区技能。
 func TestSessionCodingSkillsInjection(t *testing.T) {
 	ws := t.TempDir()
 	writeWorkspaceSkill(t, ws, "release-checklist", "发版前的检查清单", "1. 跑全量测试\n2. 打 tag\n")
+	skillPath := filepath.Join(ws, ".adago", "skills", "release-checklist", "SKILL.md")
 
 	fake := testkit.NewFakeProvider(testkit.NewScriptedModel(
-		testkit.ToolTurn("call_1", "read_skill", `{"skill":"release-checklist"}`),
+		testkit.ToolTurn("call_1", "read_file", fmt.Sprintf(`{"path":%q}`, skillPath)),
 		testkit.TextTurn("已按清单执行"),
 	))
 	sess := openWithProduct(t, codingProductPath(t), ws, fake)
@@ -107,17 +110,16 @@ func TestSessionCodingSkillsInjection(t *testing.T) {
 	if strings.Index(system, "安全边界") > strings.Index(system, "先读后改") {
 		t.Fatal("安全前言必须在 persona 片段之前")
 	}
-	// 技能元数据注入（插件技能 + 工作区技能）。
-	for _, want := range []string{`<skill name="clean-code"`, `<skill name="release-checklist"`} {
+	// 技能元数据注入（插件技能 + 工作区技能），且带绝对 path。
+	for _, want := range []string{`<skill name="clean-code"`, `<skill name="release-checklist"`, `path="`} {
 		if !strings.Contains(system, want) {
 			t.Fatalf("系统提示缺少技能元数据 %s：%.400s", want, system)
 		}
 	}
-	// read_skill 在目录里。
-	if _, ok := sess.Assembly().Tools.Lookup(ctx, "read_skill"); !ok {
-		t.Fatal("coding 产品必须有 read_skill")
+	if !strings.Contains(system, "release-checklist") || !strings.Contains(system, skillPath) {
+		t.Fatalf("系统提示缺少工作区技能的绝对路径 %q：%.400s", skillPath, system)
 	}
-	// 第二次请求的历史里有工具结果：正文是 frontmatter 之后的内容。
+	// 第二次请求的历史里有 read_file 的工具结果：正文是 frontmatter 之后的内容。
 	var toolText string
 	for _, m := range reqs[1].Messages {
 		if m.Role != domain.RoleTool {
@@ -129,8 +131,8 @@ func TestSessionCodingSkillsInjection(t *testing.T) {
 			}
 		}
 	}
-	if !strings.Contains(toolText, "跑全量测试") || strings.Contains(toolText, "description:") {
-		t.Fatalf("read_skill 应返回 frontmatter 之后的正文: %q", toolText)
+	if !strings.Contains(toolText, "跑全量测试") || !strings.Contains(toolText, "description:") {
+		t.Fatalf("read_file 应返回 SKILL.md 原文（含 frontmatter）: %q", toolText)
 	}
 }
 
@@ -166,16 +168,15 @@ func TestSessionSkillWorkspaceOverridesPlugin(t *testing.T) {
 	if !hasConflict {
 		t.Fatalf("冲突列表应包含 clean-code: %v", conflicts)
 	}
-	// 正文也是工作区版本。
-	_, content, _, ok := sess.ReadSkill("clean-code")
-	if !ok || !strings.Contains(content, "工作区正文") {
-		t.Fatalf("read_skill 应返回工作区版本正文: %q", content)
+	// path/正文也是工作区版本。
+	body, err := os.ReadFile(found.Path)
+	if err != nil || !strings.Contains(string(body), "工作区正文") {
+		t.Fatalf("工作区技能 path 应可读且是工作区版本: %q / %v", body, err)
 	}
 }
 
-// TestSessionHeadlessSkillReadable 钉 headless 的新门控：skills=true 且
-// plugin-helper 带了随包技能后，read_skill 注册、系统提示注入技能段、
-// 正文可读（门控本身的反面用例在 app 的 TestReadSkillGatedByCapability）。
+// TestSessionHeadlessSkillReadable：skills=true 且 plugin-helper 带随包技能后，
+// 系统提示注入 name/description/path，模型可按 path 读正文。
 func TestSessionHeadlessSkillReadable(t *testing.T) {
 	ws := t.TempDir()
 	fake := testkit.NewFakeProvider(testkit.NewScriptedModel(testkit.TextTurn("好的")))
@@ -184,9 +185,6 @@ func TestSessionHeadlessSkillReadable(t *testing.T) {
 	if term, err := sess.Run(ctx, "hello"); err != nil || term != domain.TerminalCompleted {
 		t.Fatalf("Run = %s / %v", term, err)
 	}
-	if _, ok := sess.Assembly().Tools.Lookup(ctx, "read_skill"); !ok {
-		t.Fatal("skills=true 的 headless 必须注册 read_skill")
-	}
 	reqs := fake.Requests()
 	if len(reqs) == 0 {
 		t.Fatal("没有模型请求")
@@ -194,14 +192,25 @@ func TestSessionHeadlessSkillReadable(t *testing.T) {
 	if !strings.Contains(reqs[0].System, "可用技能") || !strings.Contains(reqs[0].System, "create-plugin") {
 		t.Fatalf("系统提示应注入 create-plugin 技能简介: %.400s", reqs[0].System)
 	}
-	_, content, _, ok := sess.ReadSkill("create-plugin")
-	if !ok || !strings.Contains(content, "create_plugin") {
-		t.Fatalf("read_skill 应返回创建插件技能正文: %q", content)
-	}
-	// 工具目录里仍然不该有 tools-skill（它只在 coding 声明）。
-	for _, d := range sess.Assembly().Tools.List(ctx) {
-		if d.Name == "skill_search" {
-			t.Fatal("headless 未声明 tools-skill，不应装配")
+	metas, _ := sess.SkillSummaries()
+	var skill *domain.SkillMeta
+	for i := range metas {
+		if metas[i].Name == "create-plugin" {
+			skill = &metas[i]
 		}
+	}
+	if skill == nil || !filepath.IsAbs(skill.Path) {
+		t.Fatalf("create-plugin 应带绝对 path: %+v", skill)
+	}
+	if !strings.Contains(reqs[0].System, skill.Path) {
+		t.Fatalf("系统提示缺少 create-plugin 的 path %q: %.400s", skill.Path, reqs[0].System)
+	}
+	body, err := os.ReadFile(skill.Path)
+	if err != nil || !strings.Contains(string(body), "create_plugin") {
+		t.Fatalf("按 path 读取 create-plugin 正文 = %q / %v", body, err)
+	}
+	// headless 声明了 tools-skill：搜索入口来自该插件。
+	if _, ok := sess.Assembly().Tools.Lookup(ctx, "skill_search"); !ok {
+		t.Fatal("headless 声明 tools-skill 后应装配 skill_search")
 	}
 }

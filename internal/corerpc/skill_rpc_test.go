@@ -1,7 +1,7 @@
 package corerpc_test
 
-// skill.list / skill.read 的 RPC 形状验收（spec proto.json 的 skill 组）：
-// 数据源是 Session 的装配技能表；模型工具 read_skill 与 skill.read 走同一实现。
+// skill.list 的 RPC 形状验收（spec proto.json 的 skill 组）：
+// 数据源是 Session 的装配技能表；元数据带绝对 path，正文由模型用 read_file 读取。
 
 import (
 	"context"
@@ -52,18 +52,19 @@ func newCodingSession(t *testing.T) *cli.Session {
 	return sess
 }
 
-// TestSkillRPC 钉 skill.list / skill.read 的形状与错误语义。
+// TestSkillRPC 钉 skill.list 的形状：元数据带绝对 path，正文由模型用 read_file 读取。
 func TestSkillRPC(t *testing.T) {
 	sess := newCodingSession(t)
 	url, _ := startServer(t, sess, "")
 	c := dial(t, url, "")
 
-	// skill.list：工作区技能 + 随包技能（clean-code），origin 正确。
+	// skill.list：工作区技能 + 随包技能（clean-code），origin/path 正确。
 	res := c.call(t, "skill.list", map[string]any{})
 	var list struct {
 		Skills []struct {
 			Name        string `json:"name"`
 			Description string `json:"description"`
+			Path        string `json:"path"`
 			Origin      string `json:"origin"`
 			PluginID    string `json:"pluginId,omitempty"`
 		} `json:"skills"`
@@ -75,55 +76,24 @@ func TestSkillRPC(t *testing.T) {
 	byName := map[string]struct {
 		origin   string
 		pluginID string
+		path     string
 	}{}
 	for _, s := range list.Skills {
 		byName[s.Name] = struct {
 			origin   string
 			pluginID string
-		}{s.Origin, s.PluginID}
+			path     string
+		}{s.Origin, s.PluginID, s.Path}
 	}
-	if got, ok := byName["release-checklist"]; !ok || got.origin != "workspace" {
-		t.Fatalf("skill.list 缺少工作区技能或 origin 不对: %+v", byName)
+	if got, ok := byName["release-checklist"]; !ok || got.origin != "workspace" || !filepath.IsAbs(got.path) {
+		t.Fatalf("skill.list 缺少工作区技能或 path 不对: %+v", byName)
 	}
-	if got, ok := byName["clean-code"]; !ok || got.origin != "plugin" || got.pluginID != "persona-coding" {
+	if got, ok := byName["clean-code"]; !ok || got.origin != "plugin" || got.pluginID != "persona-coding" || !filepath.IsAbs(got.path) {
 		t.Fatalf("skill.list 缺少随包技能或归属不对: %+v", byName)
 	}
-
-	// skill.read：命中（content 是 frontmatter 之后的正文，截断标记为 true）。
-	res = c.call(t, "skill.read", map[string]any{"name": "release-checklist"})
-	var read struct {
-		Skill struct {
-			Name   string `json:"name"`
-			Origin string `json:"origin"`
-		} `json:"skill"`
-		Content   string `json:"content"`
-		Truncated bool   `json:"truncated"`
+	// path 指向真实 SKILL.md，模型可直接 read_file。
+	body, err := os.ReadFile(byName["release-checklist"].path)
+	if err != nil || !strings.Contains(string(body), "检查项") {
+		t.Fatalf("按 path 读取 release-checklist = %q / %v", body, err)
 	}
-	if err := json.Unmarshal(res, &read); err != nil {
-		t.Fatalf("skill.read 结果不是期望形状: %v\n%s", err, res)
-	}
-	if read.Skill.Name != "release-checklist" || read.Skill.Origin != "workspace" {
-		t.Fatalf("skill.read 的 skill 摘要不对: %+v", read.Skill)
-	}
-	if strings.Contains(read.Content, "description:") || strings.Contains(read.Content, "name:") {
-		t.Fatalf("content 不应包含 frontmatter: %.80s", read.Content)
-	}
-	if !strings.Contains(read.Content, "检查项") {
-		t.Fatalf("content 应是正文: %.80s", read.Content)
-	}
-	if len(read.Content) > 16<<10+64 {
-		t.Fatalf("content 应截断到 16KB 附近，得到 %d 字节", len(read.Content))
-	}
-	if !read.Truncated {
-		t.Fatal("超长正文应标 truncated=true")
-	}
-
-	// 未知技能：invalid_params。
-	resp := c.callError(t, "skill.read", map[string]any{"name": "no-such"})
-	if !strings.Contains(string(resp.Error), "no-such") {
-		t.Fatalf("错误应点名技能名: %s", resp.Error)
-	}
-
-	// 缺 name：invalid_params。
-	c.callError(t, "skill.read", map[string]any{})
 }

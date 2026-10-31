@@ -375,11 +375,12 @@
     },
     "SkillSummary": {
       "type": "object",
-      "description": "技能元数据（6.7）：装配期只注入 name/description，正文经 skill.read/read_skill 渐进披露。",
+      "description": "技能元数据（6.7）：装配期注入 name/description/path，正文由模型用 read_file 读取。",
       "additionalProperties": false,
       "properties": {
         "name": { "type": "string", "description": "等于目录名，1-64，小写/数字/连字符" },
         "description": { "type": "string", "maxLength": 1024 },
+        "path": { "type": "string", "description": "SKILL.md 的宿主绝对路径（模型用 read_file 读取）" },
         "origin": { "type": "string", "enum": ["workspace", "plugin"], "description": "同名冲突工作区优先，冲突记警告不静默覆盖" },
         "pluginId": { "type": "string", "description": "origin=plugin 时提供技能的插件 id" }
       },
@@ -1298,34 +1299,6 @@
         "required": ["skills"]
       },
       "errors": ["internal_error"]
-    },
-    {
-      "name": "skill.read",
-      "group": "skill",
-      "summary": "读取 SKILL.md 正文（模型工具 read_skill 走同一实现）",
-      "direction": "gateway->core",
-      "since": "1.0",
-      "idempotent": true,
-      "requiresReadyInstance": true,
-      "params": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "name": { "type": "string", "minLength": 1, "maxLength": 64, "description": "技能名（等于目录名）" }
-        },
-        "required": ["name"]
-      },
-      "result": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "skill": { "$ref": "#/definitions/SkillSummary" },
-          "content": { "type": "string", "description": "SKILL.md 正文（frontmatter 之后）" },
-          "truncated": { "type": "boolean", "default": false }
-        },
-        "required": ["skill", "content"]
-      },
-      "errors": ["invalid_params", "internal_error"]
     },
     {
       "name": "action.invoke",

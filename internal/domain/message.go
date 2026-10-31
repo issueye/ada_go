@@ -118,10 +118,13 @@ type Usage struct {
 	CostMicros int64 `json:"costMicros"`
 }
 
-// SkillMeta 是技能元数据（06 §6.7：装配期只注入 name/description，正文由 read_skill 按需读取）。
+// SkillMeta 是技能元数据（06 §6.7：装配期注入 name/description/path，正文由模型用 read_file 读取）。
 type SkillMeta struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	// Path 是 SKILL.md 的宿主绝对路径（插件技能在插件包内，工作区技能在 .adago/skills 下）。
+	// 模型通过 read_file 直接读取；路径不可用时为空。
+	Path string `json:"path,omitempty"`
 	// Origin 区分插件自带与工作区 .adago/skills（工作区优先，冲突记警告不静默覆盖）。
 	Origin   string `json:"origin"`
 	PluginID string `json:"pluginId,omitempty"`

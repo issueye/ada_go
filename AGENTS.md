@@ -28,9 +28,19 @@
 
 ### 3. 插件沙箱的其余边界保持不变
 
-- 能力位信任矩阵（third-party/verified/builtin）、fs 工作区根、exec 仅
-  builtin/verified、响应大小与超时上限**仍然生效**；暂缓的只有 host 黑白名单
-  与审批演进两块。
+- 能力位信任矩阵（third-party/verified/builtin）、fs 工作区根（写操作与 `exec` cwd；
+  读成员见下）、exec 仅 builtin/verified、响应大小与超时上限**仍然生效**；
+  暂缓的只有 host 黑白名单与审批演进两块。
+
+### 4. agent 的读不限制路径（2026-10-31 决策）
+
+- 背景：技能只在系统提示里注入 name/description/**绝对 path**，模型用 `read_file`
+  直接读取正文，基座不保存技能正文、不提供技能读取工具或 RPC。
+- 边界：`ctx.fs` 的读成员（`readText` / `list` / `stat` / `exists`）**不限制目标路径**，
+  因此 agent 的 `read_file` / `list_files` / `search_files` 可以读宿主任意文件；
+  写入与 `exec` 的 cwd 仍限制在工作区根。`node:fs` 模块仍按上游挂载点限制
+  （agent 工具走 `ctx.fs`，不受影响）。
+- 不要按旧「fs 根」规则给读加回限制；如需收紧，走策略/插件层。
 
 ## 其它速查
 

@@ -48,8 +48,7 @@
 | plugin | `plugin.setEnabled` | 启用/禁用 |
 | plugin | `plugin.http` | 调用插件 `route` 注册的动态接口 |
 | plugin | `plugin.httpStream` | 插件 SSE 路由：prepare 登记 → start 启动 → cancel 取消 |
-| skill | `skill.list` | 技能元数据 |
-| skill | `skill.read` | 读取正文（模型工具也走同一实现） |
+| skill | `skill.list` | 技能元数据（含绝对 path） |
 | action | `action.invoke` | 前端动作 → 后端动作 |
 | change | `change.list` | 检查点与变更 |
 | change | `change.revert` | 回滚卡片/文件/全部 |

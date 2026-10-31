@@ -41,8 +41,8 @@ last_error，并对未停用的落盘插件做入口预加载校验；`id` 留�
 ## 随包技能
 
 `skills/create-plugin/SKILL.md` 教 AI 如何使用本插件（对话创建流程、入口约束、
-修改已有插件）。产品声明 `capabilities.skills: true` 时，模型经系统提示看到技能
-简介，并用 `read_skill` 按需读取正文；headless / coding 产品均已开启。
+修改已有插件）。产品声明 `capabilities.skills: true` 时，模型经系统提示看到技能的
+名称、简介与绝对路径，并用 `read_file` 按需读取正文；headless / coding 产品均已开启。
 
 ## API 规范
 

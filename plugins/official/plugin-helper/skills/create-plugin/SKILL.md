@@ -78,8 +78,8 @@ description: 用插件助手（plugin-helper）创建与检查插件的完整流
 - `ctx.*`（execute/handler 的第二个参数）是唯一的能力入口：
   `ctx.log`、`ctx.state`（Promise）、`ctx.fs`（fs.read/fs.write）、
   `ctx.fetch`（net.fetch，出网唯一通道）、`ctx.exec`（exec，builtin/verified）、
-  `ctx.secret`、`ctx.settings`、`ctx.ui`（ui.ask）、`ctx.skills`、
-  `workspace/threadId/now` 等。
+  `ctx.secret`、`ctx.settings`、`ctx.ui`（ui.ask）、`ctx.skills`
+  （技能元数据含绝对 path；正文用 `read_file` 读取）、`workspace/threadId/now` 等。
 - 全局 `console`（log 走宿主，密钥自动脱敏）。
 - 受限 `process`：`process.platform/arch`、`process.env` 仅含清单
   `backend.env` 声明的名字；`process.exit` 不开放。

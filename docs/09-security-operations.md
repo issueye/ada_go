@@ -27,7 +27,7 @@
 - 读工具可读工作区；读插件目录/配置目录需要额外能力位；密钥目录永不授予。
 - `run_command` 是真实 shell，能逃出路径沙箱——这是明确保留的口子。默认策略为 `ask`（由 `policy-default` 提供，不是基座常数）；`readonly` 下禁用；未启用任何 `tool-policy` 插件时，基座直接拒绝写/执行工具；UI 在执行前显示完整命令与 cwd；环境变量默认清空，只注入白名单。
 - 命令超时/取消杀整棵进程树（Unix 进程组、Windows Job Object）；后台任务同样登记。
-- 插件经 Node 兼容层执行命令时只有 `execFile`、不经过 shell；`fs` 根固定工作区；`process.env` 只有清单白名单；`.node` 与 `node:http`/`net`/`dns` 不可用。见 [6.12](12-node-compat.md)。
+- 插件经 Node 兼容层执行命令时只有 `execFile`、不经过 shell；`fs` 的写与 `exec` cwd 固定工作区，`ctx.fs` 读成员不限制目标路径（agent 的 `read_file`/`list_files`/`search_files` 可读宿主任意文件，见 [6.12](12-node-compat.md)）；`process.env` 只有清单白名单；`.node` 与 `node:http`/`net`/`dns` 不可用。
 - 写工具执行前纳入检查点；回滚结果如实列出恢复/删除/跳过/失效。
 
 ### 9.3 Web 安全
