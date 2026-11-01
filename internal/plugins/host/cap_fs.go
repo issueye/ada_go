@@ -168,14 +168,18 @@ func (g *fsGuard) writePath(virtual string) (string, bool, error) {
 	}
 	allowed, err := allowPluginWrite(g.pluginRoots, abs)
 	if err != nil {
-		return "", true, throwCodedPath(g, fmt.Errorf(
-			"路径 %q 越出工作区根（挂载点 %s）：%v", baseForLog(virtual), g.mount, err))
+		return "", true, throwCodedPathCap(g, fmt.Errorf(
+			"路径 %q 越出工作区根（挂载点 %s）：%v", baseForLog(virtual), g.mount, err), string(plugins.CapFSWrite))
 	}
 	return allowed, true, nil
 }
 
 func throwCodedPath(g *fsGuard, err error) error {
-	return &policyError{Code: codeAccessDenied, Message: err.Error(), Fields: map[string]any{"capability": "fs.read"}}
+	return throwCodedPathCap(g, err, "fs.read")
+}
+
+func throwCodedPathCap(g *fsGuard, err error, capability string) error {
+	return &policyError{Code: codeAccessDenied, Message: err.Error(), Fields: map[string]any{"capability": capability}}
 }
 
 // checkpointMetaOf 从当前调用上下文取检查点归属（M5）。

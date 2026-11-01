@@ -56,6 +56,12 @@ func TestOfficialChartBlocks(t *testing.T) {
 			`{"title":"趋势","values":[1,2,3,2,4]}`,
 			[]string{"adag-spark"},
 		},
+		{
+			// 全平序列画中位符号，不能把每条都压成最低点。
+			"ui-charts/spark",
+			`{"title":"持平","values":[5,5,5]}`,
+			[]string{"▄▄▄"},
+		},
 	}
 	for _, tc := range cases {
 		raw, html, err := b.RenderBlock(request(t, "/thread/th_1"), tc.renderer, "b1", json.RawMessage(tc.data))

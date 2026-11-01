@@ -219,10 +219,14 @@ function SparkChart(data: any, values: number[], unit: string): any {
     if (value > max) max = value;
   }
   if (!isFinite(min) || !isFinite(max)) return null;
-  const span = max - min || 1;
+  const flat = max === min;
+  const span = flat ? 1 : max - min;
   let text = "";
   for (const value of values) {
-    const idx = clampLevel(Math.round(((value - min) / span) * (SPARK_CHARS.length - 1)), 0, SPARK_CHARS.length - 1);
+    // 全平序列画中位符号，而不是把每条都画成最低点。
+    const idx = flat
+      ? Math.floor((SPARK_CHARS.length - 1) / 2)
+      : clampLevel(Math.round(((value - min) / span) * (SPARK_CHARS.length - 1)), 0, SPARK_CHARS.length - 1);
     text += SPARK_CHARS[idx];
   }
   return (

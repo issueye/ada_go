@@ -284,6 +284,43 @@ func TestBridgeBlockAudit(t *testing.T) {
 	}
 }
 
+// TestBridgeBlockPropsNoCSRF 钉住块 props 不带 CSRF token，且 nil request 不 panic。
+func TestBridgeBlockPropsNoCSRF(t *testing.T) {
+	scripts := []host.Script{{
+		Manifest: &plugins.Manifest{
+			ID: "csrf-block", Name: "CSRF", Version: "0.1.0", APIVersion: 1,
+			Trust: plugins.TrustBuiltin,
+			Frontend: &plugins.Frontend{Blocks: []plugins.BlockContribution{
+				{Name: "echo", Schema: "schemas/any.json", Template: "blocks/echo.tsx"},
+			}},
+		},
+		Bundle: map[string]string{
+			"blocks/echo.tsx": `export default function (props) { return <div class="csrf">{String(props.app.csrf || "none")}</div>; }`,
+		},
+		Schemas: map[string][]byte{"schemas/any.json": []byte(`{"type":"object"}`)},
+	}}
+	b, err := frontend.NewBridge(frontend.BridgeOptions{
+		Scripts: scripts, MarkdownBlocks: true,
+		CSRF: func(*http.Request) string { return "secret-csrf" },
+	})
+	if err != nil {
+		t.Fatalf("NewBridge: %v", err)
+	}
+	_, html, err := b.RenderBlock(request(t, "/thread/th_1"), "csrf-block/echo", "b1", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("RenderBlock: %v", err)
+	}
+	if strings.Contains(string(html), "secret-csrf") {
+		t.Fatalf("块 props 泄露 CSRF token: %s", html)
+	}
+	if !strings.Contains(string(html), "none") {
+		t.Fatalf("块应看到空 csrf: %s", html)
+	}
+	if _, _, err := b.RenderBlock(nil, "csrf-block/echo", "b2", json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("nil request 不应失败: %v", err)
+	}
+}
+
 // TestBridgeBlockRenderTimeout 钉单块渲染超时：死循环 block 必须被中断，
 // 按 render_failed/render_error 记审计，而不是拖住请求。
 func TestBridgeBlockRenderTimeout(t *testing.T) {

@@ -519,16 +519,15 @@ func decodeJSONValue(raw json.RawMessage) (any, error) {
 func (b *Bridge) buildBlockProps(u *unit, r *http.Request, blockID, rendererID string, data json.RawMessage) (json.RawMessage, error) {
 	p := renderProps{
 		Plugin: pluginInfo{ID: u.manifest.ID, Name: u.manifest.Name, Version: u.manifest.Version},
-		App: appInfo{
-			Workspace: b.workspace(r),
-			Product:   b.product,
-			Route:     r.URL.Path,
-		},
-		Block: &blockInfo{ID: blockID, Renderer: rendererID, Version: 1, Data: data},
+		App:    appInfo{Product: b.product},
+		Block:  &blockInfo{ID: blockID, Renderer: rendererID, Version: 1, Data: data},
 	}
-	if b.csrf != nil {
-		p.App.CSRF = b.csrf(r)
+	if r != nil {
+		p.App.Workspace = b.workspace(r)
+		p.App.Route = r.URL.Path
 	}
+	// 块是只读展示，不能带 CSRF token：props 会进入模型可写的 VNode，
+	// 一旦被渲染成文本就把令牌泄漏进对话记录。
 	raw, err := json.Marshal(p)
 	if err != nil {
 		return nil, fmt.Errorf("frontend: block props 序列化失败: %w", err)

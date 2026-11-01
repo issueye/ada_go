@@ -48,7 +48,11 @@ func loadBlockScriptsFromRoots(roots []string, official []host.Script) []host.Sc
 		}
 		for _, p := range list {
 			id := p.ID()
-			if id == "" || reserved[id] || seen[id] {
+			if id == "" || reserved[id] {
+				continue
+			}
+			if seen[id] {
+				log.Printf("gateway: 插件 %s 在 %s 被更高优先级来源覆盖，忽略", id, root)
 				continue
 			}
 			sc, err := frontend.LoadBlockScript(p.Dir)
