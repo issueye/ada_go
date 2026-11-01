@@ -8,7 +8,7 @@
 | --- | --- |
 | id | `token-usage` |
 | 名称 | Token 用量 |
-| 版本 | 0.1.0 |
+| 版本 | 0.2.0 |
 | 信任级别 | `builtin`：随二进制发布，只能启用/禁用 |
 | 形态 | 纯前端 |
 | 前端能力 | `backend.read` |
@@ -19,6 +19,7 @@
 | --- | --- |
 | 导航 / 页面 | 导航「Token 用量」→ 页面 `/ext/token-usage/usage`（`page.tsx`） |
 | 仪表盘 | 概览页卡片 `usage`（`dashboard.tsx`，order 10） |
+| Markdown 动态块 | `usage-card`（`blocks/usage-card.tsx` + `schemas/usage-card.json`） |
 | 样式 | `usage.css`（`static/`） |
 
 ## 数据形状

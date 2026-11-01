@@ -1,7 +1,7 @@
 {
   "id": "token-usage",
   "name": "Token 用量",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "apiVersion": 1,
   "description": "按工作区与当前会话展示 token 用量（输入/输出/缓存）与成本；数据来自 Core usage.get。",
   "trust": "builtin",

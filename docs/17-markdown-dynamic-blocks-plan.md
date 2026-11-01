@@ -54,7 +54,7 @@ MVP 是**只读展示型动态块**，可以独立发布，不依赖交互/流�
 - MB-4 Render Runtime/VNode：block TSX、display profile、超时/错误隔离已完成；
 - MB-5 浏览器/无 JS：`markdownVNode` 支持 `$C`/`n`；`/markdown.ast`、`/markdown` 与无 JS 模板已接入；
 - MB-6 参考插件：`token-usage/usage-card` 已落地；
-- MB-7 安全/限额/缓存：display profile、限额、进程内 LRU 已完成；审计事件与 interactive profile 尚未接入；
+- MB-7 安全/限额/缓存：display profile、限额、进程内 bounded cache 已完成；审计事件与 interactive profile 尚未接入；
 - MB-8 测试/门禁：Bridge/Markdown 降级测试、`verify vnode` block profile 已通过；独立 `markdown-block` verify 检查、第三方前端 block 加载与 golden HTML 仍待补。
 
 **未做**：产品开关 `capabilities.markdownBlocks`、interactive 块、流式提前渲染、跨进程缓存、第三方前端插件加载（当前 Gateway 只加载官方前端脚本）。
@@ -278,7 +278,7 @@ MB-0 契约
 | `ui-markdown` 不支持 `$C` 节点 | MB-5 最早验证；必要时只透传组件节点，不改整体 VNode 协议 |
 | block profile 与现有 VNode Schema 冲突 | profile 作为附加约束，不修改 pages/slots 的既有允许集 |
 | 模型生成恶意 data | Schema + block profile + 限额；不把 data 当指令；错误不回显 data |
-| 重复 `/markdown.ast` 导致重复渲染 | 内容 hash 去重 + LRU；流式只处理闭合 fence |
+| 重复 `/markdown.ast` 导致重复渲染 | 内容 hash 去重 + 缓存；流式只处理闭合 fence |
 | 插件 Schema 文件缺失/非法 | 加载期禁用该 block，插件其余能力保留；`adag verify` 阻断打包 |
 | 性能退化 | 单文档 8 块、并发 2–4、300ms/块、总预算 1s；先测再放宽 |
 

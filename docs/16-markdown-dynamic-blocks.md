@@ -334,7 +334,7 @@ Markdown 可能由模型生成，不能等同于插件页面/插槽。动态块�
 
 - Key：`(pluginID, pluginVersion, renderer, version, sha256(canonicalJSON(data)), theme?, locale?)`；
 - Value：校验后的 VNode JSON（或 HTML 片段）；
-- 存储：Gateway 进程内 LRU（例如 512 项）；
+- 存储：Gateway 进程内 bounded cache（当前 512 项，满时清空；后续可换 LRU）；
 - 失效：插件 reload / enable / disable / 版本变化；
 - 不缓存含实时投影的块；v1 的 block props 只放静态数据，保证可缓存。
 
