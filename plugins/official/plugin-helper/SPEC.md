@@ -197,9 +197,9 @@ JSON 用 `JSON.parse(res.text)`；响应 ≤16MB。
 - 页面地址 `/ext/{id}/{slug}`；`nav` 进侧栏；`dashboard` 进概览页。
 - 浏览器脚本统一 `window.adaAPI(id, path, {method, body})`；样式放 `static/*.css`
   并在清单 `styles` 声明；CSP 禁止内联 style/script，颜色只用 `--ph-*` 设计令牌。
-- **当前边界**：渲染桥只装配随包官方插件（`plugins/official/`）的前端段；
-  全局安装的插件（`~/.adago/plugins/`）只加载后端段——`frontend` 段不会报错，
-  但页面/插槽不会出现。
+- **当前边界**：页面/插槽/样式/脚本仍只装配随包官方插件（`plugins/official/`）；
+  全局/工作区安装的插件（`~/.adago/plugins/`、`<ws>/.adago/plugins/`）只加载
+  后端段 **+ `frontend.blocks`**——其余 `frontend` 字段不会报错，但页面/插槽不会出现。
 
 ### 8.1 Markdown 动态块（`frontend.blocks`）
 
@@ -249,8 +249,9 @@ Schema 与 TSX 模板；宿主校验 `data` 后渲染成 VNode，浏览器与无
 - 失败只降级**当前块**（未知 renderer、插件禁用、Schema 不符、超时、非法 VNode），
   其余 Markdown 不受影响；审计事件只含错误码与归属（`ui.block.invalid_data` /
   `render_failed` / `invalid_vnode`），**不记录 data**。
-- 与 §8 边界一致：当前只有随包官方插件的前端段会被装配，全局安装插件声明的
-  block 不会出现在对话里。
+- 装配范围：随包官方插件 + 全局/工作区安装插件的 `frontend.blocks`（工作区优先，
+  官方同 id 遮蔽磁盘版本）。插件仍需有 `backend`（Core 加载后才会出现在
+  `plugin.list`，启停状态才可查）；纯前端插件不会被发现。
 
 新增一个 block 的顺序：
 

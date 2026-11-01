@@ -55,9 +55,9 @@ MVP 是**只读展示型动态块**，可以独立发布，不依赖交互/流�
 - MB-5 浏览器/无 JS：`markdownVNode` 支持 `$C`/`n`；`/markdown.ast`、`/markdown` 与无 JS 模板已接入；
 - MB-6 参考插件：`token-usage/usage-card` 已落地；
 - MB-7 安全/限额/缓存：display profile、限额、进程内 bounded cache 已完成；审计事件（`ui.block.invalid_data` / `render_failed` / `invalid_vnode`，只带错误码不带 data）已接入；interactive profile 在运行期 fail-closed（`unsupported_profile`）；
-- MB-8 测试/门禁：Bridge/Markdown 降级测试、审计事件测试、`verify vnode` block profile、`verify markdown-block`、token-usage golden HTML、`/markdown.ast` golden（`web/testdata/markdown-block/usage-card.ast.json`）、`$C` 组件渲染测试、AST→HTML 与 `/markdown` 一致、浏览器运行时结构一致（`ada-block-consistency.test.js`）、助手消息内块 e2e（含禁用插件降级与旧缓存不生效）、限额/超时测试均已通过；第三方前端 block 加载与真实浏览器冒烟仍待补。
+- MB-8 测试/门禁：Bridge/Markdown 降级测试、审计事件测试、`verify vnode` block profile、`verify markdown-block`、token-usage golden HTML、`/markdown.ast` golden（`web/testdata/markdown-block/usage-card.ast.json`）、`$C` 组件渲染测试、AST→HTML 与 `/markdown` 一致、浏览器运行时结构一致（`ada-block-consistency.test.js`）、助手消息内块 e2e（含禁用插件降级与旧缓存不生效）、限额/超时测试、第三方插件的 block-only 装配（工作区优先、官方遮蔽、坏块跳过）均已通过；真实浏览器冒烟仍待补。
 
-**未做**：interactive 块、流式提前渲染、跨进程缓存、第三方前端插件加载（当前 Gateway 只加载官方前端脚本）、真实浏览器冒烟（`tools/render-demo` 手工验证；自动化用 Node 运行时替代）。
+**未做**：interactive 块、流式提前渲染、跨进程缓存、真实浏览器冒烟（`tools/render-demo` 手工验证；自动化用 Node 运行时替代）。
 
 ## 3. 工作分解与依赖
 
@@ -289,7 +289,8 @@ MB-0 契约
 | 契约 | `spec/markdown-block.schema.json`、`spec/manifest.schema.json`、`spec/vnode.schema.json` |
 | 产品 | `spec/product.schema.json`（`capabilities.markdownBlocks`，建议） |
 | 插件清单 | `internal/plugins/manifest.go`、discovery/loader 相关 |
-| 前端渲染 | `internal/gateway/frontend/*`（block registry/Render Runtime） |
+| 前端渲染 | `internal/gateway/frontend/*`（block registry/Render Runtime、`load.go` 第三方 block 加载） |
+| Gateway 装配 | `cmd/adag/frontend_blocks.go`（工作区/全局插件扫描与遮蔽） |
 | Markdown | `internal/gateway/web/markdown_vnode.go`、新增 `markdown_block.go`、`ui.go` |
 | 浏览器 | `internal/gateway/web/static/ada-ui.js`（Markdown `$C` 透传）、CSS |
 | 官方插件 | `plugins/official/token-usage/{plugin.json,schemas,blocks}` |

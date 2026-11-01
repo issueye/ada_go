@@ -192,6 +192,11 @@ Markdown
 4. `profile=interactive` 仅 builtin/verified 可声明，且产品必须显式开启；
 5. `adag verify manifest` 校验文件存在、JSON 合法、`name` 唯一、`profile` 与信任级别匹配。
 
+装配范围：随包官方插件加载完整前端段；全局/工作区安装的插件只加载
+`frontend.blocks`（`frontend.LoadBlockScript` 会剥掉页面/插槽/样式/脚本），
+工作区优先、官方同 id 遮蔽磁盘版本；单个插件的 block 非法只跳过该插件并记日志。
+MVP 运行期只渲染 `profile: display`，`interactive` 即使在清单里声明也 fail-closed。
+
 ## 7. 插件数据 Schema
 
 示例 `plugins/official/token-usage/schemas/usage-card.json`：

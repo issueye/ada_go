@@ -55,6 +55,8 @@ func runGateway(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// 第三方插件只贡献 Markdown 动态块：随包官方插件优先，磁盘同名包被忽略。
+	frontendScripts = append(frontendScripts, loadThirdPartyBlockScripts(workspaces, frontendScripts)...)
 	cfg := gateway.Config{
 		Workspaces: workspaces, Product: *product,
 		Provider: *provider, Model: *model, BaseURL: *baseURL,

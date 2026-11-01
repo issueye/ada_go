@@ -1778,3 +1778,127 @@ html.js .ada-newtask__ws-native {
 
 /* .ada-composer__thumb / .ada-msg__image 的尺寸与比例在 ui/components.css 统一维护，
    这里不要再覆盖，否则预览与消息里的图片会呈现出不同的裁切效果。 */
+
+/* Markdown 动态块（adag-ui fence）：块内容由插件 TSX 渲染成 display-only VNode。
+   容器与降级样式归宿主；插件只输出语义 class（如 .adag-chart），不写内联 style。 */
+.adag-ui-block {
+  margin: 12px 0;
+}
+
+.adag-ui-block--error {
+  padding: 12px 14px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-subtle);
+}
+
+.adag-ui-block__error {
+  margin: 0;
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
+}
+
+/* 通用柱状图（github-trending/bar-chart 等块复用）：宽度用档位 class，
+   避免 style 属性（CSP style-src 'self' 会拦截内联样式）。 */
+.adag-chart {
+  padding: 14px 16px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-elevated);
+}
+
+.adag-chart__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin-bottom: 12px;
+}
+
+.adag-chart__title {
+  color: var(--ph-ink);
+  font-size: var(--ada-text-sm);
+  font-weight: 600;
+}
+
+.adag-chart__subtitle {
+  color: var(--ph-faint);
+  font-size: var(--ada-text-xs);
+}
+
+.adag-chart__rows {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.adag-chart__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  align-items: baseline;
+}
+
+.adag-chart__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.adag-chart__rank {
+  color: var(--ph-faint);
+  font-size: var(--ada-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.adag-chart__name {
+  overflow: hidden;
+  color: var(--ph-ink);
+  font-size: var(--ada-text-sm);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adag-chart__meta {
+  color: var(--ph-muted);
+  font-size: var(--ada-text-xs);
+}
+
+.adag-chart__delta {
+  color: var(--ph-success-ink);
+  font-size: var(--ada-text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.adag-chart__track {
+  grid-column: 1 / -1;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--ada-radius-pill);
+  background: var(--ph-subtle);
+}
+
+.adag-chart__bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ph-brand);
+}
+
+.adag-chart__bar--l1 { width: 10%; }
+.adag-chart__bar--l2 { width: 20%; }
+.adag-chart__bar--l3 { width: 30%; }
+.adag-chart__bar--l4 { width: 40%; }
+.adag-chart__bar--l5 { width: 50%; }
+.adag-chart__bar--l6 { width: 60%; }
+.adag-chart__bar--l7 { width: 70%; }
+.adag-chart__bar--l8 { width: 80%; }
+.adag-chart__bar--l9 { width: 90%; }
+.adag-chart__bar--l10 { width: 100%; }
