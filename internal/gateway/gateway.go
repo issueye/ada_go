@@ -290,6 +290,10 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 			Enabled:           gate.Enabled,
 			InvalidateEnabled: gate.Invalidate,
 			MarkdownBlocks:    product.Capabilities.MarkdownBlocks,
+			BlockAudit: func(ev frontend.BlockAuditEvent) {
+				log.Printf("audit %s plugin=%s renderer=%s block=%s error=%s",
+					ev.Kind, ev.PluginID, ev.Renderer, ev.BlockID, ev.Error)
+			},
 		})
 		if err != nil {
 			if ownSup {

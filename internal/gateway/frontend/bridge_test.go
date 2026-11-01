@@ -216,6 +216,70 @@ export default function Block() { return <Icon name="i-list" />; }`,
 	}
 }
 
+// TestBridgeBlockAudit 钉三种失败审计，且审计不携带 data/渲染器错误原文。
+func TestBridgeBlockAudit(t *testing.T) {
+	scripts := []host.Script{{
+		Manifest: &plugins.Manifest{
+			ID: "audit-block", Name: "Audit", Version: "0.1.0", APIVersion: 1,
+			Trust: plugins.TrustBuiltin,
+			Frontend: &plugins.Frontend{Blocks: []plugins.BlockContribution{
+				{Name: "bad-data", Schema: "schemas/required.json", Template: "blocks/ok.tsx"},
+				{Name: "bad-render", Schema: "schemas/any.json", Template: "blocks/throw.tsx"},
+				{Name: "bad-vnode", Schema: "schemas/any.json", Template: "blocks/form.tsx"},
+			}},
+		},
+		Bundle: map[string]string{
+			"blocks/ok.tsx":    `export default function () { return <div>ok</div>; }`,
+			"blocks/throw.tsx": `export default function () { throw new Error("secret-data-123"); }`,
+			"blocks/form.tsx":  `export default function () { return <form></form>; }`,
+		},
+		Schemas: map[string][]byte{
+			"schemas/required.json": []byte(`{"type":"object","required":["x"],"additionalProperties":false}`),
+			"schemas/any.json":      []byte(`{"type":"object"}`),
+		},
+	}}
+	var events []frontend.BlockAuditEvent
+	b, err := frontend.NewBridge(frontend.BridgeOptions{
+		Scripts: scripts, MarkdownBlocks: true,
+		BlockAudit: func(e frontend.BlockAuditEvent) { events = append(events, e) },
+	})
+	if err != nil {
+		t.Fatalf("NewBridge: %v", err)
+	}
+	run := func(renderer string, data string) {
+		t.Helper()
+		if _, _, err := b.RenderBlock(request(t, "/thread/th_1"), renderer, "b1", json.RawMessage(data)); err == nil {
+			t.Fatalf("%s 应失败", renderer)
+		}
+	}
+	run("audit-block/bad-data", `{}`)
+	run("audit-block/bad-render", `{}`)
+	run("audit-block/bad-vnode", `{}`)
+	run("missing/block", `{}`)
+
+	want := []struct{ kind, plugin, code string }{
+		{"ui.block.invalid_data", "audit-block", "schema_validation"},
+		{"ui.block.render_failed", "audit-block", "render_error"},
+		{"ui.block.invalid_vnode", "audit-block", "profile_violation"},
+		{"ui.block.render_failed", "missing", "renderer_missing"},
+	}
+	if len(events) != len(want) {
+		t.Fatalf("审计事件数 = %d，期望 %d: %+v", len(events), len(want), events)
+	}
+	for i, w := range want {
+		e := events[i]
+		if e.Kind != w.kind || e.PluginID != w.plugin || e.Error != w.code {
+			t.Fatalf("事件[%d] = %+v，期望 %+v", i, e, w)
+		}
+		if e.BlockID != "b1" {
+			t.Fatalf("事件[%d] block id = %q，期望 b1", i, e.BlockID)
+		}
+		if strings.Contains(e.Error, "secret-data-123") || strings.Contains(e.Error, "{") {
+			t.Fatalf("审计泄露 data/错误原文: %+v", e)
+		}
+	}
+}
+
 // 动作预取失败（Core 尚未实现 action.invoke 的注册）时插槽贡献为空：
 // 计划卡片和工具在同一个插件里，取不到计划就不画卡（没有示例数据兜底）。
 func TestBridgeTaskPlanSlotWithoutAction(t *testing.T) {

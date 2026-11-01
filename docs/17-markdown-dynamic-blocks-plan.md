@@ -54,10 +54,10 @@ MVP 是**只读展示型动态块**，可以独立发布，不依赖交互/流�
 - MB-4 Render Runtime/VNode：block TSX、display profile、超时/错误隔离已完成；
 - MB-5 浏览器/无 JS：`markdownVNode` 支持 `$C`/`n`；`/markdown.ast`、`/markdown` 与无 JS 模板已接入；
 - MB-6 参考插件：`token-usage/usage-card` 已落地；
-- MB-7 安全/限额/缓存：display profile、限额、进程内 bounded cache 已完成；审计事件与 interactive profile 尚未接入；
-- MB-8 测试/门禁：Bridge/Markdown 降级测试、`verify vnode` block profile、`verify markdown-block`、token-usage golden HTML、`$C` 组件渲染测试已通过；第三方前端 block 加载与浏览器 E2E 仍待补。
+- MB-7 安全/限额/缓存：display profile、限额、进程内 bounded cache 已完成；审计事件（`ui.block.invalid_data` / `render_failed` / `invalid_vnode`，只带错误码不带 data）已接入；interactive profile 尚未接入；
+- MB-8 测试/门禁：Bridge/Markdown 降级测试、审计事件测试、`verify vnode` block profile、`verify markdown-block`、token-usage golden HTML、`/markdown.ast` golden（`web/testdata/markdown-block/usage-card.ast.json`）、`$C` 组件渲染测试，以及「AST→HTML 与 `/markdown` 无 JS 输出一致」测试已通过；第三方前端 block 加载与浏览器 E2E 仍待补。
 
-**未做**：interactive 块、块渲染审计事件、流式提前渲染、跨进程缓存、第三方前端插件加载（当前 Gateway 只加载官方前端脚本）、真实浏览器端到端测试。
+**未做**：interactive 块、流式提前渲染、跨进程缓存、第三方前端插件加载（当前 Gateway 只加载官方前端脚本）、真实浏览器端到端测试。
 
 ## 3. 工作分解与依赖
 

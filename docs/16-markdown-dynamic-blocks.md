@@ -352,7 +352,7 @@ Markdown 可能由模型生成，不能等同于插件页面/插槽。动态块�
 |---|---|
 | fence JSON 非法 | 保留为普通代码块（转义显示），不执行 |
 | 封套 Schema 失败 | 同上 |
-| renderer 不存在/插件禁用 | 渲染 `Notice`/`EmptyState` 降级，或按 `fallback` 文本 |
+| renderer 不存在/插件禁用 | 渲染 `Notice`/`EmptyState` 降级，或按 `fallback` 文本；记录 `ui.block.render_failed`（`renderer_missing`/`plugin_disabled`） |
 | 数据 Schema 校验失败 | 降级块，记录 `ui.block.invalid_data` |
 | TSX 抛错/超时 | 降级块，记录 `ui.block.render_failed`（生产不展示堆栈） |
 | VNode 校验失败 | 降级块，记录 `ui.block.invalid_vnode` |
@@ -360,6 +360,14 @@ Markdown 可能由模型生成，不能等同于插件页面/插槽。动态块�
 | 其他 Markdown 渲染器 | `adag-ui` 作为普通代码块显示，不执行 |
 
 降级文本始终由宿主转义；`data` 不进入错误消息，避免泄露。
+
+审计事件由 Bridge 的 `BlockAudit` 钩子输出，字段固定为
+`kind`（`ui.block.invalid_data` / `ui.block.render_failed` / `ui.block.invalid_vnode`）、
+`plugin`、`renderer`、`block id`、`error`（仅错误码，如 `invalid_json`、
+`schema_validation`、`renderer_missing`、`plugin_disabled`、`props_error`、
+`render_error`、`profile_violation`）。
+**`data` 与其派生内容永远不进入事件**，错误码也不携带渲染器返回的原始消息。
+
 
 ## 13. 改动清单
 
@@ -439,9 +447,10 @@ Markdown：
 ### 第二阶段
 
 - interactive profile（仅 builtin/verified）+ 动作桥/CSRF；
-- 块渲染事件与审计；
 - 块目录/调试页面；
 - 跨消息缓存与指标。
+
+> 块渲染审计（`ui.block.invalid_data` / `render_failed` / `invalid_vnode`）已随 MVP 落地。
 
 ### 第三阶段
 

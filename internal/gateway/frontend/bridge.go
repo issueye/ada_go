@@ -59,6 +59,17 @@ type BridgeOptions struct {
 	InvalidateEnabled func(workspace string)
 	// MarkdownBlocks 是产品 capabilities.markdownBlocks：false 时 Block 渲染入口关闭。
 	MarkdownBlocks bool
+	// BlockAudit 接收块渲染失败审计（不包含 data 原文）。
+	BlockAudit func(BlockAuditEvent)
+}
+
+// BlockAuditEvent 是一次 block 渲染失败审计；Error 只含路径/类型/错误类别，不含 data 值。
+type BlockAuditEvent struct {
+	Kind     string // ui.block.invalid_data | ui.block.render_failed | ui.block.invalid_vnode
+	PluginID string
+	Renderer string
+	BlockID  string
+	Error    string
 }
 
 // unit 是一个已登记的前端插件。
@@ -105,6 +116,7 @@ type Bridge struct {
 	blockMu        sync.Mutex
 	blockCache     map[string]blockCacheEntry
 	markdownBlocks bool
+	blockAudit     func(BlockAuditEvent)
 }
 
 var _ web.PluginUI = (*Bridge)(nil)
@@ -124,6 +136,7 @@ func NewBridge(opts BridgeOptions) (*Bridge, error) {
 		enabled:        opts.Enabled,
 		invalidate:     opts.InvalidateEnabled,
 		markdownBlocks: opts.MarkdownBlocks,
+		blockAudit:     opts.BlockAudit,
 	}
 	pairs := make([]host.ComponentPair, 0, len(AllowedComponents)+1)
 	for _, name := range AllowedComponents {
@@ -357,9 +370,11 @@ func (b *Bridge) MarkdownBlocksEnabled() bool { return b != nil && b.markdownBlo
 func (b *Bridge) RenderBlock(r *http.Request, rendererID, blockID string, data json.RawMessage) (json.RawMessage, template.HTML, error) {
 	entry, ok := b.blocks[strings.TrimSpace(rendererID)]
 	if !ok {
+		b.auditBlockID("ui.block.render_failed", rendererID, blockID, "renderer_missing")
 		return nil, "", fmt.Errorf("frontend: 没有 block renderer %q", rendererID)
 	}
 	if !b.isEnabled(r, entry.u.manifest.ID) {
+		b.auditBlock("ui.block.render_failed", entry, rendererID, blockID, "plugin_disabled")
 		return nil, "", fmt.Errorf("frontend: 插件 %s 未启用", entry.u.manifest.ID)
 	}
 	if !b.markdownBlocks {
@@ -371,32 +386,40 @@ func (b *Bridge) RenderBlock(r *http.Request, rendererID, blockID string, data j
 	}
 	parsed, err := decodeJSONValue(data)
 	if err != nil {
+		b.auditBlock("ui.block.invalid_data", entry, rendererID, blockID, "invalid_json")
 		return nil, "", fmt.Errorf("frontend: block %s 的 data 不是合法 JSON: %w", rendererID, err)
 	}
 	if err := entry.schema.ValidateData(parsed); err != nil {
+		b.auditBlock("ui.block.invalid_data", entry, rendererID, blockID, "schema_validation")
 		return nil, "", err
 	}
 	props, err := b.buildBlockProps(entry.u, r, blockID, rendererID, data)
 	if err != nil {
+		b.auditBlock("ui.block.render_failed", entry, rendererID, blockID, "props_error")
 		return nil, "", err
 	}
 	src, ok := entry.u.templates[entry.def.Template]
 	if !ok {
+		b.auditBlock("ui.block.render_failed", entry, rendererID, blockID, "template_missing")
 		return nil, "", fmt.Errorf("frontend: 插件 %s 的 block %s 缺少模板 %q", entry.u.manifest.ID, entry.def.Name, entry.def.Template)
 	}
 	vnode, err := b.renderer.RenderPage(src, props)
 	if err != nil {
+		b.auditBlock("ui.block.render_failed", entry, rendererID, blockID, "render_error")
 		return nil, "", err
 	}
 	var root Node
 	if err := json.Unmarshal(vnode, &root); err != nil {
+		b.auditBlock("ui.block.invalid_vnode", entry, rendererID, blockID, "invalid_json")
 		return nil, "", fmt.Errorf("frontend: block %s 返回的 VNode 非法: %w", rendererID, err)
 	}
 	if entry.profile == "display" {
 		if err := ValidateBlockNode(root); err != nil {
+			b.auditBlock("ui.block.invalid_vnode", entry, rendererID, blockID, "profile_violation")
 			return nil, "", err
 		}
 	} else if err := ValidateNode(root); err != nil {
+		b.auditBlock("ui.block.invalid_vnode", entry, rendererID, blockID, "invalid_vnode")
 		return nil, "", err
 	}
 	wrapped, err := json.Marshal(struct {
@@ -412,14 +435,43 @@ func (b *Bridge) RenderBlock(r *http.Request, rendererID, blockID string, data j
 		C: []json.RawMessage{vnode},
 	})
 	if err != nil {
+		b.auditBlock("ui.block.render_failed", entry, rendererID, blockID, "wrap_error")
 		return nil, "", fmt.Errorf("frontend: block %s 包装 VNode 失败: %w", rendererID, err)
 	}
 	html, err := RenderHTML(wrapped)
 	if err != nil {
+		b.auditBlock("ui.block.invalid_vnode", entry, rendererID, blockID, "render_vnode")
 		return nil, "", err
 	}
 	b.storeBlock(cacheKey, wrapped, html)
 	return wrapped, html, nil
+}
+
+// auditBlock 只记录失败类别与归属，不记录 data 或渲染器错误消息。
+func (b *Bridge) auditBlock(kind string, entry blockEntry, rendererID, blockID, code string) {
+	b.audit(kind, entry.u.manifest.ID, rendererID, blockID, code)
+}
+
+// auditBlockID 用于 renderer 尚未解析成功（没有插件归属）的失败。
+func (b *Bridge) auditBlockID(kind, rendererID, blockID, code string) {
+	pluginID := ""
+	if i := strings.IndexByte(rendererID, '/'); i > 0 {
+		pluginID = rendererID[:i]
+	}
+	b.audit(kind, pluginID, rendererID, blockID, code)
+}
+
+func (b *Bridge) audit(kind, pluginID, rendererID, blockID, code string) {
+	if b.blockAudit == nil {
+		return
+	}
+	b.blockAudit(BlockAuditEvent{
+		Kind:     kind,
+		PluginID: pluginID,
+		Renderer: rendererID,
+		BlockID:  blockID,
+		Error:    code,
+	})
 }
 
 func (b *Bridge) blockCacheKey(entry blockEntry, r *http.Request, rendererID, blockID string, data json.RawMessage) string {

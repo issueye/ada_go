@@ -1,0 +1,202 @@
+{
+  "nodes": [
+    {
+      "t": "div",
+      "p": {
+        "class": "adag-ui-block",
+        "data-adag-renderer": "token-usage/usage-card"
+      },
+      "c": [
+        {
+          "t": "section",
+          "p": {
+            "class": "card tu-card"
+          },
+          "c": [
+            {
+              "t": "div",
+              "p": {
+                "class": "tu-card__head"
+              },
+              "c": [
+                {
+                  "t": "span",
+                  "p": {
+                    "class": "tu-card__title"
+                  },
+                  "c": [
+                    {
+                      "t": "#text",
+                      "v": "本轮用量"
+                    }
+                  ]
+                },
+                {
+                  "t": "span",
+                  "p": {
+                    "class": "tu-card__total",
+                    "title": "1,801 tokens"
+                  },
+                  "c": [
+                    {
+                      "t": "#text",
+                      "v": "1,801"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "t": "p",
+              "p": {
+                "class": "tu-card__hint"
+              },
+              "c": [
+                {
+                  "t": "#text",
+                  "v": "当前会话累计"
+                }
+              ]
+            },
+            {
+              "t": "div",
+              "p": {
+                "class": "tu-stats"
+              },
+              "c": [
+                {
+                  "t": "div",
+                  "p": {
+                    "class": "tu-stat"
+                  },
+                  "c": [
+                    {
+                      "t": "span",
+                      "p": {
+                        "class": "tu-stat__label"
+                      },
+                      "c": [
+                        {
+                          "t": "#text",
+                          "v": "输入"
+                        }
+                      ]
+                    },
+                    {
+                      "t": "span",
+                      "p": {
+                        "class": "tu-stat__value"
+                      },
+                      "c": [
+                        {
+                          "t": "#text",
+                          "v": "1,234"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "t": "div",
+                  "p": {
+                    "class": "tu-stat"
+                  },
+                  "c": [
+                    {
+                      "t": "span",
+                      "p": {
+                        "class": "tu-stat__label"
+                      },
+                      "c": [
+                        {
+                          "t": "#text",
+                          "v": "输出"
+                        }
+                      ]
+                    },
+                    {
+                      "t": "span",
+                      "p": {
+                        "class": "tu-stat__value"
+                      },
+                      "c": [
+                        {
+                          "t": "#text",
+                          "v": "567"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "t": "div",
+                  "p": {
+                    "class": "tu-stat"
+                  },
+                  "c": [
+                    {
+                      "t": "span",
+                      "p": {
+                        "class": "tu-stat__label"
+                      },
+                      "c": [
+                        {
+                          "t": "#text",
+                          "v": "缓存"
+                        }
+                      ]
+                    },
+                    {
+                      "t": "span",
+                      "p": {
+                        "class": "tu-stat__value"
+                      },
+                      "c": [
+                        {
+                          "t": "#text",
+                          "v": "0"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "t": "div",
+                  "p": {
+                    "class": "tu-stat"
+                  },
+                  "c": [
+                    {
+                      "t": "span",
+                      "p": {
+                        "class": "tu-stat__label"
+                      },
+                      "c": [
+                        {
+                          "t": "#text",
+                          "v": "成本"
+                        }
+                      ]
+                    },
+                    {
+                      "t": "span",
+                      "p": {
+                        "class": "tu-stat__value"
+                      },
+                      "c": [
+                        {
+                          "t": "#text",
+                          "v": "—"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
