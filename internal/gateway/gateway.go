@@ -97,6 +97,7 @@ type frontendGate struct {
 type frontendEnabledEntry struct {
 	at       time.Time
 	set      map[string]bool
+	known    map[string]bool
 	allowAll bool // Core 暂时不可用：按启用渲染，避免整页插件区消失
 }
 
@@ -113,10 +114,28 @@ func (g *frontendGate) Enabled(r *http.Request, pluginID string) bool {
 		workspace = g.workspaceFor(r)
 	}
 	entry, err := g.snapshot(workspace)
-	if err != nil || entry.allowAll {
+	if err != nil {
 		return true
 	}
-	return entry.set[pluginID]
+	return entry.enabledIn(pluginID)
+}
+
+// enabledIn 是启用判定的纯逻辑（便于单测）：
+//   - Core 明确列出的插件按启用状态；
+//   - 未出现在 plugin.list 里的插件视为「Core 不加载的前端-only 插件」
+//     （只贡献 Markdown 动态块的第三方包），安装即启用；要停用就移除目录；
+//   - Core 不可用时按启用渲染，避免整页插件区消失。
+func (e frontendEnabledEntry) enabledIn(pluginID string) bool {
+	if e.allowAll {
+		return true
+	}
+	if e.set[pluginID] {
+		return true
+	}
+	if e.known[pluginID] {
+		return false
+	}
+	return true
 }
 
 // Invalidate 丢弃一个工作区的缓存；workspace 为空时清空全部。
@@ -163,8 +182,13 @@ func (g *frontendGate) snapshot(workspace string) (frontendEnabledEntry, error) 
 				entry.allowAll = true
 			} else {
 				entry.set = make(map[string]bool, len(res.Plugins))
+				entry.known = make(map[string]bool, len(res.Plugins))
 				for _, p := range res.Plugins {
-					if p.ID == "" || !p.Enabled {
+					if p.ID == "" {
+						continue
+					}
+					entry.known[p.ID] = true
+					if !p.Enabled {
 						continue
 					}
 					switch p.Status {

@@ -47,15 +47,15 @@ MVP 是**只读展示型动态块**，可以独立发布，不依赖交互/流�
 
 ### 2.3 当前实现状态（2026-11-01）
 
-- MB-0 契约：`markdown-block.schema.json`、`frontend.blocks`、VNode block profile、产品开关 `capabilities.markdownBlocks` 已落地；
-- MB-1 清单/加载：`frontend.blocks` 解析、模板/Schema 读取、renderer 注册已完成；
-- MB-2 数据 Schema：受控 2020-12 子集校验器已落地（未知关键字编译期报错）；
-- MB-3 Markdown：顶层 `adag-ui` fence 分段、降级、块数/字节限额已完成；
-- MB-4 Render Runtime/VNode：block TSX、display profile、超时/错误隔离已完成；
-- MB-5 浏览器/无 JS：`markdownVNode` 支持 `$C`/`n`；`/markdown.ast`、`/markdown` 与无 JS 模板已接入；
+- MB-0 契约：`markdown-block.schema.json`、`frontend.blocks`（含 `version`，缺省 1）、VNode block profile、产品开关 `capabilities.markdownBlocks` 已落地；
+- MB-1 清单/加载：`frontend.blocks` 解析、模板/Schema 读取（路径归一）、renderer 注册已完成；
+- MB-2 数据 Schema：受控 2020-12 子集校验器已落地（未知关键字编译期报错），并有直接单测（关键字语义、边界、深度上限）；
+- MB-3 Markdown：顶层 `adag-ui` fence 分段、降级、块数/字节限额已完成；fence 扫描按行维护代码块状态（列 0 才生效，其他 fenced/缩进代码块里的示例不执行，未闭合 fence 不渲染）；封套按 Schema 校验（未知字段、尾随 JSON、renderer/id 形状、fallback 长度、version 范围），id 重复降级；
+- MB-4 Render Runtime/VNode：block TSX、display profile、超时/错误隔离已完成；模板返回 `null` 视为合法空块（两条路径都跳过，不记审计）；封套 version 与清单声明不一致 → `unsupported_version`；
+- MB-5 浏览器/无 JS：`markdownVNode` 支持 `$C`/`n`；`/markdown.ast`、`/markdown` 与无 JS 模板已接入；`$C` 的 `Icon`/`TodoList` 在两条路径同构（`TodoList` 客户端组件已补）；
 - MB-6 参考插件：`token-usage/usage-card` 已落地；通用图表 `ui-charts`（bar/column/compare/stacked/heatmap/spark）已提供并被 coding/headless 产品声明；
-- MB-7 安全/限额/缓存：display profile、限额、进程内 bounded cache 已完成；审计事件（`ui.block.invalid_data` / `render_failed` / `invalid_vnode`，只带错误码不带 data）已接入；interactive profile 在运行期 fail-closed（`unsupported_profile`）；
-- MB-8 测试/门禁：Bridge/Markdown 降级测试、审计事件测试、`verify vnode` block profile、`verify markdown-block`、token-usage golden HTML、`/markdown.ast` golden（`web/testdata/markdown-block/usage-card.ast.json`）、`$C` 组件渲染测试、AST→HTML 与 `/markdown` 一致、浏览器运行时结构一致（`ada-block-consistency.test.js`）、助手消息内块 e2e（含禁用插件降级与旧缓存不生效）、限额/超时测试、第三方插件的 block-only 装配（工作区优先、官方遮蔽、坏块跳过）均已通过；真实浏览器冒烟仍待补。
+- MB-7 安全/限额/缓存：display profile、限额、进程内 bounded cache 已完成；审计事件（`ui.block.invalid_data` / `render_failed` / `invalid_vnode`，只带错误码不带 data）已接入；interactive profile 在运行期 fail-closed（`unsupported_profile`）；块渲染走独立 300ms 预算，请求级另限 64 块 / 2000ms（超预算按代码块降级）；
+- MB-8 测试/门禁：Bridge/Markdown 降级测试、审计事件测试、`verify vnode` block profile、`verify markdown-block`（含请求级限额）、token-usage golden HTML、`/markdown.ast` golden（`web/testdata/markdown-block/usage-card.ast.json`）、`$C` 组件渲染测试、AST→HTML 与 `/markdown` 一致、浏览器运行时结构一致（`ada-block-consistency.test.js`）、`$C TodoList` 两路径一致（`ada-block-components.test.js` + golden）、fence 上下文与空块回归、封套/版本/预算/schema 单测、助手消息内块 e2e（含禁用插件降级与旧缓存不生效）、限额/超时测试、第三方插件的 block-only 装配（含无 backend 的纯前端包；工作区优先、官方遮蔽、坏块跳过）均已通过；真实浏览器冒烟仍待补。
 
 **未做**：interactive 块、流式提前渲染、跨进程缓存、真实浏览器冒烟（`tools/render-demo` 手工验证；自动化用 Node 运行时替代）。
 

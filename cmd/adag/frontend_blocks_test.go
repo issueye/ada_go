@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/adag/ada-go/internal/plugins"
@@ -13,14 +14,28 @@ import (
 
 func writePluginDir(t *testing.T, root, id string) string {
 	t.Helper()
+	return writePluginFiles(t, root, id, `"trust":"third-party","backend":{"entry":"index.ts","capabilities":[]},`)
+}
+
+// writeBlockOnlyPluginDir 模拟纯前端的 block-only 包：没有 backend（Core 不加载），
+// 只在安装目录里贡献 frontend.blocks。
+func writeBlockOnlyPluginDir(t *testing.T, root, id string) string {
+	t.Helper()
+	return writePluginFiles(t, root, id, `"trust":"third-party",`)
+}
+
+func writePluginFiles(t *testing.T, root, id, manifestExtra string) string {
+	t.Helper()
 	dir := filepath.Join(root, id)
 	files := map[string]string{
 		"plugin.json": `{"id":"` + id + `","name":"` + id + `","version":"0.1.0","apiVersion":1,` +
-			`"trust":"third-party","backend":{"entry":"index.ts","capabilities":[]},` +
+			manifestExtra +
 			`"frontend":{"blocks":[{"name":"chart","schema":"schemas/chart.json","template":"blocks/chart.tsx"}]}}`,
-		"index.ts":           `export default function register() {}`,
 		"schemas/chart.json": `{"type":"object"}`,
 		"blocks/chart.tsx":   `export default function () { return <div>chart</div>; }`,
+	}
+	if strings.Contains(manifestExtra, `"backend"`) {
+		files["index.ts"] = `export default function register() {}`
 	}
 	for name, body := range files {
 		path := filepath.Join(dir, filepath.FromSlash(name))
@@ -65,5 +80,42 @@ func TestLoadBlockScriptsFromRootsSkipsBadBlocks(t *testing.T) {
 	got := loadBlockScriptsFromRoots([]string{root}, nil)
 	if len(got) != 1 || got[0].Manifest.ID != "good" {
 		t.Fatalf("坏块应只跳过自己: %+v", got)
+	}
+}
+
+// TestLoadBlockScriptsFromRootsBlockOnly 钉住纯前端 block 包：
+// 没有 backend 的插件也要被动态块装配发现（Core 不加载它，但 Gateway 需要渲染它的块）。
+func TestLoadBlockScriptsFromRootsBlockOnly(t *testing.T) {
+	root := t.TempDir()
+	writeBlockOnlyPluginDir(t, root, "pure-blocks")
+	// 插件根里的普通目录（不是插件）应被静默跳过。
+	if err := os.MkdirAll(filepath.Join(root, "not-a-plugin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := loadBlockScriptsFromRoots([]string{root}, nil)
+	if len(got) != 1 || got[0].Manifest.ID != "pure-blocks" {
+		t.Fatalf("block-only 插件应被发现: %+v", got)
+	}
+	if got[0].Manifest.Backend != nil {
+		t.Fatal("block-only 插件不应出现 backend 段")
+	}
+}
+
+// TestLoadBlockScriptsFromRootsSkipsNonPluginJSON 钉住坏清单只跳过自己。
+func TestLoadBlockScriptsFromRootsSkipsNonPluginJSON(t *testing.T) {
+	root := t.TempDir()
+	writeBlockOnlyPluginDir(t, root, "good")
+	broken := filepath.Join(root, "broken")
+	if err := os.MkdirAll(broken, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(broken, "plugin.json"), []byte(`{"id":"broken"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := loadBlockScriptsFromRoots([]string{root}, nil)
+	if len(got) != 1 || got[0].Manifest.ID != "good" {
+		t.Fatalf("坏清单应只跳过自己: %+v", got)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -138,11 +139,16 @@ func request(t *testing.T, target string) *http.Request {
 	return r
 }
 
+// renderBlock 是测试里的默认版本（1）封装；版本相关的用例直接调 RenderBlock。
+func renderBlock(b *frontend.Bridge, r *http.Request, rendererID, blockID string, data json.RawMessage) (json.RawMessage, template.HTML, error) {
+	return b.RenderBlock(r, rendererID, blockID, 1, data)
+}
+
 // TestBridgeRenderBlock 钉 Markdown 动态块的端到端：数据 Schema → TSX → VNode → HTML。
 func TestBridgeRenderBlock(t *testing.T) {
 	b := testBridge(t, newFakeCore())
 	data := json.RawMessage(`{"scope":"thread","title":"本轮用量","usage":{"inputTokens":1234,"outputTokens":567,"cacheTokens":89,"costMicros":1200}}`)
-	raw, html, err := b.RenderBlock(request(t, "/thread/th_1"), "token-usage/usage-card", "u1", data)
+	raw, html, err := renderBlock(b, request(t, "/thread/th_1"), "token-usage/usage-card", "u1", data)
 	if err != nil {
 		t.Fatalf("RenderBlock: %v", err)
 	}
@@ -161,11 +167,11 @@ func TestBridgeRenderBlock(t *testing.T) {
 	}
 
 	// 数据 Schema 失败：调用前拒绝，不执行 TSX。
-	if _, _, err := b.RenderBlock(request(t, "/thread/th_1"), "token-usage/usage-card", "", json.RawMessage(`{"scope":"bad"}`)); err == nil {
+	if _, _, err := renderBlock(b, request(t, "/thread/th_1"), "token-usage/usage-card", "", json.RawMessage(`{"scope":"bad"}`)); err == nil {
 		t.Fatal("非法 data 应被 schema 拒绝")
 	}
 	// 未知 renderer。
-	if _, _, err := b.RenderBlock(request(t, "/thread/th_1"), "no-such/block", "", json.RawMessage(`{}`)); err == nil {
+	if _, _, err := renderBlock(b, request(t, "/thread/th_1"), "no-such/block", "", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("未知 renderer 应报错")
 	}
 }
@@ -180,7 +186,7 @@ func TestBridgeMarkdownBlocksDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewBridge: %v", err)
 	}
-	if _, _, err := b.RenderBlock(request(t, "/thread/th_1"), "token-usage/usage-card", "", json.RawMessage(`{"scope":"thread"}`)); err == nil {
+	if _, _, err := renderBlock(b, request(t, "/thread/th_1"), "token-usage/usage-card", "", json.RawMessage(`{"scope":"thread"}`)); err == nil {
 		t.Fatal("markdownBlocks=false 时应拒绝 block")
 	}
 }
@@ -205,7 +211,7 @@ export default function Block() { return <Icon name="i-list" />; }`,
 	if err != nil {
 		t.Fatalf("NewBridge: %v", err)
 	}
-	raw, html, err := b.RenderBlock(request(t, "/thread/th_1"), "demo-block/icon", "", json.RawMessage(`{}`))
+	raw, html, err := renderBlock(b, request(t, "/thread/th_1"), "demo-block/icon", "", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("RenderBlock: %v", err)
 	}
@@ -250,7 +256,7 @@ func TestBridgeBlockAudit(t *testing.T) {
 	}
 	run := func(renderer string, data string) {
 		t.Helper()
-		if _, _, err := b.RenderBlock(request(t, "/thread/th_1"), renderer, "b1", json.RawMessage(data)); err == nil {
+		if _, _, err := renderBlock(b, request(t, "/thread/th_1"), renderer, "b1", json.RawMessage(data)); err == nil {
 			t.Fatalf("%s 应失败", renderer)
 		}
 	}
@@ -306,7 +312,7 @@ func TestBridgeBlockPropsNoCSRF(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewBridge: %v", err)
 	}
-	_, html, err := b.RenderBlock(request(t, "/thread/th_1"), "csrf-block/echo", "b1", json.RawMessage(`{}`))
+	_, html, err := renderBlock(b, request(t, "/thread/th_1"), "csrf-block/echo", "b1", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("RenderBlock: %v", err)
 	}
@@ -316,7 +322,7 @@ func TestBridgeBlockPropsNoCSRF(t *testing.T) {
 	if !strings.Contains(string(html), "none") {
 		t.Fatalf("块应看到空 csrf: %s", html)
 	}
-	if _, _, err := b.RenderBlock(nil, "csrf-block/echo", "b2", json.RawMessage(`{}`)); err != nil {
+	if _, _, err := renderBlock(b, nil, "csrf-block/echo", "b2", json.RawMessage(`{}`)); err != nil {
 		t.Fatalf("nil request 不应失败: %v", err)
 	}
 }
@@ -347,7 +353,7 @@ func TestBridgeBlockRenderTimeout(t *testing.T) {
 	}
 
 	start := time.Now()
-	if _, _, err := b.RenderBlock(request(t, "/thread/th_1"), "slow-block/loop", "b1", json.RawMessage(`{}`)); err == nil {
+	if _, _, err := renderBlock(b, request(t, "/thread/th_1"), "slow-block/loop", "b1", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("死循环 block 应超时失败")
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
@@ -696,5 +702,92 @@ func TestBridgeTokenUsageDashboardProjection(t *testing.T) {
 		if !strings.Contains(string(html), want) {
 			t.Fatalf("Token 用量卡片缺少 %q\n%s", want, html)
 		}
+	}
+}
+
+// TestBridgeRenderBlockEmpty 钉住「模板返回 null ＝ 合法空块」：
+// 不报错、不记审计、HTML 为空；二次调用命中缓存后语义不变。
+func TestBridgeRenderBlockEmpty(t *testing.T) {
+	scripts := []host.Script{{
+		Manifest: &plugins.Manifest{
+			ID: "empty-block", Name: "Empty", Version: "0.1.0", APIVersion: 1,
+			Trust: plugins.TrustBuiltin,
+			Frontend: &plugins.Frontend{Blocks: []plugins.BlockContribution{
+				{Name: "none", Schema: "schemas/any.json", Template: "blocks/none.tsx"},
+				{Name: "blank-object", Schema: "schemas/any.json", Template: "blocks/blank.tsx"},
+			}},
+		},
+		Bundle: map[string]string{
+			"blocks/none.tsx":  `export default function () { return null; }`,
+			"blocks/blank.tsx": `export default function () { return {}; }`,
+		},
+		Schemas: map[string][]byte{"schemas/any.json": []byte(`{"type":"object"}`)},
+	}}
+	var events []frontend.BlockAuditEvent
+	b, err := frontend.NewBridge(frontend.BridgeOptions{
+		Scripts: scripts, MarkdownBlocks: true,
+		BlockAudit: func(e frontend.BlockAuditEvent) { events = append(events, e) },
+	})
+	if err != nil {
+		t.Fatalf("NewBridge: %v", err)
+	}
+	for i := 0; i < 2; i++ { // 第二次走缓存
+		raw, html, err := renderBlock(b, request(t, "/thread/th_1"), "empty-block/none", "b1", json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatalf("空块不应失败: %v", err)
+		}
+		if strings.TrimSpace(string(raw)) != "null" || html != "" {
+			t.Fatalf("空块结果 = %q / %q，期望 null / 空", raw, html)
+		}
+	}
+	if len(events) != 0 {
+		t.Fatalf("空块不应产生审计: %+v", events)
+	}
+
+	// 非 null 但没有根节点：仍是失败，且用独立错误码与 profile 违规区分。
+	if _, _, err := renderBlock(b, request(t, "/thread/th_1"), "empty-block/blank-object", "b2", json.RawMessage(`{}`)); err == nil {
+		t.Fatal("空对象 VNode 应失败")
+	}
+	if len(events) != 1 || events[0].Kind != "ui.block.invalid_vnode" || events[0].Error != "empty_root" {
+		t.Fatalf("审计 = %+v", events)
+	}
+}
+
+// TestBridgeRenderBlockVersion 钉住封套 version 契约：插件声明 version=2 时，
+// 封套 version 2 才渲染（props.block.version 同源），1 一律降级并记审计。
+func TestBridgeRenderBlockVersion(t *testing.T) {
+	scripts := []host.Script{{
+		Manifest: &plugins.Manifest{
+			ID: "versioned-block", Name: "Versioned", Version: "0.1.0", APIVersion: 1,
+			Trust: plugins.TrustBuiltin,
+			Frontend: &plugins.Frontend{Blocks: []plugins.BlockContribution{
+				{Name: "card", Schema: "schemas/any.json", Template: "blocks/echo.tsx", Version: 2},
+			}},
+		},
+		Bundle: map[string]string{
+			"blocks/echo.tsx": `export default function (props) { return <div class="v">{String(props.block.version)}</div>; }`,
+		},
+		Schemas: map[string][]byte{"schemas/any.json": []byte(`{"type":"object"}`)},
+	}}
+	var events []frontend.BlockAuditEvent
+	b, err := frontend.NewBridge(frontend.BridgeOptions{
+		Scripts: scripts, MarkdownBlocks: true,
+		BlockAudit: func(e frontend.BlockAuditEvent) { events = append(events, e) },
+	})
+	if err != nil {
+		t.Fatalf("NewBridge: %v", err)
+	}
+	_, html, err := b.RenderBlock(request(t, "/thread/th_1"), "versioned-block/card", "b1", 2, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("version 2 应渲染: %v", err)
+	}
+	if !strings.Contains(string(html), ">2<") {
+		t.Fatalf("props.block.version 应为 2: %s", html)
+	}
+	if _, _, err := b.RenderBlock(request(t, "/thread/th_1"), "versioned-block/card", "b2", 1, json.RawMessage(`{}`)); err == nil {
+		t.Fatal("version 不一致应降级")
+	}
+	if len(events) != 1 || events[0].Kind != "ui.block.render_failed" || events[0].Error != "unsupported_version" {
+		t.Fatalf("审计 = %+v", events)
 	}
 }

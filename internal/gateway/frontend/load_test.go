@@ -77,7 +77,7 @@ func TestLoadBlockScriptStripsNonBlockFrontend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewBridge: %v", err)
 	}
-	raw, html, err := bridge.RenderBlock(request(t, "/thread/th_1"), "demo-block/card", "b1", json.RawMessage(`{"title":"hi"}`))
+	raw, html, err := renderBlock(bridge, request(t, "/thread/th_1"), "demo-block/card", "b1", json.RawMessage(`{"title":"hi"}`))
 	if err != nil {
 		t.Fatalf("RenderBlock: %v", err)
 	}

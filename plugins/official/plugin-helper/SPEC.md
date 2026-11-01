@@ -225,19 +225,24 @@ Schema 与 TSX 模板；宿主校验 `data` 后渲染成 VNode，浏览器与无
 | `schema` | 插件目录内 `.json` 相对路径；数据 Schema（受控 2020-12 子集） |
 | `template` | 插件目录内 `.tsx` 相对路径；`export default function (props)` |
 | `profile` | 仅 `display`（缺省）；`interactive` 仅 builtin/verified 可声明，当前运行期 fail-closed |
+| `version` | 可选，缺省 1；Markdown 封套的 `version` 必须与它一致，否则该块降级（`unsupported_version`） |
 
 模板拿到的 props：
 
 ```ts
 {
   plugin: { id, name, version },
-  app:    { workspace, product, route, csrf? },
-  block:  { id, renderer, version: 1, data }   // data 已通过 schema 校验
+  app:    { workspace, product, route },
+  block:  { id, renderer, version, data }   // version = 清单声明值；data 已通过 schema 校验
 }
 ```
 
+- 块 props **不含 CSRF token**：块是只读展示，props 又可能被渲染成文本，
+  令牌一旦进 props 就会泄漏进对话记录。写操作只能走插件页面/动作桥。
 - 模板只做纯计算，返回单个 VNode（`{t,p,c}`）或 `$C` 组件；**没有** fs / 网络 /
   密钥 / 定时器 / 事件，也拿不到 `template.HTML`。
+- 返回 `null` 表示「这个块没有内容可展示」：宿主跳过它，不画错误卡
+  （与插槽的 null 语义一致）；返回 `{}` 之类没有根节点的对象才算非法 VNode。
 - display profile 禁止 `Form`/`Button`/`Input`/`Select`/`Textarea`/`Composer`/
   `InteractionTray`/`Slot` 与 `form/button/input/select/textarea` 标签、`on*`、
   `style`、原始 HTML；需要交互就走动作桥或插件页面。
@@ -248,7 +253,7 @@ Schema 与 TSX 模板；宿主校验 `data` 后渲染成 VNode，浏览器与无
 | --- | --- |
 | 标签 | `div` `section` `p` `blockquote` `details` `summary` `pre` `h1`–`h6` `ul` `ol` `li` `span` `strong` `em` `code` `small` `a` `table` `thead` `tbody` `tr` `th` `td` `caption` `br` `hr` |
 | 不可用标签 | `img` `svg` `form` `input` `button` `select` `textarea` `iframe` `video` `style` `script` 等一律拒绝 |
-| 宿主组件 | `$C` 仅 `Icon`（`name`：`i-list` `i-copy` `i-chevron-up` `i-check-circle` `i-arrow-right` `i-circle`；`size` 8–32）与 `TodoList`（`steps:[{step\|text\|title,status}]`、`notes?`） |
+| 宿主组件 | `$C` 仅 `Icon`（`name`：`i-list` `i-copy` `i-chevron-up` `i-check-circle` `i-arrow-right` `i-circle`；`size` 8–32）与 `TodoList`（`steps:[{step\|text\|title,status}]`、`notes?`）。两者在 `/markdown`（Go）与浏览器 VNode 两条路径渲染同一套 DOM |
 | 属性 | `class` `id` `href` `title` `for` `name` `value` `type` `placeholder` `required` `disabled` `readonly` `checked` `open` `min` `max` `step` `minlength` `maxlength` `cols` `rows` `action` `method` `start` `scope` `colspan` `rowspan` `role`，以及 `aria-*` / `data-*` |
 | URL 属性 | 相对路径、`#锚点`、`http(s):`、`mailto:`；拒绝 `javascript:` / `data:text/html` |
 | 文本节点 | `{"t":"#text","v":"…"}`，由宿主转义 |
@@ -258,13 +263,18 @@ Schema 与 TSX 模板；宿主校验 `data` 后渲染成 VNode，浏览器与无
   `enum`、`const`、`pattern`、`minimum/maximum`、`minItems/maxItems`、`items`、
   `allOf/anyOf/oneOf`；**未知关键字在加载期报错**，不会静默忽略。
 - 限额（宿主强制）：单块封套 64KB、data 深度 32、单文档 8 块、单块 300ms、
-  VNode 2000 节点 / 256KB 输出。
-- 失败只降级**当前块**（未知 renderer、插件禁用、Schema 不符、超时、非法 VNode），
-  其余 Markdown 不受影响；审计事件只含错误码与归属（`ui.block.invalid_data` /
-  `render_failed` / `invalid_vnode`），**不记录 data**。
+  VNode 2000 节点 / 256KB 输出；一次请求最多 64 块 / 2000ms（线程页会渲染整份
+  transcript，超预算的块按普通代码块降级）。
+- 失败只降级**当前块**（未知 renderer、插件禁用、Schema 不符、版本不一致、超时、
+  非法 VNode），其余 Markdown 不受影响；审计事件只含错误码与归属
+  （`ui.block.invalid_data` / `render_failed` / `invalid_vnode`），**不记录 data**。
+- fence 只在**列 0** 且不在其他代码块内时生效：在文档里演示语法时，把它包进
+  ```` ```markdown ```` 或缩进 4 个空格，就不会被执行；块引用/列表里的 fence
+  属于 v1 不支持的嵌套位置，按普通代码块显示。
 - 装配范围：随包官方插件 + 全局/工作区安装插件的 `frontend.blocks`（工作区优先，
-  官方同 id 遮蔽磁盘版本）。插件仍需有 `backend`（Core 加载后才会出现在
-  `plugin.list`，启停状态才可查）；纯前端插件不会被发现。
+  官方同 id 遮蔽磁盘版本）。只贡献 blocks 的纯前端包也可以安装：Gateway 直接扫描
+  插件目录，这类插件不在 Core 的 `plugin.list` 里，按「安装即启用」处理
+  （停用需移除插件目录）；要出现在插件页/可启停，仍需声明 `backend`。
 
 新增一个 block 的顺序：
 

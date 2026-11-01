@@ -64,7 +64,7 @@ func TestOfficialChartBlocks(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		raw, html, err := b.RenderBlock(request(t, "/thread/th_1"), tc.renderer, "b1", json.RawMessage(tc.data))
+		raw, html, err := renderBlock(b, request(t, "/thread/th_1"), tc.renderer, "b1", json.RawMessage(tc.data))
 		if err != nil {
 			t.Fatalf("%s: %v", tc.renderer, err)
 		}
@@ -93,11 +93,45 @@ func TestOfficialChartBlocksRejectBadData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewBridge: %v", err)
 	}
-	if _, _, err := b.RenderBlock(request(t, "/thread/th_1"), "ui-charts/bar", "b1",
+	if _, _, err := renderBlock(b, request(t, "/thread/th_1"), "ui-charts/bar", "b1",
 		json.RawMessage(`{"title":"t","items":[{"label":"a","value":1}],"bogus":true}`)); err == nil {
 		t.Fatal("未知字段应被 Schema 拒绝")
 	}
 	if len(events) != 1 || events[0].Kind != "ui.block.invalid_data" || events[0].Error != "schema_validation" {
 		t.Fatalf("审计 = %+v", events)
+	}
+}
+
+// TestOfficialChartBlocksEmpty 钉住空数据是「空块」而不是错误卡：
+// chart.tsx 在 items/values 为空时返回 null，宿主按合法空结果处理。
+func TestOfficialChartBlocksEmpty(t *testing.T) {
+	scripts, err := official.FrontendScripts()
+	if err != nil {
+		t.Fatalf("official.FrontendScripts: %v", err)
+	}
+	var events []frontend.BlockAuditEvent
+	b, err := frontend.NewBridge(frontend.BridgeOptions{
+		Scripts: scripts, MarkdownBlocks: true,
+		BlockAudit: func(e frontend.BlockAuditEvent) { events = append(events, e) },
+	})
+	if err != nil {
+		t.Fatalf("NewBridge: %v", err)
+	}
+	cases := []struct{ renderer, data string }{
+		{"ui-charts/bar", `{"title":"t"}`},
+		{"ui-charts/bar", `{"title":"t","items":[]}`},
+		{"ui-charts/spark", `{"title":"t","values":[]}`},
+	}
+	for _, tc := range cases {
+		raw, html, err := renderBlock(b, request(t, "/thread/th_1"), tc.renderer, "b1", json.RawMessage(tc.data))
+		if err != nil {
+			t.Fatalf("%s %s: 空数据不应失败: %v", tc.renderer, tc.data, err)
+		}
+		if strings.TrimSpace(string(raw)) != "null" || html != "" {
+			t.Fatalf("%s %s: 应渲染为空块，得到 %q / %q", tc.renderer, tc.data, raw, html)
+		}
+	}
+	if len(events) != 0 {
+		t.Fatalf("空数据不应产生审计: %+v", events)
 	}
 }

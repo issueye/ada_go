@@ -58,6 +58,9 @@ type BlockContribution struct {
 	Schema      string `json:"schema"`
 	Template    string `json:"template"`
 	Profile     string `json:"profile,omitempty"`
+	// Version 是块数据契约的版本（缺省 1）；Markdown 封套的 version 必须与它一致，
+	// 否则该块降级（unsupported_version）。
+	Version int `json:"version,omitempty"`
 }
 
 // SlotContribution 把一个 TSX 模板挂到某个稳定插槽。
@@ -271,11 +274,21 @@ func (m *Manifest) validateFrontend() error {
 			return fmt.Errorf("plugins: %s 重复声明 block %q", m.ID, b.Name)
 		}
 		seenBlock[b.Name] = true
+		// 路径在加载期归一：官方/第三方加载器按 TrimSpace 后的键存模板与 Schema，
+		// 装配侧也按同一份清单查，避免「首尾空格」在两边得到不同结果。
+		b.Schema = strings.TrimSpace(b.Schema)
+		b.Template = strings.TrimSpace(b.Template)
 		if !validEntryPath(b.Schema) || !strings.HasSuffix(b.Schema, ".json") {
 			return fmt.Errorf("plugins: %s 的 block %s schema %q 必须是插件目录内的 .json 相对路径", m.ID, b.Name, b.Schema)
 		}
 		if !validEntryPath(b.Template) || !strings.HasSuffix(b.Template, ".tsx") {
 			return fmt.Errorf("plugins: %s 的 block %s template %q 必须是插件目录内的 .tsx 相对路径", m.ID, b.Name, b.Template)
+		}
+		if b.Version == 0 {
+			b.Version = 1
+		}
+		if b.Version < 1 {
+			return fmt.Errorf("plugins: %s 的 block %s version 必须是正整数", m.ID, b.Name)
 		}
 		switch b.Profile {
 		case "":

@@ -1975,7 +1975,9 @@ html.js .ada-newtask__ws-native {
   background: var(--ph-muted);
 }
 
-/* 100% 堆叠占比条：.adag-chart__stack 内放 .adag-chart__seg--lN（宽度档位）。 */
+/* 100% 堆叠占比条：.adag-chart__stack 内放 .adag-chart__seg--lN。
+   段宽用 flex-grow 档位而不是百分比：11 个段各自按 10% 量化相加会不满/超 100%，
+   flex 分配保证整条始终铺满（宽度比例 = 档位值 / 档位和）。 */
 .adag-chart__stack {
   display: flex;
   height: 10px;
@@ -1986,6 +1988,8 @@ html.js .ada-newtask__ws-native {
 
 .adag-chart__seg {
   height: 100%;
+  flex: 1 1 0%;
+  min-width: 0;
 }
 
 .adag-chart__seg--a { background: var(--ph-brand); }
@@ -1993,16 +1997,16 @@ html.js .ada-newtask__ws-native {
 .adag-chart__seg--c { background: var(--ph-faint); }
 .adag-chart__seg--d { background: var(--ph-line-strong); }
 
-.adag-chart__seg--l1 { width: 10%; }
-.adag-chart__seg--l2 { width: 20%; }
-.adag-chart__seg--l3 { width: 30%; }
-.adag-chart__seg--l4 { width: 40%; }
-.adag-chart__seg--l5 { width: 50%; }
-.adag-chart__seg--l6 { width: 60%; }
-.adag-chart__seg--l7 { width: 70%; }
-.adag-chart__seg--l8 { width: 80%; }
-.adag-chart__seg--l9 { width: 90%; }
-.adag-chart__seg--l10 { width: 100%; }
+.adag-chart__seg--l1 { flex-grow: 1; }
+.adag-chart__seg--l2 { flex-grow: 2; }
+.adag-chart__seg--l3 { flex-grow: 3; }
+.adag-chart__seg--l4 { flex-grow: 4; }
+.adag-chart__seg--l5 { flex-grow: 5; }
+.adag-chart__seg--l6 { flex-grow: 6; }
+.adag-chart__seg--l7 { flex-grow: 7; }
+.adag-chart__seg--l8 { flex-grow: 8; }
+.adag-chart__seg--l9 { flex-grow: 9; }
+.adag-chart__seg--l10 { flex-grow: 10; }
 
 .adag-chart__legend {
   display: flex;

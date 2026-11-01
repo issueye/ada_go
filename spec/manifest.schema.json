@@ -294,6 +294,13 @@
                 "default": "display",
                 "description": "display 只允许展示型标签/组件；interactive 仅 builtin/verified 且产品显式开启。",
                 "x-consumer": "gateway/frontend: block VNode profile 校验；plugins: 信任级别门禁"
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 1,
+                "description": "块数据契约版本；Markdown 封套的 version 必须与它一致，否则降级。",
+                "x-consumer": "gateway/frontend: RenderBlock 比对封套 version（不一致 → unsupported_version）"
               }
             }
           },

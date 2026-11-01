@@ -92,6 +92,62 @@
       '</svg>'
   });
 
+  /* 任务步骤清单：与 Go 侧 renderTodoList 同一套 class 与状态修饰符
+     （internal/gateway/frontend/render.go），Markdown 动态块的 $C TodoList
+     节点在浏览器端必须能落到同一份 DOM。
+     字段名与状态归一化保持宽松：AST 里的 props 不是宿主校验过的数据，
+     这里不能因为缺标题就抛错，否则会拖垮整条消息的挂载。 */
+  var TODO_STATUS = {
+    done: { className: 'is-done', icon: 'i-check-circle' },
+    in_progress: { className: 'is-running', icon: 'i-arrow-right' },
+    pending: { className: 'is-pending', icon: 'i-circle' }
+  };
+
+  function todoStepTitle(step) {
+    var keys = ['step', 'text', 'title'];
+    for (var i = 0; i < keys.length; i += 1) {
+      var value = step[keys[i]];
+      if (typeof value === 'string' && value.trim()) return value;
+    }
+    return '';
+  }
+
+  function todoStatus(value) {
+    var text = typeof value === 'string' ? value.toLowerCase().trim() : '';
+    if (text === 'done' || text === 'completed') return TODO_STATUS.done;
+    if (text === 'in_progress' || text === 'in-progress' || text === 'active' || text === 'running') {
+      return TODO_STATUS.in_progress;
+    }
+    return TODO_STATUS.pending;
+  }
+
+  var TodoList = register('TodoList', {
+    props: {
+      steps: { default: function () { return []; } },
+      notes: { default: '' }
+    },
+    render: function (h) {
+      var steps = Array.isArray(this.steps) ? this.steps : [];
+      // 与 Go 一致：空清单不画面板（备注也不单独显示）。Go 侧此时不输出任何内容；
+      // 浏览器组件必须返回单根节点，所以留一个无样式的空容器。
+      if (!steps.length) return h('div', { class: 'ada-todo__list-wrap' });
+      var notes = typeof this.notes === 'string' ? this.notes : '';
+      var children = [];
+      if (notes.trim()) {
+        children.push(h('p', { class: 'ada-todo__notes' }, h('span', null, '备注：'), notes));
+      }
+      children.push(h('ol', { class: 'ada-todo__list' }, steps.map(function (step) {
+        var item = step && typeof step === 'object' ? step : {};
+        var status = todoStatus(item.status);
+        return h('li', { class: 'ada-todo__step ' + status.className }, [
+          h(Icon, { name: status.icon, size: 12 }),
+          h('span', null, todoStepTitle(item))
+        ]);
+      })));
+      return h('div', { class: 'ada-todo__list-wrap' }, children);
+    }
+  });
+
   var Spinner = register('Spinner', {
     props: {
       size: { default: 16 },

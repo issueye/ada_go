@@ -942,6 +942,8 @@ func checkMarkdownBlock(root string) error {
 		"maxDepth":             32,
 		"maxBlocksPerDocument": web.MaxMarkdownBlocks,
 		"renderTimeoutMs":      web.MarkdownBlockRenderTimeoutMS,
+		"maxBlocksPerRequest":  web.MaxMarkdownBlocksPerRequest,
+		"requestBudgetMs":      web.MarkdownBlockRequestBudgetMS,
 	}
 	var problems []string
 	for key, want := range limits {

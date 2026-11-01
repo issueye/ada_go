@@ -16,7 +16,13 @@ var BlockTags = []string{
 	"details", "summary",
 }
 
-// BlockComponents 是动态块允许的宿主组件（与当前 Go 渲染器已实现的面一致）。
+// BlockComponents 是动态块允许的宿主组件。
+//
+// 每个名字都必须在两条渲染路径有同构实现，否则块会在其中一条路径上渲染失败：
+//   - Go：render.go 的 renderComponent（/markdown 与无 JS 页面）；
+//   - 浏览器：static/ada-ui.js 注册的同名组件（/markdown.ast + VNode patch）。
+//
+// golden 见 frontend/testdata/block/*.html 与 web/testdata/ada-block-components.test.js。
 var BlockComponents = []string{"Icon", "TodoList"}
 
 var blockTagSet = toSet(BlockTags)

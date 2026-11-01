@@ -159,6 +159,8 @@ function StackedChart(data: any, items: any[], unit: string): any {
       <div class="adag-chart__stack">
         {items.map(function (item: any, index: number) {
           const value = toNumber(item.value);
+          // 档位是 flex-grow（见 app-local.css）：整条始终铺满 100%，
+          // 不用逐个段写百分比，避免量化后合计不满或溢出。
           const level = clampLevel(Math.round((value / total) * 10), 1, 10);
           return (
             <span class={"adag-chart__seg adag-chart__seg--" + palette[index % 4] + " adag-chart__seg--l" + level}></span>

@@ -40,11 +40,42 @@ func TestManifestBlockValidation(t *testing.T) {
 		{"template 越界", []plugins.BlockContribution{{Name: "card", Schema: "schemas/card.json", Template: "../card.tsx"}}, "template"},
 		{"template 非 tsx", []plugins.BlockContribution{{Name: "card", Schema: "schemas/card.json", Template: "blocks/card.js"}}, "template"},
 		{"未知 profile", []plugins.BlockContribution{{Name: "card", Schema: "schemas/card.json", Template: "blocks/card.tsx", Profile: "realtime"}}, "未知 profile"},
+		{"version 非正", []plugins.BlockContribution{{Name: "card", Schema: "schemas/card.json", Template: "blocks/card.tsx", Version: -1}}, "version"},
 	} {
 		err := blockManifest(tc.blocks...).Validate("demo")
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Fatalf("%s: err = %v，期望包含 %q", tc.name, err, tc.want)
 		}
+	}
+}
+
+// TestManifestBlockVersionAndPathDefaults 钉住 version 缺省 1 与路径归一：
+// 加载器按 TrimSpace 后的键存模板/Schema，装配侧读的是同一份清单。
+func TestManifestBlockVersionAndPathDefaults(t *testing.T) {
+	m := blockManifest(plugins.BlockContribution{
+		Name:     "card",
+		Schema:   "  schemas/card.json  ",
+		Template: " blocks/card.tsx\t",
+	})
+	if err := m.Validate("demo"); err != nil {
+		t.Fatalf("合法 block 被拒: %v", err)
+	}
+	b := m.Frontend.Blocks[0]
+	if b.Version != 1 {
+		t.Fatalf("缺省 version = %d，期望 1", b.Version)
+	}
+	if b.Schema != "schemas/card.json" || b.Template != "blocks/card.tsx" {
+		t.Fatalf("路径未归一: schema=%q template=%q", b.Schema, b.Template)
+	}
+
+	explicit := blockManifest(plugins.BlockContribution{
+		Name: "card", Schema: "schemas/card.json", Template: "blocks/card.tsx", Version: 2,
+	})
+	if err := explicit.Validate("demo"); err != nil {
+		t.Fatalf("显式 version 2 被拒: %v", err)
+	}
+	if got := explicit.Frontend.Blocks[0].Version; got != 2 {
+		t.Fatalf("显式 version = %d，期望 2", got)
 	}
 }
 

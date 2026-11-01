@@ -24,12 +24,24 @@ func (blockPluginUI) Page(string, string, *http.Request) (template.HTML, error) 
 }
 func (blockPluginUI) Styles() []string  { return nil }
 func (blockPluginUI) Scripts() []string { return nil }
-func (blockPluginUI) RenderBlock(r *http.Request, rendererID, blockID string, data json.RawMessage) (json.RawMessage, template.HTML, error) {
-	if rendererID != "demo/card" {
+func (blockPluginUI) RenderBlock(r *http.Request, rendererID, blockID string, version int, data json.RawMessage) (json.RawMessage, template.HTML, error) {
+	switch rendererID {
+	case "demo/card":
+		return json.RawMessage(`{"t":"div","p":{"class":"adag-ui-block"},"c":[{"t":"#text","v":"block hi"}]}`),
+			template.HTML(`<div class="adag-ui-block">block hi</div>`), nil
+	case "demo/empty":
+		// 渲染器显式返回空：合法结果，两条路径都应跳过该块。
+		return json.RawMessage(`null`), "", nil
+	case "demo/version":
+		// 只接受 version 2，用于钉住封套 version 透传到渲染器。
+		if version != 2 {
+			return nil, "", web.ErrExtNotFound
+		}
+		return json.RawMessage(`{"t":"div","p":{"class":"adag-ui-block"},"c":[{"t":"#text","v":"version 2"}]}`),
+			template.HTML(`<div class="adag-ui-block">version 2</div>`), nil
+	default:
 		return nil, "", web.ErrExtNotFound
 	}
-	return json.RawMessage(`{"t":"div","p":{"class":"adag-ui-block"},"c":[{"t":"#text","v":"block hi"}]}`),
-		template.HTML(`<div class="adag-ui-block">block hi</div>`), nil
 }
 
 func newBlockServer(t *testing.T) *web.Server {
@@ -367,4 +379,119 @@ func jsonEqual(t *testing.T, got, want []byte) bool {
 		t.Fatalf("序列化 want JSON: %v", err)
 	}
 	return bytes.Equal(gb, wb)
+}
+
+// TestMarkdownBlockFenceContext 钉住 fence 上下文：只有列 0、且不在其他代码块内的
+// ```adag-ui 才执行；代码块里演示语法（外层 fence / 4 空格缩进 / 块引用）保持原样。
+func TestMarkdownBlockFenceContext(t *testing.T) {
+	srv := newBlockServer(t)
+	block := "{\"renderer\":\"demo/card\",\"data\":{}}"
+	cases := map[string]string{
+		"外层 markdown fence": "说明：\n\n```markdown\n```adag-ui\n" + block + "\n```\n```\n\n结束",
+		"4 空格缩进":            "示例：\n\n    ```adag-ui\n    " + block + "\n    ```\n",
+		"块引用":               "示例：\n\n> ```adag-ui\n> " + block + "\n> ```\n",
+	}
+	for name, text := range cases {
+		htmlRec := postJSON(t, srv, "/markdown", `{"text":`+strconvQuote(text)+`}`)
+		if strings.Contains(htmlRec.Body.String(), "block hi") {
+			t.Fatalf("%s：代码块里的 adag-ui 不应执行\n%s", name, htmlRec.Body.String())
+		}
+		astRec := postJSON(t, srv, "/markdown.ast", `{"text":`+strconvQuote(text)+`}`)
+		if strings.Contains(astRec.Body.String(), "adag-ui-block") {
+			t.Fatalf("%s：AST 路径也不应产出块节点\n%s", name, astRec.Body.String())
+		}
+	}
+
+	// 正控：普通代码块之后、列 0 的 adag-ui 仍然执行。
+	text := "```js\nconst a = 1;\n```\n\n```adag-ui\n" + block + "\n```\n"
+	rec := postJSON(t, srv, "/markdown", `{"text":`+strconvQuote(text)+`}`)
+	if !strings.Contains(rec.Body.String(), "block hi") {
+		t.Fatalf("列 0 的块应正常执行\n%s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "language-js") {
+		t.Fatalf("普通代码块应保留\n%s", rec.Body.String())
+	}
+}
+
+// TestMarkdownEmptyBlock 钉住「渲染器返回 null ＝ 空块」：两条路径都跳过，
+// 不画错误卡，也不影响前后 Markdown。
+func TestMarkdownEmptyBlock(t *testing.T) {
+	srv := newBlockServer(t)
+	text := "before\n\n```adag-ui\n{\"renderer\":\"demo/empty\",\"data\":{}}\n```\n\nafter"
+
+	rec := postJSON(t, srv, "/markdown", `{"text":`+strconvQuote(text)+`}`)
+	if strings.Contains(rec.Body.String(), "adag-ui-block") {
+		t.Fatalf("空块不应渲染任何块容器: %s", rec.Body.String())
+	}
+	for _, want := range []string{"before", "after"} {
+		wantContains(t, rec.Body.String(), want)
+	}
+
+	astRec := postJSON(t, srv, "/markdown.ast", `{"text":`+strconvQuote(text)+`}`)
+	if strings.Contains(astRec.Body.String(), "adag-ui-block") {
+		t.Fatalf("空块不应进入 AST: %s", astRec.Body.String())
+	}
+	for _, want := range []string{"before", "after"} {
+		wantContains(t, astRec.Body.String(), want)
+	}
+}
+
+// TestMarkdownBlockEnvelope 钉住封套 Schema：未知字段 / 尾随 JSON / 非法 id /
+// 超长 fallback 都按「封套失败」退回普通代码块；version 缺省 1、显式值透传。
+func TestMarkdownBlockEnvelope(t *testing.T) {
+	srv := newBlockServer(t)
+	render := func(payload string) string {
+		t.Helper()
+		text := "```adag-ui\n" + payload + "\n```"
+		rec := postJSON(t, srv, "/markdown", `{"text":`+strconvQuote(text)+`}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d", rec.Code)
+		}
+		return rec.Body.String()
+	}
+
+	for _, tc := range []struct{ name, payload string }{
+		{"未知字段", `{"renderer":"demo/card","data":{},"bogus":1}`},
+		{"尾随 JSON", `{"renderer":"demo/card","data":{}}{"x":1}`},
+		{"非法 id", `{"renderer":"demo/card","id":"1bad","data":{}}`},
+		{"fallback 超长", `{"renderer":"demo/card","fallback":"` + strings.Repeat("x", 513) + `","data":{}}`},
+		{"version 非正", `{"renderer":"demo/card","version":-1,"data":{}}`},
+	} {
+		html := render(tc.payload)
+		if strings.Contains(html, "block hi") || !strings.Contains(html, "language-adag-ui") {
+			t.Fatalf("%s：应退回普通代码块\n%s", tc.name, html)
+		}
+	}
+
+	// version 缺省 = 1：正常渲染。
+	if !strings.Contains(render(`{"renderer":"demo/card","data":{}}`), "block hi") {
+		t.Fatal("缺省 version 应渲染")
+	}
+	// 显式 version 透传给渲染器（fake 只接受 2）。
+	if !strings.Contains(render(`{"renderer":"demo/version","version":2,"data":{}}`), "version 2") {
+		t.Fatal("version 2 应透传给渲染器")
+	}
+	if strings.Contains(render(`{"renderer":"demo/version","version":1,"data":{}}`), "version 2") {
+		t.Fatal("version 1 不应渲染成 version 2")
+	}
+}
+
+// TestMarkdownBlockDuplicateID 钉住「同一 Markdown 内 id 唯一」：重复的块降级，
+// 不静默复用锚点，也不影响其它块。
+func TestMarkdownBlockDuplicateID(t *testing.T) {
+	srv := newBlockServer(t)
+	text := "```adag-ui\n{\"renderer\":\"demo/card\",\"id\":\"a\",\"data\":{}}\n```\n\n" +
+		"```adag-ui\n{\"renderer\":\"demo/card\",\"id\":\"a\",\"data\":{}}\n```"
+	rec := postJSON(t, srv, "/markdown", `{"text":`+strconvQuote(text)+`}`)
+	if got := strings.Count(rec.Body.String(), "block hi"); got != 1 {
+		t.Fatalf("重复 id 只应渲染第一个块，got %d\n%s", got, rec.Body.String())
+	}
+	wantContains(t, rec.Body.String(), "动态块 id 重复")
+
+	astRec := postJSON(t, srv, "/markdown.ast", `{"text":`+strconvQuote(text)+`}`)
+	if got := strings.Count(astRec.Body.String(), `"v":"block hi"`); got != 1 {
+		t.Fatalf("AST 只应有一个渲染成功的块，got %d: %s", got, astRec.Body.String())
+	}
+	wantContains(t, astRec.Body.String(), "adag-ui-block--error")
+	wantContains(t, astRec.Body.String(), "动态块 id 重复")
 }

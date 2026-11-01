@@ -91,6 +91,7 @@ type blockEntry struct {
 	def     plugins.BlockContribution
 	schema  *DataSchema
 	profile string
+	version int
 }
 
 type blockCacheEntry struct {
@@ -147,6 +148,9 @@ func NewBridge(opts BridgeOptions) (*Bridge, error) {
 		host.WithComponentsModule(host.ComponentModuleSource(pairs)),
 		// 注意毫秒换算：frontend 常量是 int 毫秒，Duration 直接传会变成纳秒。
 		host.WithRenderBudgets(SlotTimeoutMS*time.Millisecond, PageTimeoutMS*time.Millisecond),
+		// 动态块用独立预算：Schema 的 x-limits.renderTimeoutMs 与这里必须同源，
+		// 否则门禁比对的不是真正生效的值。
+		host.WithBlockRenderBudget(web.MarkdownBlockRenderTimeoutMS*time.Millisecond),
 	)
 
 	ids := make([]string, 0, len(opts.Scripts))
@@ -205,7 +209,11 @@ func NewBridge(opts BridgeOptions) (*Bridge, error) {
 			if profile == "" {
 				profile = "display"
 			}
-			b.blocks[rendererID] = blockEntry{u: u, def: bd, schema: schema, profile: profile}
+			version := bd.Version
+			if version < 1 {
+				version = 1
+			}
+			b.blocks[rendererID] = blockEntry{u: u, def: bd, schema: schema, profile: profile, version: version}
 		}
 	}
 	for name := range b.slotIndex {
@@ -367,7 +375,9 @@ func (b *Bridge) MarkdownBlocksEnabled() bool { return b != nil && b.markdownBlo
 
 // RenderBlock 渲染一个 Markdown 动态块：数据 Schema → TSX → VNode → 校验 → HTML。
 // 返回的 raw 是包装后的单个 VNode，html 是同一份 VNode 的 HTML 表达。
-func (b *Bridge) RenderBlock(r *http.Request, rendererID, blockID string, data json.RawMessage) (json.RawMessage, template.HTML, error) {
+// version 是封套声明的块数据版本（缺省 1），必须与插件清单一致。
+// 模板返回 null 时 raw 为字面量 null、html 为空、err 为 nil：web 层据此跳过该块。
+func (b *Bridge) RenderBlock(r *http.Request, rendererID, blockID string, version int, data json.RawMessage) (json.RawMessage, template.HTML, error) {
 	entry, ok := b.blocks[strings.TrimSpace(rendererID)]
 	if !ok {
 		b.auditBlockID("ui.block.render_failed", rendererID, blockID, "renderer_missing")
@@ -386,6 +396,13 @@ func (b *Bridge) RenderBlock(r *http.Request, rendererID, blockID string, data j
 		b.auditBlock("ui.block.render_failed", entry, rendererID, blockID, "unsupported_profile")
 		return nil, "", fmt.Errorf("frontend: block %s 的 profile %q 暂不支持（MVP 仅 display）", rendererID, entry.profile)
 	}
+	if version < 1 {
+		version = 1
+	}
+	if version != entry.version {
+		b.auditBlock("ui.block.render_failed", entry, rendererID, blockID, "unsupported_version")
+		return nil, "", fmt.Errorf("frontend: block %s 的 version %d 与插件声明的 %d 不一致", rendererID, version, entry.version)
+	}
 	cacheKey := b.blockCacheKey(entry, r, rendererID, blockID, data)
 	if raw, html, ok := b.cachedBlock(cacheKey); ok {
 		return raw, html, nil
@@ -399,7 +416,7 @@ func (b *Bridge) RenderBlock(r *http.Request, rendererID, blockID string, data j
 		b.auditBlock("ui.block.invalid_data", entry, rendererID, blockID, "schema_validation")
 		return nil, "", err
 	}
-	props, err := b.buildBlockProps(entry.u, r, blockID, rendererID, data)
+	props, err := b.buildBlockProps(entry, r, blockID, rendererID, data)
 	if err != nil {
 		b.auditBlock("ui.block.render_failed", entry, rendererID, blockID, "props_error")
 		return nil, "", err
@@ -409,15 +426,28 @@ func (b *Bridge) RenderBlock(r *http.Request, rendererID, blockID string, data j
 		b.auditBlock("ui.block.render_failed", entry, rendererID, blockID, "template_missing")
 		return nil, "", fmt.Errorf("frontend: 插件 %s 的 block %s 缺少模板 %q", entry.u.manifest.ID, entry.def.Name, entry.def.Template)
 	}
-	vnode, err := b.renderer.RenderPage(src, props)
+	vnode, err := b.renderer.RenderBlockTemplate(src, props)
 	if err != nil {
 		b.auditBlock("ui.block.render_failed", entry, rendererID, blockID, "render_error")
 		return nil, "", err
+	}
+	// 模板返回 null 表示「这个块没有内容可展示」，是合法结果而不是失败：
+	// 与插槽的 null 语义一致（host.Renderer 用字面量 null 表示留空）。
+	// 不能把它当零值 VNode 去校验，否则会误报 invalid_vnode 并画出错误卡。
+	if trimmed := bytes.TrimSpace(vnode); len(trimmed) == 0 || string(trimmed) == "null" {
+		b.storeBlock(cacheKey, json.RawMessage("null"), "")
+		return json.RawMessage("null"), "", nil
 	}
 	var root Node
 	if err := json.Unmarshal(vnode, &root); err != nil {
 		b.auditBlock("ui.block.invalid_vnode", entry, rendererID, blockID, "invalid_json")
 		return nil, "", fmt.Errorf("frontend: block %s 返回的 VNode 非法: %w", rendererID, err)
+	}
+	if root.T == "" {
+		// 非 null 但没有根节点类型：模板返回了空对象/标量，按 VNode 非法处理，
+		// 用独立错误码与 profile 违规区分开。
+		b.auditBlock("ui.block.invalid_vnode", entry, rendererID, blockID, "empty_root")
+		return nil, "", fmt.Errorf("frontend: block %s 返回的 VNode 缺少根节点", rendererID)
 	}
 	if err := ValidateBlockNode(root); err != nil {
 		b.auditBlock("ui.block.invalid_vnode", entry, rendererID, blockID, "profile_violation")
@@ -516,11 +546,11 @@ func decodeJSONValue(raw json.RawMessage) (any, error) {
 	return out, nil
 }
 
-func (b *Bridge) buildBlockProps(u *unit, r *http.Request, blockID, rendererID string, data json.RawMessage) (json.RawMessage, error) {
+func (b *Bridge) buildBlockProps(entry blockEntry, r *http.Request, blockID, rendererID string, data json.RawMessage) (json.RawMessage, error) {
 	p := renderProps{
-		Plugin: pluginInfo{ID: u.manifest.ID, Name: u.manifest.Name, Version: u.manifest.Version},
+		Plugin: pluginInfo{ID: entry.u.manifest.ID, Name: entry.u.manifest.Name, Version: entry.u.manifest.Version},
 		App:    appInfo{Product: b.product},
-		Block:  &blockInfo{ID: blockID, Renderer: rendererID, Version: 1, Data: data},
+		Block:  &blockInfo{ID: blockID, Renderer: rendererID, Version: entry.version, Data: data},
 	}
 	if r != nil {
 		p.App.Workspace = b.workspace(r)

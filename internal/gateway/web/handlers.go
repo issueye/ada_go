@@ -111,10 +111,10 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 	base := s.base(r, "chat", title, threads, id, true)
 	base.TopbarActions = threadTopbarActions(id, run.Active, s.csrf(r))
 	base.NeedsUI = len(transcript) > 0
-	s.attachPartHTML(r, transcript)
+	s.attachPartHTML(r, transcript, newBlockBudget())
 	picker := s.modelOptions(r, id)
 	models, modelLabel, modelValue := picker.Models, picker.Label, picker.Value
-	stateJSON, err := json.Marshal(s.transcriptPayload(r, id, get.Run.Status, transcript))
+	stateJSON, err := json.Marshal(s.transcriptPayload(r, id, get.Run.Status, transcript, newBlockBudget()))
 	if err != nil {
 		stateJSON = []byte(`{"threadId":"","runStatus":"","rows":[]}`)
 	}
@@ -175,11 +175,12 @@ func (s *Server) handleTranscriptJSON(w http.ResponseWriter, r *http.Request) {
 	transcript = append(transcript, noticesFromItems(get.Items)...)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(s.transcriptPayload(r, id, get.Run.Status, transcript))
+	_ = json.NewEncoder(w).Encode(s.transcriptPayload(r, id, get.Run.Status, transcript, newBlockBudget()))
 }
 
 // attachPartHTML 为助手文本预渲染 HTML（含 Markdown 动态块），供无 JS 模板使用。
-func (s *Server) attachPartHTML(r *http.Request, items []transcriptItem) {
+// budget 由调用方跨整份 transcript 共享，避免长会话按消息数线性放大渲染耗时。
+func (s *Server) attachPartHTML(r *http.Request, items []transcriptItem, budget *blockBudget) {
 	for i := range items {
 		if items[i].Kind != "assistant" {
 			continue
@@ -187,13 +188,13 @@ func (s *Server) attachPartHTML(r *http.Request, items []transcriptItem) {
 		for j := range items[i].Parts {
 			p := &items[i].Parts[j]
 			if p.Type == "text" && strings.TrimSpace(p.Text) != "" {
-				p.HTML = s.renderMarkdownWithBlocks(r, p.Text)
+				p.HTML = s.renderMarkdownWithBlocks(r, p.Text, budget)
 			}
 		}
 	}
 }
 
-func (s *Server) transcriptPayload(r *http.Request, threadID, runStatus string, items []transcriptItem) transcriptPayload {
+func (s *Server) transcriptPayload(r *http.Request, threadID, runStatus string, items []transcriptItem, budget *blockBudget) transcriptPayload {
 	rows := make([]transcriptRowState, 0, len(items))
 	for i, item := range items {
 		key := item.Key
@@ -207,7 +208,7 @@ func (s *Server) transcriptPayload(r *http.Request, threadID, runStatus string, 
 				case "text":
 					parts = append(parts, transcriptPartState{
 						Type:  "text",
-						Nodes: s.markdownNodesJSONWithBlocks(r, part.Text),
+						Nodes: s.markdownNodesJSONWithBlocks(r, part.Text, budget),
 					})
 				case "thinking":
 					parts = append(parts, transcriptPartState{Type: "thinking", Text: part.Text})
@@ -2180,7 +2181,7 @@ func (s *Server) handleMarkdown(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_, _ = io.WriteString(w, string(s.renderMarkdownWithBlocks(r, req.Text)))
+	_, _ = io.WriteString(w, string(s.renderMarkdownWithBlocks(r, req.Text, newBlockBudget())))
 }
 
 // handleMarkdownAST 是实时 Markdown 的结构化版本：返回 VNode 数据，
@@ -2204,7 +2205,7 @@ func (s *Server) handleMarkdownAST(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(map[string]any{"nodes": json.RawMessage(s.markdownNodesJSONWithBlocks(r, req.Text))})
+	_ = json.NewEncoder(w).Encode(map[string]any{"nodes": json.RawMessage(s.markdownNodesJSONWithBlocks(r, req.Text, newBlockBudget()))})
 }
 
 // handleStatic 提供内嵌的静态资源（a_da token/CSS/JS 副本与 app-local.css）。

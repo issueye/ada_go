@@ -119,6 +119,19 @@ func TestRenderTemplateTimeoutInterrupts(t *testing.T) {
 	}
 }
 
+// TestRenderBlockTemplateBudget 钉住块档预算独立于插槽/页面档：
+// Markdown 动态块的 renderTimeoutMs 走这里，而不是借页面预算。
+func TestRenderBlockTemplateBudget(t *testing.T) {
+	r := NewRenderer(
+		WithRenderBudgets(time.Second, time.Second),
+		WithBlockRenderBudget(30*time.Millisecond),
+	)
+	_, err := r.RenderBlockTemplate(`export default function () { for (;;) {} }`, nil)
+	if err == nil || !strings.Contains(err.Error(), "超出预算") {
+		t.Fatalf("块档超时应生效，got %v", err)
+	}
+}
+
 func TestRenderTemplateSizeLimit(t *testing.T) {
 	r := testRenderer()
 	src := `export default function () {

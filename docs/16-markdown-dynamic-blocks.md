@@ -93,7 +93,7 @@ Markdown
       "type": "integer",
       "minimum": 1,
       "default": 1,
-      "description": "插件 block Schema 的版本"
+      "description": "插件 block Schema 的版本；必须与 plugin.json frontend.blocks[].version 一致"
     },
     "id": {
       "type": "string",
@@ -114,7 +114,9 @@ Markdown
     "maxBytes": 65536,
     "maxDepth": 32,
     "maxBlocksPerDocument": 8,
-    "renderTimeoutMs": 300
+    "renderTimeoutMs": 300,
+    "maxBlocksPerRequest": 64,
+    "requestBudgetMs": 2000
   }
 }
 ```
@@ -140,6 +142,8 @@ Markdown
 
 - fence 内容必须是单个 JSON 对象；
 - 不支持 YAML/MDX/多段拼接；
+- fence 必须位于**列 0**，且不能处在其他 fenced code block 内；缩进代码块
+  （4 空格）与块引用/列表里的 fence 不执行（用于演示语法时不会被误触发）；
 - 未识别或解析失败时，**保留为普通代码块**（转义显示），不执行；
 - 流式过程中 fence 未闭合时按普通代码/占位显示，不调用渲染器；
 - 同一 Markdown 内块数量、总字节由 `x-limits` 限制。
@@ -183,6 +187,7 @@ Markdown
 | `schema` | 是 | 相对插件目录的 JSON Schema 路径，禁止 `..` |
 | `template` | 是 | 相对插件目录的 TSX 渲染器路径 |
 | `profile` | 否 | `display`（默认）或 `interactive` |
+| `version` | 否 | 块数据契约版本，缺省 `1`；fence 封套的 `version` 必须与它一致，否则降级 |
 
 加载规则：
 
@@ -195,7 +200,10 @@ Markdown
 装配范围：随包官方插件加载完整前端段；全局/工作区安装的插件只加载
 `frontend.blocks`（`frontend.LoadBlockScript` 会剥掉页面/插槽/样式/脚本），
 工作区优先、官方同 id 遮蔽磁盘版本；单个插件的 block 非法只跳过该插件并记日志。
-MVP 运行期只渲染 `profile: display`，`interactive` 即使在清单里声明也 fail-closed。
+Gateway 直接扫描安装目录，因此**只贡献 blocks、没有 backend 的纯前端包也能安装**；
+这类插件不在 Core 的 `plugin.list` 里，门禁按「未列出 = 安装即启用」处理，
+要停用就移除插件目录。MVP 运行期只渲染 `profile: display`，
+`interactive` 即使在清单里声明也 fail-closed。
 
 ## 7. 插件数据 Schema
 
@@ -230,7 +238,8 @@ type BlockProps = {
     version: number;
     data: { scope: "thread" | "workspace"; title?: string; highlight?: string };
   };
-  app: { workspace: string; product: string; route: string; theme: "light" | "dark" };
+  // 只含静态 app 信息；不带 CSRF token（块是只读展示，令牌不能进模型可写的内容）。
+  app: { workspace: string; product: string; route: string };
 };
 
 export default function UsageCard(props: BlockProps) {
@@ -259,13 +268,16 @@ export default function UsageCard(props: BlockProps) {
 
 MVP 在 Markdown **顶层**按 ` ```adag-ui ` fence 分段，不修改 goldmark AST：
 
-1. 扫描顶层 fence，得到「文本段 / 块段」序列；
+1. 按行扫描 fence 状态，得到「文本段 / 块段」序列：只有列 0 的
+   ` ```adag-ui ` 开块，其他 fenced code block 内的行一律跳过；
 2. 每个文本段继续走现有 `renderMarkdown` → bluemonday → `markdownVNodes`；
 3. 每个块段解析封套、校验 `data`、调用 Render Runtime 得到块 VNode；
 4. 按原顺序拼接文本段与块 VNode（HTML 端点拼接 `renderMarkdown` 输出与块 HTML）；
 5. 失败时只替换该块为降级节点，不影响其余文本。
 
-边界：fence 需位于顶层行首；列表/引用块内的嵌套 fence 不在 MVP 范围。后续可迁移为 goldmark AST 占位元素，以支持嵌套结构。
+边界：fence 需位于列 0；缩进代码块（4 空格）、块引用/列表内的 fence 与
+未闭合 fence 都不执行，按普通代码块显示——这样在文档里演示语法不会被误触发。
+后续可迁移为 goldmark AST 占位元素，以支持嵌套结构。
 
 这样：
 
@@ -334,14 +346,16 @@ Markdown 可能由模型生成，不能等同于插件页面/插槽。动态块�
 | 单块封套 | 64KB |
 | 单块 `data` 深度 | 32 |
 | 单文档块数 | 8 |
-| 单块渲染超时 | 300ms |
+| 单块渲染超时 | 300ms（块专属预算，见 `x-limits.renderTimeoutMs`） |
 | 单块 VNode 节点 | 2000 |
 | 单块 VNode 输出 | 256KB |
-| 单文档块渲染预算 | MVP 串行渲染，最长约 8 × 300ms；总预算与并发留到 P2 |
+| 单请求块数 | 64（线程页会渲染整份 transcript；超出按普通代码块降级） |
+| 单请求块渲染墙钟 | 2000ms（同上，超预算的块降级为代码块） |
+| 单文档块渲染预算 | 串行渲染，最长约 8 × 300ms |
 
 ### 11.2 缓存
 
-- Key：`(pluginID, pluginVersion, renderer, version, sha256(canonicalJSON(data)), theme?, locale?)`；
+- Key：`(renderer, blockID, pluginVersion, workspace, route, sha256(raw data))`；
 - Value：校验后的 VNode JSON（或 HTML 片段）；
 - 存储：Gateway 进程内 bounded cache（当前 512 项，满时清空；后续可换 LRU）；
 - 失效：插件 reload / enable / disable / 版本变化；
@@ -365,8 +379,11 @@ Markdown 可能由模型生成，不能等同于插件页面/插槽。动态块�
 | 数据 Schema 校验失败 | 降级块，记录 `ui.block.invalid_data` |
 | `profile` 非 `display`（MVP） | 降级块，记录 `ui.block.render_failed`（`unsupported_profile`） |
 | TSX 抛错/超时 | 降级块，记录 `ui.block.render_failed`（生产不展示堆栈） |
+| 模板返回 `null` | **合法空块**：HTML 与 AST 都跳过该块，不画错误卡、不记审计 |
+| 模板返回非 null 但没有根节点 | 降级块，记录 `ui.block.invalid_vnode`（`empty_root`） |
 | VNode 校验失败 | 降级块，记录 `ui.block.invalid_vnode` |
-| 未知 `version` | 降级块，提示“插件版本不兼容” |
+| 未知 `version` | 降级块，记录 `ui.block.render_failed`（`unsupported_version`） |
+| 块 `id` 重复 | 降级当前块，提示「动态块 id 重复」 |
 | 其他 Markdown 渲染器 | `adag-ui` 作为普通代码块显示，不执行 |
 
 降级文本始终由宿主转义；`data` 不进入错误消息，避免泄露。
@@ -375,7 +392,7 @@ Markdown 可能由模型生成，不能等同于插件页面/插槽。动态块�
 `kind`（`ui.block.invalid_data` / `ui.block.render_failed` / `ui.block.invalid_vnode`）、
 `plugin`、`renderer`、`block id`、`error`（仅错误码，如 `invalid_json`、
 `schema_validation`、`renderer_missing`、`plugin_disabled`、`props_error`、
-`render_error`、`profile_violation`）。
+`render_error`、`empty_root`、`unsupported_version`、`profile_violation`）。
 **`data` 与其派生内容永远不进入事件**，错误码也不携带渲染器返回的原始消息。
 
 

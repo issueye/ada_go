@@ -123,11 +123,12 @@ func quoteJS(s string) string {
 // Renderer 把 TSX 模板渲染成 VNode JSON。并发安全：编译缓存有锁，
 // Runtime 每次渲染新建、不跨 goroutine。
 type Renderer struct {
-	mu       sync.Mutex
-	cache    map[string]string // 源内容 SHA-256 → transform 后的 ESM
-	compMod  string            // ssr:components 模块源码
-	slotTime time.Duration
-	pageTime time.Duration
+	mu        sync.Mutex
+	cache     map[string]string // 源内容 SHA-256 → transform 后的 ESM
+	compMod   string            // ssr:components 模块源码
+	slotTime  time.Duration
+	pageTime  time.Duration
+	blockTime time.Duration
 }
 
 // RendererOption 定制 Renderer。
@@ -151,13 +152,25 @@ func WithRenderBudgets(slot, page time.Duration) RendererOption {
 	}
 }
 
+// WithBlockRenderBudget 覆盖 Markdown 动态块的渲染预算（缺省同页面档）。
+// 独立成项，保证 spec/markdown-block.schema.json 的 renderTimeoutMs 对应
+// 真正生效的值，而不是随 PageTimeoutMS 漂移。
+func WithBlockRenderBudget(d time.Duration) RendererOption {
+	return func(r *Renderer) {
+		if d > 0 {
+			r.blockTime = d
+		}
+	}
+}
+
 // NewRenderer 构造渲染器。
 func NewRenderer(opts ...RendererOption) *Renderer {
 	r := &Renderer{
-		cache:    map[string]string{},
-		compMod:  renderPrelude,
-		slotTime: DefaultRenderSlotTimeout,
-		pageTime: DefaultRenderPageTimeout,
+		cache:     map[string]string{},
+		compMod:   renderPrelude,
+		slotTime:  DefaultRenderSlotTimeout,
+		pageTime:  DefaultRenderPageTimeout,
+		blockTime: DefaultRenderPageTimeout,
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -174,6 +187,12 @@ func (r *Renderer) RenderTemplate(src string, props json.RawMessage) (json.RawMe
 // RenderPage 渲染一个页面模板（预算 = 页面档）。
 func (r *Renderer) RenderPage(src string, props json.RawMessage) (json.RawMessage, error) {
 	return r.render(src, props, r.pageTime)
+}
+
+// RenderBlockTemplate 渲染一个 Markdown 动态块模板（预算 = 块档）。
+// 返回值可能是字面量 null，表示该块没有内容可展示。
+func (r *Renderer) RenderBlockTemplate(src string, props json.RawMessage) (json.RawMessage, error) {
+	return r.render(src, props, r.blockTime)
 }
 
 // render 的一次完整执行：transform → Runtime → eval → 调用 → JSON。

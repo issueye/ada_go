@@ -6,6 +6,9 @@ package main
 import (
 	"errors"
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/adag/ada-go/internal/gateway/frontend"
 	"github.com/adag/ada-go/internal/plugins/discovery"
@@ -28,6 +31,10 @@ func loadThirdPartyBlockScripts(workspaces []string, official []host.Script) []h
 }
 
 // loadBlockScriptsFromRoots 按 roots 顺序加载，先到先得（工作区优先）。
+//
+// 这里直接读插件目录、不经过 discovery.LoadDirDetailed：后者要求插件有
+// backend（Core 只加载有入口的包），而 block-only 的纯前端包正是本功能要支持的。
+// 清单校验与模板/Schema 读取由 frontend.LoadBlockScript 负责。
 func loadBlockScriptsFromRoots(roots []string, official []host.Script) []host.Script {
 	reserved := map[string]bool{}
 	for _, s := range official {
@@ -38,24 +45,30 @@ func loadBlockScriptsFromRoots(roots []string, official []host.Script) []host.Sc
 	seen := map[string]bool{}
 	var out []host.Script
 	for _, root := range roots {
-		list, warns, err := discovery.LoadDirDetailed(root, "")
+		entries, err := os.ReadDir(root)
 		if err != nil {
-			log.Printf("gateway: 扫描插件目录 %s 失败: %v", root, err)
+			if !os.IsNotExist(err) {
+				log.Printf("gateway: 扫描插件目录 %s 失败: %v", root, err)
+			}
 			continue
 		}
-		for _, w := range warns {
-			log.Printf("gateway: 插件发现警告 %s: %s", w.PluginID, w.Message)
-		}
-		for _, p := range list {
-			id := p.ID()
-			if id == "" || reserved[id] {
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			id := e.Name()
+			if reserved[id] {
 				continue
 			}
 			if seen[id] {
 				log.Printf("gateway: 插件 %s 在 %s 被更高优先级来源覆盖，忽略", id, root)
 				continue
 			}
-			sc, err := frontend.LoadBlockScript(p.Dir)
+			dir := filepath.Join(root, id)
+			if _, statErr := os.Stat(filepath.Join(dir, "plugin.json")); statErr != nil {
+				continue // 插件根里可能有非插件目录，静默跳过
+			}
+			sc, err := frontend.LoadBlockScript(dir)
 			if errors.Is(err, frontend.ErrNoBlocks) {
 				continue
 			}

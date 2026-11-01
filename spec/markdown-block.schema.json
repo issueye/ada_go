@@ -37,6 +37,8 @@
     "maxBytes": 65536,
     "maxDepth": 32,
     "maxBlocksPerDocument": 8,
-    "renderTimeoutMs": 300
+    "renderTimeoutMs": 300,
+    "maxBlocksPerRequest": 64,
+    "requestBudgetMs": 2000
   }
 }
