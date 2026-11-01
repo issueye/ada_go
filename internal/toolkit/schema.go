@@ -296,7 +296,12 @@ func (s *schema) checkType(path string, v any) error {
 		return nil
 	}
 	if !s.matches(v) {
-		return fmt.Errorf("toolkit: %s 的类型应为 %s，实际是 %T", path, s.Type, v)
+		hint := ""
+		if _, isString := v.(string); isString && (s.Type == "array" || s.Type == "object") {
+			// 常见模型错误：把数组/对象序列化成字符串再传。
+			hint = "（传 JSON 结构本身，不要传序列化后的字符串）"
+		}
+		return fmt.Errorf("toolkit: %s 的类型应为 %s，实际是 %T%s", path, s.Type, v, hint)
 	}
 	return nil
 }

@@ -93,6 +93,8 @@ export default function (agent: AgentAPI): void {
       "执行一条命令并返回退出码与输出。命令与参数必须分开传（不经过 shell：没有管道、通配符、变量展开）。" +
       `当前宿主平台：${PLATFORM || "未知"}；Windows 原生 find/grep/ls 与 Unix 语义不同，` +
       "查找文件优先用 list_files/search_files。" +
+      "args 是 JSON 数组（不是序列化后的字符串）；带空格或引号的参数作为一个元素传入。" +
+      "写文件优先用 write_file/edit_file，不要用 echo/Set-Content 拼接内容（引号与换行极易出错）。" +
       "cwd 只能是工作区内的路径；非零退出码不会抛错，会原样回给你判断。",
     access: "exec",
     parameters: {
