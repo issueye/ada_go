@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adag/ada-go/app"
 	"github.com/adag/ada-go/internal/cli"
 	"github.com/adag/ada-go/internal/conformance/testkit"
 	"github.com/adag/ada-go/internal/domain"
@@ -30,6 +31,7 @@ func testConfig(t *testing.T, model string) cli.Config {
 		DataDir:   data,
 		Product:   productPath(t),
 		Scripts:   scripts,
+		Assembler: app.Assembler{},
 		Fake:      model == "",
 		// 插件启停的全局状态（plugins.json）指向临时目录，测试不写真实主目录。
 		PluginStatePath: filepath.Join(data, "plugins.json"),
@@ -109,7 +111,7 @@ func TestSessionEnableUndeclaredPlugin(t *testing.T) {
 	defer sess.Close(ctx)
 
 	hasTool := func(name string) bool {
-		for _, d := range sess.Assembly().Tools.List(ctx) {
+		for _, d := range sess.Assembly().ToolCatalog().List(ctx) {
 			if d.Name == name {
 				return true
 			}
@@ -228,7 +230,7 @@ func TestSessionPluginToolReceivesThreadID(t *testing.T) {
 	))
 	cfg := cli.Config{
 		Workspace: ws, DataDir: data, Product: productPath(t), Scripts: scripts,
-		ModelClient: fake, In: strings.NewReader(""),
+		Assembler: app.Assembler{}, ModelClient: fake, In: strings.NewReader(""),
 	}
 	ctx := context.Background()
 	sess, err := cli.Open(ctx, cfg)
@@ -272,6 +274,7 @@ func TestSessionScriptedToolTurn(t *testing.T) {
 		DataDir:     data,
 		Product:     productPath(t),
 		Scripts:     scripts,
+		Assembler:   app.Assembler{},
 		ModelClient: fake,
 		In:          strings.NewReader(""),
 		Out:         &out,
@@ -309,6 +312,7 @@ func TestSessionAskUserRoundTripsThroughUI(t *testing.T) {
 		DataDir:     t.TempDir(),
 		Product:     productPath(t),
 		Scripts:     scripts,
+		Assembler:   app.Assembler{},
 		ModelClient: fake,
 		In:          strings.NewReader(""),
 		HasUI:       true,
@@ -380,6 +384,7 @@ func TestSessionAskUserFailsClosedWithoutUI(t *testing.T) {
 		DataDir:     t.TempDir(),
 		Product:     productPath(t),
 		Scripts:     scripts,
+		Assembler:   app.Assembler{},
 		ModelClient: fake,
 		In:          strings.NewReader(""),
 	}

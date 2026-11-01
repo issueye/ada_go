@@ -112,8 +112,9 @@ agent.registerProvider({
   id: "openai", models: [ModelInfo],
   protocol: "openai_chat", defaultBaseUrl: "https://api.openai.com/v1",
   secretName: "openai_api_key", displayName: "OpenAI Chat",
+  authHeader: "Authorization", authPrefix: "Bearer ",
   stream(req, ctx) {},
-}); // 仅 builtin/verified；元数据用于播种默认供应商，基座不写死端点/密钥名
+}); // 仅 builtin/verified；元数据用于播种默认供应商、密钥提示与代发 /models
 agent.on("tool.beforeCall", fn, { priority?: 0, action?: "deny" });       // 策略钩子，见 docs 06 §6.6
 ```
 

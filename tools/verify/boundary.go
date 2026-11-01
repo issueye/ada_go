@@ -175,7 +175,7 @@ func strictAdjacentCount(line, key string) bool {
 //
 // 直接 import 检查只能覆盖 `import "plugins/official"`；`corerpc → cli → app → official`
 // 这类链路不会出现在任何一个文件的 import 里。这里用 go list 的 Deps 做闭包检查：
-// 允许 app（组合根）、internal/cli（CLI/组合消费方）、cmd/adag（入口）与 official 自身。
+// 允许 app（组合根）、cmd/adag（入口）与 official 自身。
 func checkTransitiveOfficial(root string) error {
 	cmd := exec.Command("go", "list", "-deps",
 		"-f", `{{.ImportPath}}|{{join .Deps ","}}`, "./internal/...", "./cmd/...")
@@ -191,10 +191,9 @@ func checkTransitiveOfficial(root string) error {
 
 	official := modulePrefix + "plugins/official"
 	allowed := map[string]bool{
-		official:                      true,
-		modulePrefix + "app":          true,
-		modulePrefix + "internal/cli": true,
-		modulePrefix + "cmd/adag":     true,
+		official:                  true,
+		modulePrefix + "app":      true,
+		modulePrefix + "cmd/adag": true,
 	}
 	var bad []string
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {

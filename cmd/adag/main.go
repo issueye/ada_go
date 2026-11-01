@@ -241,14 +241,15 @@ func cmdCore(args []string, stdout io.Writer) error {
 	defer cancel()
 
 	sess, err := cli.Open(serveCtx, cli.Config{
-		Workspace:  *workspace,
-		DataDir:    *dataDir,
-		Product:    *product,
-		Provider:   *provider,
-		Model:      *model,
-		BaseURL:    *baseURL,
-		Fake:       *fake,
-		Debug:      debugRequested(*debug),
+		Workspace: *workspace,
+		DataDir:   *dataDir,
+		Product:   *product,
+		Provider:  *provider,
+		Model:     *model,
+		BaseURL:   *baseURL,
+		Fake:      *fake,
+		Assembler: app.Assembler{},
+		Debug:     debugRequested(*debug),
 		// Core 由 Gateway 托管：交互由网页里的托盘回答（没有终端 stdin）。
 		HasUI: true,
 		In:    strings.NewReader(""),

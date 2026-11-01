@@ -50,6 +50,11 @@ type ProviderDef struct {
 	DefaultBaseURL string `json:"defaultBaseUrl,omitempty"`
 	SecretName     string `json:"secretName,omitempty"`
 	DisplayName    string `json:"displayName,omitempty"`
+	// 鉴权元数据：拉取 /models 等宿主代发请求时使用，避免基座按协议特判。
+	AuthHeader       string `json:"authHeader,omitempty"`       // 如 Authorization / x-api-key；空时按 Authorization
+	AuthPrefix       string `json:"authPrefix,omitempty"`       // 如 "Bearer "；空时按 "Bearer "
+	APIVersionHeader string `json:"apiVersionHeader,omitempty"` // 如 anthropic-version
+	APIVersion       string `json:"apiVersion,omitempty"`
 	// Stream 是脚本侧 provider 的句柄；ctx.http 由 CapabilitySet 决定。
 	Stream HandlerRef `json:"-"`
 }

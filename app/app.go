@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/adag/ada-go/internal/coreapp"
+	"github.com/adag/ada-go/internal/corecontracts"
 	"github.com/adag/ada-go/internal/domain"
 	"github.com/adag/ada-go/internal/plugins"
 	"github.com/adag/ada-go/internal/plugins/host"
@@ -24,28 +25,8 @@ import (
 	"github.com/adag/ada-go/plugins/official"
 )
 
-// Deps 是装配期注入的宿主依赖。
-type Deps struct {
-	// Context 是给每个插件调用的宿主上下文（Workspace/Signal/Log/State/UI/HTTP/Secret）。
-	// PluginID 与 Settings 由装配器按插件覆盖，调用方不用填。
-	Context host.Context
-	// HostEnv 是宿主的进程环境（清单 backend.env 白名单与它求交，06 §6.2）。
-	HostEnv map[string]string
-	// Secrets 报告某个密钥名是否可用；nil 表示「清单声明的都能取到」。
-	Secrets func(name string) bool
-	// Settings 是按插件 id 的用户设置（[plugins.settings.<id>]，13 §附录 B）。
-	Settings map[string]map[string]any
-	// OnWarning 接收装配期非致命警告（技能解析失败/同名冲突等）；nil 时丢弃。
-	OnWarning func(string)
-	// Scripts 为空时从官方插件目录加载；测试可以注入替身。
-	Scripts []host.Script
-	// BaseURL 是 OpenAI 兼容端点的覆盖（M1 的 provider 插件读取它）。
-	BaseURL string
-	// FrontendIDs 列出「产品声明里允许出现、但不在本侧装配」的插件 id（M4 前端插件）。
-	// 它们由 Gateway 的渲染桥装配；本侧装配对它们容忍缺席（产品承诺由 Gateway 侧
-	// 用同一份 FrontendScripts 校验），避免前端插件进不了产品声明。
-	FrontendIDs map[string]bool
-}
+// Deps 是装配期注入的宿主依赖（契约定义在 corecontracts，供 CLI/Core 共用）。
+type Deps = corecontracts.Deps
 
 // Assembly 是一次装配的结果。
 type Assembly struct {
@@ -69,6 +50,43 @@ type Assembly struct {
 	skills skillTable
 	// executor 是 tool 调用的路由（toolkit.Invoker）。
 	executor *toolInvoker
+}
+
+// PluginInstances 返回本次装配的插件实例（corecontracts.Assembly）。
+func (a *Assembly) PluginInstances() []*host.Instance {
+	if a == nil {
+		return nil
+	}
+	return a.Plugins
+}
+
+// ToolCatalog 返回工具目录。
+func (a *Assembly) ToolCatalog() *toolkit.Catalog {
+	if a == nil {
+		return nil
+	}
+	return a.Tools
+}
+
+// ProviderRegistry 返回 provider 目录。
+func (a *Assembly) ProviderRegistry() *provider.Registry {
+	if a == nil {
+		return nil
+	}
+	return a.Providers
+}
+
+// HookChain 返回钩子链。
+func (a *Assembly) HookChain() *plugins.HookChain {
+	if a == nil {
+		return nil
+	}
+	return a.Hooks
+}
+
+// PolicyPluginActive 报告本次装配是否有 role=tool-policy 插件。
+func (a *Assembly) PolicyPluginActive() bool {
+	return a != nil && a.Runtime != nil && a.Runtime.PolicyPluginActive
 }
 
 // Skills 返回本次装配的技能元数据（不含正文；deps.Skills 与 ctx.skills 用它）。
@@ -166,6 +184,37 @@ func AssembleWithExtras(ctx context.Context, p *coreapp.Product, base, extras []
 // 少一个就等于承诺没兑现（1.5.5 禁用即能力消失的反向）。
 func Assemble(ctx context.Context, p *coreapp.Product, scripts []host.Script, deps Deps) (*Assembly, error) {
 	return assembleSet(ctx, p, scripts, nil, nil, nil, deps)
+}
+
+// Assembler 是组合根对 corecontracts.Assembler 的实现。
+//
+// 它把具体 *Assembly 适配成接口返回，让 internal/cli 不需要 import app；
+// cmd/adag 负责把 Assembler{} 注入 cli.Config。
+type Assembler struct{}
+
+func (Assembler) Assemble(ctx context.Context, p *coreapp.Product, scripts []host.Script, deps Deps) (corecontracts.Assembly, error) {
+	asm, err := Assemble(ctx, p, scripts, deps)
+	return assemblyOrNil(asm, err)
+}
+
+func (Assembler) AssembleWithExtras(ctx context.Context, p *coreapp.Product, base, extras []host.Script, disabled, optIn map[string]bool, deps Deps) (corecontracts.Assembly, error) {
+	asm, err := AssembleWithExtras(ctx, p, base, extras, disabled, optIn, deps)
+	return assemblyOrNil(asm, err)
+}
+
+func (Assembler) OfficialScripts() ([]host.Script, error) { return OfficialScripts() }
+
+func (Assembler) FrontendScripts() ([]host.Script, error) { return FrontendScripts() }
+
+func (Assembler) OfficialRoot() (string, error) { return OfficialRoot() }
+
+func (Assembler) IsPolicyPlugin(m *plugins.Manifest) bool { return isPolicyPlugin(m) }
+
+func assemblyOrNil(asm *Assembly, err error) (corecontracts.Assembly, error) {
+	if asm == nil {
+		return nil, err
+	}
+	return asm, err
 }
 
 // assembleSet 是 Assemble / AssembleWithExtras 的共用实现：

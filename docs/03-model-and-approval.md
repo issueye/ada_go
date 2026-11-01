@@ -39,6 +39,10 @@ interface ProviderDef {
   defaultBaseUrl?: string;                  // 播种默认供应商时的端点
   secretName?: string;                      // 播种/密钥提示用的清单 secrets 名
   displayName?: string;                     // 供应商页显示名
+  authHeader?: string;                      // 宿主代发 /models 时的鉴权头，如 Authorization / x-api-key
+  authPrefix?: string;                      // 鉴权值前缀，如 "Bearer "
+  apiVersionHeader?: string;                // 版本头，如 anthropic-version
+  apiVersion?: string;                      // 版本头的值
   stream(req: ProviderRequest, ctx: ProviderContext): Promise<void>;
 }
 
@@ -84,7 +88,7 @@ interface ProviderContext {
 }
 ```
 
-`http.sse` 是受信能力 `net.sse`，只授予 builtin/verified；TLS、代理、重定向、连接/空闲/总时长、取消与响应大小都由宿主执行，插件只做“SSE 事件 → 归一化增量”的协议映射。provider 的 `stream` 是长任务，不受 5s 脚本调用超时约束，受建连 15s、空闲 90s、总时长 30 分钟与轮次取消约束。provider 清单声明 `backend.capabilities: ["net.sse"]` 与 `secrets`，模型名、`base_url` 与参数由产品配置传入，插件不读全局配置。`ProviderDef` 的 `protocol` / `defaultBaseUrl` / `secretName` / `displayName` 用于宿主播种默认供应商与密钥提示；基座不写死具体供应商的端点或密钥名。
+`http.sse` 是受信能力 `net.sse`，只授予 builtin/verified；TLS、代理、重定向、连接/空闲/总时长、取消与响应大小都由宿主执行，插件只做“SSE 事件 → 归一化增量”的协议映射。provider 的 `stream` 是长任务，不受 5s 脚本调用超时约束，受建连 15s、空闲 90s、总时长 30 分钟与轮次取消约束。provider 清单声明 `backend.capabilities: ["net.sse"]` 与 `secrets`，模型名、`base_url` 与参数由产品配置传入，插件不读全局配置。`ProviderDef` 的 `protocol` / `defaultBaseUrl` / `secretName` / `displayName` / `authHeader` / `authPrefix` / `apiVersionHeader` / `apiVersion` 用于宿主播种默认供应商、密钥提示与代发 `/models`；基座不写死具体供应商的端点、密钥名或鉴权头。
 
 Node 兼容层**不安装** `node:http`/`node:https`/`node:net`/`node:tls`/`node:dns`。provider 只能用 `ctx.http.sse`/`ctx.http.json`，不能用全局 `fetch` 或自建连接；这样代理、证书、重定向、DNS 与超时都只有一个执行点。完整模块矩阵见 [6.12](12-node-compat.md#612-node-兼容原生库)。
 

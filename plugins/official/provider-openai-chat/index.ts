@@ -83,6 +83,10 @@ interface ProviderDef {
   defaultBaseUrl?: string;
   secretName?: string;
   displayName?: string;
+  authHeader?: string;
+  authPrefix?: string;
+  apiVersionHeader?: string;
+  apiVersion?: string;
   stream(req: ProviderRequest, ctx: ProviderContext): Promise<void>;
 }
 
@@ -392,6 +396,8 @@ export default function (agent: AgentAPI): void {
     defaultBaseUrl: DEFAULT_BASE_URL,
     secretName: SECRET_NAME,
     displayName: "OpenAI Chat（兼容端点）",
+    authHeader: "Authorization",
+    authPrefix: "Bearer ",
     stream(req, ctx) {
       return streamOnce(req, ctx);
     },

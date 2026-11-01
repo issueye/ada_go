@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/adag/ada-go/app"
 	"github.com/adag/ada-go/internal/cli"
 	"github.com/adag/ada-go/plugins/official"
 )
@@ -26,7 +27,7 @@ func TestProviderAdminConfigLifecycle(t *testing.T) {
 	}
 	sess, err := cli.Open(ctx, cli.Config{
 		Workspace: t.TempDir(), DataDir: dataDir, Product: productPath(t),
-		Scripts: scripts, Fake: true, In: strings.NewReader(""), Out: io.Discard,
+		Scripts: scripts, Assembler: app.Assembler{}, Fake: true, In: strings.NewReader(""), Out: io.Discard,
 	})
 	if err != nil {
 		t.Fatalf("cli.Open: %v", err)
@@ -158,7 +159,7 @@ func TestProviderConfigSharedAcrossWorkspaces(t *testing.T) {
 		}
 		sess, err := cli.Open(ctx, cli.Config{
 			Workspace: workspace, Product: productPath(t),
-			Scripts: scripts, Fake: true, In: strings.NewReader(""), Out: io.Discard,
+			Scripts: scripts, Assembler: app.Assembler{}, Fake: true, In: strings.NewReader(""), Out: io.Discard,
 		})
 		if err != nil {
 			t.Fatalf("cli.Open(%s): %v", name, err)
@@ -243,7 +244,7 @@ func TestProviderConfigMigratesLegacyWorkspace(t *testing.T) {
 	}
 	sess, err := cli.Open(ctx, cli.Config{
 		Workspace: workspace, Product: productPath(t),
-		Scripts: scripts, Fake: true, In: strings.NewReader(""), Out: io.Discard,
+		Scripts: scripts, Assembler: app.Assembler{}, Fake: true, In: strings.NewReader(""), Out: io.Discard,
 	})
 	if err != nil {
 		t.Fatalf("cli.Open: %v", err)

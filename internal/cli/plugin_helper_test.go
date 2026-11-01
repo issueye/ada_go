@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/adag/ada-go/app"
 	"github.com/adag/ada-go/internal/cli"
 	"github.com/adag/ada-go/plugins/official"
 )
@@ -27,7 +28,7 @@ func TestPluginHelperInstallsGlobalPlugin(t *testing.T) {
 	}
 	sess, err := cli.Open(ctx, cli.Config{
 		Workspace: workspace, DataDir: t.TempDir(), Product: productPath(t),
-		Scripts: scripts, Fake: true, In: strings.NewReader(""), Out: io.Discard,
+		Scripts: scripts, Assembler: app.Assembler{}, Fake: true, In: strings.NewReader(""), Out: io.Discard,
 	})
 	if err != nil {
 		t.Fatalf("cli.Open: %v", err)

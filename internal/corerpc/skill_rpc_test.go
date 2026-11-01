@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/adag/ada-go/app"
 	"github.com/adag/ada-go/internal/cli"
 )
 
@@ -41,6 +42,7 @@ func newCodingSession(t *testing.T) *cli.Session {
 		Workspace: ws,
 		DataDir:   t.TempDir(),
 		Product:   codingProductPath(t),
+		Assembler: app.Assembler{},
 		Fake:      true,
 		In:        strings.NewReader(""),
 		Out:       discard{},

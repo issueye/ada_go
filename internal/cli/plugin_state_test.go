@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/adag/ada-go/app"
 	"github.com/adag/ada-go/internal/adapters/sqlite"
 	"github.com/adag/ada-go/internal/cli"
 	"github.com/adag/ada-go/plugins/official"
@@ -30,7 +31,7 @@ func openWithPluginState(t *testing.T, workspace, dataDir, globalPath string) *c
 	}
 	sess, err := cli.Open(context.Background(), cli.Config{
 		Workspace: workspace, DataDir: dataDir, Product: productPath(t),
-		Scripts: scripts, Fake: true, In: strings.NewReader(""), Out: io.Discard,
+		Scripts: scripts, Assembler: app.Assembler{}, Fake: true, In: strings.NewReader(""), Out: io.Discard,
 		PluginStatePath: globalPath,
 	})
 	if err != nil {

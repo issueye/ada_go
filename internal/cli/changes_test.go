@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adag/ada-go/app"
 	"github.com/adag/ada-go/internal/adapters/sqlite"
 	"github.com/adag/ada-go/internal/cli"
 	"github.com/adag/ada-go/internal/conformance/testkit"
@@ -94,6 +95,7 @@ func ckptSession(t *testing.T, workspace, dataDir string, steps ...[]testkit.Scr
 		DataDir:     dataDir,
 		Product:     ckptProduct(t),
 		Scripts:     append(base, fixture),
+		Assembler:   app.Assembler{},
 		Settings:    map[string]map[string]any{"policy-default": {"mode": "auto"}},
 		ModelClient: model,
 		In:          strings.NewReader(""),

@@ -2,7 +2,7 @@ package cli
 
 // 本文件是技能的会话侧接线（06 §6.7）。
 //
-// 技能表本身在装配期由 app 结算（app.settleSkills：插件贡献 + 工作区
+// 技能表本身在装配期由组合根结算（settleSkills：插件贡献 + 工作区
 // .adago/skills，同名工作区优先；只保留 name/description/absolute path，
 // 正文由模型用 read_file 按路径读取）。这里只做三件事：
 //
@@ -14,7 +14,7 @@ package cli
 import (
 	"context"
 
-	"github.com/adag/ada-go/app"
+	"github.com/adag/ada-go/internal/corecontracts"
 	"github.com/adag/ada-go/internal/domain"
 	"github.com/adag/ada-go/internal/engine"
 )
@@ -54,12 +54,12 @@ func (src assemblyPromptSource) Fragments(context.Context) []engine.PromptFragme
 }
 
 // promptFragmentsOf 从装配结果收集提示词片段（persona 等提示词插件的贡献）。
-func promptFragmentsOf(asm *app.Assembly) []engine.PromptFragment {
+func promptFragmentsOf(asm corecontracts.Assembly) []engine.PromptFragment {
 	var frags []engine.PromptFragment
 	if asm == nil {
 		return nil
 	}
-	for _, inst := range asm.Plugins {
+	for _, inst := range asm.PluginInstances() {
 		c := inst.Contribution()
 		if c == nil {
 			continue

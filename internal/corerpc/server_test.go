@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adag/ada-go/app"
 	"github.com/adag/ada-go/internal/domain"
 	"github.com/coder/websocket"
 
@@ -41,6 +42,7 @@ func newSession(t *testing.T, model ports.ModelClient) *cli.Session {
 		Workspace:   t.TempDir(),
 		DataDir:     t.TempDir(),
 		Product:     productPath(t),
+		Assembler:   app.Assembler{},
 		Fake:        model == nil,
 		ModelClient: model,
 		In:          strings.NewReader(""),
@@ -939,7 +941,7 @@ func TestCoreRPCPluginHTTPStream(t *testing.T) {
 	script := host.Script{Manifest: m, EntryName: host.EntryScheme + "://sse-fixture/index.js", Source: src}
 	sess, err := cli.Open(ctx, cli.Config{
 		Workspace: t.TempDir(), DataDir: t.TempDir(), Product: productPath,
-		Scripts: []host.Script{script}, Fake: true, In: strings.NewReader(""),
+		Scripts: []host.Script{script}, Assembler: app.Assembler{}, Fake: true, In: strings.NewReader(""),
 	})
 	if err != nil {
 		t.Fatalf("cli.Open: %v", err)

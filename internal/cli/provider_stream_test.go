@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/adag/ada-go/app"
 	"github.com/adag/ada-go/internal/cli"
 	"github.com/adag/ada-go/internal/domain"
 	"github.com/adag/ada-go/plugins/official"
@@ -45,7 +46,7 @@ func TestConfiguredProviderStreamAllowsConfiguredHost(t *testing.T) {
 	ctx := context.Background()
 	sess, err := cli.Open(ctx, cli.Config{
 		Workspace: t.TempDir(), DataDir: dataDir, Product: productPath(t),
-		Scripts: scripts, Provider: "test", Model: "m1",
+		Scripts: scripts, Assembler: app.Assembler{}, Provider: "test", Model: "m1",
 		In: strings.NewReader(""), Out: io.Discard,
 	})
 	if err != nil {
@@ -91,7 +92,7 @@ func TestDebugModeLogsProviderRequest(t *testing.T) {
 	ctx := context.Background()
 	sess, err := cli.Open(ctx, cli.Config{
 		Workspace: t.TempDir(), DataDir: dataDir, Product: productPath(t),
-		Scripts: scripts, Provider: "test", Model: "m1",
+		Scripts: scripts, Assembler: app.Assembler{}, Provider: "test", Model: "m1",
 		In: strings.NewReader(""), Out: io.Discard, Err: &debug,
 		Debug: true,
 	})

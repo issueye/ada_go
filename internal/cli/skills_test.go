@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/adag/ada-go/app"
 	"github.com/adag/ada-go/internal/cli"
 	"github.com/adag/ada-go/internal/conformance/testkit"
 	"github.com/adag/ada-go/internal/domain"
@@ -43,6 +44,7 @@ func openWithProduct(t *testing.T, productPath, ws string, model ports.ModelClie
 		DataDir:     t.TempDir(),
 		Product:     productPath,
 		Scripts:     scripts,
+		Assembler:   app.Assembler{},
 		ModelClient: model,
 		In:          strings.NewReader(""),
 		Out:         &out,
@@ -210,7 +212,7 @@ func TestSessionHeadlessSkillReadable(t *testing.T) {
 		t.Fatalf("按 path 读取 create-plugin 正文 = %q / %v", body, err)
 	}
 	// headless 声明了 tools-skill：搜索入口来自该插件。
-	if _, ok := sess.Assembly().Tools.Lookup(ctx, "skill_search"); !ok {
+	if _, ok := sess.Assembly().ToolCatalog().Lookup(ctx, "skill_search"); !ok {
 		t.Fatal("headless 声明 tools-skill 后应装配 skill_search")
 	}
 }

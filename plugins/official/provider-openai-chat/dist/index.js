@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:6f7638e3e1a74998) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:34eab351c6aa7f83) by plugins/official/build.mjs — do not edit
 // provider-openai-chat —— 官方插件：OpenAI Chat Completions 的流式协议映射（03 §5.5）。
 //
 // 这一层只做「SSE 事件 → 归一化 Delta」：TLS、代理、重定向、超时、取消、
@@ -84,6 +84,10 @@
                           
                       
                        
+                      
+                      
+                            
+                      
                                                                     
  
 
@@ -393,6 +397,8 @@ export default function (agent          )       {
     defaultBaseUrl: DEFAULT_BASE_URL,
     secretName: SECRET_NAME,
     displayName: "OpenAI Chat（兼容端点）",
+    authHeader: "Authorization",
+    authPrefix: "Bearer ",
     stream(req, ctx) {
       return streamOnce(req, ctx);
     },

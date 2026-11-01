@@ -25,7 +25,6 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/adag/ada-go/app"
 	"github.com/adag/ada-go/internal/adapters"
 	"github.com/adag/ada-go/internal/adapters/sqlite"
 	"github.com/adag/ada-go/internal/coreapp"
@@ -65,6 +64,8 @@ type Config struct {
 	HasUI bool
 	// Scripts 是官方插件包（由 cmd 注入）。
 	Scripts []host.Script
+	// Assembler 是组合根注入的装配入口（corecontracts.Assembler）；nil 时 Open 失败。
+	Assembler corecontracts.Assembler
 	// FrontendScripts 是前端插件（M4）：产品声明允许它们缺席本侧装配，
 	// 真实渲染在 Gateway 侧；Session 只用它们的 id 集合。
 	FrontendScripts []host.Script
@@ -96,18 +97,19 @@ type Config struct {
 
 // Session 是已装配的 Core 侧 CLI 会话。
 type Session struct {
-	cfg      Config
-	store    *sqlite.Store
-	asm      *app.Assembly
-	emitter  *coreproto.Emitter
-	broker   *coreproto.Broker
-	executor *toolkit.Executor
-	deps     engine.Deps
-	ids      *adapters.ULIDGen
-	clock    adapters.SystemClock
-	model    ports.ModelClient
-	modelErr error
-	secrets  map[string]string
+	cfg       Config
+	store     *sqlite.Store
+	asm       corecontracts.Assembly
+	assembler corecontracts.Assembler
+	emitter   *coreproto.Emitter
+	broker    *coreproto.Broker
+	executor  *toolkit.Executor
+	deps      engine.Deps
+	ids       *adapters.ULIDGen
+	clock     adapters.SystemClock
+	model     ports.ModelClient
+	modelErr  error
+	secrets   map[string]string
 
 	// M5 检查点账目：changes 是工具执行的内存账本（回执 chk_ id、写串行、
 	// 热重载跨代复用）；changeStore 是数据目录 changes/ 下的持久化账目
@@ -116,11 +118,11 @@ type Session struct {
 	changeStore *changeStore
 
 	// M3 插件平台：随包插件 base（Open 时冻结，热重载的合并基准）、产品声明、
-	// 装配期宿主依赖（app.Deps 原样复用）、第三方发现快照与失败记录。
+	// 装配期宿主依赖（corecontracts.Deps 原样复用）、第三方发现快照与失败记录。
 	// baseScripts/cfg 在 Open 之后只读；discovered/failedPlugins 变更持 s.mu。
 	baseScripts []host.Script
 	product     *coreapp.Product
-	appDeps     app.Deps
+	appDeps     corecontracts.Deps
 	// httpBridge 是插件出网桥；供应商配置变更时无需重建（当前不做 host 黑白名单）。
 	httpBridge httpBridge
 	// debug 与 httpBridge 共用同一序号，--debug 时输出每次出网请求。
@@ -196,6 +198,9 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 	if strings.TrimSpace(cfg.Workspace) == "" {
 		return nil, errors.New("cli: 需要工作区目录")
 	}
+	if cfg.Assembler == nil {
+		return nil, errors.New("cli: 需要组合根注入 Assembler")
+	}
 	abs, err := filepath.Abs(cfg.Workspace)
 	if err != nil {
 		return nil, err
@@ -255,6 +260,7 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 	}
 	s := &Session{
 		cfg: cfg, store: store, ids: ids, clock: clock, secrets: secrets,
+		assembler:     cfg.Assembler,
 		providerStore: provider.NewStore(providersPath),
 		steerQueues:   map[string][]domain.Message{},
 		turnActive:    map[string]int{},
@@ -289,7 +295,7 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 		hc.UI = s.uiAsk
 	}
 	hc.State = s.stateOp
-	// 技能通道（6.7）由 app.Assemble 按产品 capabilities.skills 注入：
+	// 技能通道（6.7）由 Assembler 按产品 capabilities.skills 注入：
 	// ctx.skills 只给 name/description/path；正文由模型用 read_file 按路径读取。
 	// 供应商管理（model.admin）：目录只读、不含密钥；切换复用 model.set 的解析。
 	hc.Providers = s.providerCatalog
@@ -320,7 +326,7 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 			s.frontendIDs[sc.Manifest.ID] = true
 		}
 	}
-	s.appDeps = app.Deps{
+	s.appDeps = corecontracts.Deps{
 		Context:     hc,
 		Secrets:     func(name string) bool { _, ok := s.secret(name); return ok },
 		Settings:    cfg.Settings,
@@ -686,7 +692,7 @@ func (s *Session) Product() *coreapp.Product {
 
 // Assembly 返回装配结果（插件、工具、provider 目录）。
 // 热重载会在锁内整体替换这份结果；拿到的指针对应的目录已冻结，可安全只读。
-func (s *Session) Assembly() *app.Assembly {
+func (s *Session) Assembly() corecontracts.Assembly {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.asm
@@ -698,43 +704,43 @@ func (s *Session) Plugins() []*host.Instance {
 	if asm == nil {
 		return nil
 	}
-	return append([]*host.Instance(nil), asm.Plugins...)
+	return append([]*host.Instance(nil), asm.PluginInstances()...)
 }
 
 // Tools 返回当前装配的工具描述符（tool.list 数据源）。
 func (s *Session) Tools(ctx context.Context) []domain.Descriptor {
 	asm := s.Assembly()
-	if asm == nil || asm.Tools == nil {
+	if asm == nil || asm.ToolCatalog() == nil {
 		return nil
 	}
-	return asm.Tools.List(ctx)
+	return asm.ToolCatalog().List(ctx)
 }
 
 // ProviderIDs 返回当前可用的 provider 实例 id（model.list 数据源）。
 func (s *Session) ProviderIDs() []string {
 	asm := s.Assembly()
-	if asm == nil || asm.Providers == nil {
+	if asm == nil || asm.ProviderRegistry() == nil {
 		return nil
 	}
-	return asm.Providers.Providers()
+	return asm.ProviderRegistry().Providers()
 }
 
 // ProviderModels 返回某个 provider 的模型能力。
 func (s *Session) ProviderModels(providerID string) []host.ModelInfo {
 	asm := s.Assembly()
-	if asm == nil || asm.Providers == nil {
+	if asm == nil || asm.ProviderRegistry() == nil {
 		return nil
 	}
-	return asm.Providers.Models(providerID)
+	return asm.ProviderRegistry().Models(providerID)
 }
 
 // ProviderConfigs 返回当前供应商配置（provider.list 数据源）。
 func (s *Session) ProviderConfigs() []provider.Config {
 	asm := s.Assembly()
-	if asm == nil || asm.Providers == nil {
+	if asm == nil || asm.ProviderRegistry() == nil {
 		return nil
 	}
-	return asm.Providers.Configs()
+	return asm.ProviderRegistry().Configs()
 }
 
 // Store 返回工作区存储句柄（Core RPC 的线程/entry 查询复用它）。
@@ -883,13 +889,13 @@ func (s *Session) CheckHTTPAPIStream(pluginID, method, path string) error {
 // httpAPIError 把路由层的判定映射成可读的 HTTP 状态（由 Core RPC 透给 Gateway）。
 func httpAPIError(err error) error {
 	switch {
-	case errors.Is(err, app.ErrRouteNotFound):
+	case errors.Is(err, corecontracts.ErrRouteNotFound):
 		return &HTTPAPIError{Status: 404, Message: "没有匹配的接口"}
-	case errors.Is(err, app.ErrRouteMethodNotAllowed):
+	case errors.Is(err, corecontracts.ErrRouteMethodNotAllowed):
 		return &HTTPAPIError{Status: 405, Message: "该路径不支持此方法"}
-	case errors.Is(err, app.ErrRouteStreaming):
+	case errors.Is(err, corecontracts.ErrRouteStreaming):
 		return &HTTPAPIError{Status: 406, Message: "该接口是 SSE，请用 EventSource 订阅"}
-	case errors.Is(err, app.ErrRouteNotStreaming):
+	case errors.Is(err, corecontracts.ErrRouteNotStreaming):
 		return &HTTPAPIError{Status: 406, Message: "该接口不是 SSE"}
 	}
 	return err
@@ -965,20 +971,20 @@ func (s *Session) UpdatePolicies(up PolicyUpdate) (coreapp.Policies, error) {
 }
 
 // ResolveModel 在装配好的 provider 目录里解析 provider/model，并补齐能力位。
-// 返回 false 表示 provider 或 model 未在 asm.Providers 中声明。
+// 返回 false 表示 provider 或 model 未在 asm.ProviderRegistry() 中声明。
 func (s *Session) ResolveModel(providerID, modelID string) (ports.ModelRef, bool) {
 	if providerID == "" || modelID == "" {
 		return ports.ModelRef{}, false
 	}
 	asm := s.Assembly()
-	if asm == nil || asm.Providers == nil {
+	if asm == nil || asm.ProviderRegistry() == nil {
 		return ports.ModelRef{}, false
 	}
-	for _, id := range s.asm.Providers.Providers() {
+	for _, id := range s.asm.ProviderRegistry().Providers() {
 		if id != providerID {
 			continue
 		}
-		for _, m := range s.asm.Providers.Models(id) {
+		for _, m := range s.asm.ProviderRegistry().Models(id) {
 			if m.ID != modelID {
 				continue
 			}
@@ -1115,8 +1121,8 @@ func defaultProvidersPath(dataDir string) string {
 // 首次启动先迁移旧的「每工作区一份」配置，避免用户升级后丢失已配置的供应商；
 // 没有可迁移配置时才从适配器插件播种（保留旧产品开箱即用的行为）。
 // 配置读取/写入失败只记警告：供应商配置坏掉不应该让整个 Core 起不来。
-func (s *Session) applyProviderConfigs(asm *app.Assembly) {
-	if asm == nil || asm.Providers == nil {
+func (s *Session) applyProviderConfigs(asm corecontracts.Assembly) {
+	if asm == nil || asm.ProviderRegistry() == nil {
 		return
 	}
 	cfgs, exists, err := s.providerStore.Load()
@@ -1139,7 +1145,7 @@ func (s *Session) applyProviderConfigs(asm *app.Assembly) {
 		}
 	}
 	migrateProviderThinkingLevels(cfgs)
-	asm.Providers.SetConfigs(cfgs)
+	asm.ProviderRegistry().SetConfigs(cfgs)
 	s.providersMu.Lock()
 	s.providerConfigs = cloneProviderConfigs(cfgs)
 	s.providersMu.Unlock()
@@ -1151,7 +1157,7 @@ func (s *Session) applyProviderConfigs(asm *app.Assembly) {
 // 否则模型列表/供应商页会一直停留在启动时的快照。文件不存在或损坏时保留现状。
 func (s *Session) RefreshProviderConfigs() {
 	asm := s.Assembly()
-	if asm == nil || asm.Providers == nil {
+	if asm == nil || asm.ProviderRegistry() == nil {
 		return
 	}
 	cfgs, exists, err := s.providerStore.Load()
@@ -1159,7 +1165,7 @@ func (s *Session) RefreshProviderConfigs() {
 		return
 	}
 	migrateProviderThinkingLevels(cfgs)
-	asm.Providers.SetConfigs(cfgs)
+	asm.ProviderRegistry().SetConfigs(cfgs)
 	s.providersMu.Lock()
 	s.providerConfigs = cloneProviderConfigs(cfgs)
 	s.providersMu.Unlock()
@@ -1170,7 +1176,7 @@ func (s *Session) RefreshProviderConfigs() {
 // 优先当前工作区；否则扫描同级工作区，取最近修改的一份用户配置。
 // 只有确实含用户改动（密钥/代理/请求头/自定义端点或供应商）才迁移，
 // 避免把旧版本自动播种的 OpenAI 默认项带进共享配置。
-func (s *Session) legacyProviderConfigs(asm *app.Assembly) ([]provider.Config, bool) {
+func (s *Session) legacyProviderConfigs(asm corecontracts.Assembly) ([]provider.Config, bool) {
 	path := s.providerStore.Path()
 	if strings.TrimSpace(path) == "" {
 		return nil, false
@@ -1225,7 +1231,7 @@ func samePath(a, b string) bool {
 // loadUserProviderConfigs 读取一份旧配置；没有用户改动时视为「可重新播种」。
 // 适配器默认端点由 provider 插件声明；仍是默认端点/无密钥的条目是旧版本自动播种的，
 // 迁移时丢弃，避免升级后又冒出一套未配置的供应商。
-func (s *Session) loadUserProviderConfigs(asm *app.Assembly, path string) ([]provider.Config, bool) {
+func (s *Session) loadUserProviderConfigs(asm corecontracts.Assembly, path string) ([]provider.Config, bool) {
 	cfgs, exists, err := provider.NewStore(path).Load()
 	if err != nil || !exists {
 		return nil, false
@@ -1242,7 +1248,7 @@ func (s *Session) loadUserProviderConfigs(asm *app.Assembly, path string) ([]pro
 	return out, true
 }
 
-func (s *Session) userModifiedProvider(asm *app.Assembly, c provider.Config) bool {
+func (s *Session) userModifiedProvider(asm corecontracts.Assembly, c provider.Config) bool {
 	if strings.TrimSpace(c.APIKey) != "" || strings.TrimSpace(c.Proxy) != "" ||
 		len(c.Headers) > 0 || c.Disabled {
 		return true
@@ -1258,10 +1264,10 @@ func (s *Session) userModifiedProvider(asm *app.Assembly, c provider.Config) boo
 // seedProviderConfigs 用已装配的适配器声明播种默认供应商。
 // 端点、密钥名与显示名由 provider 插件声明；只有显式 BaseURL 或对应密钥已配置时才播种，
 // 否则新工作区会凭空出现一套不可用的模型（用户并没有配置过这个供应商）。
-func seedProviderConfigs(asm *app.Assembly, baseURL string, hasCredential func(string) bool) []provider.Config {
-	out := make([]provider.Config, 0, len(asm.Providers.AdapterIDs()))
-	for _, id := range asm.Providers.AdapterIDs() {
-		meta, ok := asm.Providers.AdapterMeta(id)
+func seedProviderConfigs(asm corecontracts.Assembly, baseURL string, hasCredential func(string) bool) []provider.Config {
+	out := make([]provider.Config, 0, len(asm.ProviderRegistry().AdapterIDs()))
+	for _, id := range asm.ProviderRegistry().AdapterIDs() {
+		meta, ok := asm.ProviderRegistry().AdapterMeta(id)
 		if !ok || len(meta.Models) == 0 {
 			continue
 		}
@@ -1311,28 +1317,28 @@ func (s *Session) adapterMetaForProtocol(protocol provider.Protocol) (provider.A
 	return adapterMetaIn(s.Assembly(), protocol)
 }
 
-func adapterMetaIn(asm *app.Assembly, protocol provider.Protocol) (provider.AdapterMeta, bool) {
-	if asm == nil || asm.Providers == nil {
+func adapterMetaIn(asm corecontracts.Assembly, protocol provider.Protocol) (provider.AdapterMeta, bool) {
+	if asm == nil || asm.ProviderRegistry() == nil {
 		return provider.AdapterMeta{}, false
 	}
-	adapterID, ok := asm.Providers.AdapterIDForProtocol(protocol)
+	adapterID, ok := asm.ProviderRegistry().AdapterIDForProtocol(protocol)
 	if !ok {
 		return provider.AdapterMeta{}, false
 	}
-	return asm.Providers.AdapterMeta(adapterID)
+	return asm.ProviderRegistry().AdapterMeta(adapterID)
 }
 
 // ensureCurrentModel 在供应商/模型被删改后保证当前选择仍然有效；无效时选第一个可用模型。
-func (s *Session) ensureCurrentModel(asm *app.Assembly) {
-	if asm == nil || asm.Providers == nil || s.cfg.Fake || s.cfg.ModelClient != nil {
+func (s *Session) ensureCurrentModel(asm corecontracts.Assembly) {
+	if asm == nil || asm.ProviderRegistry() == nil || s.cfg.Fake || s.cfg.ModelClient != nil {
 		return
 	}
 	cur := s.ModelRef()
 	if modelUsable(asm, cur.ProviderID, cur.ModelID) {
 		return
 	}
-	for _, pid := range asm.Providers.Providers() {
-		models := asm.Providers.Models(pid)
+	for _, pid := range asm.ProviderRegistry().Providers() {
+		models := asm.ProviderRegistry().Models(pid)
 		if len(models) == 0 {
 			continue
 		}
@@ -1347,12 +1353,12 @@ func (s *Session) ensureCurrentModel(asm *app.Assembly) {
 	}
 }
 
-func modelUsable(asm *app.Assembly, providerID, modelID string) bool {
-	for _, pid := range asm.Providers.Providers() {
+func modelUsable(asm corecontracts.Assembly, providerID, modelID string) bool {
+	for _, pid := range asm.ProviderRegistry().Providers() {
 		if pid != providerID {
 			continue
 		}
-		for _, m := range asm.Providers.Models(pid) {
+		for _, m := range asm.ProviderRegistry().Models(pid) {
 			if m.ID == modelID {
 				return true
 			}
@@ -1382,9 +1388,9 @@ func (s *Session) saveProviderFromPlugin(ctx context.Context, in host.ProviderIn
 		name = id
 	}
 	protocol := provider.Protocol(strings.TrimSpace(in.Protocol))
-	if asm := s.Assembly(); asm == nil || asm.Providers == nil {
+	if asm := s.Assembly(); asm == nil || asm.ProviderRegistry() == nil {
 		return host.ProviderInfo{}, errors.New("供应商适配器尚未装配")
-	} else if _, ok := asm.Providers.AdapterIDForProtocol(protocol); !ok {
+	} else if _, ok := asm.ProviderRegistry().AdapterIDForProtocol(protocol); !ok {
 		return host.ProviderInfo{}, fmt.Errorf("未知 API 格式: %s", in.Protocol)
 	}
 	baseURL := strings.TrimSpace(in.BaseURL)
@@ -1436,8 +1442,8 @@ func (s *Session) saveProviderFromPlugin(ctx context.Context, in host.ProviderIn
 		return host.ProviderInfo{}, fmt.Errorf("保存供应商失败: %w", err)
 	}
 	s.providerConfigs = cloneProviderConfigs(cfgs)
-	if asm := s.Assembly(); asm != nil && asm.Providers != nil {
-		asm.Providers.SetConfigs(cfgs)
+	if asm := s.Assembly(); asm != nil && asm.ProviderRegistry() != nil {
+		asm.ProviderRegistry().SetConfigs(cfgs)
 		s.ensureCurrentModel(asm)
 	}
 	return s.providerInfo(cfg), nil
@@ -1447,8 +1453,8 @@ func (s *Session) saveProviderFromPlugin(ctx context.Context, in host.ProviderIn
 func (s *Session) providerInfo(c provider.Config) host.ProviderInfo {
 	info := providerInfoOf(c)
 	info.Available = true
-	if asm := s.Assembly(); asm != nil && asm.Providers != nil {
-		info.Available = asm.Providers.ConfigAvailable(c.ID)
+	if asm := s.Assembly(); asm != nil && asm.ProviderRegistry() != nil {
+		info.Available = asm.ProviderRegistry().ConfigAvailable(c.ID)
 	}
 	if info.HasAPIKey {
 		return info
@@ -1487,8 +1493,8 @@ func (s *Session) removeProviderFromPlugin(_ context.Context, providerID string)
 		return fmt.Errorf("删除供应商失败: %w", err)
 	}
 	s.providerConfigs = cloneProviderConfigs(out)
-	if asm := s.Assembly(); asm != nil && asm.Providers != nil {
-		asm.Providers.SetConfigs(out)
+	if asm := s.Assembly(); asm != nil && asm.ProviderRegistry() != nil {
+		asm.ProviderRegistry().SetConfigs(out)
 		s.ensureCurrentModel(asm)
 	}
 	return nil
@@ -1534,11 +1540,14 @@ func (s *Session) fetchModelsFromPlugin(ctx context.Context, providerID string) 
 		return nil, fmt.Errorf("模型列表地址非法: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
-	if cfg.Protocol == provider.ProtocolAnthropic {
-		req.Header.Set("x-api-key", key)
-		req.Header.Set("anthropic-version", "2023-06-01")
-	} else {
-		req.Header.Set("Authorization", "Bearer "+key)
+	authHeader := meta.AuthHeader
+	authPrefix := meta.AuthPrefix
+	if authHeader == "" {
+		authHeader, authPrefix = "Authorization", "Bearer "
+	}
+	req.Header.Set(authHeader, authPrefix+key)
+	if meta.APIVersionHeader != "" {
+		req.Header.Set(meta.APIVersionHeader, meta.APIVersion)
 	}
 	for k, v := range cfg.Headers {
 		req.Header.Set(k, v)
@@ -1780,14 +1789,14 @@ func (s *Session) defaultModelRef() ports.ModelRef {
 	}
 	toolCount := 0
 	if asm != nil {
-		toolCount = len(asm.Tools.List(context.Background()))
+		toolCount = len(asm.ToolCatalog().List(context.Background()))
 	}
 	ref := ports.ModelRef{
 		ProviderID: providerID, ModelID: modelID,
 		ContextWindow: 128000, SupportsTools: toolCount > 0,
 	}
-	if asm != nil && asm.Providers != nil {
-		ids := asm.Providers.Providers()
+	if asm != nil && asm.ProviderRegistry() != nil {
+		ids := asm.ProviderRegistry().Providers()
 		if len(ids) == 1 {
 			// 产品可能直接写插件 id；桥支持这种写法，但能力仍来自唯一 provider。
 			ref.ProviderID = ids[0]
@@ -2020,22 +2029,22 @@ func (s *Session) secret(name string) (string, bool) {
 // （在途调用可能拿到已关闭的旧代并失败，不再无限等待）。
 const reloadDrainTimeout = 30 * time.Second
 
-// sessionBaseScripts 决定随包插件的来源：测试注入优先，否则用嵌入官方包。
-// internal 不得 import official/——经组合根转手（app.OfficialScripts）。
+// sessionBaseScripts 决定随包插件的来源：测试注入优先，否则经注入的 Assembler 取官方包。
+// internal 不得 import official/——经组合根转手（Assembler.OfficialScripts）。
 func sessionBaseScripts(cfg Config) ([]host.Script, error) {
 	if len(cfg.Scripts) > 0 {
 		return cfg.Scripts, nil
 	}
-	return app.OfficialScripts()
+	return cfg.Assembler.OfficialScripts()
 }
 
-// sessionFrontendScripts 返回前端插件脚本：测试注入优先，否则经组合根取嵌入包。
+// sessionFrontendScripts 返回前端插件脚本：测试注入优先，否则经组合根取官方包。
 // Session 只用 id 集合（产品声明允许缺席的集合）；真实渲染在 Gateway 侧。
 func sessionFrontendScripts(cfg Config) ([]host.Script, error) {
 	if cfg.FrontendScripts != nil {
 		return cfg.FrontendScripts, nil
 	}
-	return app.FrontendScripts()
+	return cfg.Assembler.FrontendScripts()
 }
 
 // installAssembly 把装配结果接进会话：工具执行器、模型选择与引擎依赖里
@@ -2043,14 +2052,14 @@ func sessionFrontendScripts(cfg Config) ([]host.Script, error) {
 // Open 与热重载共用。
 // 旧装配在新目录接入后关闭（双代：替换瞬间之后的新调用走新代，旧代在途调用
 // 已由 reloadAssembly 的排空等待覆盖）。
-func (s *Session) installAssembly(asm *app.Assembly) error {
+func (s *Session) installAssembly(asm corecontracts.Assembly) error {
 	exec, err := toolkit.NewExecutor(toolkit.ExecutorConfig{
-		Catalog: asm.Tools,
+		Catalog: asm.ToolCatalog(),
 		Invoker: asm.ToolInvoker(),
 		Clock:   s.clock,
 		// Changes 跨热重载复用：检查点账本不随装配换代清零（M5）。
 		Changes:   s.changes,
-		HasPolicy: asm.Runtime.PolicyPluginActive,
+		HasPolicy: asm.PolicyPluginActive(),
 		// 检查点归属：threadId/runId 由轮次 ctx 携带（withThread/withRun）。
 		CtxMeta: func(ctx context.Context) (string, string) {
 			return threadFrom(ctx), runFrom(ctx)
@@ -2074,12 +2083,12 @@ func (s *Session) installAssembly(asm *app.Assembly) error {
 	s.asm = asm
 	s.executor = exec
 	s.model, s.modelErr = model, modelErr
-	s.deps.Tools = asm.Tools
-	s.deps.Hooks = asm.Hooks
+	s.deps.Tools = asm.ToolCatalog()
+	s.deps.Hooks = asm.HookChain()
 	s.deps.Model = model
 	s.deps.Runner = exec
 	s.deps.Compactor = &engine.ModelCompactor{Model: model, Clock: s.clock, IDs: s.ids}
-	s.deps.HasPolicy = func() bool { return asm.Runtime.PolicyPluginActive }
+	s.deps.HasPolicy = func() bool { return asm.PolicyPluginActive() }
 	s.deps.Prompts = prompts
 	s.deps.Skills = skillSrc
 	s.mu.Unlock()
@@ -2091,14 +2100,14 @@ func (s *Session) installAssembly(asm *app.Assembly) error {
 
 // pickModel 是装配后的模型选择：测试覆盖 > --fake > provider 插件（与 M1 相同优先级）。
 // 第二个返回值非 nil 表示当前装配没有可用模型（没有 provider 且未用 --fake）。
-func (s *Session) pickModel(asm *app.Assembly) (ports.ModelClient, error) {
+func (s *Session) pickModel(asm corecontracts.Assembly) (ports.ModelClient, error) {
 	switch {
 	case s.cfg.ModelClient != nil:
 		return s.cfg.ModelClient, nil
 	case s.cfg.Fake:
 		return devfake.New(), nil
 	case asm.ProviderCount() > 0:
-		return provider.NewRetry(asm.Providers), nil
+		return provider.NewRetry(asm.ProviderRegistry()), nil
 	default:
 		return nil, errors.New("没有可用的 provider：启用 provider 插件或使用 --fake")
 	}
@@ -2109,7 +2118,7 @@ func (s *Session) pickModel(asm *app.Assembly) (ports.ModelClient, error) {
 // 这里没有旧代可回退：单个第三方插件装配失败时把它隔离（记 plugin_meta.last_error、
 // 状态 failed），其余插件照常装配——Core 不因一个坏插件起不来（6.5「其他插件不受影响」），
 // 也不会降级成空基座（随包 base 仍在）。归因不到第三方时让 Open 失败（诚实报错）。
-func (s *Session) assembleInitial(ctx context.Context) (*app.Assembly, error) {
+func (s *Session) assembleInitial(ctx context.Context) (corecontracts.Assembly, error) {
 	discovered, warnings := s.discoverThirdParty()
 	s.logWarnings(warnings)
 	s.mu.Lock()
@@ -2124,7 +2133,7 @@ func (s *Session) assembleInitial(ctx context.Context) (*app.Assembly, error) {
 	meta := s.listPluginMeta(ctx)
 	productIDs := productIDSet(s.product)
 	extras, disabled, optIn := pluginSelection(discovered, meta, s.baseScripts, s.frontendScripts, productIDs)
-	asm, err := app.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, optIn, s.appDeps)
+	asm, err := s.assembler.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, optIn, s.appDeps)
 	if err == nil {
 		if serr := s.syncPluginMeta(ctx, discovered, meta, nil); serr != nil {
 			return nil, serr
@@ -2151,7 +2160,7 @@ func (s *Session) assembleInitial(ctx context.Context) (*app.Assembly, error) {
 		}
 		remaining = kept
 		extras, disabled, optIn = pluginSelection(remaining, meta, s.baseScripts, s.frontendScripts, productIDs)
-		asm, err = app.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, optIn, s.appDeps)
+		asm, err = s.assembler.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, optIn, s.appDeps)
 	}
 	if err != nil {
 		return nil, err
@@ -2374,7 +2383,7 @@ func fingerprintScript(sc host.Script) string {
 
 // reloadAssembly 重建装配并双代切换（6.9）：
 //
-//	发现第三方（警告即失败） → 按 plugin_meta 过滤 → app.AssembleWithExtras 构建新代
+//	发现第三方（警告即失败） → 按 plugin_meta 过滤 → Assembler.AssembleWithExtras 构建新代
 //	→ 构建失败：保留旧代并返回错误（Core 不降级为空）
 //	→ 构建成功：等待在途轮次结束（上限 30s）→ 锁内替换目录与依赖 → 关闭旧代
 //
@@ -2390,7 +2399,7 @@ func (s *Session) reloadAssembly(ctx context.Context) error {
 	}
 	meta := s.listPluginMeta(ctx)
 	extras, disabled, optIn := pluginSelection(discovered, meta, s.baseScripts, s.frontendScripts, productIDSet(s.product))
-	newAsm, err := app.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, optIn, s.appDeps)
+	newAsm, err := s.assembler.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, optIn, s.appDeps)
 	if err != nil {
 		return fmt.Errorf("cli: 重建装配失败，保留旧装配: %w", err)
 	}
@@ -2512,7 +2521,7 @@ func (s *Session) pluginViews(ctx context.Context, detailID string) []PluginView
 			}
 			baseScript := sc
 			// 开发/源码或 Electron resources 运行时，官方插件有真实目录。
-			if dir := officialPluginDir(id); dir != "" {
+			if dir := officialPluginDir(s.assembler, id); dir != "" {
 				v.Path = dir
 				v.Files = walkPluginFiles(dir)
 			} else {
@@ -2562,7 +2571,7 @@ func (s *Session) pluginViews(ctx context.Context, detailID string) []PluginView
 			Enabled: enabled, Frontend: true, Status: status,
 		}
 		if detailID != "" && detailID == id {
-			if dir := officialPluginDir(id); dir != "" {
+			if dir := officialPluginDir(s.assembler, id); dir != "" {
 				v.Path = dir
 				v.Files = walkPluginFiles(dir)
 			} else {
@@ -2620,9 +2629,9 @@ const (
 
 // officialPluginDir 在开发/源码或 Electron resources 布局里定位官方插件目录
 // （绝对路径）；找不到时返回空。
-func officialPluginDir(id string) string {
+func officialPluginDir(asm corecontracts.Assembler, id string) string {
 	// 与加载器共用同一份解析（ADAG_OFFICIAL_PLUGINS_DIR / resources / 源码检出）。
-	if root, err := app.OfficialRoot(); err == nil && root != "" {
+	if root, err := asm.OfficialRoot(); err == nil && root != "" {
 		dir := filepath.Join(root, id)
 		if st, statErr := os.Stat(filepath.Join(dir, "plugin.json")); statErr == nil && !st.IsDir() {
 			if abs, absErr := filepath.Abs(dir); absErr == nil {
@@ -2782,7 +2791,7 @@ func clipBytes(s string, max int) string {
 
 // pluginViewOf 把一份脚本 + 元信息 + 运行时状态合成一行视图。
 // recOK 为 false 表示 plugin_meta 还没有这一行（缺省 enabled）。
-func pluginViewOf(sc host.Script, source string, p *discovery.Plugin, rec sqlite.PluginMetaRecord, recOK bool, asm *app.Assembly) PluginView {
+func pluginViewOf(sc host.Script, source string, p *discovery.Plugin, rec sqlite.PluginMetaRecord, recOK bool, asm corecontracts.Assembly) PluginView {
 	v := PluginView{Source: source}
 	m := sc.Manifest
 	if m == nil {
@@ -2862,7 +2871,7 @@ func (s *Session) lookupPlugin(id string) (host.Script, string, string, bool) {
 	return host.Script{}, "", "", false
 }
 
-// hasToolPolicyRole 报告清单是否声明了审批策略角色（与 app.isPolicyPlugin 同口径；
+// hasToolPolicyRole 报告清单是否声明了审批策略角色（与组合根同口径；
 // 这里是 Session 侧的门禁预检，基座仍不解释策略规则，5.4）。
 func hasToolPolicyRole(m *plugins.Manifest) bool {
 	if m == nil || m.Backend == nil {
@@ -2882,7 +2891,7 @@ func (s *Session) hasNonReadToolsExcluding(ctx context.Context, pluginID string)
 	if asm == nil {
 		return false
 	}
-	for _, d := range asm.Tools.List(ctx) {
+	for _, d := range asm.ToolCatalog().List(ctx) {
 		if d.PluginID != pluginID && d.Access != domain.AccessRead {
 			return true
 		}

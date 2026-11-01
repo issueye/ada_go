@@ -51,7 +51,7 @@ func buildSystem(ctx context.Context, spec TurnSpec, prompts PromptSource, skill
 	// 模型拿 Unix 参数去调用 Windows 原生命令。
 	b.WriteString("\n\n宿主环境：")
 	b.WriteString(runtime.GOOS)
-	b.WriteString("。命令工具直接执行程序（不经过 shell）；查找文件/目录优先使用可用的文件工具（如 list_files/search_files），不要假设 Unix find/grep 的语义。")
+	b.WriteString("。命令工具直接执行程序（不经过 shell）；查找文件/目录优先使用当前可用的文件/搜索工具，不要假设 Unix find/grep 的语义。")
 
 	var frags []PromptFragment
 	if prompts != nil {

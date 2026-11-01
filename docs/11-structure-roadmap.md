@@ -25,7 +25,7 @@ ada-go/
     coreproto/             JSON-RPC 服务端、事件发射、投影
     coreapp/               通用装配器：接收插件集合 → 目录/引擎（不 import plugins/official/）
     corecontracts/         Core RPC 与 CLI 共享的轻量类型（不依赖 cli/app）
-    cli/                   会话运行时（CLI 与 Core 共用；组合根的消费方）
+    cli/                   会话运行时（CLI 与 Core 共用；装配入口由 Assembler 注入）
     corerpc/               JSON-RPC over WebSocket（只依赖 Session 接口）
     gateway/
       gateway.go            Gateway 装配、路由与生命周期

@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:22c78dfca01e4866) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:e2a931b995e8f9f0) by plugins/official/build.mjs — do not edit
 // provider-openai-responses —— 官方插件：OpenAI Responses API 的流式协议映射（03 §5.5）。
 //
 // 与 Chat Completions 的差别：system 走顶层 instructions；历史用 Responses 的消息形状
@@ -85,6 +85,10 @@
                           
                       
                        
+                      
+                      
+                            
+                      
                                                                     
  
 
@@ -403,6 +407,8 @@ export default function (agent          )       {
     defaultBaseUrl: DEFAULT_BASE_URL,
     secretName: SECRET_NAME,
     displayName: "OpenAI Responses",
+    authHeader: "Authorization",
+    authPrefix: "Bearer ",
     stream(req, ctx) {
       return streamOnce(req, ctx);
     },

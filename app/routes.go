@@ -15,16 +15,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/adag/ada-go/internal/corecontracts"
 	"github.com/adag/ada-go/internal/plugins/host"
 )
 
 // ErrRouteNotFound / ErrRouteMethodNotAllowed 供 Core RPC 映射 404/405。
 // ErrRouteStreaming / ErrRouteNotStreaming 表示调用方式与路由类型不匹配（406）。
 var (
-	ErrRouteNotFound         = errors.New("app: 没有匹配的插件 HTTP 路由")
-	ErrRouteMethodNotAllowed = errors.New("app: 该路径不支持此 HTTP 方法")
-	ErrRouteStreaming        = errors.New("app: 该路由是 SSE，需要流式调用")
-	ErrRouteNotStreaming     = errors.New("app: 该路由不是 SSE")
+	ErrRouteNotFound         = corecontracts.ErrRouteNotFound
+	ErrRouteMethodNotAllowed = corecontracts.ErrRouteMethodNotAllowed
+	ErrRouteStreaming        = corecontracts.ErrRouteStreaming
+	ErrRouteNotStreaming     = corecontracts.ErrRouteNotStreaming
 )
 
 type routeRegistry struct {

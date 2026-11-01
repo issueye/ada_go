@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/adag/ada-go/app"
 	"github.com/adag/ada-go/internal/cli"
 	"github.com/adag/ada-go/internal/corerpc"
 	"github.com/adag/ada-go/internal/proto"
@@ -44,6 +45,7 @@ func rpcSession(t *testing.T) *cli.Session {
 		Workspace: t.TempDir(),
 		DataDir:   t.TempDir(),
 		Product:   productPath(t),
+		Assembler: app.Assembler{},
 		Fake:      true,
 		In:        strings.NewReader(""),
 		Out:       discard{},
@@ -161,7 +163,7 @@ func TestPluginRPCListSetEnabledReload(t *testing.T) {
 
 func hasTool(t *testing.T, sess *cli.Session, name string) bool {
 	t.Helper()
-	for _, d := range sess.Assembly().Tools.List(context.Background()) {
+	for _, d := range sess.Assembly().ToolCatalog().List(context.Background()) {
 		if d.Name == name {
 			return true
 		}

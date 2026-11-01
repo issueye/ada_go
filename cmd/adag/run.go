@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/adag/ada-go/app"
 	"github.com/adag/ada-go/internal/cli"
 	"github.com/adag/ada-go/internal/domain"
 )
@@ -78,6 +79,7 @@ func (f *sessionFlags) open(ctx context.Context, interactive bool) (*cli.Session
 		Model:       f.model,
 		BaseURL:     f.baseURL,
 		Fake:        f.fake,
+		Assembler:   app.Assembler{},
 		Debug:       debugRequested(f.debug),
 		Interactive: interactive,
 		// 交互模式的终端就是界面；print 模式没有界面，ask 类工具按失败关闭。

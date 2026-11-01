@@ -224,12 +224,16 @@ func (r *Registry) AdapterModels(adapterID string) []host.ModelInfo {
 
 // AdapterMeta 是 provider 插件为某个适配器声明的配置元数据。
 type AdapterMeta struct {
-	ID             string
-	Protocol       Protocol
-	DefaultBaseURL string
-	SecretName     string
-	DisplayName    string
-	Models         []host.ModelInfo
+	ID               string
+	Protocol         Protocol
+	DefaultBaseURL   string
+	SecretName       string
+	DisplayName      string
+	AuthHeader       string
+	AuthPrefix       string
+	APIVersionHeader string
+	APIVersion       string
+	Models           []host.ModelInfo
 }
 
 // AdapterMeta 返回适配器的元数据（端点/密钥名/显示名由插件声明，基座不写死）。
@@ -245,12 +249,16 @@ func (r *Registry) AdapterMeta(adapterID string) (AdapterMeta, bool) {
 		protocol = ProtocolForAdapter(adapterID)
 	}
 	return AdapterMeta{
-		ID:             adapterID,
-		Protocol:       protocol,
-		DefaultBaseURL: reg.def.DefaultBaseURL,
-		SecretName:     reg.def.SecretName,
-		DisplayName:    reg.def.DisplayName,
-		Models:         append([]host.ModelInfo(nil), reg.def.Models...),
+		ID:               adapterID,
+		Protocol:         protocol,
+		DefaultBaseURL:   reg.def.DefaultBaseURL,
+		SecretName:       reg.def.SecretName,
+		DisplayName:      reg.def.DisplayName,
+		AuthHeader:       reg.def.AuthHeader,
+		AuthPrefix:       reg.def.AuthPrefix,
+		APIVersionHeader: reg.def.APIVersionHeader,
+		APIVersion:       reg.def.APIVersion,
+		Models:           append([]host.ModelInfo(nil), reg.def.Models...),
 	}, true
 }
 

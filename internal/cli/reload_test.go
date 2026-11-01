@@ -98,7 +98,7 @@ func makeHelloEchoZip(t *testing.T) string {
 func catalogToolNames(t *testing.T, sess *cli.Session) map[string]bool {
 	t.Helper()
 	out := map[string]bool{}
-	for _, d := range sess.Assembly().Tools.List(context.Background()) {
+	for _, d := range sess.Assembly().ToolCatalog().List(context.Background()) {
 		out[d.Name] = true
 	}
 	return out

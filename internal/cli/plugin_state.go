@@ -23,9 +23,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/adag/ada-go/app"
 	"github.com/adag/ada-go/internal/adapters/sqlite"
 	"github.com/adag/ada-go/internal/coreapp"
+	"github.com/adag/ada-go/internal/corecontracts"
 	"github.com/adag/ada-go/internal/plugins/discovery"
 	"github.com/adag/ada-go/internal/plugins/host"
 )
@@ -345,7 +345,7 @@ func (s *Session) preflightPluginAssembly(ctx context.Context, dir string) error
 	if err != nil {
 		return err
 	}
-	asm, err := app.Assemble(ctx, p, []host.Script{script}, app.Deps{
+	asm, err := s.assembler.Assemble(ctx, p, []host.Script{script}, corecontracts.Deps{
 		Context: host.Context{
 			Workspace: dir,
 			Log:       func(string, string, map[string]any) {},
