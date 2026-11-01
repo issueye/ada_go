@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/adag/ada-go/internal/gateway/frontend"
 	"github.com/adag/ada-go/internal/gateway/web"
+	"github.com/adag/ada-go/plugins/official"
 )
 
 type blockPluginUI struct{}
@@ -95,4 +97,39 @@ func TestMarkdownDynamicBlockFallbacks(t *testing.T) {
 func strconvQuote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// TestMarkdownTokenUsageBlockIntegration 走真实 Bridge × 官方插件 × token-usage block。
+func TestMarkdownTokenUsageBlockIntegration(t *testing.T) {
+	scripts, err := official.FrontendScripts()
+	if err != nil {
+		t.Fatalf("official.FrontendScripts: %v", err)
+	}
+	bridge, err := frontend.NewBridge(frontend.BridgeOptions{
+		Scripts:     scripts,
+		Supervisor:  &fakeSupervisor{core: newFakeCore()},
+		ProductName: "测试产品",
+	})
+	if err != nil {
+		t.Fatalf("NewBridge: %v", err)
+	}
+	srv, err := web.New(web.Config{
+		Supervisor:  &fakeSupervisor{core: newFakeCore()},
+		Workspace:   "/tmp/ws",
+		ProductName: "测试产品",
+		PluginUI:    bridge,
+	})
+	if err != nil {
+		t.Fatalf("web.New: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+
+	text := "```adag-ui\n{\"renderer\":\"token-usage/usage-card\",\"data\":{\"scope\":\"thread\",\"title\":\"本轮用量\",\"usage\":{\"inputTokens\":1234,\"outputTokens\":567}}}\n```"
+	rec := postJSON(t, srv, "/markdown", `{"text":`+strconvQuote(text)+`}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "tu-card") || !strings.Contains(rec.Body.String(), "1,234") {
+		t.Fatalf("token-usage block 未渲染: %s", rec.Body.String())
+	}
 }
