@@ -351,6 +351,8 @@ type transcriptPayload struct {
 type partView struct {
 	Type string // text | thinking | image
 	Text string
+	// HTML 是助手文本的预渲染结果（含 Markdown 动态块）；空时模板回退到 markdown 函数。
+	HTML template.HTML
 	// Mime/Data 仅在 Type=image 时有值：data URL 的两半，
 	// 模板拼成 src="data:{{.Mime}};base64,{{.Data}}" 渲染消息里的图片。
 	Mime string

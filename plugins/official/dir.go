@@ -237,7 +237,24 @@ func loadFrontendDir(dir string, m *plugins.Manifest) (host.Script, error) {
 		Manifest:     m,
 		Bundle:       bundle,
 		StaticAssets: assets,
+		Schemas:      map[string][]byte{},
 		Readme:       readOptionalText(filepath.Join(dir, "README.md")),
+	}
+	// Markdown 动态块：模板进 Bundle，数据 Schema 单独保存（不暴露为静态资源）。
+	for _, b := range m.Frontend.Blocks {
+		tmplPath := filepath.Join(dir, filepath.FromSlash(strings.TrimSpace(b.Template)))
+		data, rerr := os.ReadFile(tmplPath)
+		if rerr != nil {
+			return host.Script{}, fmt.Errorf("official: 读取 block %s 的模板 %s 失败: %w", b.Name, b.Template, rerr)
+		}
+		bundle[strings.TrimSpace(b.Template)] = string(data)
+
+		schemaPath := filepath.Join(dir, filepath.FromSlash(strings.TrimSpace(b.Schema)))
+		schemaData, serr := os.ReadFile(schemaPath)
+		if serr != nil {
+			return host.Script{}, fmt.Errorf("official: 读取 block %s 的 Schema %s 失败: %w", b.Name, b.Schema, serr)
+		}
+		script.Schemas[strings.TrimSpace(b.Schema)] = schemaData
 	}
 	// 清单引用的模板必须真实存在：缺件是打包错误而不是运行期才发现。
 	for _, sc := range m.Frontend.Slots {

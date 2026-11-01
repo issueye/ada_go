@@ -10,6 +10,8 @@
     "maxOutputBytes": 262144,
     "note": "JSON Schema 不表达树深度/节点总数/总字节数；由 Go 渲染器在解码时强制（§7.3 校验、§9.5 前端 Render Runtime 行）。单字符串 32KB 在本 Schema 以 maxByteLength 尽力声明，Go 侧以 UTF-8 字节数复核。"
   },
+  "x-blockTags": ["div", "span", "p", "br", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "strong", "em", "code", "pre", "small", "blockquote", "a", "section", "table", "thead", "tbody", "tr", "th", "td", "caption", "details", "summary"],
+  "x-blockComponents": ["Icon", "TodoList"],
   "anyOf": [
     { "$ref": "#/$defs/node" },
     { "type": "null" }

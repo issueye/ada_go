@@ -37,7 +37,7 @@
 | 现状 | 位置 | 本方案如何复用 |
 |---|---|---|
 | Markdown 解析/清洗 | `internal/gateway/web/ui.go` 的 `renderMarkdown`（goldmark + bluemonday） | 只增加 fenced block 处理，不改清洗边界 |
-| Markdown → VNode | `internal/gateway/web/markdown_vnode.go` | 增加占位符替换与 `$C` 组件节点 |
+| Markdown → VNode | `internal/gateway/web/markdown_vnode.go` | 增加 fence 分段与块 VNode 合并、`$C` 组件节点 |
 | 浏览器 Markdown 渲染 | `internal/gateway/web/static/ada-ui.js` 的 `Markdown` 组件 | 继续接收 VNode AST；补 `$C` 节点透传 |
 | VNode 契约 | `spec/vnode.schema.json` | 复用元素/组件/文本节点、限额与校验器 |
 | 前端插件 | `plugin.json` 的 `frontend`、`internal/gateway/frontend` Render Runtime | 新增 `frontend.blocks`，复用同一 TSX→VNode 运行时 |
@@ -49,22 +49,18 @@ VNode 就是统一的 **UI Schema**；插件数据 Schema 只负责 `data` 的�
 
 ```text
 Markdown
-  → goldmark AST
-  → 识别 ```adag-ui fence
-  → 校验封套 Schema
-  → 按 renderer id 找到插件 block
-  → 用插件数据 Schema 校验 data
-  → Render Runtime 执行 TSX → VNode
+  → 扫描顶层 ```adag-ui fence，切成文本段 / 块段
+  → 文本段：goldmark → bluemonday → Markdown VNode
+  → 块段：校验封套 Schema → 按 renderer id 找插件 block
+  → 用插件数据 Schema 校验 data → Render Runtime 执行 TSX
   → VNode Schema + block profile + 限额校验
-  → 替换为带 token 的占位元素
-  → Markdown HTML → bluemonday → Markdown VNode
-  → 占位元素替换为块 VNode
+  → 按原顺序合并文本 VNode 与块 VNode
   → ui-markdown（浏览器）/ VNode→HTML（无 JS/HTML 端点）
 ```
 
 职责边界：
 
-- **基座/Gateway**：识别 fence、校验封套、解析 renderer、执行限额与 VNode 校验、占位替换、错误降级；
+- **基座/Gateway**：识别 fence、分段、校验封套、解析 renderer、执行限额与 VNode 校验、合并/降级；
 - **插件**：声明 `frontend.blocks`、提供数据 Schema 与 TSX 渲染器；
 - **模型/工具**：只产生 Markdown 文本与块 `data`，不执行代码。
 
@@ -251,31 +247,24 @@ export default function UsageCard(props: BlockProps) {
 
 ## 9. 服务端渲染管线
 
-### 9.1 解析与占位
+### 9.1 解析与占位（MVP）
 
-在现有 goldmark 管线中增加 fenced code 处理器：
+MVP 在 Markdown **顶层**按 ` ```adag-ui ` fence 分段，不修改 goldmark AST：
 
-1. 当 info string 为 `adag-ui` 时，读取 fence 内容；
-2. 校验 `markdown-block.schema.json`；
-3. 解析 `renderer`，查 block 注册表；
-4. 用插件 Schema 校验 `data`；
-5. 调用 Render Runtime 得到 VNode；
-6. 校验 VNode（§10）后，把 fence 替换为一个带唯一 token 的占位元素：
+1. 扫描顶层 fence，得到「文本段 / 块段」序列；
+2. 每个文本段继续走现有 `renderMarkdown` → bluemonday → `markdownVNodes`；
+3. 每个块段解析封套、校验 `data`、调用 Render Runtime 得到块 VNode；
+4. 按原顺序拼接文本段与块 VNode（HTML 端点拼接 `renderMarkdown` 输出与块 HTML）；
+5. 失败时只替换该块为降级节点，不影响其余文本。
 
-```html
-<div class="adag-ui-block adag-ui-block-<token>"></div>
-```
-
-7. 把 `token → 块 VNode` 放入本次渲染的 map；
-8. 其余 Markdown 继续走现有 `renderMarkdown` → bluemonday → `markdownVNodes`；
-9. `markdownVNodes` 遇到 `adag-ui-block-<token>` 时，用 map 中的 VNode 替换占位元素。
+边界：fence 需位于顶层行首；列表/引用块内的嵌套 fence 不在 MVP 范围。后续可迁移为 goldmark AST 占位元素，以支持嵌套结构。
 
 这样：
 
 - Markdown 其余部分完全复用现有解析/清洗；
 - 动态块不经过 HTML 字符串，不引入二次解析；
-- 占位 class 属于现有白名单，清洗不会丢；
-- 失败时只影响该块，不影响整篇 Markdown。
+- 失败时只影响该块，不影响整篇 Markdown；
+- 不需要改动 goldmark/bluemonday 的核心行为。
 
 ### 9.2 渲染与 VNode 校验
 
@@ -309,8 +298,8 @@ Markdown 可能由模型生成，不能等同于插件页面/插槽。动态块�
 
 ### 10.1 允许
 
-- 展示型标签：`div`、`span`、`p`、`br`、`hr`、`h1`–`h6`、`ul`、`ol`、`li`、`strong`、`em`、`code`、`pre`、`small`、`blockquote`、`a`、`section`、`table`、`thead`、`tbody`、`tr`、`th`、`td`、`caption`
-- 展示型组件：`Icon`、`Notice`、`EmptyState`、`Panel`、`Markdown`、`ToolCall`、`ModelTable`、`TodoList`
+- 展示型标签：`div`、`span`、`p`、`br`、`hr`、`h1`–`h6`、`ul`、`ol`、`li`、`strong`、`em`、`code`、`pre`、`small`、`blockquote`、`a`、`section`、`table`、`thead`、`tbody`、`tr`、`th`、`td`、`caption`、`details`、`summary`
+- 展示型组件：`Icon`、`TodoList`（当前 Go 渲染器已实现的面；`Notice`/`Panel` 等后续扩展）
 - `aria-*`、`data-*`、class
 
 ### 10.2 禁止
@@ -380,7 +369,7 @@ Markdown 可能由模型生成，不能等同于插件页面/插槽。动态块�
 | `spec/vnode.schema.json` | 增加 block profile（或独立 `block-vnode.schema.json` 引用公共 `$defs`） |
 | `internal/plugins` manifest | 解析 `frontend.blocks`，加载 schema/template 路径 |
 | `internal/gateway/frontend` | block 注册表 + Render Runtime 调用 |
-| `internal/gateway/web` | goldmark fence 扩展、占位替换、`markdownVNode` 支持 `$C`/`n` |
+| `internal/gateway/web` | fence 分段、块 VNode 合并、`markdownVNode` 支持 `$C`/`n` |
 | `internal/gateway/web/static/ada-ui.js` | 确认/补齐 `Markdown` 组件对 `$C` 节点的透传 |
 | `tools/verify` | manifest 字段、Schema 文件存在、block VNode profile、fixture |
 | `docs/07`、`docs/14`、`docs/15` | 语法、Schema、限额、安全模型交叉引用 |
@@ -423,16 +412,11 @@ Markdown：
   "p": { "class": "adag-ui-block", "data-adag-renderer": "token-usage/usage-card" },
   "c": [
     {
-      "t": "$C",
-      "n": "Panel",
-      "p": { "title": "本轮用量" },
+      "t": "section",
+      "p": { "class": "card tu-card" },
       "c": [
-        {
-          "t": "$C",
-          "n": "Notice",
-          "p": { "tone": "neutral" },
-          "c": [{ "t": "#text", "v": "统计范围：当前线程" }]
-        }
+        { "t": "span", "p": { "class": "tu-card__title" }, "c": [{ "t": "#text", "v": "本轮用量" }] },
+        { "t": "span", "p": { "class": "tu-card__total" }, "c": [{ "t": "#text", "v": "1,801" }] }
       ]
     }
   ]

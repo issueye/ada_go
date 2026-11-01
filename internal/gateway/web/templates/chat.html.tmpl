@@ -184,7 +184,7 @@
 
 {{define "parts_user"}}{{range .Parts}}{{if eq .Type "thinking"}}{{template "thinking" .}}{{else if eq .Type "image"}}<button class="ada-msg__image" type="button" data-image-viewer aria-label="查看图片"><img loading="lazy" alt="图片" src="data:{{.Mime}};base64,{{.Data}}"></button>{{else}}<div class="part-text">{{.Text}}</div>{{end}}{{end}}{{end}}
 
-{{define "parts_assistant"}}{{range .Parts}}{{if eq .Type "thinking"}}{{template "thinking" .}}{{else if eq .Type "image"}}<span class="ada-msg__images">[图片]</span>{{else}}<div class="part-text">{{markdown .Text}}</div>{{end}}{{end}}{{end}}
+{{define "parts_assistant"}}{{range .Parts}}{{if eq .Type "thinking"}}{{template "thinking" .}}{{else if eq .Type "image"}}<span class="ada-msg__images">[图片]</span>{{else}}<div class="part-text">{{if .HTML}}{{.HTML}}{{else}}{{markdown .Text}}{{end}}</div>{{end}}{{end}}{{end}}
 
 {{define "thinking"}}
 <details class="ada-disclosure" data-kind="thinking" data-state="closed">

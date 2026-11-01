@@ -45,6 +45,20 @@ MVP 是**只读展示型动态块**，可以独立发布，不依赖交互/流�
 - 跨插件 renderer 引用策略（v1 先按启用插件解析，后续可收紧）；
 - 块目录/可视化编辑器。
 
+### 2.3 当前实现状态（2026-11-01）
+
+- MB-0 契约：`markdown-block.schema.json`、`frontend.blocks`、VNode block profile 已落地；
+- MB-1 清单/加载：`frontend.blocks` 解析、模板/Schema 读取、renderer 注册已完成；
+- MB-2 数据 Schema：受控 2020-12 子集校验器已落地（未知关键字编译期报错）；
+- MB-3 Markdown：顶层 `adag-ui` fence 分段、降级、块数/字节限额已完成；
+- MB-4 Render Runtime/VNode：block TSX、display profile、超时/错误隔离已完成；
+- MB-5 浏览器/无 JS：`markdownVNode` 支持 `$C`/`n`；`/markdown.ast`、`/markdown` 与无 JS 模板已接入；
+- MB-6 参考插件：`token-usage/usage-card` 已落地；
+- MB-7 安全/限额/缓存：display profile、限额、进程内 LRU 已完成；审计事件与 interactive profile 尚未接入；
+- MB-8 测试/门禁：Bridge/Markdown 降级测试、`verify vnode` block profile 已通过；独立 `markdown-block` verify 检查、第三方前端 block 加载与 golden HTML 仍待补。
+
+**未做**：产品开关 `capabilities.markdownBlocks`、interactive 块、流式提前渲染、跨进程缓存、第三方前端插件加载（当前 Gateway 只加载官方前端脚本）。
+
 ## 3. 工作分解与依赖
 
 ```text

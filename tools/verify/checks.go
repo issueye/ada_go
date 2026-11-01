@@ -571,6 +571,20 @@ func checkVNode(root string) error {
 			problems = append(problems, fmt.Sprintf("%s：Schema %d，Go 校验器 %d", key, int(got), want))
 		}
 	}
+	for key, goList := range map[string][]string{
+		"blockTags":       frontend.BlockTags,
+		"blockComponents": frontend.BlockComponents,
+	} {
+		schemaList := dedupeSorted(info.RootArrays[key])
+		if len(schemaList) == 0 {
+			problems = append(problems, fmt.Sprintf("Schema 缺少 x-%s（block profile 单一真源）", key))
+			continue
+		}
+		missing, extra := setDiff(dedupeSorted(goList), schemaList)
+		if len(missing) > 0 || len(extra) > 0 {
+			problems = append(problems, fmt.Sprintf("%s：Go 有 Schema 无 %v；Schema 有 Go 无 %v", key, missing, extra))
+		}
+	}
 	if len(problems) > 0 {
 		return fmt.Errorf("VNode 契约漂移:\n  - %s", strings.Join(problems, "\n  - "))
 	}

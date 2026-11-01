@@ -253,6 +253,53 @@
           "description": "独立页面贡献；与聊天页共用侧栏外壳，内容最大宽度 1040px（§7.7.6）。",
           "x-consumer": "gateway/web: 页面路由表与侧栏可达性"
         },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "schema", "template"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{1,63}$",
+                "description": "块名；与插件 id 组成 renderer id：<plugin-id>/<name>（§7 动态块）。",
+                "x-consumer": "gateway/frontend: 注册 block renderer，Markdown adag-ui fence 按此 id 解析"
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 120,
+                "description": "人类可读标题，用于错误/调试展示。",
+                "x-consumer": "gateway/frontend: 渲染失败/调试面板展示"
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 1024,
+                "description": "块用途说明。",
+                "x-consumer": "gateway/web: 插件详情/调试页展示"
+              },
+              "schema": {
+                "$ref": "#/$defs/schemaPath",
+                "description": "块数据 JSON Schema（相对插件目录）。",
+                "x-consumer": "gateway/frontend: 加载并编译为数据校验器；Markdown data 渲染前校验"
+              },
+              "template": {
+                "$ref": "#/$defs/templatePath",
+                "description": "块 TSX 渲染器，导出 export default function Block(props) 返回 VNode。",
+                "x-consumer": "gateway/frontend: 编译并执行得到 block VNode"
+              },
+              "profile": {
+                "type": "string",
+                "enum": ["display", "interactive"],
+                "default": "display",
+                "description": "display 只允许展示型标签/组件；interactive 仅 builtin/verified 且产品显式开启。",
+                "x-consumer": "gateway/frontend: block VNode profile 校验；plugins: 信任级别门禁"
+              }
+            }
+          },
+          "description": "Markdown 内联动态块渲染器（adag-ui fence）。",
+          "x-consumer": "gateway/frontend: block 注册表与 Render Runtime；gateway/web: Markdown fence 解析"
+        },
         "nav": {
           "type": "array",
           "items": {
@@ -505,6 +552,11 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9._/-]+\\.tsx?$",
       "description": "相对插件目录的 TSX/TS 模板路径（不含 ..，宿主另做路径穿越检查）。"
+    },
+    "schemaPath": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._/-]+\\.json$",
+      "description": "相对插件目录的 JSON Schema 路径（不含 ..，宿主另做路径穿越检查）。"
     },
     "assetPath": {
       "type": "string",

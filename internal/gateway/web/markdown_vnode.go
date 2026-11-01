@@ -20,6 +20,7 @@ import (
 
 type markdownVNode struct {
 	T string          `json:"t"`
+	N string          `json:"n,omitempty"`
 	V string          `json:"v,omitempty"`
 	P map[string]any  `json:"p,omitempty"`
 	C []markdownVNode `json:"c,omitempty"`

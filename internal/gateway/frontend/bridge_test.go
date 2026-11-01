@@ -134,6 +134,31 @@ func request(t *testing.T, target string) *http.Request {
 	return r
 }
 
+// TestBridgeRenderBlock 钉 Markdown 动态块的端到端：数据 Schema → TSX → VNode → HTML。
+func TestBridgeRenderBlock(t *testing.T) {
+	b := testBridge(t, newFakeCore())
+	data := json.RawMessage(`{"scope":"thread","title":"本轮用量","usage":{"inputTokens":1234,"outputTokens":567,"cacheTokens":89,"costMicros":1200}}`)
+	raw, html, err := b.RenderBlock(request(t, "/thread/th_1"), "token-usage/usage-card", "u1", data)
+	if err != nil {
+		t.Fatalf("RenderBlock: %v", err)
+	}
+	if !strings.Contains(string(raw), `"adag-ui-block"`) || !strings.Contains(string(raw), `"data-adag-renderer"`) {
+		t.Fatalf("block VNode 缺少包装: %s", raw)
+	}
+	if !strings.Contains(string(html), "tu-card") || !strings.Contains(string(html), "1,234") {
+		t.Fatalf("block HTML = %s", html)
+	}
+
+	// 数据 Schema 失败：调用前拒绝，不执行 TSX。
+	if _, _, err := b.RenderBlock(request(t, "/thread/th_1"), "token-usage/usage-card", "", json.RawMessage(`{"scope":"bad"}`)); err == nil {
+		t.Fatal("非法 data 应被 schema 拒绝")
+	}
+	// 未知 renderer。
+	if _, _, err := b.RenderBlock(request(t, "/thread/th_1"), "no-such/block", "", json.RawMessage(`{}`)); err == nil {
+		t.Fatal("未知 renderer 应报错")
+	}
+}
+
 // 动作预取失败（Core 尚未实现 action.invoke 的注册）时插槽贡献为空：
 // 计划卡片和工具在同一个插件里，取不到计划就不画卡（没有示例数据兜底）。
 func TestBridgeTaskPlanSlotWithoutAction(t *testing.T) {

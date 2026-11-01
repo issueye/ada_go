@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["scope"],
+  "properties": {
+    "scope": { "enum": ["thread", "workspace"] },
+    "title": { "type": "string", "maxLength": 80 },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "inputTokens": { "type": "number", "minimum": 0 },
+        "outputTokens": { "type": "number", "minimum": 0 },
+        "cacheTokens": { "type": "number", "minimum": 0 },
+        "costMicros": { "type": "number", "minimum": 0 },
+        "provider": { "type": "string", "maxLength": 80 },
+        "model": { "type": "string", "maxLength": 120 }
+      }
+    }
+  }
+}

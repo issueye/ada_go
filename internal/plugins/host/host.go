@@ -63,6 +63,8 @@ type Script struct {
 	Bundle map[string]string
 	// StaticAssets 是插件包内静态资源的只读视图（plugin://<id>/…）。
 	StaticAssets map[string][]byte
+	// Schemas 是前端 block 数据 Schema 的原文（清单路径 → JSON 字节）。
+	Schemas map[string][]byte
 	// Root 是插件包在宿主上的绝对目录（可选）；技能路径按它拼出 SKILL.md 的绝对路径。
 	Root string
 	// Readme 是插件包内 README.md 的原文（可选；详情页展示用）。

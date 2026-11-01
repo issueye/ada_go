@@ -41,12 +41,23 @@ type Frontend struct {
 	Capabilities []Capability             `json:"capabilities"`
 	Slots        []SlotContribution       `json:"slots"`
 	Pages        []PageContribution       `json:"pages"`
+	Blocks       []BlockContribution      `json:"blocks"`
 	Nav          []NavContribution        `json:"nav"`
 	Dashboard    []DashboardContribution  `json:"dashboard"`
 	Actions      map[string]ActionBinding `json:"actions"`
 	Styles       []string                 `json:"styles"`
 	Scripts      []string                 `json:"scripts"`
 	Assets       string                   `json:"assets"`
+}
+
+// BlockContribution 是 Markdown 内联动态块的渲染器（adag-ui fence）。
+type BlockContribution struct {
+	Name        string `json:"name"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Schema      string `json:"schema"`
+	Template    string `json:"template"`
+	Profile     string `json:"profile,omitempty"`
 }
 
 // SlotContribution 把一个 TSX 模板挂到某个稳定插槽。
@@ -248,6 +259,33 @@ func (m *Manifest) validateFrontend() error {
 	for _, p := range f.Pages {
 		if strings.TrimSpace(p.Slug) == "" || strings.TrimSpace(p.Template) == "" {
 			return fmt.Errorf("plugins: %s 的页面贡献缺少 slug 或 template", m.ID)
+		}
+	}
+	seenBlock := make(map[string]bool, len(f.Blocks))
+	for _, b := range f.Blocks {
+		if !ValidID(b.Name) {
+			return fmt.Errorf("plugins: %s 的 block 名 %q 不满足 ^[a-z][a-z0-9-]{1,63}$", m.ID, b.Name)
+		}
+		if seenBlock[b.Name] {
+			return fmt.Errorf("plugins: %s 重复声明 block %q", m.ID, b.Name)
+		}
+		seenBlock[b.Name] = true
+		if !validEntryPath(b.Schema) || !strings.HasSuffix(b.Schema, ".json") {
+			return fmt.Errorf("plugins: %s 的 block %s schema %q 必须是插件目录内的 .json 相对路径", m.ID, b.Name, b.Schema)
+		}
+		if !validEntryPath(b.Template) || !strings.HasSuffix(b.Template, ".tsx") {
+			return fmt.Errorf("plugins: %s 的 block %s template %q 必须是插件目录内的 .tsx 相对路径", m.ID, b.Name, b.Template)
+		}
+		switch b.Profile {
+		case "":
+			b.Profile = "display"
+		case "display":
+		case "interactive":
+			if m.Trust != TrustBuiltin && m.Trust != TrustVerified {
+				return fmt.Errorf("plugins: %s 的 block %s 声明 interactive，但信任级别是 %s", m.ID, b.Name, m.Trust)
+			}
+		default:
+			return fmt.Errorf("plugins: %s 的 block %s 声明未知 profile %q", m.ID, b.Name, b.Profile)
 		}
 	}
 	return nil

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/adag/ada-go/spec/markdown-block.schema.json",
+  "title": "Markdown 动态块封套（adag-ui fence）",
+  "description": "Markdown ```adag-ui fence 的内容契约。data 由 renderer 对应的插件 Schema 再校验；渲染结果必须符合 spec/vnode.schema.json 的 block profile。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["renderer", "data"],
+  "properties": {
+    "renderer": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,63}/[a-z][a-z0-9-]{1,63}$",
+      "description": "插件 id / block name"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "block schema 的版本"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$",
+      "description": "可选的块锚点；同一 Markdown 内唯一"
+    },
+    "data": {
+      "description": "插件自定义数据；由插件自带 Schema 校验",
+      "type": ["object", "array", "string", "number", "boolean", "null"]
+    },
+    "fallback": {
+      "type": "string",
+      "maxLength": 512,
+      "description": "渲染失败时的纯文本提示；由宿主转义"
+    }
+  },
+  "x-limits": {
+    "maxBytes": 65536,
+    "maxDepth": 32,
+    "maxBlocksPerDocument": 8,
+    "renderTimeoutMs": 300
+  }
+}

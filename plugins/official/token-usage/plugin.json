@@ -9,6 +9,14 @@
     "capabilities": ["backend.read"],
     "nav": [{ "label": "Token 用量", "slug": "usage" }],
     "pages": [{ "slug": "usage", "title": "Token 用量", "template": "page.tsx" }],
+    "blocks": [{
+      "name": "usage-card",
+      "title": "Token 用量卡片",
+      "description": "在 Markdown 中内联展示一次 token 用量摘要",
+      "schema": "schemas/usage-card.json",
+      "template": "blocks/usage-card.tsx",
+      "profile": "display"
+    }],
     "dashboard": [{ "widget": "usage", "template": "dashboard.tsx", "order": 10 }],
     "styles": ["usage.css"],
     "assets": "static"

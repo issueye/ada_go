@@ -13,6 +13,7 @@ package frontend
 // 由 web 回退到基座占位。动作预取失败只缺对应 props.data.backend 条目（7.5）。
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -24,6 +25,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/adag/ada-go/internal/gateway/contracts"
@@ -70,9 +72,25 @@ type slotContrib struct {
 	contrib plugins.SlotContribution
 }
 
+// blockEntry 是一个已登记的 Markdown 动态块渲染器。
+type blockEntry struct {
+	u       *unit
+	def     plugins.BlockContribution
+	schema  *DataSchema
+	profile string
+}
+
+type blockCacheEntry struct {
+	raw  json.RawMessage
+	html template.HTML
+}
+
+const blockCacheLimit = 512
+
 // Bridge 实现 web.PluginUI 与 web 的静态资源 / 动作解析扩展接口。
 type Bridge struct {
 	byID         map[string]*unit
+	blocks       map[string]blockEntry
 	slotIndex    map[string][]slotContrib
 	renderer     *host.Renderer
 	sup          contracts.Supervisor
@@ -81,6 +99,9 @@ type Bridge struct {
 	csrf         func(*http.Request) string
 	enabled      func(*http.Request, string) bool
 	invalidate   func(string)
+
+	blockMu    sync.Mutex
+	blockCache map[string]blockCacheEntry
 }
 
 var _ web.PluginUI = (*Bridge)(nil)
@@ -90,6 +111,8 @@ var _ web.PluginUI = (*Bridge)(nil)
 func NewBridge(opts BridgeOptions) (*Bridge, error) {
 	b := &Bridge{
 		byID:         map[string]*unit{},
+		blocks:       map[string]blockEntry{},
+		blockCache:   map[string]blockCacheEntry{},
 		slotIndex:    map[string][]slotContrib{},
 		sup:          opts.Supervisor,
 		workspaceFor: opts.WorkspaceFor,
@@ -147,6 +170,26 @@ func NewBridge(opts BridgeOptions) (*Bridge, error) {
 				},
 			})
 		}
+		// Markdown 动态块：模板在 Bundle，数据 Schema 在 Script.Schemas。
+		for _, bd := range f.Blocks {
+			rendererID := u.manifest.ID + "/" + bd.Name
+			if _, dup := b.blocks[rendererID]; dup {
+				return nil, fmt.Errorf("frontend: block renderer 重复 %q", rendererID)
+			}
+			raw, ok := script.Schemas[bd.Schema]
+			if !ok || len(bytes.TrimSpace(raw)) == 0 {
+				return nil, fmt.Errorf("frontend: 插件 %s 的 block %s 缺少 Schema %q", u.manifest.ID, bd.Name, bd.Schema)
+			}
+			schema, err := CompileDataSchema(raw)
+			if err != nil {
+				return nil, fmt.Errorf("frontend: 插件 %s 的 block %s Schema 非法: %w", u.manifest.ID, bd.Name, err)
+			}
+			profile := bd.Profile
+			if profile == "" {
+				profile = "display"
+			}
+			b.blocks[rendererID] = blockEntry{u: u, def: bd, schema: schema, profile: profile}
+		}
 	}
 	for name := range b.slotIndex {
 		list := b.slotIndex[name]
@@ -185,6 +228,11 @@ func newUnit(s host.Script) (*unit, error) {
 	for _, dc := range u.manifest.Frontend.Dashboard {
 		if _, ok := u.templates[dc.Template]; !ok {
 			return nil, fmt.Errorf("frontend: 插件 %s 的 dashboard 卡片引用模板 %q，但包里没有它", u.manifest.ID, dc.Template)
+		}
+	}
+	for _, bd := range u.manifest.Frontend.Blocks {
+		if _, ok := u.templates[bd.Template]; !ok {
+			return nil, fmt.Errorf("frontend: 插件 %s 的 block %s 引用模板 %q，但包里没有它", u.manifest.ID, bd.Name, bd.Template)
 		}
 	}
 	for _, style := range u.manifest.Frontend.Styles {
@@ -297,6 +345,134 @@ func (b *Bridge) PageTitle(pluginID, slug string) string {
 	return ""
 }
 
+// RenderBlock 渲染一个 Markdown 动态块：数据 Schema → TSX → VNode → 校验 → HTML。
+// 返回的 raw 是包装后的单个 VNode，html 是同一份 VNode 的 HTML 表达。
+func (b *Bridge) RenderBlock(r *http.Request, rendererID, blockID string, data json.RawMessage) (json.RawMessage, template.HTML, error) {
+	entry, ok := b.blocks[strings.TrimSpace(rendererID)]
+	if !ok {
+		return nil, "", fmt.Errorf("frontend: 没有 block renderer %q", rendererID)
+	}
+	if !b.isEnabled(r, entry.u.manifest.ID) {
+		return nil, "", fmt.Errorf("frontend: 插件 %s 未启用", entry.u.manifest.ID)
+	}
+	cacheKey := b.blockCacheKey(entry, r, rendererID, blockID, data)
+	if raw, html, ok := b.cachedBlock(cacheKey); ok {
+		return raw, html, nil
+	}
+	parsed, err := decodeJSONValue(data)
+	if err != nil {
+		return nil, "", fmt.Errorf("frontend: block %s 的 data 不是合法 JSON: %w", rendererID, err)
+	}
+	if err := entry.schema.ValidateData(parsed); err != nil {
+		return nil, "", err
+	}
+	props, err := b.buildBlockProps(entry.u, r, blockID, rendererID, data)
+	if err != nil {
+		return nil, "", err
+	}
+	src, ok := entry.u.templates[entry.def.Template]
+	if !ok {
+		return nil, "", fmt.Errorf("frontend: 插件 %s 的 block %s 缺少模板 %q", entry.u.manifest.ID, entry.def.Name, entry.def.Template)
+	}
+	vnode, err := b.renderer.RenderPage(src, props)
+	if err != nil {
+		return nil, "", err
+	}
+	var root Node
+	if err := json.Unmarshal(vnode, &root); err != nil {
+		return nil, "", fmt.Errorf("frontend: block %s 返回的 VNode 非法: %w", rendererID, err)
+	}
+	if entry.profile == "display" {
+		if err := ValidateBlockNode(root); err != nil {
+			return nil, "", err
+		}
+	} else if err := ValidateNode(root); err != nil {
+		return nil, "", err
+	}
+	wrapped, err := json.Marshal(struct {
+		T string            `json:"t"`
+		P map[string]any    `json:"p"`
+		C []json.RawMessage `json:"c"`
+	}{
+		T: "div",
+		P: map[string]any{
+			"class":              "adag-ui-block",
+			"data-adag-renderer": rendererID,
+		},
+		C: []json.RawMessage{vnode},
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("frontend: block %s 包装 VNode 失败: %w", rendererID, err)
+	}
+	html, err := RenderHTML(wrapped)
+	if err != nil {
+		return nil, "", err
+	}
+	b.storeBlock(cacheKey, wrapped, html)
+	return wrapped, html, nil
+}
+
+func (b *Bridge) blockCacheKey(entry blockEntry, r *http.Request, rendererID, blockID string, data json.RawMessage) string {
+	sum := sha256.Sum256(data)
+	route, workspace := "", ""
+	if r != nil {
+		route = r.URL.Path
+		workspace = b.workspace(r)
+	}
+	return strings.Join([]string{
+		rendererID, blockID, entry.u.manifest.Version, workspace, route, hex.EncodeToString(sum[:]),
+	}, "\x00")
+}
+
+func (b *Bridge) cachedBlock(key string) (json.RawMessage, template.HTML, bool) {
+	b.blockMu.Lock()
+	defer b.blockMu.Unlock()
+	entry, ok := b.blockCache[key]
+	if !ok {
+		return nil, "", false
+	}
+	return append(json.RawMessage(nil), entry.raw...), entry.html, true
+}
+
+func (b *Bridge) storeBlock(key string, raw json.RawMessage, html template.HTML) {
+	b.blockMu.Lock()
+	defer b.blockMu.Unlock()
+	if len(b.blockCache) >= blockCacheLimit {
+		b.blockCache = map[string]blockCacheEntry{}
+	}
+	b.blockCache[key] = blockCacheEntry{raw: append(json.RawMessage(nil), raw...), html: html}
+}
+
+func decodeJSONValue(raw json.RawMessage) (any, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var out any
+	if err := dec.Decode(&out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (b *Bridge) buildBlockProps(u *unit, r *http.Request, blockID, rendererID string, data json.RawMessage) (json.RawMessage, error) {
+	p := renderProps{
+		Plugin: pluginInfo{ID: u.manifest.ID, Name: u.manifest.Name, Version: u.manifest.Version},
+		App: appInfo{
+			Workspace: b.workspace(r),
+			Product:   b.product,
+			Route:     r.URL.Path,
+		},
+		Block: &blockInfo{ID: blockID, Renderer: rendererID, Version: 1, Data: data},
+	}
+	if b.csrf != nil {
+		p.App.CSRF = b.csrf(r)
+	}
+	raw, err := json.Marshal(p)
+	if err != nil {
+		return nil, fmt.Errorf("frontend: block props 序列化失败: %w", err)
+	}
+	return raw, nil
+}
+
 // Styles 实现 web.PluginUI：插件样式的 /ext URL。
 func (b *Bridge) Styles() []string {
 	return b.assetURLs(func(f *plugins.Frontend) []string { return f.Styles })
@@ -384,6 +560,7 @@ type renderProps struct {
 	App    appInfo    `json:"app"`
 	Slot   string     `json:"slot,omitempty"`
 	Page   string     `json:"page,omitempty"`
+	Block  *blockInfo `json:"block,omitempty"`
 	Data   struct {
 		Thread       *threadRef                            `json:"thread,omitempty"`
 		Backend      map[string]map[string]json.RawMessage `json:"backend,omitempty"`
@@ -391,6 +568,14 @@ type renderProps struct {
 		Usage        *usageProjection                      `json:"usage,omitempty"`
 		Interactions []interactionProjection               `json:"interactions,omitempty"`
 	} `json:"data"`
+}
+
+// blockInfo 是动态块传给 TSX 的 props.block。
+type blockInfo struct {
+	ID       string          `json:"id,omitempty"`
+	Renderer string          `json:"renderer"`
+	Version  int             `json:"version"`
+	Data     json.RawMessage `json:"data"`
 }
 
 type pluginInfo struct {
