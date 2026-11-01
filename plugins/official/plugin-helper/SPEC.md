@@ -129,7 +129,7 @@ agent.on("tool.beforeCall", fn, { priority?: 0, action?: "deny" });       // 策
 | `settings` | — | 产品/用户配置透传的对象 |
 | `state.get/set/delete(key[, value])` | `state` | 线程级命名空间 KV；值为可 JSON 序列化数据 |
 | `secret(name)` | 清单 `secrets` | 未声明的名字返回 undefined |
-| `fs.readText/writeText/list/stat/exists` | `fs.read`（写需 `fs.write`） | 读可访问任意路径；写以工作区为根；见 §6 上限；覆盖写入进检查点 |
+| `fs.readText/writeText/list/stat/exists` | `fs.read`（写需 `fs.write`） | 读可访问任意路径；写限工作区与已安装插件目录（`~/.adago/plugins/<id>/`，逐次审批）；见 §6 上限；工作区写入进检查点 |
 | `exec.execFile/execFileSync` | `exec`（builtin/verified） | 无 shell；输出 4MB / 超时 120s |
 | `ui.available / confirm / select / input` | `ui.ask`（builtin/verified） | 通用用户交互 |
 | `skills()` | 产品 `skills: true` | 只读技能元数据 `{ name, description, path, origin }`；正文用 `read_file` 按 path 读取 |
@@ -341,7 +341,7 @@ block**，不要在 Markdown 里手写 HTML（会被清洗）或伪造宿主组�
 
 - 密钥只存在于 Core 内存与配置：不进提示词、工具结果、日志、前端 props，
   也不进插件子进程环境；`ctx.secret` 只对清单声明过的名字开放。
-- 插件出网只经宿主 HTTP 桥（host 黑白名单暂未启用）；fs 只在workspace 根内；无 shell 的
+- 插件出网只经宿主 HTTP 桥（host 黑白名单暂未启用）；fs 写限 workspace 与已安装插件目录；无 shell 的
   exec 仅 builtin/verified。
 - 工具与动作的写/执行都要用户确认；动作不进模型上下文。
 - 所有插件 HTTP 响应 `Cache-Control: no-store`（静态资源除外）。

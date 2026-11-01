@@ -143,7 +143,7 @@ cfg := stdlib.Config{
 
 | 模块 | 能力位 | 兼容范围 | 偏差与边界 |
 |---|---|---|---|
-| `fs`、`fs/promises` | `fs.read` / `fs.write` | `readFile`/`writeFile`/`appendFile`/`readdir`/`stat`/`lstat`/`mkdir`/`rm`/`rename`/`copyFile`/`realpath`/`readlink`/`existsSync`；同步与 promise 两种形状；`createReadStream`/`createWriteStream`（Web Streams） | 根固定为工作区，脚本视图 `/`；symlink 越界拒绝；单次读写 16MB、目录 10k 条；不提供回调形式；v1 不开放 `watch`、文件描述符、`chmod`/`chown`/`utimes`。例外：`ctx.fs` 的读成员（`readText`/`list`/`stat`/`exists`）不限制路径；写仍固定工作区 |
+| `fs`、`fs/promises` | `fs.read` / `fs.write` | `readFile`/`writeFile`/`appendFile`/`readdir`/`stat`/`lstat`/`mkdir`/`rm`/`rename`/`copyFile`/`realpath`/`readlink`/`existsSync`；同步与 promise 两种形状；`createReadStream`/`createWriteStream`（Web Streams） | 根固定为工作区，脚本视图 `/`；symlink 越界拒绝；单次读写 16MB、目录 10k 条；不提供回调形式；v1 不开放 `watch`、文件描述符、`chmod`/`chown`/`utimes`。例外：`ctx.fs` 的读成员（`readText`/`list`/`stat`/`exists`）不限制路径；`ctx.fs.writeText` 可写工作区与已安装插件目录（`~/.adago/plugins/<id>/`），node:fs 写成员仍固定工作区 |
 | `process` | 始终（只读子集） | `argv`、`env`（白名单）、`cwd`、`platform`、`arch`、`version`/`versions`、`pid`、`hrtime`、`nextTick`、`stdout`/`stderr` | `cwd` 是虚拟根 `/`；`env` 只含 `backend.env`；`exit` 抛异常；没有 `kill`、`binding`、`dlopen`、`setuid`、`umask` |
 | `os` | 始终（受限） | `platform`、`arch`、`EOL`、`cpus`、`tmpdir` | `hostname`/`homedir` 为空；没有 `networkInterfaces`、`userInfo`、`loadavg` |
 | `child_process` | `exec`，仅 builtin/verified | `execFile`/`execFileSync`；参数数组、`cwd`、`env`、`timeout`、`maxBuffer` | 不安装 `spawn`/`fork`；`exec`/`execSync` 因走 shell 而被拒绝（`Run.Shell=false`）；`cwd` 使用虚拟根并由宿主映射到工作区，越界拒绝；捕获上限 4MB，超时 120s，杀整棵进程树；进入模型回执仍按 50KB/2000 行截断 |

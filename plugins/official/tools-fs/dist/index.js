@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:c92478fa93a0f2dc) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:8485abf1f43a15fb) by plugins/official/build.mjs — do not edit
 // tools-fs —— 官方插件：工作区内的文件读写（05 §6.3、02 §5.4 的 tools-fs）。
 //
 // 边界不在这一层：真正的根、只读、symlink 落点、16MB/10k 上限与审计都由宿主的
@@ -173,7 +173,9 @@ export default function (agent          )       {
 
   agent.registerTool({
     name: "write_file",
-    description: "把内容整体写入工作区内的一个文件（覆盖已有内容，父目录不存在会失败）。",
+    description:
+      "把内容整体写入工作区或已安装插件目录（~/.adago/plugins/<id>/）内的一个文件" +
+      "（覆盖已有内容，父目录不存在会失败）。",
     access: "write",
     parameters: {
       type: "object",

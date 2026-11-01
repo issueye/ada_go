@@ -172,7 +172,9 @@ export default function (agent: AgentAPI): void {
 
   agent.registerTool({
     name: "write_file",
-    description: "把内容整体写入工作区内的一个文件（覆盖已有内容，父目录不存在会失败）。",
+    description:
+      "把内容整体写入工作区或已安装插件目录（~/.adago/plugins/<id>/）内的一个文件" +
+      "（覆盖已有内容，父目录不存在会失败）。",
     access: "write",
     parameters: {
       type: "object",

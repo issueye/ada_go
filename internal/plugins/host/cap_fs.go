@@ -31,12 +31,13 @@ import (
 
 // fsGuard 是一个 Runtime 的文件系统边界：同一份 Root/Mount/Write 也交给上游。
 type fsGuard struct {
-	st       *capsState
-	root     string // 真实工作区根（绝对路径）
-	mount    string // 脚本视图里的挂载点（默认 /workspace）
-	write    bool
-	promises bool // 本次包装的是否是 fs/promises 模块
-	limits   Limits
+	st          *capsState
+	root        string // 真实工作区根（绝对路径）
+	mount       string // 脚本视图里的挂载点（默认 /workspace）
+	write       bool
+	promises    bool // 本次包装的是否是 fs/promises 模块
+	limits      Limits
+	pluginRoots []string // 允许写的已安装插件根（默认 ~/.adago/plugins）
 }
 
 func init() {
@@ -69,8 +70,9 @@ func newFSGuard(st *capsState) (*fsGuard, error) {
 	}
 	return &fsGuard{
 		st: st, root: abs, mount: mount,
-		write:  st.caps != nil && st.caps.Has(plugins.CapFSWrite),
-		limits: st.limits,
+		write:       st.caps != nil && st.caps.Has(plugins.CapFSWrite),
+		limits:      st.limits,
+		pluginRoots: pluginWriteRoots(),
 	}, nil
 }
 
@@ -152,6 +154,24 @@ func (g *fsGuard) readPath(virtual string) (string, error) {
 		return cleaned, nil
 	}
 	return g.realPath(virtual)
+}
+
+// writePath 解析写操作目标：工作区优先；宿主绝对路径再试「已安装插件目录」。
+// 第二个返回值表示目标在工作区之外（插件目录），调用方据此跳过工作区检查点。
+func (g *fsGuard) writePath(virtual string) (string, bool, error) {
+	abs := filepath.Clean(strings.TrimSpace(virtual))
+	norm := filepath.ToSlash(abs)
+	hostAbs := filepath.IsAbs(abs) && norm != g.mount && !strings.HasPrefix(norm, g.mount+"/")
+	if !hostAbs {
+		real, err := g.realPath(virtual)
+		return real, false, err
+	}
+	allowed, err := allowPluginWrite(g.pluginRoots, abs)
+	if err != nil {
+		return "", true, throwCodedPath(g, fmt.Errorf(
+			"路径 %q 越出工作区根（挂载点 %s）：%v", baseForLog(virtual), g.mount, err))
+	}
+	return allowed, true, nil
 }
 
 func throwCodedPath(g *fsGuard, err error) error {
@@ -431,12 +451,18 @@ func ctxFSMember(st *capsState, hc Context) moejs.NativeFunc {
 		go func() {
 			settle(func(rt *mojsRuntime) (moejs.Value, error) {
 				r := rt.Realm()
-				// 读操作（readText/list/stat/exists）不限制目标路径；写入仍受工作区 Scope 约束。
-				resolve := guard.readPath
+				// 读操作（readText/list/stat/exists）不限制目标路径；写入限工作区
+				// 与已安装插件目录（~/.adago/plugins/<id>/，见 writePath）。
+				var (
+					real     string
+					external bool
+					err      error
+				)
 				if op == "writeText" {
-					resolve = guard.realPath
+					real, external, err = guard.writePath(virtual)
+				} else {
+					real, err = guard.readPath(virtual)
 				}
-				real, err := resolve(virtual)
 				if err != nil {
 					return moejs.Undefined(), err
 				}
@@ -473,8 +499,8 @@ func ctxFSMember(st *capsState, hc Context) moejs.NativeFunc {
 							map[string]any{"limit": guard.limits.MaxFileBytes})
 					}
 					// 检查点在覆盖之前登记（M5）：备份的是「被覆盖前的内容」。
-					// CallID 为空说明不在 Rollback 工具调用里，回调自己忽略。
-					if hc.Checkpoint != nil {
+					// 插件目录不在工作区检查点范围内，跳过（回滚只覆盖工作区）。
+					if hc.Checkpoint != nil && !external {
 						hc.Checkpoint(checkpointMetaOf(hc), virtual)
 					}
 					// 父目录由宿主补建（如 .adag/todo/）；real 已过工作区根校验。
@@ -484,7 +510,7 @@ func ctxFSMember(st *capsState, hc Context) moejs.NativeFunc {
 					if err := os.WriteFile(real, []byte(text), 0o644); err != nil {
 						return moejs.Undefined(), err
 					}
-					guard.st.audit("fs", "writeText", virtual, len(text), "ok", nil)
+					guard.st.audit("fs", "writeText", virtual, len(text), "ok", map[string]any{"pluginDir": external})
 					return rt.FromGo(map[string]any{"bytes": len(text)})
 				case "list":
 					entries, err := os.ReadDir(real)

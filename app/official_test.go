@@ -88,6 +88,44 @@ func TestToolsFS(t *testing.T) {
 	}
 }
 
+// TestToolsFSWritesInstalledPlugin 钉 write_file 的新边界：工作区之外只允许
+// 已安装插件目录（~/.adago/plugins/<id>/），插件根之外仍然拒绝。
+func TestToolsFSWritesInstalledPlugin(t *testing.T) {
+	home := tempDir(t)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	pluginDir := filepath.Join(home, ".adago", "plugins", "demo")
+	if err := os.MkdirAll(filepath.Join(pluginDir, "blocks"), 0o755); err != nil {
+		t.Fatalf("mkdir plugin: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(`{"id":"demo"}`), 0o644); err != nil {
+		t.Fatalf("write plugin.json: %v", err)
+	}
+
+	ws := tempDir(t)
+	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
+	asm := assemble(t, testProduct(t, "tools-fs", "policy-default"), hc, nil)
+
+	target := filepath.Join(pluginDir, "blocks", "card.tsx")
+	text, res := callTool(t, asm, hc, "write_file", map[string]any{
+		"path": target, "content": "export default function () { return <div>ok</div>; }",
+	})
+	if res.Receipt.Status != domain.ReceiptOK || !strings.Contains(text, "已写入") {
+		t.Fatalf("插件目录写入失败: %q / %+v", text, res.Receipt)
+	}
+	if got, err := os.ReadFile(target); err != nil || !strings.Contains(string(got), "<div>ok</div>") {
+		t.Fatalf("插件文件未落盘: %q / %v", got, err)
+	}
+
+	if _, err := callToolErr(t, asm, hc, "write_file", map[string]any{
+		"path": filepath.Join(home, "secret.txt"), "content": "x",
+	}); err == nil {
+		t.Fatal("插件根之外的写盘必须被拒绝")
+	} else if !strings.Contains(err.Error(), "已安装插件目录") {
+		t.Fatalf("错误应说明允许的插件目录：%v", err)
+	}
+}
+
 // TestToolsShell 钉 run_command：无 shell、非零退出码不抛错、参数校验。
 func TestToolsShell(t *testing.T) {
 	ws := tempDir(t)
