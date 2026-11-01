@@ -12,6 +12,7 @@
     "policy-default",
     "provider-admin",
     "token-usage",
+    "ui-charts",
     "plugin-helper"
   ],
   "capabilities": {

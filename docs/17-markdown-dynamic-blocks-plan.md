@@ -53,7 +53,7 @@ MVP 是**只读展示型动态块**，可以独立发布，不依赖交互/流�
 - MB-3 Markdown：顶层 `adag-ui` fence 分段、降级、块数/字节限额已完成；
 - MB-4 Render Runtime/VNode：block TSX、display profile、超时/错误隔离已完成；
 - MB-5 浏览器/无 JS：`markdownVNode` 支持 `$C`/`n`；`/markdown.ast`、`/markdown` 与无 JS 模板已接入；
-- MB-6 参考插件：`token-usage/usage-card` 已落地；
+- MB-6 参考插件：`token-usage/usage-card` 已落地；通用图表 `ui-charts`（bar/column/compare/stacked/heatmap/spark）已提供并被 coding/headless 产品声明；
 - MB-7 安全/限额/缓存：display profile、限额、进程内 bounded cache 已完成；审计事件（`ui.block.invalid_data` / `render_failed` / `invalid_vnode`，只带错误码不带 data）已接入；interactive profile 在运行期 fail-closed（`unsupported_profile`）；
 - MB-8 测试/门禁：Bridge/Markdown 降级测试、审计事件测试、`verify vnode` block profile、`verify markdown-block`、token-usage golden HTML、`/markdown.ast` golden（`web/testdata/markdown-block/usage-card.ast.json`）、`$C` 组件渲染测试、AST→HTML 与 `/markdown` 一致、浏览器运行时结构一致（`ada-block-consistency.test.js`）、助手消息内块 e2e（含禁用插件降级与旧缓存不生效）、限额/超时测试、第三方插件的 block-only 装配（工作区优先、官方遮蔽、坏块跳过）均已通过；真实浏览器冒烟仍待补。
 
@@ -293,7 +293,7 @@ MB-0 契约
 | Gateway 装配 | `cmd/adag/frontend_blocks.go`（工作区/全局插件扫描与遮蔽） |
 | Markdown | `internal/gateway/web/markdown_vnode.go`、新增 `markdown_block.go`、`ui.go` |
 | 浏览器 | `internal/gateway/web/static/ada-ui.js`（Markdown `$C` 透传）、CSS |
-| 官方插件 | `plugins/official/token-usage/{plugin.json,schemas,blocks}` |
+| 官方插件 | `plugins/official/token-usage/{plugin.json,schemas,blocks}`、`plugins/official/ui-charts/{plugin.json,schemas,chart.tsx}` |
 | 门禁 | `tools/verify/*`、`spec/*` fixture |
 | 文档 | `docs/16-markdown-dynamic-blocks.md`、`docs/07/14/15` |
 

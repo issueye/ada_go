@@ -277,6 +277,21 @@ Schema 与 TSX 模板；宿主校验 `data` 后渲染成 VNode，浏览器与无
 比例一律换算成 10 档（`Math.round(v/max*10)`，至少 1）；真实折线/饼图需要受限
 SVG 白名单，当前未开放，不要用 `svg`/`style` 绕过。
 
+官方 `ui-charts` 插件已提供通用 renderer（coding/headless 产品默认启用）：
+
+| renderer | 用途 | data 要点 |
+| --- | --- | --- |
+| `ui-charts/bar` | 横向条 | `items[{label,value}]` |
+| `ui-charts/column` | 纵向柱 | `items[{label,value}]` |
+| `ui-charts/compare` | 双条对比 | `items[{label,value,value2}]` + `legendA/legendB` |
+| `ui-charts/stacked` | 100% 堆叠 | `items[{label,value}]`（按总和算占比） |
+| `ui-charts/heatmap` | 热力方块 | `items[{label,value}]` 或 `items[{label,level:0..5}]` |
+| `ui-charts/spark` | 迷你折线 | `values:[number]`（≤48） |
+
+公共字段：`title`（必填）、`subtitle?`、`unit?`；未知字段会被 Schema 拒绝。
+任意工具/插件在结果里提示模型时，应给出 **确切的 renderer id + data 示例**，
+不要让模型猜。
+
 ### 8.2 AI 在回答里如何使用动态块
 
 需要结构化展示（用量、统计、清单、状态卡）时，优先用**已启用插件提供的

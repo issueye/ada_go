@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "通用图表数据",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title"],
+  "properties": {
+    "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "subtitle": { "type": "string", "maxLength": 120 },
+    "unit": { "type": "string", "maxLength": 16 },
+    "legendA": { "type": "string", "maxLength": 16 },
+    "legendB": { "type": "string", "maxLength": 16 },
+    "items": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "value"],
+        "properties": {
+          "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "value": { "type": "number" },
+          "value2": { "type": "number" },
+          "level": { "type": "number", "minimum": 0, "maximum": 5 },
+          "note": { "type": "string", "maxLength": 80 }
+        }
+      }
+    },
+    "values": {
+      "type": "array",
+      "maxItems": 48,
+      "items": { "type": "number" }
+    }
+  }
+}

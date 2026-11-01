@@ -1,0 +1,60 @@
+{
+  "id": "ui-charts",
+  "name": "通用图表",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "Markdown 动态块的通用图表渲染器：横向条、纵向柱、双条对比、堆叠占比、热力方块与迷你折线。",
+  "trust": "builtin",
+  "frontend": {
+    "blocks": [
+      {
+        "name": "bar",
+        "title": "横向条",
+        "description": "按数值大小对比的横向条形图",
+        "schema": "schemas/chart.json",
+        "template": "chart.tsx",
+        "profile": "display"
+      },
+      {
+        "name": "column",
+        "title": "纵向柱",
+        "description": "按数值大小对比的纵向柱状图",
+        "schema": "schemas/chart.json",
+        "template": "chart.tsx",
+        "profile": "display"
+      },
+      {
+        "name": "compare",
+        "title": "双条对比",
+        "description": "每个条目两组数值的对比图",
+        "schema": "schemas/chart.json",
+        "template": "chart.tsx",
+        "profile": "display"
+      },
+      {
+        "name": "stacked",
+        "title": "堆叠占比",
+        "description": "多个条目占总量的 100% 堆叠条",
+        "schema": "schemas/chart.json",
+        "template": "chart.tsx",
+        "profile": "display"
+      },
+      {
+        "name": "heatmap",
+        "title": "热力方块",
+        "description": "按等级着色的热力方块网格",
+        "schema": "schemas/chart.json",
+        "template": "chart.tsx",
+        "profile": "display"
+      },
+      {
+        "name": "spark",
+        "title": "迷你折线",
+        "description": "用文本块字符绘制的迷你折线",
+        "schema": "schemas/chart.json",
+        "template": "chart.tsx",
+        "profile": "display"
+      }
+    ]
+  }
+}
