@@ -17,7 +17,8 @@
   "capabilities": {
     "skills": true,
     "images": true,
-    "subagents": false
+    "subagents": false,
+    "markdownBlocks": true
   },
   "identity": {
     "name": "ada-go",

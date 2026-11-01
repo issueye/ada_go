@@ -59,6 +59,7 @@ func Registry() []Check {
 		{Name: "capabilities", Summary: "每个能力位都有安装消费者与信任约束", Milestone: "M0", Run: checkCapabilities},
 		{Name: "manifest", Summary: "清单 Schema 字段与 Go 加载结构逐字一致，且每字段有消费者", Milestone: "M0", Run: checkManifestFields},
 		{Name: "vnode", Summary: "VNode Schema 的白名单与限制与 Go 校验器一致", Milestone: "M0", Run: checkVNode},
+		{Name: "markdown-block", Summary: "Markdown 动态块封套 Schema 与限额同运行时一致", Milestone: "M4", Run: checkMarkdownBlock},
 		{Name: "products", Summary: "产品声明逐字段有消费者；skeleton 空基座可启动", Milestone: "M0", Run: checkProducts},
 		{Name: "docs", Summary: "文档链接可解析；核心数字（34/15/12/1）与生成结果一致", Milestone: "M0", Run: checkDocs},
 		{Name: "nodecompat", Summary: "Node 模块矩阵、能力位、错误码与偏差表自洽", Milestone: "M0", Run: checkNodeCompat},

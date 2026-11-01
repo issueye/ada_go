@@ -43,11 +43,11 @@ type Config struct {
 	// Binary 是 adag 可执行文件（spawn Core 用）；空时 supervisor 取 os.Executable。
 	Binary string
 	// Provider/Model/BaseURL/DataDir 原样传给 Core。
-	Provider   string
-	Model      string
-	BaseURL    string
-	DataDir    string
-	Fake       bool
+	Provider string
+	Model    string
+	BaseURL  string
+	DataDir  string
+	Fake     bool
 	// Debug 让 Core 把每次出网请求摘要写到自己的 stderr（网关再转发到本进程）。
 	Debug bool
 	// Token 是 Gateway 的访问令牌；空时自动生成。
@@ -289,6 +289,7 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 			CSRF:              mw.CSRFToken,
 			Enabled:           gate.Enabled,
 			InvalidateEnabled: gate.Invalidate,
+			MarkdownBlocks:    product.Capabilities.MarkdownBlocks,
 		})
 		if err != nil {
 			if ownSup {

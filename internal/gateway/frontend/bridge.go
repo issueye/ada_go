@@ -57,6 +57,8 @@ type BridgeOptions struct {
 	Enabled func(*http.Request, string) bool
 	// InvalidateEnabled 让 Enabled 的实现丢弃某个工作区的缓存（启用/停用后调用）。
 	InvalidateEnabled func(workspace string)
+	// MarkdownBlocks 是产品 capabilities.markdownBlocks：false 时 Block 渲染入口关闭。
+	MarkdownBlocks bool
 }
 
 // unit 是一个已登记的前端插件。
@@ -100,8 +102,9 @@ type Bridge struct {
 	enabled      func(*http.Request, string) bool
 	invalidate   func(string)
 
-	blockMu    sync.Mutex
-	blockCache map[string]blockCacheEntry
+	blockMu        sync.Mutex
+	blockCache     map[string]blockCacheEntry
+	markdownBlocks bool
 }
 
 var _ web.PluginUI = (*Bridge)(nil)
@@ -110,16 +113,17 @@ var _ web.PluginUI = (*Bridge)(nil)
 // （不静默丢弃贡献，INV-2）。
 func NewBridge(opts BridgeOptions) (*Bridge, error) {
 	b := &Bridge{
-		byID:         map[string]*unit{},
-		blocks:       map[string]blockEntry{},
-		blockCache:   map[string]blockCacheEntry{},
-		slotIndex:    map[string][]slotContrib{},
-		sup:          opts.Supervisor,
-		workspaceFor: opts.WorkspaceFor,
-		product:      opts.ProductName,
-		csrf:         opts.CSRF,
-		enabled:      opts.Enabled,
-		invalidate:   opts.InvalidateEnabled,
+		byID:           map[string]*unit{},
+		blocks:         map[string]blockEntry{},
+		blockCache:     map[string]blockCacheEntry{},
+		slotIndex:      map[string][]slotContrib{},
+		sup:            opts.Supervisor,
+		workspaceFor:   opts.WorkspaceFor,
+		product:        opts.ProductName,
+		csrf:           opts.CSRF,
+		enabled:        opts.Enabled,
+		invalidate:     opts.InvalidateEnabled,
+		markdownBlocks: opts.MarkdownBlocks,
 	}
 	pairs := make([]host.ComponentPair, 0, len(AllowedComponents)+1)
 	for _, name := range AllowedComponents {
@@ -345,6 +349,9 @@ func (b *Bridge) PageTitle(pluginID, slug string) string {
 	return ""
 }
 
+// MarkdownBlocksEnabled 实现 web 的可选能力查询。
+func (b *Bridge) MarkdownBlocksEnabled() bool { return b != nil && b.markdownBlocks }
+
 // RenderBlock 渲染一个 Markdown 动态块：数据 Schema → TSX → VNode → 校验 → HTML。
 // 返回的 raw 是包装后的单个 VNode，html 是同一份 VNode 的 HTML 表达。
 func (b *Bridge) RenderBlock(r *http.Request, rendererID, blockID string, data json.RawMessage) (json.RawMessage, template.HTML, error) {
@@ -354,6 +361,9 @@ func (b *Bridge) RenderBlock(r *http.Request, rendererID, blockID string, data j
 	}
 	if !b.isEnabled(r, entry.u.manifest.ID) {
 		return nil, "", fmt.Errorf("frontend: 插件 %s 未启用", entry.u.manifest.ID)
+	}
+	if !b.markdownBlocks {
+		return nil, "", fmt.Errorf("frontend: 产品未启用 Markdown 动态块")
 	}
 	cacheKey := b.blockCacheKey(entry, r, rendererID, blockID, data)
 	if raw, html, ok := b.cachedBlock(cacheKey); ok {

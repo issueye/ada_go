@@ -47,7 +47,7 @@ MVP 是**只读展示型动态块**，可以独立发布，不依赖交互/流�
 
 ### 2.3 当前实现状态（2026-11-01）
 
-- MB-0 契约：`markdown-block.schema.json`、`frontend.blocks`、VNode block profile 已落地；
+- MB-0 契约：`markdown-block.schema.json`、`frontend.blocks`、VNode block profile、产品开关 `capabilities.markdownBlocks` 已落地；
 - MB-1 清单/加载：`frontend.blocks` 解析、模板/Schema 读取、renderer 注册已完成；
 - MB-2 数据 Schema：受控 2020-12 子集校验器已落地（未知关键字编译期报错）；
 - MB-3 Markdown：顶层 `adag-ui` fence 分段、降级、块数/字节限额已完成；
@@ -55,9 +55,9 @@ MVP 是**只读展示型动态块**，可以独立发布，不依赖交互/流�
 - MB-5 浏览器/无 JS：`markdownVNode` 支持 `$C`/`n`；`/markdown.ast`、`/markdown` 与无 JS 模板已接入；
 - MB-6 参考插件：`token-usage/usage-card` 已落地；
 - MB-7 安全/限额/缓存：display profile、限额、进程内 bounded cache 已完成；审计事件与 interactive profile 尚未接入；
-- MB-8 测试/门禁：Bridge/Markdown 降级测试、`verify vnode` block profile 已通过；独立 `markdown-block` verify 检查、第三方前端 block 加载与 golden HTML 仍待补。
+- MB-8 测试/门禁：Bridge/Markdown 降级测试、`verify vnode` block profile、`verify markdown-block` 已通过；第三方前端 block 加载与 golden HTML 仍待补。
 
-**未做**：产品开关 `capabilities.markdownBlocks`、interactive 块、流式提前渲染、跨进程缓存、第三方前端插件加载（当前 Gateway 只加载官方前端脚本）。
+**未做**：interactive 块、块渲染审计事件、流式提前渲染、跨进程缓存、第三方前端插件加载（当前 Gateway 只加载官方前端脚本）、golden HTML 与浏览器端 `$C` 专项测试。
 
 ## 3. 工作分解与依赖
 
@@ -298,10 +298,10 @@ MB-0 契约
 
 ## 9. 开放决策
 
-1. MVP 是否增加 `capabilities.markdownBlocks` 产品开关（建议增加，默认 false）。
-2. JSON Schema 运行时库选择（建议纯 Go、固定版本）。
+1. `capabilities.markdownBlocks` 产品开关：**已采用**（默认 false，coding/headless true，skeleton false）。
+2. JSON Schema 运行时实现：**已采用**受控 2020-12 子集（未知关键字编译期报错）。
 3. 是否允许引用其他插件的 renderer（MVP 建议允许启用插件，但数据 Schema 由目标插件负责）。
-4. 是否在块上显示插件来源标识（建议 MVP 加一个轻量 `data-adag-renderer`，UI 可选展示）。
+4. 块上插件来源标识：**已采用** `data-adag-renderer` 包装属性，UI 可选展示。
 5. 交互块的信任门槛（P1 决策，建议仅 builtin/verified + 产品显式开启）。
 
 ## 10. 相关文档

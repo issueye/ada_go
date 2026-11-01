@@ -48,4 +48,4 @@
 - 插件启停：全局 `~/.adago/plugins.json` + 工作区 `.adag/plugins.json` 覆盖。
 - 插件平台 API 规范：`plugins/official/plugin-helper/SPEC.md`；
   操作流程技能：`plugins/official/plugin-helper/skills/create-plugin/SKILL.md`。
-- 验证门禁：`go test ./...`、`go vet ./...`、staticcheck、`adag verify`（12 项）。
+- 验证门禁：`go test ./...`、`go vet ./...`、staticcheck、`adag verify`（13 项）。

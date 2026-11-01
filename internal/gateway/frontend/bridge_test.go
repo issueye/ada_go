@@ -118,9 +118,10 @@ func testBridge(t *testing.T, core contracts.CoreClient) *frontend.Bridge {
 		t.Fatalf("官方前端插件应有 2 个，got %d", len(scripts))
 	}
 	b, err := frontend.NewBridge(frontend.BridgeOptions{
-		Scripts:     scripts,
-		Supervisor:  &fakeSup{core: core},
-		ProductName: "ada-go",
+		Scripts:        scripts,
+		Supervisor:     &fakeSup{core: core},
+		ProductName:    "ada-go",
+		MarkdownBlocks: true,
 	})
 	if err != nil {
 		t.Fatalf("NewBridge: %v", err)
@@ -156,6 +157,53 @@ func TestBridgeRenderBlock(t *testing.T) {
 	// 未知 renderer。
 	if _, _, err := b.RenderBlock(request(t, "/thread/th_1"), "no-such/block", "", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("未知 renderer 应报错")
+	}
+}
+
+// 产品 capabilities.markdownBlocks=false 时 Block 渲染入口关闭。
+func TestBridgeMarkdownBlocksDisabled(t *testing.T) {
+	scripts, err := official.FrontendScripts()
+	if err != nil {
+		t.Fatalf("official.FrontendScripts: %v", err)
+	}
+	b, err := frontend.NewBridge(frontend.BridgeOptions{Scripts: scripts, MarkdownBlocks: false})
+	if err != nil {
+		t.Fatalf("NewBridge: %v", err)
+	}
+	if _, _, err := b.RenderBlock(request(t, "/thread/th_1"), "token-usage/usage-card", "", json.RawMessage(`{"scope":"thread"}`)); err == nil {
+		t.Fatal("markdownBlocks=false 时应拒绝 block")
+	}
+}
+
+// TestBridgeRenderBlockComponent 验证 block TSX 产出的 $C 组件节点能通过校验与 HTML 渲染。
+func TestBridgeRenderBlockComponent(t *testing.T) {
+	scripts := []host.Script{{
+		Manifest: &plugins.Manifest{
+			ID: "demo-block", Name: "Demo Block", Version: "0.1.0", APIVersion: 1,
+			Trust: plugins.TrustBuiltin,
+			Frontend: &plugins.Frontend{Blocks: []plugins.BlockContribution{{
+				Name: "icon", Schema: "schemas/icon.json", Template: "blocks/icon.tsx", Profile: "display",
+			}}},
+		},
+		Bundle: map[string]string{
+			"blocks/icon.tsx": `import { Icon } from "ssr:components";
+export default function Block() { return <Icon name="i-list" />; }`,
+		},
+		Schemas: map[string][]byte{"schemas/icon.json": []byte(`{"type":"object"}`)},
+	}}
+	b, err := frontend.NewBridge(frontend.BridgeOptions{Scripts: scripts, MarkdownBlocks: true})
+	if err != nil {
+		t.Fatalf("NewBridge: %v", err)
+	}
+	raw, html, err := b.RenderBlock(request(t, "/thread/th_1"), "demo-block/icon", "", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("RenderBlock: %v", err)
+	}
+	if !strings.Contains(string(raw), `"t":"$C"`) || !strings.Contains(string(raw), `"n":"Icon"`) {
+		t.Fatalf("block 应保留 $C 组件节点: %s", raw)
+	}
+	if !strings.Contains(string(html), "ada-icon") {
+		t.Fatalf("$C Icon 应渲染为 SVG: %s", html)
 	}
 }
 

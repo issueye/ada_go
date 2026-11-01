@@ -923,3 +923,38 @@ func containsStr(hay []string, needle string) bool {
 	}
 	return false
 }
+
+// checkMarkdownBlock 校验 Markdown 动态块封套 Schema 与运行时限额一致。
+func checkMarkdownBlock(root string) error {
+	path := filepath.Join(root, "spec", "markdown-block.schema.json")
+	info, err := loadSchema(path)
+	if err != nil {
+		return err
+	}
+	for _, key := range []string{"renderer", "data"} {
+		if _, ok := info.ByPath[key]; !ok {
+			return fmt.Errorf("markdown-block Schema 缺少必填字段 %s", key)
+		}
+	}
+	limits := map[string]int{
+		"maxBytes":             web.MaxMarkdownBlockBytes,
+		"maxDepth":             32,
+		"maxBlocksPerDocument": web.MaxMarkdownBlocks,
+		"renderTimeoutMs":      web.MarkdownBlockRenderTimeoutMS,
+	}
+	var problems []string
+	for key, want := range limits {
+		got, ok := info.RootNumbers["x-limits/"+key]
+		if !ok {
+			problems = append(problems, fmt.Sprintf("x-limits 缺少 %s", key))
+			continue
+		}
+		if int(got) != want {
+			problems = append(problems, fmt.Sprintf("%s：Schema %d，Go 常量 %d", key, int(got), want))
+		}
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("Markdown 动态块契约漂移:\n  - %s", strings.Join(problems, "\n  - "))
+	}
+	return nil
+}

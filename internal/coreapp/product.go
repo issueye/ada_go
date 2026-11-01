@@ -31,9 +31,10 @@ type Product struct {
 
 // Capabilities 是产品能力位（不含人格，人格来自 persona-* 插件）。
 type Capabilities struct {
-	Skills    bool `json:"skills"`
-	Images    bool `json:"images"`
-	Subagents bool `json:"subagents"`
+	Skills         bool `json:"skills"`
+	Images         bool `json:"images"`
+	Subagents      bool `json:"subagents"`
+	MarkdownBlocks bool `json:"markdownBlocks"`
 }
 
 // Identity 是界面品牌与语言；刻意不含人格字段（8.6）。

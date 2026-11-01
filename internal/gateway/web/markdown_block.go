@@ -16,9 +16,12 @@ import (
 )
 
 const (
-	maxMarkdownBlocks       = 8
-	maxMarkdownBlockBytes   = 64 << 10
-	defaultBlockFailureText = "动态内容暂不可用"
+	// MaxMarkdownBlocks / MaxMarkdownBlockBytes / MarkdownBlockRenderTimeoutMS
+	// 与 spec/markdown-block.schema.json 的 x-limits 一致（adag verify markdown-block 核对）。
+	MaxMarkdownBlocks            = 8
+	MaxMarkdownBlockBytes        = 64 << 10
+	MarkdownBlockRenderTimeoutMS = 300
+	defaultBlockFailureText      = "动态内容暂不可用"
 )
 
 // BlockRenderer 由前端插件桥可选实现：把 adag-ui block 渲染成 VNode/HTML。
@@ -43,7 +46,13 @@ func (s *Server) blockRenderer() BlockRenderer {
 	if s == nil || s.cfg.PluginUI == nil {
 		return nil
 	}
-	br, _ := s.cfg.PluginUI.(BlockRenderer)
+	br, ok := s.cfg.PluginUI.(BlockRenderer)
+	if !ok {
+		return nil
+	}
+	if gate, ok := br.(interface{ MarkdownBlocksEnabled() bool }); ok && !gate.MarkdownBlocksEnabled() {
+		return nil
+	}
 	return br
 }
 
@@ -113,11 +122,11 @@ func (s *Server) renderMarkdownBlock(r *http.Request, br BlockRenderer, payload 
 func (s *Server) renderMarkdownBlockNodes(r *http.Request, br BlockRenderer, payload string, count *int) (json.RawMessage, template.HTML, bool) {
 	if count != nil {
 		*count++
-		if *count > maxMarkdownBlocks {
+		if *count > MaxMarkdownBlocks {
 			return nil, blockFallbackHTML("动态块数量超过上限"), false
 		}
 	}
-	if len(payload) > maxMarkdownBlockBytes {
+	if len(payload) > MaxMarkdownBlockBytes {
 		return nil, blockFallbackHTML("动态块数据超过上限"), false
 	}
 	var env markdownBlockEnvelope

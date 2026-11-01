@@ -106,9 +106,10 @@ func TestMarkdownTokenUsageBlockIntegration(t *testing.T) {
 		t.Fatalf("official.FrontendScripts: %v", err)
 	}
 	bridge, err := frontend.NewBridge(frontend.BridgeOptions{
-		Scripts:     scripts,
-		Supervisor:  &fakeSupervisor{core: newFakeCore()},
-		ProductName: "测试产品",
+		Scripts:        scripts,
+		Supervisor:     &fakeSupervisor{core: newFakeCore()},
+		ProductName:    "测试产品",
+		MarkdownBlocks: true,
 	})
 	if err != nil {
 		t.Fatalf("NewBridge: %v", err)

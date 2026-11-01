@@ -37,9 +37,9 @@
     "capabilities": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["skills", "images", "subagents"],
-      "description": "功能开关容器（§8.6：三个布尔，全部必须有消费者：技能装配、图片输入门、子智能体装配）。",
-      "x-consumer": "coreapp: 按开关裁剪装配路径（技能注入、图片输入、子智能体）；关闭后对应工具与 UI 入口消失",
+      "required": ["skills", "images", "subagents", "markdownBlocks"],
+      "description": "功能开关容器（§8.6：四个布尔，全部必须有消费者：技能装配、图片输入门、子智能体装配、Markdown 动态块）。",
+      "x-consumer": "coreapp: 按开关裁剪装配路径（技能注入、图片输入、子智能体、Markdown 动态块）；关闭后对应工具、块渲染与 UI 入口消失",
       "properties": {
         "skills": {
           "type": "boolean",
@@ -55,6 +55,11 @@
           "type": "boolean",
           "description": "子智能体装配开关（v1.5；coding 样例为 false——子智能体是 v1.5，tools-subagent 不在 v1 清单）。",
           "x-consumer": "coreapp: 子智能体装配与 subagent.invoke 链路是否建立"
+        },
+        "markdownBlocks": {
+          "type": "boolean",
+          "description": "Markdown 动态块开关：产品启用后，Markdown 中的 ```adag-ui fence 才会解析并交给插件 Render Runtime。",
+          "x-consumer": "gateway: 决定 Markdown 渲染是否处理 adag-ui fence；false 时按普通代码块降级"
         }
       }
     },

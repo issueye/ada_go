@@ -6,7 +6,8 @@
   "capabilities": {
     "skills": false,
     "images": false,
-    "subagents": false
+    "subagents": false,
+    "markdownBlocks": false
   },
   "identity": {
     "name": "ada-go",

@@ -22,6 +22,7 @@
 - **同一套 Schema 技术体系**：JSON Schema 2020-12 + 现有 `spec/vnode.schema.json`；
 - 插件自己声明数据 Schema 与 TSX 渲染器，宿主只负责解析、校验、限额与渲染；
 - 复用现有 goldmark + bluemonday + VNode + Render Runtime，不引入 MDX、客户端模板执行或第二套渲染引擎；
+- 产品开关：`capabilities.markdownBlocks` 是总开关；false 时 `adag-ui` fence 按普通代码块降级；
 - 模型/工具输出只是数据，不能执行脚本、注入原始 HTML 或伪造宿主 UI；
 - 无 JS 时仍能通过 `/markdown` HTML 端点看到块内容。
 
