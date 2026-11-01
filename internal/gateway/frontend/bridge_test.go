@@ -10,6 +10,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -148,6 +150,13 @@ func TestBridgeRenderBlock(t *testing.T) {
 	}
 	if !strings.Contains(string(html), "tu-card") || !strings.Contains(string(html), "1,234") {
 		t.Fatalf("block HTML = %s", html)
+	}
+	golden, err := os.ReadFile(filepath.Join("testdata", "block", "usage-card.html"))
+	if err != nil {
+		t.Fatalf("读取 golden: %v", err)
+	}
+	if strings.TrimSpace(string(html)) != strings.TrimSpace(string(golden)) {
+		t.Fatalf("block HTML 与 golden 不一致:\n--- got ---\n%s\n--- want ---\n%s", html, golden)
 	}
 
 	// 数据 Schema 失败：调用前拒绝，不执行 TSX。
