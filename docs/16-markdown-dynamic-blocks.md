@@ -153,7 +153,6 @@ Markdown
 ## 6. 插件声明
 
 扩展 `plugin.json` 的 `frontend` 段：
-
 ```json
 {
   "frontend": {
@@ -170,6 +169,9 @@ Markdown
   }
 }
 ```
+
+> 插件作者与 AI 的操作说明（如何声明、如何在回答里写 fence）见
+> `plugins/official/plugin-helper/SPEC.md` §8.1 / §8.2。
 
 字段：
 

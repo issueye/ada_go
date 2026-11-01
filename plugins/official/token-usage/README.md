@@ -37,6 +37,28 @@
 - 数量按千分位格式化；成本由 `costMicros / 1_000_000` 转成美元，无成本时显示 `—`。
 - 仪表盘只展示工作区汇总与当前会话明细；两者都没有数据时返回 `null`，概览页不留空卡。
 
+## Markdown 用法
+
+renderer id 是 `token-usage/usage-card`。在助手回答里用 `adag-ui` fence 引用：
+
+````markdown
+```adag-ui
+{
+  "renderer": "token-usage/usage-card",
+  "id": "b1",
+  "fallback": "用量卡片暂不可用",
+  "data": {
+    "scope": "thread",
+    "title": "本轮用量",
+    "usage": { "inputTokens": 1234, "outputTokens": 567, "cacheTokens": 89, "costMicros": 1200 }
+  }
+}
+```
+````
+
+`data` 由 `schemas/usage-card.json` 校验：`scope` 必填（`thread` | `workspace`），
+`title`、`usage` 可选；缺失字段按 0 / `—` 展示。块只做展示，交互走页面或工具。
+
 ## 边界
 
 - 本插件没有后端与能力，不读写会话存储，也不发起网络请求。
