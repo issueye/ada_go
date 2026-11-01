@@ -262,6 +262,21 @@ Schema 与 TSX 模板；宿主校验 `data` 后渲染成 VNode，浏览器与无
 4. 官方插件跑 `node plugins/official/build.mjs`，再跑 `adag verify`；
 5. 在插件 README/技能里给出 renderer id 与一段 `data` 示例，供模型引用。
 
+图表 class 速查（宿主 `app-local.css` 提供，插件直接用，**禁止写 `style`**）：
+
+| 形态 | class |
+| --- | --- |
+| 横向条 | `.adag-chart__track` + `.adag-chart__bar--l1..l10` |
+| 一行双条（最高/最低） | `.adag-chart__pair` + 第二条加 `.adag-chart__bar--alt` |
+| 纵向柱 | `.adag-chart__cols` / `.adag-chart__col` / `.adag-chart__colbar--h1..h10` |
+| 100% 堆叠占比 | `.adag-chart__stack` + `.adag-chart__seg--l1..l10` + `.adag-chart__seg--a..d` |
+| 图例 | `.adag-chart__legend` + `.adag-chart__dot`（`--b/--c/--d`） |
+| 热力方块 | `.adag-heat`（`--cols4/--cols12/--cols24`）+ `.adag-heat__cell--l1..l5` |
+| 迷你折线 | `.adag-spark` + 文本 `▁▂▃▄▅▆▇█` |
+
+比例一律换算成 10 档（`Math.round(v/max*10)`，至少 1）；真实折线/饼图需要受限
+SVG 白名单，当前未开放，不要用 `svg`/`style` 绕过。
+
 ### 8.2 AI 在回答里如何使用动态块
 
 需要结构化展示（用量、统计、清单、状态卡）时，优先用**已启用插件提供的

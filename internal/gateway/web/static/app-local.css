@@ -1902,3 +1902,158 @@ html.js .ada-newtask__ws-native {
 .adag-chart__bar--l8 { width: 80%; }
 .adag-chart__bar--l9 { width: 90%; }
 .adag-chart__bar--l10 { width: 100%; }
+
+/* 图表变体：全部用固定档位 class 表达比例（CSP 禁内联 style）。
+   插件 TSX 只组合这些 class；需要新形态时先在这里加宿主样式。 */
+
+/* 纵向柱状图：<ol class="adag-chart__cols"><li class="adag-chart__col">… */
+.adag-chart__cols {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 132px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.adag-chart__col {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  height: 100%;
+  min-width: 0;
+}
+
+.adag-chart__colbar {
+  width: 100%;
+  max-width: 28px;
+  border-radius: var(--ada-radius-sm) var(--ada-radius-sm) 0 0;
+  background: var(--ph-brand);
+}
+
+.adag-chart__col-value,
+.adag-chart__col-label {
+  overflow: hidden;
+  max-width: 100%;
+  font-size: var(--ada-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adag-chart__col-value {
+  color: var(--ph-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.adag-chart__col-label {
+  color: var(--ph-muted);
+}
+
+.adag-chart__colbar--h1 { height: 10%; }
+.adag-chart__colbar--h2 { height: 20%; }
+.adag-chart__colbar--h3 { height: 30%; }
+.adag-chart__colbar--h4 { height: 40%; }
+.adag-chart__colbar--h5 { height: 50%; }
+.adag-chart__colbar--h6 { height: 60%; }
+.adag-chart__colbar--h7 { height: 70%; }
+.adag-chart__colbar--h8 { height: 80%; }
+.adag-chart__colbar--h9 { height: 90%; }
+.adag-chart__colbar--h10 { height: 100%; }
+
+/* 一行两根（如最高/最低）：在现有 row 里放 .adag-chart__pair。 */
+.adag-chart__pair {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 3px;
+}
+
+.adag-chart__bar--alt {
+  background: var(--ph-muted);
+}
+
+/* 100% 堆叠占比条：.adag-chart__stack 内放 .adag-chart__seg--lN（宽度档位）。 */
+.adag-chart__stack {
+  display: flex;
+  height: 10px;
+  overflow: hidden;
+  border-radius: var(--ada-radius-pill);
+  background: var(--ph-subtle);
+}
+
+.adag-chart__seg {
+  height: 100%;
+}
+
+.adag-chart__seg--a { background: var(--ph-brand); }
+.adag-chart__seg--b { background: var(--ph-muted); }
+.adag-chart__seg--c { background: var(--ph-faint); }
+.adag-chart__seg--d { background: var(--ph-line-strong); }
+
+.adag-chart__seg--l1 { width: 10%; }
+.adag-chart__seg--l2 { width: 20%; }
+.adag-chart__seg--l3 { width: 30%; }
+.adag-chart__seg--l4 { width: 40%; }
+.adag-chart__seg--l5 { width: 50%; }
+.adag-chart__seg--l6 { width: 60%; }
+.adag-chart__seg--l7 { width: 70%; }
+.adag-chart__seg--l8 { width: 80%; }
+.adag-chart__seg--l9 { width: 90%; }
+.adag-chart__seg--l10 { width: 100%; }
+
+.adag-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 8px;
+  color: var(--ph-muted);
+  font-size: var(--ada-text-xs);
+}
+
+.adag-chart__dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-radius: var(--ada-radius-pill);
+  background: var(--ph-brand);
+}
+
+.adag-chart__dot--b { background: var(--ph-muted); }
+.adag-chart__dot--c { background: var(--ph-faint); }
+.adag-chart__dot--d { background: var(--ph-line-strong); }
+
+/* 热力方块：默认 7 列（一周），另有 12/24 列变体。 */
+.adag-heat {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.adag-heat--cols4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.adag-heat--cols12 { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+.adag-heat--cols24 { grid-template-columns: repeat(24, minmax(0, 1fr)); }
+
+.adag-heat__cell {
+  aspect-ratio: 1;
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-subtle);
+}
+
+.adag-heat__cell--l1 { background: color-mix(in srgb, var(--ph-brand) 16%, var(--ph-subtle)); }
+.adag-heat__cell--l2 { background: color-mix(in srgb, var(--ph-brand) 32%, var(--ph-subtle)); }
+.adag-heat__cell--l3 { background: color-mix(in srgb, var(--ph-brand) 48%, var(--ph-subtle)); }
+.adag-heat__cell--l4 { background: color-mix(in srgb, var(--ph-brand) 64%, var(--ph-subtle)); }
+.adag-heat__cell--l5 { background: var(--ph-brand); }
+
+/* 迷你折线：直接用文本块字符 ▁▂▃▄▅▆▇█，无需绘图。 */
+.adag-spark {
+  color: var(--ph-ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--ada-text-sm);
+  letter-spacing: 1px;
+  line-height: 1;
+}
