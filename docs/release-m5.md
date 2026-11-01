@@ -1,18 +1,18 @@
-# M5 发布清单（v0.1.0）
+# M5 发布清单（v0.2.0）
 
 > 对应章节：[09-security-operations.md](09-security-operations.md)（审计与备份）、
 > [development-plan.md §4.6](development-plan.md)（M5 退出标准）、
 > [performance.md](performance.md)（性能基线）。
 >
-> 版本口径：项目尚未进入稳定期，当前版本统一为 `0.1.0`；本清单中的产物命名与
-> 升级步骤按 `v0.1.0` 执行，`v1.0.0-rc.1` 不再作为当前发布标签。
+> 版本口径：项目尚未进入稳定期，当前定版为 `0.2.0`；本清单中的产物命名与
+> 升级步骤按 `v0.2.0` 执行，`v1.0.0-rc.1` 不再作为当前发布标签。
 
 ## 1. 版本与构建
 
-- 版本号真源：`internal/version` 的 `Version`（默认 `0.1.0`）；
+- 版本号真源：`internal/version` 的 `Version`（默认 `0.2.0`）；
   `make release` 注入规则是 **git tag 优先于 rev**：HEAD 恰好落在 tag 上时用
-  `git describe --tags --exact-match`（如 `v0.1.0`），否则落回短哈希；
-  也可显式覆盖：`make release RELEASE_VERSION=v0.1.0`。
+  `git describe --tags --exact-match`（如 `v0.2.0`），否则落回短哈希；
+  也可显式覆盖：`make release RELEASE_VERSION=v0.2.0`。
   `Revision`/`BuildTime` 照旧由 ldflags 注入（01 §4.2、08 §8.2 的版本字段）。
 - 构建命令：`make release`（GOWORK=off、CGO_ENABLED=0，与 CI release 矩阵同口径）。
   注意：Makefile 的 recipe 字符串保持 ASCII——mingw32-make 在 Windows 上按系统
