@@ -241,6 +241,19 @@ Schema 与 TSX 模板；宿主校验 `data` 后渲染成 VNode，浏览器与无
 - display profile 禁止 `Form`/`Button`/`Input`/`Select`/`Textarea`/`Composer`/
   `InteractionTray`/`Slot` 与 `form/button/input/select/textarea` 标签、`on*`、
   `style`、原始 HTML；需要交互就走动作桥或插件页面。
+
+块内**完整可用面**（超出即渲染失败/降级）：
+
+| 项 | 允许 |
+| --- | --- |
+| 标签 | `div` `section` `p` `blockquote` `details` `summary` `pre` `h1`–`h6` `ul` `ol` `li` `span` `strong` `em` `code` `small` `a` `table` `thead` `tbody` `tr` `th` `td` `caption` `br` `hr` |
+| 不可用标签 | `img` `svg` `form` `input` `button` `select` `textarea` `iframe` `video` `style` `script` 等一律拒绝 |
+| 宿主组件 | `$C` 仅 `Icon`（`name`：`i-list` `i-copy` `i-chevron-up` `i-check-circle` `i-arrow-right` `i-circle`；`size` 8–32）与 `TodoList`（`steps:[{step\|text\|title,status}]`、`notes?`） |
+| 属性 | `class` `id` `href` `title` `for` `name` `value` `type` `placeholder` `required` `disabled` `readonly` `checked` `open` `min` `max` `step` `minlength` `maxlength` `cols` `rows` `action` `method` `start` `scope` `colspan` `rowspan` `role`，以及 `aria-*` / `data-*` |
+| URL 属性 | 相对路径、`#锚点`、`http(s):`、`mailto:`；拒绝 `javascript:` / `data:text/html` |
+| 文本节点 | `{"t":"#text","v":"…"}`，由宿主转义 |
+| 禁止 | `on*`、`style`、`dangerouslySetInnerHTML`、原始 HTML/脚本 |
+
 - Schema 受控子集：`type`、`properties`、`required`、`additionalProperties`、
   `enum`、`const`、`pattern`、`minimum/maximum`、`minItems/maxItems`、`items`、
   `allOf/anyOf/oneOf`；**未知关键字在加载期报错**，不会静默忽略。
