@@ -236,6 +236,15 @@ type AdapterMeta struct {
 	Models           []host.ModelInfo
 }
 
+// effectiveProtocol 取插件声明的协议；未声明时用适配器 id 作为通用标识
+// （不推断任何具体供应商协议）。
+func effectiveProtocol(def host.ProviderDef, adapterID string) Protocol {
+	if p := strings.TrimSpace(def.Protocol); p != "" {
+		return Protocol(p)
+	}
+	return Protocol(adapterID)
+}
+
 // AdapterMeta 返回适配器的元数据（端点/密钥名/显示名由插件声明，基座不写死）。
 func (r *Registry) AdapterMeta(adapterID string) (AdapterMeta, bool) {
 	r.mu.RLock()
@@ -244,10 +253,7 @@ func (r *Registry) AdapterMeta(adapterID string) (AdapterMeta, bool) {
 	if !ok {
 		return AdapterMeta{}, false
 	}
-	protocol := Protocol(strings.TrimSpace(reg.def.Protocol))
-	if protocol == "" {
-		protocol = ProtocolForAdapter(adapterID)
-	}
+	protocol := effectiveProtocol(reg.def, adapterID)
 	return AdapterMeta{
 		ID:               adapterID,
 		Protocol:         protocol,
@@ -277,11 +283,7 @@ func (r *Registry) adapterIDForProtocolLocked(protocol Protocol) (string, bool) 
 	sort.Strings(ids)
 	for _, id := range ids {
 		reg := r.byID[id]
-		p := Protocol(strings.TrimSpace(reg.def.Protocol))
-		if p == "" {
-			p = ProtocolForAdapter(id)
-		}
-		if p == protocol {
+		if effectiveProtocol(reg.def, id) == protocol {
 			return id, true
 		}
 	}

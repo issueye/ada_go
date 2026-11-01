@@ -23,48 +23,8 @@ import (
 	"github.com/adag/ada-go/internal/plugins/host"
 )
 
-// Protocol 是适配器协议标识；与官方 provider 插件一一对应。
+// Protocol 是适配器协议标识（不透明字符串，由 provider 插件在 registerProvider 里声明）。
 type Protocol string
-
-const (
-	ProtocolOpenAIChat      Protocol = "openai_chat"
-	ProtocolOpenAIResponses Protocol = "openai_responses"
-	ProtocolAnthropic       Protocol = "anthropic"
-)
-
-// Valid 报告协议是否受支持。
-func (p Protocol) Valid() bool {
-	switch p {
-	case ProtocolOpenAIChat, ProtocolOpenAIResponses, ProtocolAnthropic:
-		return true
-	default:
-		return false
-	}
-}
-
-// AdapterID 返回协议对应的 provider 插件登记的 provider def.id。
-func (p Protocol) AdapterID() string {
-	switch p {
-	case ProtocolOpenAIResponses:
-		return "openai-responses"
-	case ProtocolAnthropic:
-		return "anthropic"
-	default:
-		return "openai"
-	}
-}
-
-// ProtocolForAdapter 是 AdapterID 的反向映射；未知适配器按 OpenAI Chat 处理。
-func ProtocolForAdapter(adapterID string) Protocol {
-	switch adapterID {
-	case "openai-responses":
-		return ProtocolOpenAIResponses
-	case "anthropic":
-		return ProtocolAnthropic
-	default:
-		return ProtocolOpenAIChat
-	}
-}
 
 // Model 是配置里的一个模型；Disabled 为 true 时不参与 model.list / 模型选择。
 type Model struct {

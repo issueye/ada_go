@@ -1175,7 +1175,7 @@ func (s *Session) RefreshProviderConfigs() {
 // legacyProviderConfigs 查找升级前按工作区保存的供应商配置。
 // 优先当前工作区；否则扫描同级工作区，取最近修改的一份用户配置。
 // 只有确实含用户改动（密钥/代理/请求头/自定义端点或供应商）才迁移，
-// 避免把旧版本自动播种的 OpenAI 默认项带进共享配置。
+// 避免把旧版本自动播种的默认项带进共享配置。
 func (s *Session) legacyProviderConfigs(asm corecontracts.Assembly) ([]provider.Config, bool) {
 	path := s.providerStore.Path()
 	if strings.TrimSpace(path) == "" {
@@ -1272,9 +1272,6 @@ func seedProviderConfigs(asm corecontracts.Assembly, baseURL string, hasCredenti
 			continue
 		}
 		protocol := meta.Protocol
-		if protocol == "" {
-			protocol = provider.ProtocolForAdapter(id)
-		}
 		cfgBase := baseURL
 		if cfgBase == "" {
 			if meta.SecretName == "" || hasCredential == nil || !hasCredential(meta.SecretName) {
@@ -1768,39 +1765,46 @@ func (s *Session) threadOverrideLocked(threadID string) *ports.ModelRef {
 // modelRef 由产品/CLI 配置与 provider 声明的能力合成（工作区级）。
 func (s *Session) modelRef() ports.ModelRef { return s.ModelRefFor("") }
 
-// defaultModelRef 是没有任何覆盖时的模型选择（--fake > provider 默认）。
+// defaultModelRef 是没有任何覆盖时的模型选择（--fake > 首个可用 provider 的首个模型）。
 func (s *Session) defaultModelRef() ports.ModelRef {
-	s.mu.Lock()
-	asm := s.asm
-	s.mu.Unlock()
+	asm := s.Assembly()
 	if s.cfg.Fake || s.cfg.ModelClient != nil {
 		return ports.ModelRef{ProviderID: "fake", ModelID: "fake-1", ContextWindow: 128000, SupportsTools: true}
 	}
-	providerID := s.cfg.Provider
-	if providerID == "" {
-		providerID = "openai"
+	var providerIDs []string
+	if asm != nil && asm.ProviderRegistry() != nil {
+		providerIDs = asm.ProviderRegistry().Providers()
 	}
-	modelID := s.cfg.Model
-	if modelID == "" {
-		modelID = "gpt-4o"
+	providerID := strings.TrimSpace(s.cfg.Provider)
+	if providerID == "" && len(providerIDs) > 0 {
+		providerID = providerIDs[0]
 	}
-	if ref, ok := s.ResolveModel(providerID, modelID); ok {
-		return ref
+	modelID := strings.TrimSpace(s.cfg.Model)
+	if modelID == "" && providerID != "" && asm != nil && asm.ProviderRegistry() != nil {
+		for _, m := range asm.ProviderRegistry().Models(providerID) {
+			modelID = m.ID
+			break
+		}
+	}
+	if providerID != "" && modelID != "" {
+		if ref, ok := s.ResolveModel(providerID, modelID); ok {
+			return ref
+		}
 	}
 	toolCount := 0
 	if asm != nil {
 		toolCount = len(asm.ToolCatalog().List(context.Background()))
 	}
+	if providerID == "" {
+		return ports.ModelRef{}
+	}
 	ref := ports.ModelRef{
 		ProviderID: providerID, ModelID: modelID,
 		ContextWindow: 128000, SupportsTools: toolCount > 0,
 	}
-	if asm != nil && asm.ProviderRegistry() != nil {
-		ids := asm.ProviderRegistry().Providers()
-		if len(ids) == 1 {
-			// 产品可能直接写插件 id；桥支持这种写法，但能力仍来自唯一 provider。
-			ref.ProviderID = ids[0]
-		}
+	if len(providerIDs) == 1 {
+		// 产品可能直接写插件 id；桥支持这种写法，但能力仍来自唯一 provider。
+		ref.ProviderID = providerIDs[0]
 	}
 	return ref
 }
@@ -1984,7 +1988,7 @@ type httpBridge interface {
 	Close()
 }
 
-// loadSecrets 读取 ~/.adago/secrets.toml（形如 openai_api_key = "sk-..."）。
+// loadSecrets 读取 ~/.adago/secrets.toml（形如 some_key = "sk-..."）。
 // 文件不存在不是错误：只用环境变量的部署是合法的。
 func loadSecrets(path string) (map[string]string, error) {
 	if path == "" {
@@ -2009,11 +2013,6 @@ func (s *Session) secret(name string) (string, bool) {
 	env := "ADAG_SECRET_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
 	if v := strings.TrimSpace(os.Getenv(env)); v != "" {
 		return v, true
-	}
-	if name == "openai_api_key" {
-		if v := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); v != "" {
-			return v, true
-		}
 	}
 	if v := strings.TrimSpace(s.secrets[name]); v != "" {
 		return v, true

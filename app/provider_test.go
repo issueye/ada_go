@@ -341,7 +341,7 @@ func TestConfiguredProviderUsesBaseURLAndKey(t *testing.T) {
 
 	asm := providerAssembly(t, "")
 	asm.Providers.SetConfigs([]provider.Config{{
-		ID: "custom", Name: "自定义", Protocol: provider.ProtocolOpenAIChat,
+		ID: "custom", Name: "自定义", Protocol: provider.Protocol("openai_chat"),
 		BaseURL: srv.URL, APIKey: "sk-custom",
 		Models: []provider.Model{{ID: "m-custom", ContextWindow: 1000, SupportsTools: true}},
 	}})

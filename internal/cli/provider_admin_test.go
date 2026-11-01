@@ -19,7 +19,7 @@ import (
 func TestProviderAdminConfigLifecycle(t *testing.T) {
 	ctx := context.Background()
 	// 播种只在密钥已通过环境变量/secrets 提供时发生。
-	t.Setenv("OPENAI_API_KEY", "sk-seed-test")
+	t.Setenv("ADAG_SECRET_OPENAI_API_KEY", "sk-seed-test")
 	dataDir := t.TempDir()
 	scripts, err := official.Scripts()
 	if err != nil {
@@ -145,7 +145,6 @@ func TestProviderConfigSharedAcrossWorkspaces(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("ADAG_SECRET_OPENAI_API_KEY", "")
 	scripts, err := official.Scripts()
 	if err != nil {
@@ -221,7 +220,6 @@ func TestProviderConfigMigratesLegacyWorkspace(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("ADAG_SECRET_OPENAI_API_KEY", "")
 	legacyDir := filepath.Join(home, ".adago", "workspaces", "legacy")
 	if err := os.MkdirAll(legacyDir, 0o755); err != nil {

@@ -43,7 +43,7 @@ type ToolDef struct {
 type ProviderDef struct {
 	ID     string      `json:"id"`
 	Models []ModelInfo `json:"models"`
-	// Protocol 是供应商配置里的协议标识（如 openai_chat / anthropic）。
+	// Protocol 是供应商配置里的协议标识（不透明字符串，由插件自定义）。
 	Protocol string `json:"protocol,omitempty"`
 	// DefaultBaseURL / SecretName / DisplayName 供宿主播种默认供应商；
 	// 基座不再写死具体供应商的端点与密钥名。
@@ -51,9 +51,9 @@ type ProviderDef struct {
 	SecretName     string `json:"secretName,omitempty"`
 	DisplayName    string `json:"displayName,omitempty"`
 	// 鉴权元数据：拉取 /models 等宿主代发请求时使用，避免基座按协议特判。
-	AuthHeader       string `json:"authHeader,omitempty"`       // 如 Authorization / x-api-key；空时按 Authorization
+	AuthHeader       string `json:"authHeader,omitempty"`       // 如 Authorization；空时按 Authorization
 	AuthPrefix       string `json:"authPrefix,omitempty"`       // 如 "Bearer "；空时按 "Bearer "
-	APIVersionHeader string `json:"apiVersionHeader,omitempty"` // 如 anthropic-version
+	APIVersionHeader string `json:"apiVersionHeader,omitempty"` // 可选的版本头名
 	APIVersion       string `json:"apiVersion,omitempty"`
 	// Stream 是脚本侧 provider 的句柄；ctx.http 由 CapabilitySet 决定。
 	Stream HandlerRef `json:"-"`

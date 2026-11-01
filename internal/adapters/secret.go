@@ -25,7 +25,7 @@ type Secrets struct {
 	values map[string]string
 	// declared 是 pluginID → 允许申请的名字集合（装配期由清单写入）。
 	declared map[string]map[string]bool
-	// envPrefix 是环境变量前缀；ADAG_SECRET_OPENAI_API_KEY → openai_api_key。
+	// envPrefix 是环境变量前缀；ADAG_SECRET_SOME_KEY → some_key。
 	envPrefix string
 }
 
@@ -43,7 +43,7 @@ func NewSecrets() *Secrets {
 	}
 }
 
-// LoadFile 读取 secrets.toml（形如 `openai_api_key = "sk-..."`）。
+// LoadFile 读取 secrets.toml（形如 `some_key = "sk-..."`）。
 //
 // 文件不存在不算错误（离线首启动）；权限过宽必须拒绝加载：密钥文件是 0600（附录 B）。
 func (s *Secrets) LoadFile(path string) error {

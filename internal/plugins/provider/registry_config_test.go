@@ -16,36 +16,25 @@ func hostProviderRegistration() host.ProviderRegistration {
 		PluginID: "adapter",
 		Trust:    domain.TrustBuiltin,
 		Def: host.ProviderDef{
-			ID:     "openai",
-			Models: []host.ModelInfo{{ID: "static", ContextWindow: 1000}},
-			Stream: host.HandlerRef{Slot: 1},
+			ID:       "openai",
+			Protocol: "openai_chat",
+			Models:   []host.ModelInfo{{ID: "static", ContextWindow: 1000}},
+			Stream:   host.HandlerRef{Slot: 1},
 		},
 	}
 }
 
-func TestProtocolMapping(t *testing.T) {
-	cases := []struct {
-		p  provider.Protocol
-		id string
-		ok bool
-	}{
-		{provider.ProtocolOpenAIChat, "openai", true},
-		{provider.ProtocolOpenAIResponses, "openai-responses", true},
-		{provider.ProtocolAnthropic, "anthropic", true},
-		{provider.Protocol("nope"), "", false},
+func TestAdapterMeta(t *testing.T) {
+	r := provider.New("")
+	if err := r.AddProvider(hostProviderRegistration()); err != nil {
+		t.Fatal(err)
 	}
-	for _, c := range cases {
-		if c.ok {
-			if got := c.p.AdapterID(); got != c.id {
-				t.Fatalf("%s.AdapterID() = %s, want %s", c.p, got, c.id)
-			}
-			if got := provider.ProtocolForAdapter(c.id); got != c.p {
-				t.Fatalf("ProtocolForAdapter(%s) = %s, want %s", c.id, got, c.p)
-			}
-		}
-		if c.p.Valid() != c.ok {
-			t.Fatalf("%s.Valid() = %v, want %v", c.p, c.p.Valid(), c.ok)
-		}
+	meta, ok := r.AdapterMeta("openai")
+	if !ok || meta.Protocol != provider.Protocol("openai_chat") {
+		t.Fatalf("AdapterMeta = %+v / %v", meta, ok)
+	}
+	if id, ok := r.AdapterIDForProtocol("openai_chat"); !ok || id != "openai" {
+		t.Fatalf("AdapterIDForProtocol = %q / %v", id, ok)
 	}
 }
 
@@ -59,7 +48,7 @@ func TestStoreRoundTrip(t *testing.T) {
 	}
 
 	in := []provider.Config{{
-		ID: "p_1", Name: "测试", Protocol: provider.ProtocolOpenAIChat,
+		ID: "p_1", Name: "测试", Protocol: provider.Protocol("openai_chat"),
 		BaseURL: "https://example.com/v1", APIKey: "sk-secret-1234",
 		Models: []provider.Model{{ID: "m1", ContextWindow: 128000, SupportsTools: true, Input: []string{"text", "image"}}},
 	}}
@@ -102,8 +91,8 @@ func TestRegistryUsesConfiguredProviders(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.SetConfigs([]provider.Config{
-		{ID: "a", Name: "A", Protocol: provider.ProtocolOpenAIChat, Models: []provider.Model{{ID: "m1"}, {ID: "m2", Disabled: true}}},
-		{ID: "b", Name: "B", Protocol: provider.ProtocolOpenAIChat, Disabled: true, Models: []provider.Model{{ID: "m3"}}},
+		{ID: "a", Name: "A", Protocol: provider.Protocol("openai_chat"), Models: []provider.Model{{ID: "m1"}, {ID: "m2", Disabled: true}}},
+		{ID: "b", Name: "B", Protocol: provider.Protocol("openai_chat"), Disabled: true, Models: []provider.Model{{ID: "m3"}}},
 	})
 	if got := r.Providers(); len(got) != 1 || got[0] != "a" {
 		t.Fatalf("Providers = %v, want [a]", got)
