@@ -123,11 +123,11 @@ func (s *Server) renderMarkdownBlockNodes(r *http.Request, br BlockRenderer, pay
 	if count != nil {
 		*count++
 		if *count > MaxMarkdownBlocks {
-			return nil, blockFallbackHTML("动态块数量超过上限"), false
+			return blockFallbackNodes("动态块数量超过上限")
 		}
 	}
 	if len(payload) > MaxMarkdownBlockBytes {
-		return nil, blockFallbackHTML("动态块数据超过上限"), false
+		return blockFallbackNodes("动态块数据超过上限")
 	}
 	var env markdownBlockEnvelope
 	dec := json.NewDecoder(bytes.NewReader([]byte(payload)))
@@ -145,9 +145,16 @@ func (s *Server) renderMarkdownBlockNodes(r *http.Request, br BlockRenderer, pay
 		if text == "" {
 			text = defaultBlockFailureText
 		}
-		return nil, blockFallbackHTML(text), false
+		return blockFallbackNodes(text)
 	}
 	return raw, html, true
+}
+
+// blockFallbackNodes 让 HTML 与 AST 两条路径拿到同一份降级文案：
+// 只返回 HTML 会让 /markdown.ast 退回通用提示，两条渲染路径就不一致了。
+func blockFallbackNodes(text string) (json.RawMessage, template.HTML, bool) {
+	raw, _ := json.Marshal(blockFallbackVNode(text))
+	return raw, blockFallbackHTML(text), false
 }
 
 func blockSyntaxFallbackHTML(payload string) template.HTML {

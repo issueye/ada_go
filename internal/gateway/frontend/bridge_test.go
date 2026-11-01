@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/adag/ada-go/internal/gateway/contracts"
 	"github.com/adag/ada-go/internal/gateway/frontend"
@@ -226,6 +227,7 @@ func TestBridgeBlockAudit(t *testing.T) {
 				{Name: "bad-data", Schema: "schemas/required.json", Template: "blocks/ok.tsx"},
 				{Name: "bad-render", Schema: "schemas/any.json", Template: "blocks/throw.tsx"},
 				{Name: "bad-vnode", Schema: "schemas/any.json", Template: "blocks/form.tsx"},
+				{Name: "interactive", Schema: "schemas/any.json", Template: "blocks/ok.tsx", Profile: "interactive"},
 			}},
 		},
 		Bundle: map[string]string{
@@ -256,12 +258,14 @@ func TestBridgeBlockAudit(t *testing.T) {
 	run("audit-block/bad-render", `{}`)
 	run("audit-block/bad-vnode", `{}`)
 	run("missing/block", `{}`)
+	run("audit-block/interactive", `{}`)
 
 	want := []struct{ kind, plugin, code string }{
 		{"ui.block.invalid_data", "audit-block", "schema_validation"},
 		{"ui.block.render_failed", "audit-block", "render_error"},
 		{"ui.block.invalid_vnode", "audit-block", "profile_violation"},
 		{"ui.block.render_failed", "missing", "renderer_missing"},
+		{"ui.block.render_failed", "audit-block", "unsupported_profile"},
 	}
 	if len(events) != len(want) {
 		t.Fatalf("审计事件数 = %d，期望 %d: %+v", len(events), len(want), events)
@@ -277,6 +281,43 @@ func TestBridgeBlockAudit(t *testing.T) {
 		if strings.Contains(e.Error, "secret-data-123") || strings.Contains(e.Error, "{") {
 			t.Fatalf("审计泄露 data/错误原文: %+v", e)
 		}
+	}
+}
+
+// TestBridgeBlockRenderTimeout 钉单块渲染超时：死循环 block 必须被中断，
+// 按 render_failed/render_error 记审计，而不是拖住请求。
+func TestBridgeBlockRenderTimeout(t *testing.T) {
+	scripts := []host.Script{{
+		Manifest: &plugins.Manifest{
+			ID: "slow-block", Name: "Slow", Version: "0.1.0", APIVersion: 1,
+			Trust: plugins.TrustBuiltin,
+			Frontend: &plugins.Frontend{Blocks: []plugins.BlockContribution{
+				{Name: "loop", Schema: "schemas/any.json", Template: "blocks/loop.tsx"},
+			}},
+		},
+		Bundle: map[string]string{
+			"blocks/loop.tsx": `export default function () { while (true) {} }`,
+		},
+		Schemas: map[string][]byte{"schemas/any.json": []byte(`{"type":"object"}`)},
+	}}
+	var events []frontend.BlockAuditEvent
+	b, err := frontend.NewBridge(frontend.BridgeOptions{
+		Scripts: scripts, MarkdownBlocks: true,
+		BlockAudit: func(e frontend.BlockAuditEvent) { events = append(events, e) },
+	})
+	if err != nil {
+		t.Fatalf("NewBridge: %v", err)
+	}
+
+	start := time.Now()
+	if _, _, err := b.RenderBlock(request(t, "/thread/th_1"), "slow-block/loop", "b1", json.RawMessage(`{}`)); err == nil {
+		t.Fatal("死循环 block 应超时失败")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("超时未生效，耗时 %v", elapsed)
+	}
+	if len(events) != 1 || events[0].Kind != "ui.block.render_failed" || events[0].Error != "render_error" {
+		t.Fatalf("超时审计 = %+v", events)
 	}
 }
 

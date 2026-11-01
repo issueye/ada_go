@@ -380,6 +380,12 @@ func (b *Bridge) RenderBlock(r *http.Request, rendererID, blockID string, data j
 	if !b.markdownBlocks {
 		return nil, "", fmt.Errorf("frontend: 产品未启用 Markdown 动态块")
 	}
+	// MVP 只支持 display profile；interactive 等后续 profile 一律 fail-closed，
+	// 避免清单里声明了交互却按展示块渲染出可提交的表单。
+	if entry.profile != "display" {
+		b.auditBlock("ui.block.render_failed", entry, rendererID, blockID, "unsupported_profile")
+		return nil, "", fmt.Errorf("frontend: block %s 的 profile %q 暂不支持（MVP 仅 display）", rendererID, entry.profile)
+	}
 	cacheKey := b.blockCacheKey(entry, r, rendererID, blockID, data)
 	if raw, html, ok := b.cachedBlock(cacheKey); ok {
 		return raw, html, nil
@@ -413,13 +419,8 @@ func (b *Bridge) RenderBlock(r *http.Request, rendererID, blockID string, data j
 		b.auditBlock("ui.block.invalid_vnode", entry, rendererID, blockID, "invalid_json")
 		return nil, "", fmt.Errorf("frontend: block %s 返回的 VNode 非法: %w", rendererID, err)
 	}
-	if entry.profile == "display" {
-		if err := ValidateBlockNode(root); err != nil {
-			b.auditBlock("ui.block.invalid_vnode", entry, rendererID, blockID, "profile_violation")
-			return nil, "", err
-		}
-	} else if err := ValidateNode(root); err != nil {
-		b.auditBlock("ui.block.invalid_vnode", entry, rendererID, blockID, "invalid_vnode")
+	if err := ValidateBlockNode(root); err != nil {
+		b.auditBlock("ui.block.invalid_vnode", entry, rendererID, blockID, "profile_violation")
 		return nil, "", err
 	}
 	wrapped, err := json.Marshal(struct {

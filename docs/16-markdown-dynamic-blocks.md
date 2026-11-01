@@ -315,7 +315,8 @@ Markdown 可能由模型生成，不能等同于插件页面/插槽。动态块�
 - 防止模型生成的 Markdown 伪造审批托盘、表单或系统操作；
 - 防止块冒充宿主 UI 骗取点击；
 - 交互仍走插件页面/动作桥（CSRF + 确认）；
-- 确需交互时声明 `profile: interactive`，仅 builtin/verified，且产品显式开启。
+- 确需交互时声明 `profile: interactive`，仅 builtin/verified，且产品显式开启；
+- MVP 运行期只渲染 `profile: display`，其余 profile 一律 fail-closed（`render_failed` / `unsupported_profile`），避免清单声明交互却按展示块画出可提交表单。
 
 ## 11. 限额、缓存与流式
 
@@ -329,7 +330,7 @@ Markdown 可能由模型生成，不能等同于插件页面/插槽。动态块�
 | 单块渲染超时 | 300ms |
 | 单块 VNode 节点 | 2000 |
 | 单块 VNode 输出 | 256KB |
-| 单文档块渲染总预算 | 1s |
+| 单文档块渲染预算 | MVP 串行渲染，最长约 8 × 300ms；总预算与并发留到 P2 |
 
 ### 11.2 缓存
 
@@ -344,7 +345,8 @@ Markdown 可能由模型生成，不能等同于插件页面/插槽。动态块�
 - 未闭合的 `adag-ui` fence 不执行，按普通代码/占位显示；
 - fence 闭合后（或最终 AST 请求）才渲染；
 - `/markdown.ast` 可能被多次调用：按内容 hash 去重，避免同一块重复执行 TSX；
-- 同一条消息内块按文档顺序渲染，最多 2–4 个并发。
+- 同一条消息内块按文档顺序**串行**渲染，避免并发压垮单进程渲染器；
+- 并发 2–4 与文档级总预算留到 P2，引入时需先加并发上限与总超时。
 
 ## 12. 失败与降级
 
@@ -354,6 +356,7 @@ Markdown 可能由模型生成，不能等同于插件页面/插槽。动态块�
 | 封套 Schema 失败 | 同上 |
 | renderer 不存在/插件禁用 | 渲染 `Notice`/`EmptyState` 降级，或按 `fallback` 文本；记录 `ui.block.render_failed`（`renderer_missing`/`plugin_disabled`） |
 | 数据 Schema 校验失败 | 降级块，记录 `ui.block.invalid_data` |
+| `profile` 非 `display`（MVP） | 降级块，记录 `ui.block.render_failed`（`unsupported_profile`） |
 | TSX 抛错/超时 | 降级块，记录 `ui.block.render_failed`（生产不展示堆栈） |
 | VNode 校验失败 | 降级块，记录 `ui.block.invalid_vnode` |
 | 未知 `version` | 降级块，提示“插件版本不兼容” |

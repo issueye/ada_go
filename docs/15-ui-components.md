@@ -350,10 +350,10 @@ AdaUI.toast.warn('网络较慢');
 ## 7. 测试
 
 ```bash
-# 37 个 Node 用例：引擎 20 + 组件 17
+# 38 个 Node 用例：引擎 20 + 组件 17 + 块渲染一致性 1
 mingw32-make test-js
 # 或
-node --test internal/gateway/web/testdata/ada-render.test.js internal/gateway/web/testdata/ada-ui.test.js
+node --test internal/gateway/web/testdata/ada-render.test.js internal/gateway/web/testdata/ada-ui.test.js internal/gateway/web/testdata/ada-block-consistency.test.js
 ```
 
 浏览器冒烟：直接打开 `tools/render-demo/ui.html`，标题应为

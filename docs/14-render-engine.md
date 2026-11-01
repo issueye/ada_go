@@ -367,6 +367,8 @@ await AdaRender.nextTick();
 ```bash
 # 18 个 Node 用例：VNode、表达式、响应式、mount/patch、组件、slots、hydration、SSR 线格式
 node --test internal/gateway/web/testdata/ada-render.test.js
+# 块 VNode：浏览器运行时挂载结果与 /markdown golden HTML 结构一致
+node --test internal/gateway/web/testdata/ada-block-consistency.test.js
 # 或
 make test-js
 

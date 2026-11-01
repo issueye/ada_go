@@ -54,10 +54,10 @@ MVP 是**只读展示型动态块**，可以独立发布，不依赖交互/流�
 - MB-4 Render Runtime/VNode：block TSX、display profile、超时/错误隔离已完成；
 - MB-5 浏览器/无 JS：`markdownVNode` 支持 `$C`/`n`；`/markdown.ast`、`/markdown` 与无 JS 模板已接入；
 - MB-6 参考插件：`token-usage/usage-card` 已落地；
-- MB-7 安全/限额/缓存：display profile、限额、进程内 bounded cache 已完成；审计事件（`ui.block.invalid_data` / `render_failed` / `invalid_vnode`，只带错误码不带 data）已接入；interactive profile 尚未接入；
-- MB-8 测试/门禁：Bridge/Markdown 降级测试、审计事件测试、`verify vnode` block profile、`verify markdown-block`、token-usage golden HTML、`/markdown.ast` golden（`web/testdata/markdown-block/usage-card.ast.json`）、`$C` 组件渲染测试，以及「AST→HTML 与 `/markdown` 无 JS 输出一致」测试已通过；第三方前端 block 加载与浏览器 E2E 仍待补。
+- MB-7 安全/限额/缓存：display profile、限额、进程内 bounded cache 已完成；审计事件（`ui.block.invalid_data` / `render_failed` / `invalid_vnode`，只带错误码不带 data）已接入；interactive profile 在运行期 fail-closed（`unsupported_profile`）；
+- MB-8 测试/门禁：Bridge/Markdown 降级测试、审计事件测试、`verify vnode` block profile、`verify markdown-block`、token-usage golden HTML、`/markdown.ast` golden（`web/testdata/markdown-block/usage-card.ast.json`）、`$C` 组件渲染测试、AST→HTML 与 `/markdown` 一致、浏览器运行时结构一致（`ada-block-consistency.test.js`）、助手消息内块 e2e（含禁用插件降级与旧缓存不生效）、限额/超时测试均已通过；第三方前端 block 加载与真实浏览器冒烟仍待补。
 
-**未做**：interactive 块、流式提前渲染、跨进程缓存、第三方前端插件加载（当前 Gateway 只加载官方前端脚本）、真实浏览器端到端测试。
+**未做**：interactive 块、流式提前渲染、跨进程缓存、第三方前端插件加载（当前 Gateway 只加载官方前端脚本）、真实浏览器冒烟（`tools/render-demo` 手工验证；自动化用 Node 运行时替代）。
 
 ## 3. 工作分解与依赖
 
@@ -198,7 +198,7 @@ MB-0 契约
 产物：
 
 - 每文档 8 块、单块 64KB/300ms/2000 节点/256KB 输出；
-- 文档级总预算 1s，并发 2–4；
+- 单文档最多 8 块 × 300ms；MVP 串行渲染（不并发执行），总耗时上限约 2.4s；
 - block profile 拒绝 `Composer`/`InteractionTray`/`Slot`/`Form`/`Button`/`Input`/`Select`/`Textarea`；
 - URL/属性/事件校验；
 - 进程内 LRU 缓存：`(plugin, version, renderer, schemaVersion, dataHash, theme?, locale?)`；
@@ -243,18 +243,18 @@ MB-0 契约
 
 ## 5. MVP 验收清单
 
-- [ ] `adag-ui` fence 可被解析，非法内容保留为代码块；
-- [ ] 插件 `frontend.blocks` 加载、校验、注册；
-- [ ] 数据 Schema 校验通过/失败路径正确；
-- [ ] TSX → VNode → HTML/AST 全链路可用；
-- [ ] 浏览器与 `/markdown` 无 JS 结果一致；
-- [ ] display profile 拒绝宿主控制组件与表单；
-- [ ] 单块/单文档限额、超时、并发、降级生效；
-- [ ] 未知/禁用 renderer 降级且不影响其余 Markdown；
-- [ ] 缓存命中与插件变更失效；
-- [ ] token-usage 示例块通过 golden；
-- [ ] `adag verify` 新增检查通过；
-- [ ] 文档与 Schema 无漂移。
+- [x] `adag-ui` fence 可被解析，非法内容保留为代码块（`TestMarkdownDynamicBlockFallbacks`）；
+- [x] 插件 `frontend.blocks` 加载、校验、注册（`TestManifestBlockValidation`、`TestManifestInteractiveBlockRequiresTrust`、Bridge 注册表）；
+- [x] 数据 Schema 校验通过/失败路径正确（`TestBridgeRenderBlock`、`TestBridgeBlockAudit`）；
+- [x] TSX → VNode → HTML/AST 全链路可用（`TestBridgeRenderBlock`、`TestMarkdownTokenUsageBlockIntegration`）；
+- [x] 浏览器与 `/markdown` 无 JS 结果一致：Go 侧 `AST → RenderHTML` 与 `/markdown` 逐字一致；`ada-render.js`（浏览器运行时）挂载同一份 AST 与 golden HTML 结构一致（`ada-block-consistency.test.js`）；
+- [x] display profile 拒绝宿主控制组件与表单（`TestValidateBlockNodeProfile`、`TestBridgeBlockAudit` 的 profile_violation）；
+- [x] 单块/单文档限额、超时、降级生效，块按文档顺序串行渲染（无并发执行）：`TestMarkdownBlockLimits`、`TestBridgeBlockRenderTimeout`；
+- [x] 未知/禁用 renderer 降级且不影响其余 Markdown（`TestMarkdownDynamicBlockFallbacks`、`TestAssistantMessageDynamicBlockE2E`）；
+- [x] 缓存命中与插件变更失效（`TestBlockCacheStoreAndKey`、`TestBlockCacheLimitResets`；禁用插件时先查启停、不吃旧缓存）；
+- [x] token-usage 示例块通过 golden（HTML golden 与 `/markdown.ast` golden）；
+- [x] `adag verify` 新增检查通过（`manifest`/`vnode`/`markdown-block`，共 13 项）；
+- [x] 文档与 Schema 无漂移（`adag verify docs/manifest/vnode/markdown-block`）。
 
 ## 6. 测试矩阵
 
@@ -267,7 +267,7 @@ MB-0 契约
 | 安全 | `javascript:`/`data:` URL、`on*`、`style`、`Slot`/`InteractionTray`、递归块 |
 | 路径 | `/markdown.ast` 与 `/markdown` 一致性、无 JS |
 | 生命周期 | 插件禁用/重载/版本变化、缓存失效、降级 |
-| 性能 | 8 块上限、总预算、并发、重复请求缓存 |
+| 性能 | 8 块上限、单块超时、串行渲染、重复请求缓存 |
 
 ## 7. 风险与对策
 
@@ -280,7 +280,7 @@ MB-0 契约
 | 模型生成恶意 data | Schema + block profile + 限额；不把 data 当指令；错误不回显 data |
 | 重复 `/markdown.ast` 导致重复渲染 | 内容 hash 去重 + 缓存；流式只处理闭合 fence |
 | 插件 Schema 文件缺失/非法 | 加载期禁用该 block，插件其余能力保留；`adag verify` 阻断打包 |
-| 性能退化 | 单文档 8 块、并发 2–4、300ms/块、总预算 1s；先测再放宽 |
+| 性能退化 | 单文档 8 块、300ms/块、串行渲染（上限约 2.4s）；并发与总预算留到 P2 |
 
 ## 8. 文件变更地图
 

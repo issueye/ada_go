@@ -262,7 +262,8 @@ func (m *Manifest) validateFrontend() error {
 		}
 	}
 	seenBlock := make(map[string]bool, len(f.Blocks))
-	for _, b := range f.Blocks {
+	for i := range f.Blocks {
+		b := &f.Blocks[i]
 		if !ValidID(b.Name) {
 			return fmt.Errorf("plugins: %s 的 block 名 %q 不满足 ^[a-z][a-z0-9-]{1,63}$", m.ID, b.Name)
 		}
