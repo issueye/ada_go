@@ -1734,6 +1734,9 @@ func TestPluginsUnifiedListAndDetail(t *testing.T) {
 	frontend := serve(t, srv, "GET", "/extensions/ui-demo", nil).Body.String()
 	wantContains(t, frontend, "前端插件")
 	wantContains(t, frontend, "演示前端")
+	// 有独立页面的插件：页头动作组里同时给出「打开插件页面」。
+	wantContains(t, frontend, `href="/ext/ui-demo/home"`)
+	wantContains(t, frontend, "打开插件页面")
 
 	if rec := serve(t, srv, "GET", "/extensions/missing", nil); rec.Code != http.StatusNotFound {
 		t.Fatalf("未知插件详情 = %d, want 404", rec.Code)
@@ -1779,6 +1782,21 @@ func TestPluginDetailShowsReadmeAndFiles(t *testing.T) {
 	}
 	if call, ok := core.lastCall("plugin.list"); !ok || call.Params["detailId"] != "tools-fs" {
 		t.Fatalf("详情页 plugin.list 没有带 detailId: %+v", call.Params)
+	}
+
+	// 插件级动作（停用/启用、打开插件页面、返回列表）在页头：它们必须出现在岛屿容器之前，
+	// 这样切文件、翻到「插件信息」面板时按钮不会跟着面板滚走。
+	islandAt := strings.Index(body, `id="plugin-detail-island"`)
+	if islandAt < 0 {
+		t.Fatal("详情页缺少 plugin-detail-island 容器")
+	}
+	head := body[:islandAt]
+	for _, want := range []string{
+		`class="section-head__actions"`,
+		`action="/extensions/tools-fs/disable"`,
+		`href="/extensions"`,
+	} {
+		wantContains(t, head, want)
 	}
 
 	// 列表页不需要 README/文件，不应每次轮询都读盘。
@@ -1847,6 +1865,26 @@ func TestPluginFilePreview(t *testing.T) {
 	indexPage := serve(t, srv, "GET", "/extensions/demo-plugin?file=index.ts", nil).Body.String()
 	wantContains(t, indexPage, "export const answer = 42;")
 
+	// Markdown 文件带「预览 / 源码」开关：源码态只多一个按钮，正文仍是高亮代码块。
+	wantContains(t, page, `class="ada-plugin-viewer__toggle"`)
+	wantContains(t, page, `class="ada-plugin-viewer__code`)
+	if strings.Contains(page, "ada-plugin-file-preview") {
+		t.Fatal("默认应是源码态，不应直接渲染预览")
+	}
+	// ?view=md 是无 JS 的预览入口：同一份 README 由服务端渲染成 HTML。
+	preview := serve(t, srv, "GET", "/extensions/demo-plugin?file=README.md&view=md", nil).Body.String()
+	for _, want := range []string{
+		`class="markdown-body ada-markdown ada-plugin-file-preview"`,
+		"<h1>Demo</h1>",
+		"切换到源码",
+	} {
+		wantContains(t, preview, want)
+	}
+	// 非 Markdown 文件没有这个开关。
+	if strings.Contains(indexPage, "ada-plugin-viewer__toggle") {
+		t.Fatal("index.ts 不是 Markdown，不应出现预览/源码开关")
+	}
+
 	res := serve(t, srv, "GET", "/extensions/demo-plugin/file?path=index.ts", nil)
 	if res.Code != http.StatusOK {
 		t.Fatalf("GET file = %d, body=%s", res.Code, res.Body.String())
@@ -1868,6 +1906,22 @@ func TestPluginFilePreview(t *testing.T) {
 	binary := serve(t, srv, "GET", "/extensions/demo-plugin/file?path=binary.bin", nil)
 	if binary.Code != http.StatusOK || !strings.Contains(binary.Body.String(), `"binary":true`) {
 		t.Fatalf("二进制文件 = %d %s", binary.Code, binary.Body.String())
+	}
+
+	// 岛屿（有 JS 时）靠文件 JSON 里的 previewHtml 做切换，这里钉住字段存在且已渲染。
+	mdRes := serve(t, srv, "GET", "/extensions/demo-plugin/file?path=README.md", nil)
+	var mdFile struct {
+		Markdown    bool   `json:"markdown"`
+		PreviewHTML string `json:"previewHtml"`
+	}
+	if err := json.Unmarshal(mdRes.Body.Bytes(), &mdFile); err != nil {
+		t.Fatalf("README JSON: %v (%s)", err, mdRes.Body.String())
+	}
+	if !mdFile.Markdown || !strings.Contains(mdFile.PreviewHTML, "<h1>Demo</h1>") {
+		t.Fatalf("Markdown 预览字段缺失: %+v", mdFile)
+	}
+	if strings.Contains(res.Body.String(), `"markdown":true`) {
+		t.Fatal("index.ts 不应带 markdown 标记")
 	}
 	for _, unsafe := range []string{"../secret.txt", "static/../../secret.txt", "missing.ts"} {
 		if rec := serve(t, srv, "GET", "/extensions/demo-plugin/file?path="+url.QueryEscape(unsafe), nil); rec.Code != http.StatusNotFound {

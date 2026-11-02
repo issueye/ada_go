@@ -572,6 +572,13 @@ type pluginFileView struct {
 	Binary    bool          `json:"binary,omitempty"`
 	Truncated bool          `json:"truncated,omitempty"`
 	Error     string        `json:"error,omitempty"`
+	// Markdown / PreviewHTML 让 Markdown 文件多一个「预览」视图：宿主用同一套
+	// goldmark+bluemonday 管线把正文渲染出来，前端只负责在源码与预览之间切换。
+	Markdown    bool          `json:"markdown,omitempty"`
+	PreviewHTML template.HTML `json:"previewHtml,omitempty"`
+	// ShowPreview 是当前这次渲染是否处于预览态（?view=md）。无 JS 时由模板消费，
+	// 有 JS 时岛屿用自己的 preview 状态，两者语义一致。
+	ShowPreview bool `json:"showPreview,omitempty"`
 }
 
 // pluginDetailData 是 /extensions/{id} 的详情页。

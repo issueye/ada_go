@@ -439,6 +439,8 @@
           loading: false,
           fileError: '',
           showInfo: false,
+          // Markdown 文件的「预览 / 源码」开关；初始值与无 JS 路径的 ?view=md 一致。
+          preview: !!(initial.file && initial.file.showPreview),
           csrf: typeof initial.csrf === 'string' ? initial.csrf : '',
           fileSeq: 0
         };
@@ -466,6 +468,8 @@
             .then(function (data) {
               if (seq !== self.fileSeq) return;
               self.file = data;
+              // 换文件回到源码态：预览是按文件内容渲染的，沿用上一个文件的开关会让人误以为新文件也是富文本。
+              self.preview = false;
               self.loading = false;
             })
             .catch(function (error) {
@@ -476,6 +480,11 @@
         },
         toggleInfo: function () {
           this.showInfo = !this.showInfo;
+        },
+        // Markdown 文件在源码与渲染预览之间切换（预览 HTML 由服务端渲染并清洗）。
+        togglePreview: function () {
+          if (!this.file || !this.file.markdown) return;
+          this.preview = !this.preview;
         }
       },
       template:
@@ -507,12 +516,17 @@
         '<section v-if="!showInfo" class="card ada-plugin-viewer" aria-label="文件内容">' +
         '<header v-if="file" class="ada-plugin-viewer__head">' +
         '<code class="ada-plugin-viewer__path">{{ file.path }}</code>' +
+        '<div class="ada-plugin-viewer__actions">' +
         '<span class="ada-plugin-viewer__meta">{{ file.sizeLabel }}<span v-if="file.truncated"> · 已截断</span></span>' +
+        '<button v-if="file.markdown" type="button" class="ada-plugin-viewer__toggle" @click="togglePreview" ' +
+        ':title="preview ? \'切换到源码\' : \'切换到渲染预览\'">{{ preview ? \'源码\' : \'预览\' }}</button>' +
+        '</div>' +
         '</header>' +
         '<p v-if="loading" class="ada-plugin-viewer__empty">正在读取文件…</p>' +
         '<p v-else-if="fileError" class="ada-plugin-viewer__empty">{{ fileError }}</p>' +
         '<p v-else-if="file && file.error" class="ada-plugin-viewer__empty">{{ file.error }}</p>' +
         '<p v-else-if="file && file.binary" class="ada-plugin-viewer__empty">这是二进制文件，暂不展示内容。</p>' +
+        '<div v-else-if="file && preview" class="markdown-body ada-markdown ada-plugin-file-preview" v-html="file.previewHtml"></div>' +
         '<pre v-else-if="file" class="ada-plugin-viewer__code chroma"><code v-html="file.html"></code></pre>' +
         '<p v-else class="ada-plugin-viewer__empty">这个插件没有可展示的包内文件。</p>' +
         '</section>' +
@@ -553,16 +567,6 @@
         '<p v-else class="text-sm text-muted">这个插件没有提供 README。</p>' +
         '</div>' +
         '<p v-if="plugin.error" class="mt-3 text-xs text-danger-ink">{{ plugin.error }}</p>' +
-        '<div class="mt-4 flex flex-wrap items-center gap-2">' +
-        '<form method="post" :action="plugin.enabled ? \'/extensions/\' + plugin.id + \'/disable\' : \'/extensions/\' + plugin.id + \'/enable\'">' +
-        '<input type="hidden" name="csrf_token" :value="csrf">' +
-        '<input type="hidden" name="next" :value="\'/extensions/\' + plugin.id">' +
-        '<ui-button type="submit" :variant="plugin.enabled ? \'secondary\' : \'primary\'" size="sm" ' +
-        ':label="plugin.enabled ? \'停用\' : \'启用\'"></ui-button>' +
-        '</form>' +
-        '<ui-button v-if="plugin.firstPage" :href="\'/ext/\' + plugin.id + \'/\' + plugin.firstPage" ' +
-        'variant="secondary" size="sm" icon="i-external" label="打开插件页面"></ui-button>' +
-        '</div>' +
         '</section>' +
 
         '</div>' +

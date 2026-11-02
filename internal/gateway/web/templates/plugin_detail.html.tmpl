@@ -7,7 +7,26 @@
           <h1 class="page-title">{{if .Plugin.Name}}{{.Plugin.Name}}{{else}}{{.Plugin.ID}}{{end}}</h1>
           <p class="page-sub">{{.Plugin.ID}}{{if .Plugin.Version}} · v{{.Plugin.Version}}{{end}}</p>
         </div>
-        <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/extensions">返回插件列表</a>
+        {{/* 插件级动作放在页头：与「返回插件列表」同排，不随文件/信息面板滚动。 */}}
+        <div class="section-head__actions">
+          {{if .Plugin.Enabled}}
+          <form method="post" action="/extensions/{{.Plugin.ID}}/disable">
+            {{template "csrf" .}}
+            <input type="hidden" name="next" value="/extensions/{{.Plugin.ID}}">
+            <button class="ada-btn ada-btn--secondary ada-btn--sm" type="submit">停用</button>
+          </form>
+          {{else}}
+          <form method="post" action="/extensions/{{.Plugin.ID}}/enable">
+            {{template "csrf" .}}
+            <input type="hidden" name="next" value="/extensions/{{.Plugin.ID}}">
+            <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit">启用</button>
+          </form>
+          {{end}}
+          {{if .Plugin.FirstPage}}
+          <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/ext/{{.Plugin.ID}}/{{.Plugin.FirstPage}}">{{icon "i-external" 13}}打开插件页面</a>
+          {{end}}
+          <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/extensions">返回插件列表</a>
+        </div>
       </div>
 
       <div id="plugin-detail-island" data-ada-island="plugin-detail" data-ada-state="{{.StateJSON}}">
@@ -52,12 +71,22 @@
             {{if .File}}
             <header class="ada-plugin-viewer__head">
               <code class="ada-plugin-viewer__path">{{.File.Path}}</code>
-              <span class="ada-plugin-viewer__meta">{{.File.SizeLabel}}{{if .File.Truncated}} · 已截断{{end}}</span>
+              <div class="ada-plugin-viewer__actions">
+                <span class="ada-plugin-viewer__meta">{{.File.SizeLabel}}{{if .File.Truncated}} · 已截断{{end}}</span>
+                {{if .File.Markdown}}
+                {{/* 无 JS 时的开关：换一个 URL 重新渲染（?view=md）；有 JS 时由岛屿接管同一个按钮。 */}}
+                <a class="ada-plugin-viewer__toggle" rel="nofollow"
+                   href="/extensions/{{.Plugin.ID}}?file={{urlquery .File.Path}}{{if not .File.ShowPreview}}&amp;view=md{{end}}"
+                   title="{{if .File.ShowPreview}}切换到源码{{else}}切换到渲染预览{{end}}">{{if .File.ShowPreview}}源码{{else}}预览{{end}}</a>
+                {{end}}
+              </div>
             </header>
             {{if .File.Error}}
             <p class="ada-plugin-viewer__empty">{{.File.Error}}</p>
             {{else if .File.Binary}}
             <p class="ada-plugin-viewer__empty">这是二进制文件，暂不展示内容。</p>
+            {{else if .File.ShowPreview}}
+            <div class="markdown-body ada-markdown ada-plugin-file-preview">{{.File.PreviewHTML}}</div>
             {{else}}
             <pre class="ada-plugin-viewer__code chroma" data-plugin-file-content><code>{{.File.HTML}}</code></pre>
             {{end}}
@@ -132,25 +161,6 @@
             </div>
 
             {{if .Plugin.Error}}<p class="mt-3 text-xs text-danger-ink">{{.Plugin.Error}}</p>{{end}}
-
-            <div class="mt-4 flex flex-wrap items-center gap-2">
-              {{if .Plugin.Enabled}}
-              <form method="post" action="/extensions/{{.Plugin.ID}}/disable">
-                {{template "csrf" .}}
-                <input type="hidden" name="next" value="/extensions/{{.Plugin.ID}}">
-                <button class="ada-btn ada-btn--secondary ada-btn--sm" type="submit">停用</button>
-              </form>
-              {{else}}
-              <form method="post" action="/extensions/{{.Plugin.ID}}/enable">
-                {{template "csrf" .}}
-                <input type="hidden" name="next" value="/extensions/{{.Plugin.ID}}">
-                <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit">启用</button>
-              </form>
-              {{end}}
-              {{if .Plugin.FirstPage}}
-              <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/ext/{{.Plugin.ID}}/{{.Plugin.FirstPage}}">{{icon "i-external" 13}}打开插件页面</a>
-              {{end}}
-            </div>
           </section>
         </div>
       </div>

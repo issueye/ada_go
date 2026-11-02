@@ -1619,6 +1619,11 @@ func (s *Server) handlePluginDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	p.ReadmeNodes = markdownNodesJSON(p.Readme)
 	file := s.pluginFileForView(p, initialPluginFile(p, r.URL.Query().Get("file")))
+	// ?view=md 是「预览」态的无 JS 入口（按钮是有 JS 时的同一个开关）：
+	// 只对 Markdown 文件生效，其它文件忽略该参数。
+	if file != nil && file.Markdown && strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("view")), "md") {
+		file.ShowPreview = true
+	}
 	threads, err := s.listThreads(r, 50)
 	state := pluginDetailState{Plugin: p, File: file, CSRF: s.csrf(r)}
 	raw, marshalErr := json.Marshal(state)
@@ -1769,8 +1774,25 @@ func (s *Server) readPluginFile(p pluginRow, rel string) (pluginFileView, error)
 	}
 	meta.Content = string(data)
 	meta.HTML, meta.Language = highlightPluginSource(meta.Content, meta.Path)
+	// Markdown 文件额外带一份渲染结果：前端据此提供「预览 / 源码」切换，
+	// 复用 README 同一套渲染与清洗，不引入第二套 Markdown 实现。
+	if isMarkdownFile(meta.Path) {
+		meta.Markdown = true
+		meta.PreviewHTML = renderMarkdown(meta.Content)
+	}
 	meta.Truncated = truncated
 	return meta, nil
+}
+
+// isMarkdownFile 判断预览文件是否按 Markdown 渲染（只看扩展名，不看内容嗅探：
+// 扩展名是插件作者的选择，嗅探会把 README 之外的 .txt 也画成富文本）。
+func isMarkdownFile(name string) bool {
+	switch strings.ToLower(path.Ext(name)) {
+	case ".md", ".markdown", ".mdown", ".mkd":
+		return true
+	default:
+		return false
+	}
 }
 
 // collectPlugins 合并前端插件（渲染桥）与后端插件（Core plugin.list）。
