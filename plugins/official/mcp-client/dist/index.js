@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:f92c279e036dfde2) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:889e31687ca3c5d0) by plugins/official/build.mjs — do not edit
 // mcp-client —— 官方插件：把 MCP server 的工具接入为普通工具（v2 设计见 docs/18）。
 //
 // 范围：
@@ -698,7 +698,7 @@ class McpClient {
       const r = await this.request(ctx, "initialize", {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: {},
-        clientInfo: { name: "ada-go-mcp-client", version: "0.1.0" },
+        clientInfo: { name: "ada-go-mcp-client", version: "0.4.0" },
       });
       this.session = r.session;
       // 只做记录不阻断：老版本 server 可能回一个不同的协议版本，工具面通常仍可用。
