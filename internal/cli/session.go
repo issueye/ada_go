@@ -2028,6 +2028,10 @@ func (s *Session) secret(name string) (string, bool) {
 // （在途调用可能拿到已关闭的旧代并失败，不再无限等待）。
 const reloadDrainTimeout = 30 * time.Second
 
+// closeOldAssemblyTimeout 是关闭旧装配（逐个插件实例等 owner goroutine 退出）的上限。
+// 不设上限就是死锁入口：owner goroutine 可能卡在等用户回答的工具调用里。
+const closeOldAssemblyTimeout = 5 * time.Second
+
 // sessionBaseScripts 决定随包插件的来源：测试注入优先，否则经注入的 Assembler 取官方包。
 // internal 不得 import official/——经组合根转手（Assembler.OfficialScripts）。
 func sessionBaseScripts(cfg Config) ([]host.Script, error) {
@@ -2092,7 +2096,14 @@ func (s *Session) installAssembly(asm corecontracts.Assembly) error {
 	s.deps.Skills = skillSrc
 	s.mu.Unlock()
 	if old != nil && old != asm {
-		_ = old.Close(context.Background())
+		// 关旧代必须有界：旧插件实例的 owner goroutine 可能正卡在 ask_user 这类等
+		// 人回答的调用里，而回答可能要靠同一条被重载堵住的 RPC 送进来。无期限地等
+		// 会把重载、那条连接和整个界面一起挂死（06 §6.5 的双代语义不要求无限等）。
+		closeCtx, cancel := context.WithTimeout(context.Background(), closeOldAssemblyTimeout)
+		defer cancel()
+		if err := old.Close(closeCtx); err != nil {
+			s.logWarn("关闭旧插件装配超时，已放弃等待（在途调用会拿到已关闭错误）: " + err.Error())
+		}
 	}
 	return nil
 }
