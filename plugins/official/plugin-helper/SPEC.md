@@ -386,5 +386,6 @@ Route（向导页面用）：
 启停状态：全局 `~/.adago/plugins.json`（跨工作区共享）+ 工作区
 `<workspace>/.adag/plugins.json`（单独启停的覆盖，见 §7.3）。
 
-随包技能：`skills/create-plugin/SKILL.md` — 创建流程的操作指引（工作流层），
-本文件是契约层；两者配合使用。
+随包技能：`skills/plugin-manual/SKILL.md` — 插件手册（工作流层）：创建/检查/启停/
+移除的操作指引，外加 `adag-ui` 动态块的使用说明（语法、可用 renderer、data 规则与
+降级）；本文件是契约层，两者配合使用。

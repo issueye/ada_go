@@ -40,8 +40,10 @@ last_error，并对未停用的落盘插件做入口预加载校验；`id` 留�
 
 ## 随包技能
 
-`skills/create-plugin/SKILL.md` 教 AI 如何使用本插件（对话创建流程、入口约束、
-修改已有插件）。产品声明 `capabilities.skills: true` 时，模型经系统提示看到技能的
+`skills/plugin-manual/SKILL.md` 是插件手册，教 AI 如何使用本插件（对话创建流程、
+入口约束、修改/移除已有插件），并给出 **Markdown 动态块（`adag-ui`）** 的使用说明：
+语法、随包可用的 renderer（`token-usage/usage-card`、`ui-charts/*`）、data 规则、
+限额与降级。产品声明 `capabilities.skills: true` 时，模型经系统提示看到技能的
 名称、简介与绝对路径，并用 `read_file` 按需读取正文；headless / coding 产品均已开启。
 
 ## API 规范

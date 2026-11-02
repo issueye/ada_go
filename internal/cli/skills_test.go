@@ -187,25 +187,25 @@ func TestSessionHeadlessSkillReadable(t *testing.T) {
 	if len(reqs) == 0 {
 		t.Fatal("没有模型请求")
 	}
-	if !strings.Contains(reqs[0].System, "可用技能") || !strings.Contains(reqs[0].System, "create-plugin") {
-		t.Fatalf("系统提示应注入 create-plugin 技能简介: %.400s", reqs[0].System)
+	if !strings.Contains(reqs[0].System, "可用技能") || !strings.Contains(reqs[0].System, "plugin-manual") {
+		t.Fatalf("系统提示应注入 plugin-manual 技能简介: %.400s", reqs[0].System)
 	}
 	metas, _ := sess.SkillSummaries()
 	var skill *domain.SkillMeta
 	for i := range metas {
-		if metas[i].Name == "create-plugin" {
+		if metas[i].Name == "plugin-manual" {
 			skill = &metas[i]
 		}
 	}
 	if skill == nil || !filepath.IsAbs(skill.Path) {
-		t.Fatalf("create-plugin 应带绝对 path: %+v", skill)
+		t.Fatalf("plugin-manual 应带绝对 path: %+v", skill)
 	}
 	if !strings.Contains(reqs[0].System, skill.Path) {
-		t.Fatalf("系统提示缺少 create-plugin 的 path %q: %.400s", skill.Path, reqs[0].System)
+		t.Fatalf("系统提示缺少 plugin-manual 的 path %q: %.400s", skill.Path, reqs[0].System)
 	}
 	body, err := os.ReadFile(skill.Path)
 	if err != nil || !strings.Contains(string(body), "create_plugin") {
-		t.Fatalf("按 path 读取 create-plugin 正文 = %q / %v", body, err)
+		t.Fatalf("按 path 读取 plugin-manual 正文 = %q / %v", body, err)
 	}
 	// headless 声明了 tools-skill：搜索入口来自该插件。
 	if _, ok := sess.Assembly().ToolCatalog().Lookup(ctx, "skill_search"); !ok {

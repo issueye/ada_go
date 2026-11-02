@@ -47,5 +47,6 @@
 - 插件安装：全局 `~/.adago/plugins/<id>/`（`plugin.admin` 能力桥，仅 builtin）。
 - 插件启停：全局 `~/.adago/plugins.json` + 工作区 `.adag/plugins.json` 覆盖。
 - 插件平台 API 规范：`plugins/official/plugin-helper/SPEC.md`；
-  操作流程技能：`plugins/official/plugin-helper/skills/create-plugin/SKILL.md`。
+  插件手册技能：`plugins/official/plugin-helper/skills/plugin-manual/SKILL.md`
+  （创建/检查/启停 + `adag-ui` 动态块用法）。
 - 验证门禁：`go test ./...`、`go vet ./...`、staticcheck、`adag verify`（13 项）。

@@ -1,6 +1,6 @@
 package app_test
 
-// plugin-helper 的随包技能 create-plugin：headless 产品开启 skills 后，
+// plugin-helper 的随包技能 plugin-manual：headless 产品开启 skills 后，
 // 装配结果暴露 name/description/绝对 path，模型按 path 用 read_file 读正文。
 
 import (
@@ -59,23 +59,28 @@ func TestPluginHelperSkillReadable(t *testing.T) {
 
 	var skill *domain.SkillMeta
 	for _, m := range asm.Skills() {
-		if m.Name == "create-plugin" {
+		if m.Name == "plugin-manual" {
 			meta := m
 			skill = &meta
 		}
 	}
 	if skill == nil {
-		t.Fatalf("skills=true 且有随包技能时应暴露 create-plugin（现有：%+v）", asm.Skills())
+		t.Fatalf("skills=true 且有随包技能时应暴露 plugin-manual（现有：%+v）", asm.Skills())
 	}
 	if !filepath.IsAbs(skill.Path) {
-		t.Fatalf("create-plugin path 不是绝对路径: %q", skill.Path)
+		t.Fatalf("plugin-manual path 不是绝对路径: %q", skill.Path)
 	}
 	data, err := os.ReadFile(skill.Path)
 	if err != nil {
-		t.Fatalf("按 path 读取 create-plugin 失败（%s）: %v", skill.Path, err)
+		t.Fatalf("按 path 读取 plugin-manual 失败（%s）: %v", skill.Path, err)
 	}
 	text := string(data)
-	for _, want := range []string{"create_plugin", "export default function register", ".adago/plugins", "重载"} {
+	// 手册要同时覆盖「创建插件」与「adag-ui 动态块」两块内容：
+	// 少了后者，模型就只会写 Markdown 纯文本，不会用随包 renderer 出卡片/图表。
+	for _, want := range []string{
+		"create_plugin", "export default function register", ".adago/plugins", "重载",
+		"adag-ui", "ui-charts/bar", "token-usage/usage-card", "fallback",
+	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("技能正文缺少 %q:\n%.400s", want, text)
 		}
