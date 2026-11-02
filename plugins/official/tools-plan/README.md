@@ -20,9 +20,30 @@
 | --- | --- | --- | --- |
 | `update_plan` | 工具 | `read` | 用完整步骤列表整体替换当前会话的计划 |
 | `read_plan` | 工具 | `read` | 读取当前会话的计划 |
+| `reflect_plan` | 工具 | `read` | 基于当前计划做反思：确认下一步聚焦、是否在计划路径上、有没有走偏或越做越多 |
 | `plan` | 只读动作 | — | 给 Todo 卡片取数，返回 `{ plan: { done, total, steps } }` |
 
-`update_plan` 标 `access=read` 是刻意的：它只写插件自己的会话状态文件 `.adag/todo/TODO_<threadId>.json`，不是用户文件编辑，不应触发写/执行审批。
+`update_plan` 标 `access=read` 是刻意的：它只写插件自己的会话状态文件 `.adag/todo/TODO_<threadId>.json`，不是用户文件编辑，不应触发写/执行审批。`reflect_plan` 也是 `access=read`：它只读取计划并输出反思结论，不修改任何状态。
+
+## 反思工具 `reflect_plan`
+
+`reflect_plan` 由 AI 显式调用，基于当前计划生成反思结论，引导它遵循规划路径、避免走偏或越做越多：
+
+- 可选参数 `focus`：即将执行的动作描述。工具把它与计划步骤做大小写不敏感的子串匹配，判断是否命中计划内步骤、是否在重复已完成步骤、或是否在做计划外工作。
+- 省略 `focus` 时只提示下一步应聚焦哪个待办步骤。
+- 没有计划时提示先 `update_plan` 建立计划。
+- 输出包含「下一步应聚焦」与「反思结论」两部分，结论以 `-` 列表呈现。
+- 纯只读：不修改计划文件，可放心反复调用。`reflect_plan` 也是 `access=read`：它只读取计划并输出反思结论，不修改任何状态。
+
+## 随包技能
+
+`skills/plan-and-reflect/SKILL.md` 是一份装配进系统提示的技能，教模型判断**何时使用 TODO、何时反思**：
+
+- 多步/跨轮任务先 `update_plan` 建计划，步骤完成时更新状态；
+- 每轮动手前用 `reflect_plan({ focus })` 确认不跑偏；
+- 单步简单任务不建计划，也不过度反思。
+
+技能由宿主在装配期从 `skills/*/SKILL.md` 自动收集（`dirSkills`），无需在清单里声明，也不参与 `dist` 构建。
 
 ## 存储
 

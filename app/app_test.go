@@ -118,8 +118,8 @@ func TestToolsPlan(t *testing.T) {
 
 	names := toolNames(asm)
 	sort.Strings(names)
-	if strings.Join(names, ",") != "read_plan,update_plan" {
-		t.Fatalf("工具目录 = %v，期望 [read_plan update_plan]", names)
+	if strings.Join(names, ",") != "read_plan,reflect_plan,update_plan" {
+		t.Fatalf("工具目录 = %v，期望 [read_plan reflect_plan update_plan]", names)
 	}
 
 	text, res := callTool(t, asm, hc, "update_plan", map[string]any{
@@ -139,6 +139,20 @@ func TestToolsPlan(t *testing.T) {
 	text, _ = callTool(t, asm, hc, "read_plan", map[string]any{})
 	if !strings.Contains(text, "[x] 读代码") || !strings.Contains(text, "[ ] 跑测试") {
 		t.Fatalf("read_plan 输出 = %q", text)
+	}
+
+	// reflect_plan：无 focus 时提示聚焦下一步；命中计划内步骤；计划外 focus 给出走偏警告。
+	text, _ = callTool(t, asm, hc, "reflect_plan", map[string]any{})
+	if !strings.Contains(text, "下一步应聚焦") || !strings.Contains(text, "改实现") {
+		t.Fatalf("reflect_plan（无 focus）输出 = %q", text)
+	}
+	text, _ = callTool(t, asm, hc, "reflect_plan", map[string]any{"focus": "改实现"})
+	if !strings.Contains(text, "命中计划内步骤") || !strings.Contains(text, "改实现") {
+		t.Fatalf("reflect_plan（命中 focus）输出 = %q", text)
+	}
+	text, _ = callTool(t, asm, hc, "reflect_plan", map[string]any{"focus": "重构无关模块"})
+	if !strings.Contains(text, "计划外工作") || !strings.Contains(text, "越做越多") {
+		t.Fatalf("reflect_plan（计划外 focus）输出 = %q", text)
 	}
 
 	// 数据必须落在按会话命名的文件里，并由工具自己读写。

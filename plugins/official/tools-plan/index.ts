@@ -110,6 +110,60 @@ function render(steps: PlanStep[]): string {
   return `当前计划（${done}/${steps.length} 完成）：\n` + lines.join("\n");
 }
 
+// matchStep 判断 focus 是否与某一步骤文本互相覆盖（大小写不敏感）。
+// 子串匹配（任一方向）即算命中：模型传入的 focus 通常是自然语言动作描述，
+// 与计划步骤不必逐字相同。
+function matchStep(step: string, focus: string): boolean {
+  const a = step.toLowerCase();
+  const b = focus.toLowerCase();
+  return a.includes(b) || b.includes(a);
+}
+
+// reflectionFor 生成反思结论：基于当前计划与 focus（模型即将执行的动作描述），
+// 确认是否仍走在计划路径上，并提醒只做当前步、不做计划外工作。这是
+// reflect_plan 的核心：把「遵循规划路径、避免走偏或越做越多」变成可见引导。
+function reflectionFor(steps: PlanStep[], focus: string): string {
+  const next = steps.find((s) => s.status !== "done");
+  const nextLine =
+    steps.length === 0
+      ? "当前没有计划。"
+      : next
+        ? `${steps.indexOf(next) + 1}. ${next.step}（${next.status === "in_progress" ? "进行中" : "待办"}）`
+        : "全部步骤均已完成，无待办。";
+
+  const lines: string[] = [];
+  lines.push(`下一步应聚焦：${nextLine}`);
+  lines.push("");
+  lines.push("反思结论：");
+
+  if (steps.length === 0) {
+    lines.push("- 当前没有计划。请先 update_plan 建立任务计划，再开始执行，避免漫无目的地铺开。");
+  } else if (!focus) {
+    if (next) {
+      lines.push(`- 请先完成下一步「${next.step}」，再进入后续步骤；不要跳到计划外的工作上。`);
+    } else {
+      lines.push("- 计划已全部完成。若任务尚未结束，先 update_plan 建立新计划，再继续执行。");
+    }
+  } else {
+    const onPlan = steps.find((s) => s.status !== "done" && matchStep(s.step, focus));
+    const alreadyDone = steps.find((s) => s.status === "done" && matchStep(s.step, focus));
+    if (onPlan) {
+      lines.push(`- focus「${focus}」命中计划内步骤「${onPlan.step}」，请继续完成该步，完成后再进入下一步。`);
+    } else if (alreadyDone) {
+      lines.push(`- focus「${focus}」对应的步骤「${alreadyDone.step}」已完成，不要重复执行；请转向下一步。`);
+    } else {
+      lines.push(`- focus「${focus}」未命中任何计划步骤，可能在做计划外工作。`);
+      if (next) {
+        lines.push(`- 请回到计划路径：先完成「${next.step}」，或先用 update_plan 调整计划，不要擅自扩大范围。`);
+      } else {
+        lines.push("- 请先用 update_plan 建立新计划，再继续执行。");
+      }
+    }
+  }
+  lines.push("- 只做当前步骤，不做计划外工作；发现新需求先记入计划，避免越做越多。");
+  return lines.join("\n");
+}
+
 // planView 是本插件前端段（Todo 卡片）的结构化视图：total=0 表示当前没有计划。
 function planView(steps: PlanStep[]): { done: number; total: number; steps: PlanStep[] } {
   const done = steps.filter((s) => s.status === "done").length;
@@ -241,6 +295,35 @@ export default function (agent: AgentAPI): void {
       return {
         content: [{ type: "text", text: render(steps) }],
         details: { steps, file: todoPath(ctx) },
+      };
+    },
+  });
+
+  // reflect_plan：基于当前计划生成反思结论，引导 AI 遵循规划路径、避免走偏或越做越多。
+  // 纯只读：只读取计划并对照 focus 输出反思，不修改计划（access=read，不触发写审批）。
+  // focus 是模型即将执行的动作描述（可选）；省略时只提示聚焦下一步。
+  agent.registerTool({
+    name: "reflect_plan",
+    description:
+      "基于当前任务计划做一次反思：确认接下来该聚焦哪一步、是否仍在计划路径上、有没有走偏或越做越多。可选传入 focus（你即将执行的动作描述），工具会把它与计划步骤对照，指出是否命中计划内步骤、是否在重复已完成步骤、或是否在做计划外工作。适合在每轮动手前调用，确保只做当前步骤、不做计划外工作。",
+    access: "read",
+    parameters: {
+      type: "object",
+      properties: {
+        focus: {
+          type: "string",
+          description: "即将执行的动作描述，用于与计划步骤对照（可选）",
+        },
+      },
+      required: [],
+    },
+    execute: async (args: any, ctx: ToolContext) => {
+      const steps = await loadSteps(ctx);
+      const focus = String((args && args.focus) || "").trim();
+      ctx.log("info", "plan reflect", { steps: steps.length, focus: focus, threadId: ctx.threadId });
+      return {
+        content: [{ type: "text", text: reflectionFor(steps, focus) }],
+        details: { steps, focus, file: todoPath(ctx) },
       };
     },
   });
