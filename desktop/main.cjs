@@ -771,6 +771,31 @@ function sameOriginPageUrl(previousUrl) {
   }
 }
 
+// turnRunning 报告当前页面是否有一轮在跑（含「等用户回答」的暂停态）。
+//
+// 重建 = restartGatewaySupervisor() = taskkill /T 整棵进程树：正在跑这一轮的 Core
+// 会被一起杀掉，run 落库成 interrupted/core_unavailable，用户看到的就是「会话突然
+// 中断」。而本仓库的 agent 任务恰好会改 plugins/、internal/（都是被监听的目录），
+// 等于每写一个文件就把自己这一轮杀掉——所以热更新前必须先问一句「现在忙不忙」。
+//
+// 直接读页面自己的状态：会话页的 #transcript 上由模板与 chat-live.js 维护
+// data-run-status（running / waiting_input / 终态）。它不依赖 workspace cookie、
+// 不额外发请求，也不会有「读不到就误判空闲」的第二种真相。
+async function turnRunning() {
+  if (!mainWindow || mainWindow.isDestroyed()) return false
+  try {
+    const status = await mainWindow.webContents.executeJavaScript(
+      "(() => { const el = document.getElementById('transcript'); return el ? String(el.dataset.runStatus || '') : ''; })()",
+      true,
+    )
+    const value = String(status || '')
+    return value === 'running' || value === 'waiting_input'
+  } catch (err) {
+    appendLauncherLog(`[热更新] 读取轮次状态失败: ${err?.message ?? String(err)}`)
+    return false
+  }
+}
+
 async function refreshToLatest(reason = '重复启动') {
   showMainWindow()
   if (app.isPackaged) return
@@ -831,11 +856,29 @@ function scheduleHotReload(filename) {
   }, 700)
 }
 
+// 轮次在跑时只排队：15s 后重试，最多等 10 分钟；再久就放弃这一轮改动，
+// 留到下一次变化或下次启动（横幅/日志里能查到）。
+const HOT_BUSY_RETRY_MS = 15000
+const HOT_BUSY_MAX_RETRIES = 40
+let hotBusyRetries = 0
+
 async function runHotReload(filename) {
   if (refreshingToLatest || hotBusy) return
   hotBusy = true
   try {
     appendLauncherLog(`[热更新] 检测到变化: ${filename || '(unknown)'}`)
+    if (await turnRunning()) {
+      hotBusyRetries += 1
+      if (hotBusyRetries > HOT_BUSY_MAX_RETRIES) {
+        hotBusyRetries = 0
+        appendLauncherLog(`[热更新] 等了 ${(HOT_BUSY_RETRY_MS * HOT_BUSY_MAX_RETRIES) / 60000} 分钟仍未空闲，放弃本轮重建（改动会在下次启动生效）`)
+        return
+      }
+      appendLauncherLog(`[热更新] 有轮次正在运行，推迟重建（${HOT_BUSY_RETRY_MS / 1000}s 后重试，第 ${hotBusyRetries} 次）`)
+      setTimeout(() => { void runHotReload(filename) }, HOT_BUSY_RETRY_MS)
+      return
+    }
+    hotBusyRetries = 0
     await refreshToLatest('源码变化')
   } finally {
     hotBusy = false
