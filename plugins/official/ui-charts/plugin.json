@@ -1,10 +1,13 @@
 {
   "id": "ui-charts",
   "name": "通用图表",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "apiVersion": 1,
-  "description": "Markdown 动态块的通用图表渲染器：横向条、纵向柱、双条对比、堆叠占比、热力方块与迷你折线。",
+  "description": "Markdown 动态块的通用图表渲染器（横向条、纵向柱、双条对比、堆叠占比、热力方块与迷你折线），并提供 chart_guide 工具查询 renderer 用法与随包技能 charts-render。",
   "trust": "builtin",
+  "backend": {
+    "entry": "index.ts"
+  },
   "frontend": {
     "blocks": [
       {

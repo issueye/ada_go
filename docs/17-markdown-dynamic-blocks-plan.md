@@ -293,7 +293,7 @@ MB-0 契约
 | Gateway 装配 | `cmd/adag/frontend_blocks.go`（工作区/全局插件扫描与遮蔽） |
 | Markdown | `internal/gateway/web/markdown_vnode.go`、新增 `markdown_block.go`、`ui.go` |
 | 浏览器 | `internal/gateway/web/static/ada-ui.js`（Markdown `$C` 透传）、CSS |
-| 官方插件 | `plugins/official/token-usage/{plugin.json,schemas,blocks}`、`plugins/official/ui-charts/{plugin.json,schemas,chart.tsx}` |
+| 官方插件 | `plugins/official/token-usage/{plugin.json,schemas,blocks}`、`plugins/official/ui-charts/{plugin.json,schemas,chart.tsx,index.ts,skills/charts-render}` |
 | 门禁 | `tools/verify/*`、`spec/*` fixture |
 | 文档 | `docs/16-markdown-dynamic-blocks.md`、`docs/07/14/15` |
 

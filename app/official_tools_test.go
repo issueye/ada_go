@@ -68,13 +68,13 @@ func codingProductIn(t *testing.T, ws string) *app.Assembly {
 }
 
 // TestCodingProductAssembles 钉 coding 产品的装配：14 个声明插件全部就位
-// （11 个后端实例 + 5 个前端声明；provider-admin / plugin-helper 同时有 route 后端与页面），
+// （12 个后端实例 + 5 个前端声明；provider-admin / plugin-helper 同时有 route 后端与页面），
 // tools-skill 贡献 skill_search，persona-coding 的提示词片段已结算。
 func TestCodingProductAssembles(t *testing.T) {
 	asm := codingProduct(t)
 
-	if len(asm.Plugins) != 11 {
-		t.Fatalf("后端插件数 = %d，期望 11（provider-admin 的 route 后端也装配；前端插件走 Gateway）: %v",
+	if len(asm.Plugins) != 12 {
+		t.Fatalf("后端插件数 = %d，期望 12（provider-admin 的 route 后端也装配；前端插件走 Gateway）: %v",
 			len(asm.Plugins), pluginIDsOf(asm))
 	}
 	wantFrontend := []string{"tools-plan", "tools-ask", "provider-admin", "token-usage", "ui-charts", "plugin-helper"}
@@ -89,7 +89,7 @@ func TestCodingProductAssembles(t *testing.T) {
 	if _, ok := asm.Tools.Lookup(context.Background(), "skill_search"); !ok {
 		t.Fatalf("coding 产品（skills=true）必须有 tools-skill 贡献的 skill_search，现有 %v", toolNames(asm))
 	}
-	for _, name := range []string{"git_status", "git_diff", "git_log", "ask_user"} {
+	for _, name := range []string{"git_status", "git_diff", "git_log", "ask_user", "chart_guide"} {
 		if _, ok := asm.Tools.Lookup(context.Background(), name); !ok {
 			t.Fatalf("缺少工具 %s，现有 %v", name, toolNames(asm))
 		}
@@ -117,6 +117,13 @@ func TestCodingProductAssembles(t *testing.T) {
 		skills := inst.Contribution().Skills
 		if len(skills) != 1 || skills[0].Name != "clean-code" || skills[0].Origin != "plugin" {
 			t.Fatalf("persona-coding 的随包技能 = %+v", skills)
+		}
+	}
+	// ui-charts 的随包技能进入贡献（origin=plugin）。
+	if inst, ok := asm.Plugin("ui-charts"); ok {
+		skills := inst.Contribution().Skills
+		if len(skills) != 1 || skills[0].Name != "charts-render" || skills[0].Origin != "plugin" {
+			t.Fatalf("ui-charts 的随包技能 = %+v", skills)
 		}
 	}
 }
@@ -164,6 +171,22 @@ func TestSkillsExposeReadablePaths(t *testing.T) {
 	body, err = os.ReadFile(deploy.Path)
 	if err != nil || !strings.Contains(string(body), "部署步骤正文") {
 		t.Fatalf("按 path 读取 deploy-notes = %q / %v", body, err)
+	}
+
+	// ui-charts 的随包技能 charts-render：path 指向插件包内的 SKILL.md，文件可读。
+	charts, ok := byName["charts-render"]
+	if !ok {
+		t.Fatalf("缺少 ui-charts 的随包技能 charts-render: %+v", asm.Skills())
+	}
+	if !filepath.IsAbs(charts.Path) {
+		t.Fatalf("charts-render path 不是绝对路径: %q", charts.Path)
+	}
+	body, err = os.ReadFile(charts.Path)
+	if err != nil {
+		t.Fatalf("按 path 读取 charts-render 失败（%s）: %v", charts.Path, err)
+	}
+	if !strings.Contains(string(body), "ui-charts/bar") || !strings.Contains(string(body), "adag-ui") {
+		t.Fatalf("charts-render 正文不对: %.400s", body)
 	}
 }
 
@@ -327,6 +350,45 @@ func TestToolsSkillSearch(t *testing.T) {
 		json.RawMessage(`{"query":"x"}`), hc2)
 	if err == nil || !strings.Contains(err.Error(), "ctx.skills") {
 		t.Fatalf("没有技能表应失败关闭: %v", err)
+	}
+}
+
+// TestChartGuide 钉 ui-charts 的 chart_guide 工具：全部/单形态/非法形态。
+func TestChartGuide(t *testing.T) {
+	hc := host.Context{Workspace: tempDir(t), Log: func(string, string, map[string]any) {}}
+	asm := assemble(t, testProduct(t, "ui-charts"), hc, nil)
+
+	// 全部 renderer：六种 id 都在，adag-ui 封套语法与公共字段齐全。
+	text, res := callTool(t, asm, hc, "chart_guide", map[string]any{})
+	for _, id := range []string{"ui-charts/bar", "ui-charts/column", "ui-charts/compare", "ui-charts/stacked", "ui-charts/heatmap", "ui-charts/spark"} {
+		if !strings.Contains(text, id) {
+			t.Fatalf("chart_guide 全部应包含 %s:\n%s", id, text)
+		}
+	}
+	for _, want := range []string{"adag-ui", "fallback", "renderer", "title（必填）"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("chart_guide 全部缺少 %q:\n%s", want, text)
+		}
+	}
+	if renderers, ok := res.Details["renderers"].([]any); !ok || len(renderers) != 6 {
+		t.Fatalf("details.renderers = %#v", res.Details["renderers"])
+	}
+
+	// 单形态：只返回该 renderer，且 details.selected 正确。
+	text, res = callTool(t, asm, hc, "chart_guide", map[string]any{"kind": "bar"})
+	if !strings.Contains(text, "ui-charts/bar") || strings.Contains(text, "ui-charts/spark") {
+		t.Fatalf("chart_guide(bar) 应只含 bar:\n%s", text)
+	}
+	if res.Details["selected"] != "ui-charts/bar" {
+		t.Fatalf("details.selected = %#v", res.Details["selected"])
+	}
+
+	// 非法形态：失败关闭。
+	inst := pluginOwning(t, asm, "chart_guide")
+	_, err := inst.CallTool(context.Background(), handlerOf(t, inst, "chart_guide"),
+		json.RawMessage(`{"kind":"line"}`), hc)
+	if err == nil || !strings.Contains(err.Error(), "未知图表形态") {
+		t.Fatalf("非法 kind 应报错: %v", err)
 	}
 }
 

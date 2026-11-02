@@ -12,7 +12,7 @@ import (
 )
 
 // codingPlugins 是 08 §8.6 与 development-plan §1.1 冻结的官方插件清单
-// （13 项：11 个后端实例；tools-plan/tools-ask 的后端与卡片同属一个插件，provider-admin / plugin-helper 同时提供 route 后端与页面，token-usage / ui-charts 是纯前端）。
+// （13 项：12 个后端实例；tools-plan/tools-ask 的后端与卡片同属一个插件，provider-admin / plugin-helper 同时提供 route 后端与页面，token-usage 是纯前端、ui-charts 是前端动态块 + 后端工具）。
 // 只出现在测试代码里：基座源码不认得它们（1.5.5 的硬边界），选择权在产品声明。
 var codingPlugins = []string{
 	"provider-openai-chat",
