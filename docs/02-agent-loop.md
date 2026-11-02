@@ -107,6 +107,7 @@ type Receipt struct {
 - 写工具统一经过文件变更队列（同一路径串行），避免并发写互相覆盖。
 - `Rollback=true` 的工具在执行前把涉及文件纳入检查点；回滚接口返回“恢复/删除/跳过/失效”四份清单，不谎报成功。
 - 截断统一在适配层做（例如单条工具输出 50KB / 2000 行），回执标记 `Truncated`，界面可提示“查看完整输出”。
+- 等人工的工具，执行预算必须**长于交互期限**（300s）：预算先到期会在用户还在作答时把调用掐掉（模型只看到 `context canceled`），交互托盘却还挂着。`ask_user` 取 330s（`INTERACTION_TIMEOUT_MS + 30s`），超时统一由交互期限按拒绝处理。
 - 工具目录在装配期冻结；运行中新增工具只记日志，不生效（要生效就重载插件）。
 
 **基座不注册任何工具**：空基座的工具目录长度为 0。工具目录由“产品声明启用哪些官方插件 + 用户启用哪些第三方插件”与“插件在装配期登记的工具”组成；基座只提供描述符校验、执行包装、交互请求路由与回执。
@@ -118,7 +119,7 @@ type Receipt struct {
 | `tools-fs` | `read_file`、`write_file`、`edit_file`、`list_files`、`search_files` | 读可访问宿主任意路径；写仍受 Scope；编辑要求唯一匹配 |
 | `tools-shell` | `run_command`、`run_background`、`check_task`、`kill_task` | 超时杀进程树；后台任务有 id；`check_task` 标记 `repeatable`；默认由 `policy-default` 询问 |
 | `tools-git` | `git` | 单工具 + `action`：status/diff/log/show/blame/add/commit/checkout/restore/reset/stash/branch/merge/push/pull；写动作交给策略插件 |
-| `tools-plan` | `update_plan`、`read_plan` | 维护线程级任务计划；同一插件的前端段把它渲染成 Todo 卡片 |
+| `tools-plan` | `update_plan`、`read_plan`、`reflect_plan` | 维护线程级任务计划；`reflect_plan` 基于当前计划做反思，引导遵循规划路径、避免走偏或越做越多；同一插件的前端段把它渲染成 Todo 卡片 |
 | `tools-ask` | `ask_user` | 向用户提问；前端段在交互托盘里渲染提问卡片 |
 | `tools-skill` | `skill_search` | 按关键词检索技能；正文由模型按提示里的 path 用 `read_file` 读取 |
 | `tools-subagent` | `invoke_subagent` | v1.5；委派子智能体 |

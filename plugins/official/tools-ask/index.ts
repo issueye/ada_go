@@ -30,8 +30,16 @@ interface ToolDef {
   description: string;
   parameters: object;
   access: "read" | "write" | "exec" | "network";
+  // 单次执行预算（06 §6.4，缺省 120s）。提问要等人在界面里作答，见 TOOL_BUDGET_MS。
+  timeoutMs?: number;
   execute: (args: any, ctx: ToolContext) => unknown;
 }
+
+// 交互期限是 300s（06 §6.4），提问工具的预算必须比它长：预算先到期会在用户还在
+// 作答时把这次调用掐掉（模型只看到一句 context canceled），而交互托盘还挂在那里。
+// 留 30s 余量，让超时由交互期限决定——那才是「按拒绝处理」的语义（INV-4）。
+const INTERACTION_TIMEOUT_MS = 300_000;
+const TOOL_BUDGET_MS = INTERACTION_TIMEOUT_MS + 30_000;
 
 interface AgentAPI {
   registerTool(def: ToolDef): void;
@@ -104,21 +112,21 @@ function normalizeQuestions(args: any): AskItem[] {
 function askOne(ui: UIContext, item: AskItem): Promise<string> {
   switch (item.kind) {
     case "select": {
-      return ui.select(item.question, item.options).then((picked) => {
+      return ui.select(item.question, item.options, { timeoutMs: INTERACTION_TIMEOUT_MS }).then((picked) => {
         if (picked === null || picked === undefined) denied("用户取消或超时，未做出选择");
         if (!item.options.includes(picked)) denied("用户返回了候选项之外的值，按拒绝处理");
         return picked;
       });
     }
     case "input": {
-      return ui.input(item.question, item.question).then((typed) => {
+      return ui.input(item.question, item.question, { timeoutMs: INTERACTION_TIMEOUT_MS }).then((typed) => {
         if (typed === null || typed === undefined) denied("用户取消或超时，未输入内容");
         if (String(typed).trim().length === 0) denied("用户提交了空输入，按取消处理");
         return String(typed);
       });
     }
     default: {
-      return ui.confirm(item.question, item.question).then((ok) => {
+      return ui.confirm(item.question, item.question, { timeoutMs: INTERACTION_TIMEOUT_MS }).then((ok) => {
         if (ok === null || ok === undefined) denied("用户拒绝、取消或超时，未得到确认");
         return ok === true ? "yes" : "no";
       });
@@ -128,7 +136,7 @@ function askOne(ui: UIContext, item: AskItem): Promise<string> {
 
 // askForm 走一张分步表单（上一题/下一题/提交），一次性收集全部答案。
 function askForm(ui: UIContext, questions: AskItem[]): Promise<string[]> {
-  return ui.form(JSON.stringify(questions)).then((raw) => {
+  return ui.form(JSON.stringify(questions), { timeoutMs: INTERACTION_TIMEOUT_MS }).then((raw) => {
     if (raw === null || raw === undefined) denied("用户取消或超时，未提交表单");
     let parsed: any = null;
     try {
@@ -168,6 +176,7 @@ export default function (agent: AgentAPI): void {
       "界面会依次弹出。用户拒绝、取消、超时或没有可用界面时本工具失败（失败关闭）：不要重复追问，" +
       "改用其它方法或在回复里说明。",
     access: "read",
+    timeoutMs: TOOL_BUDGET_MS,
     parameters: {
       type: "object",
       properties: {
