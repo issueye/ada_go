@@ -26,6 +26,15 @@ const (
 	requestTimeout = 30 * time.Second
 	// eventQueue 是每个连接的待发事件缓冲；满时丢弃该连接的最新事件而不是阻塞轮次。
 	eventQueue = 512
+	// concurrentRequests 是单连接同时处理的 RPC 上限。
+	//
+	// 必须并发派发：Handle 里有会长时间阻塞的方法（plugin.reload 要等在途轮次排空，
+	// 还要关掉旧装配的插件运行时）。串行读循环会让这条连接上的其它请求全部排在后面，
+	// 包括 interaction.respond、turn.cancel 与页面渲染；最坏情况是死锁——
+	// reload 等旧插件实例的 owner goroutine 退出，那个 goroutine 正卡在 ask_user 里
+	// 等用户回答，而回答必须走 interaction.respond，它又排在被堵住的同一条连接后面。
+	// 并发之后慢请求只慢它自己；响应靠 JSON-RPC 的 id 对应，不需要保序。
+	concurrentRequests = 8
 )
 
 // Handler 返回 HTTP handler：/rpc 是 WebSocket，/healthz 是健康检查。
@@ -82,6 +91,9 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 
 	go c.writeLoop()
 
+	// sem 限流：读循环最多把 concurrentRequests 个请求同时挂出去，其余在这里等，
+	// 既有背压又不会让一个慢方法独占整条连接。
+	sem := make(chan struct{}, concurrentRequests)
 	for {
 		typ, data, err := conn.Read(r.Context())
 		if err != nil {
@@ -99,9 +111,12 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
-		resp := s.core.Handle(ctx, req)
-		cancel()
-		c.enqueue(mustJSON(resp))
+		sem <- struct{}{}
+		go func(req proto.Request, ctx context.Context, cancel context.CancelFunc) {
+			defer func() { <-sem }()
+			defer cancel()
+			c.enqueue(mustJSON(s.core.Handle(ctx, req)))
+		}(req, ctx, cancel)
 	}
 	s.mu.Lock()
 	delete(s.conns, c)
