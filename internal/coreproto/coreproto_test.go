@@ -128,17 +128,17 @@ func TestNotificationEncoding(t *testing.T) {
 // ---------- 交互桥 ----------
 
 type brokerHarness struct {
-	b        *coreproto.Broker
-	events   *coreproto.Emitter
-	clock    *fakeAdvanceClock
-	storeLog []string
+	b      *coreproto.Broker
+	events *coreproto.Emitter
+	clock  *fakeAdvanceClock
+	store  *recordingStore
 }
 
 func newBrokerHarness(t *testing.T, hasUI bool) *brokerHarness {
 	t.Helper()
 	clock := &fakeAdvanceClock{now: time.Date(2026, 10, 28, 10, 0, 0, 0, time.UTC)}
 	events := coreproto.NewEmitter(clock)
-	store := &recordingStore{log: &[]string{}}
+	store := &recordingStore{}
 	b, err := coreproto.NewBroker(coreproto.BrokerConfig{
 		Sink: events, Clock: clock, IDs: coreIDs{}, Store: store,
 		HasUI: func(context.Context, string) bool { return hasUI },
@@ -146,7 +146,7 @@ func newBrokerHarness(t *testing.T, hasUI bool) *brokerHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &brokerHarness{b: b, events: events, clock: clock}
+	return &brokerHarness{b: b, events: events, clock: clock, store: store}
 }
 
 type fakeAdvanceClock struct {
@@ -173,22 +173,53 @@ func (coreIDs) NewCheckpointID(context.Context) (string, error)     { return "ch
 func (coreIDs) NewMessageID(context.Context) (string, error)        { return "msg_test", nil }
 func (coreIDs) NewInteractionID(context.Context) (string, error)    { return "intg_test", nil }
 
+// recordingStore 记下持久层看到的调用；pending 用来模拟「库里有、内存里没有」的残留行。
 type recordingStore struct {
-	log *[]string
+	mu      sync.Mutex
+	log     []string
+	pending []ports.InteractionRequest
 }
 
 func (s *recordingStore) SavePending(_ context.Context, req ports.InteractionRequest) error {
-	*s.log = append(*s.log, "save:"+req.ID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.log = append(s.log, "save:"+req.ID)
 	return nil
 }
 
-func (s *recordingStore) Resolve(_ context.Context, id string, res coreproto.InteractionRecord) error {
-	*s.log = append(*s.log, "resolve:"+id+":"+string(res.Status))
+func (s *recordingStore) Resolve(ctx context.Context, id string, res coreproto.InteractionRecord) error {
+	if err := ctx.Err(); err != nil {
+		// 旧实现把调用方（可能已取消）的 ctx 直接拿来写库：这里如实失败，
+		// 好让「取消后仍要落库」这条回归测试能抓住它。
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.log = append(s.log, "resolve:"+id+":"+string(res.Status))
 	return nil
 }
 
 func (s *recordingStore) ListPending(context.Context, string) ([]ports.InteractionRequest, error) {
-	return nil, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]ports.InteractionRequest(nil), s.pending...), nil
+}
+
+func (s *recordingStore) has(want string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, line := range s.log {
+		if line == want {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *recordingStore) lines() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.log...)
 }
 
 // TestInteractionUnavailableWithoutUI 是 INV-4 的基座侧证据：没有界面时立即 unavailable，
@@ -330,6 +361,71 @@ func TestInteractionCancelFromRound(t *testing.T) {
 	}
 	if err == nil || !res.Status.IsDenial() {
 		t.Fatalf("取消必须按拒绝处理：%v", err)
+	}
+}
+
+// TestInteractionResolvePersistsUnderCancelledContext 钉住「终态一定落库」。
+//
+// 工具预算耗尽/轮次取消会把已取消的 ctx 带进 resolve；旧实现直接拿它写库，
+// 写失败又被吞掉，库里的 pending 行就永远留着：提问托盘显示一张点了没反应的卡片，
+// 下一次提问还会被 CreateInteraction 判成 thread_busy。
+func TestInteractionResolvePersistsUnderCancelledContext(t *testing.T) {
+	t.Parallel()
+	h := newBrokerHarness(t, true)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+	res, err := h.b.Request(ctx, ports.InteractionRequest{
+		ID: "i14", ThreadID: "th_1", PluginID: "policy", Kind: domain.InteractionConfirm, Title: "a", Body: "b",
+	})
+	if res.Status != domain.InteractionCancelled {
+		t.Fatalf("状态 = %q，期望 cancelled", res.Status)
+	}
+	if err == nil {
+		t.Fatal("取消必须按拒绝处理")
+	}
+	if !h.store.has("resolve:i14:cancelled") {
+		t.Fatalf("取消后终态必须落库，实际持久层调用：%v", h.store.lines())
+	}
+}
+
+// TestInteractionListPendingHidesResolvedRows 验证内存权威：本进程已解析的交互，
+// 即使库里还留着 pending 行，也不再出现在待办里（否则托盘关不掉）。
+func TestInteractionListPendingHidesResolvedRows(t *testing.T) {
+	t.Parallel()
+	h := newBrokerHarness(t, true)
+	req := ports.InteractionRequest{
+		ID: "i15", ThreadID: "th_1", PluginID: "policy", Kind: domain.InteractionConfirm,
+		Title: "a", Body: "b", CreatedAt: h.clock.Now(), ExpiresAt: h.clock.Now().Add(time.Minute),
+	}
+	h.store.pending = []ports.InteractionRequest{req}
+	go func() {
+		_, _ = h.b.Request(context.Background(), req)
+	}()
+	// 等 goroutine 真正登记好待处理项（库里的残留行会让 pendingIDs 立刻非空，不能靠它判）。
+	waitFor(t, func() bool { return h.store.has("save:i15") }, time.Second)
+	if _, err := h.b.Respond(context.Background(), "th_1", "i15", domain.InteractionCancelled, ""); err != nil {
+		t.Fatal(err)
+	}
+	if ids := pendingIDs(h.b, "th_1"); len(ids) != 0 {
+		t.Fatalf("已解析的交互不该再出现在待办里：%v", ids)
+	}
+}
+
+// TestInteractionListPendingDropsExpiredRows 验证过期行不再被当成待办：它已经答不了
+// （Respond 会按 timeout 拒绝），界面不该继续让用户点。
+func TestInteractionListPendingDropsExpiredRows(t *testing.T) {
+	t.Parallel()
+	h := newBrokerHarness(t, true)
+	h.store.pending = []ports.InteractionRequest{{
+		ID: "i16", ThreadID: "th_1", PluginID: "policy", Kind: domain.InteractionConfirm,
+		Title: "a", Body: "b", CreatedAt: h.clock.Now().Add(-2 * time.Minute),
+		ExpiresAt: h.clock.Now().Add(-time.Minute),
+	}}
+	if ids := pendingIDs(h.b, "th_1"); len(ids) != 0 {
+		t.Fatalf("过期交互不该出现在待办里：%v", ids)
 	}
 }
 

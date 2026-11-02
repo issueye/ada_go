@@ -203,11 +203,19 @@ func (b *Broker) Respond(ctx context.Context, threadID, requestID string, status
 }
 
 // ListPending 返回线程的待处理交互（重启恢复、interaction.list）。
+//
+// 内存是权威：库里的 pending 行只是恢复用的副本，可能比内存旧。两种副本一律不返回——
+//   - 本进程已解析过的（落库失败会留下 pending 行）：再显示出来就是一张点了没反应的卡片；
+//   - 已经过了期限的：它再也接受不了回答（Respond 会按 timeout 拒绝），界面不该再让用户点。
 func (b *Broker) ListPending(ctx context.Context, threadID string) ([]ports.InteractionRequest, error) {
 	b.mu.Lock()
 	out := make([]ports.InteractionRequest, 0, 1)
 	if p, ok := b.pending[threadID]; ok {
 		out = append(out, p.req)
+	}
+	resolved := make(map[string]bool, len(b.resolved))
+	for id := range b.resolved {
+		resolved[id] = true
 	}
 	b.mu.Unlock()
 	if b.store != nil {
@@ -215,11 +223,20 @@ func (b *Broker) ListPending(ctx context.Context, threadID string) ([]ports.Inte
 		if err != nil {
 			return out, err
 		}
-		seen := map[string]bool{out0id(out): true}
+		now := b.clock.Now()
+		seen := make(map[string]bool, len(out)+len(stored))
+		for _, r := range out {
+			seen[r.ID] = true
+		}
 		for _, r := range stored {
-			if !seen[r.ID] {
-				out = append(out, r)
+			if seen[r.ID] || resolved[r.ID] {
+				continue
 			}
+			if !r.ExpiresAt.IsZero() && !r.ExpiresAt.After(now) {
+				continue
+			}
+			seen[r.ID] = true
+			out = append(out, r)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
@@ -245,7 +262,7 @@ func (b *Broker) resolve(ctx context.Context, p *pendingInteraction, status doma
 		b.resolved[p.req.ID] = res
 		b.mu.Unlock()
 		if b.store != nil {
-			_ = b.store.Resolve(ctx, p.req.ID, InteractionRecord{
+			b.persistResolved(ctx, InteractionRecord{
 				RequestID: p.req.ID, ThreadID: p.req.ThreadID,
 				Status: status, Value: value, ResolvedAt: res.ResolvedAt,
 			})
@@ -264,6 +281,26 @@ func (b *Broker) resolve(ctx context.Context, p *pendingInteraction, status doma
 		return res, domain.NewError(domain.CodePluginDenied, "交互按失败方向处理: "+reason)
 	}
 	return res, nil
+}
+
+// resolvedPersistTimeout 是「解析结果落库」的独立期限：解析已经发生，落库只是记账，
+// 不能被调用方的取消或轮次预算牵连，也不能无限等（写锁被占时要让路）。
+const resolvedPersistTimeout = 5 * time.Second
+
+// persistResolved 把交互终态写进持久层。
+//
+// 不能用调用方的 ctx 直接写库：resolve 的三条路径都可能带着已取消的 ctx 进来
+// （轮次取消、工具预算耗尽、请求方放弃等待），拿它写库会立刻失败；错误又是记账性的、
+// 不值得反过来打断调用方，于是库里的 pending 行就永远留着——提问托盘一直显示一张
+// 点了没反应的卡片，下一次提问还会被 CreateInteraction 判成 thread_busy。
+// 这里换一个与取消解耦的短期限 ctx，让终态一定落地。
+func (b *Broker) persistResolved(ctx context.Context, rec InteractionRecord) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), resolvedPersistTimeout)
+	defer cancel()
+	_ = b.store.Resolve(pctx, rec.RequestID, rec)
 }
 
 func (b *Broker) forget(threadID string) {
@@ -294,13 +331,6 @@ func mustMarshal(v any) json.RawMessage {
 		return nil
 	}
 	return raw
-}
-
-func out0id(xs []ports.InteractionRequest) string {
-	if len(xs) == 0 {
-		return ""
-	}
-	return xs[0].ID
 }
 
 // fieldOf 从载荷里取 threadId（事件序号归属用）。
