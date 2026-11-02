@@ -48,7 +48,7 @@ adag doctor --fake                          # 无模型依赖的启动自检
 | 插件分配 1GB | `ErrMemoryLimit`，插件 `degraded`，其余工具可用 |
 | 插件读 `../../secret` | 拒绝，回执 `denied`，审计记录 |
 | 无 `fs.read` 的插件 `import "node:fs"` | 装配失败，`ERR_ACCESS_DENIED`；不是运行期 undefined |
-| 只读插件的 `fs.writeFile` | 访问即抛 `ERR_ACCESS_DENIED`；读操作正常 |
+| 只读插件的 `fs.writeFile` | 调用即抛 `ERR_ACCESS_DENIED`；读操作正常 |
 | 插件 `process.env.SECRET` | 不在 `backend.env` 白名单时为 `undefined`；密钥只能经 `secret()` 取得 |
 | 插件 `child_process.exec("rm -rf /")` | 拒绝：只允许 `execFile`、不经过 shell；审计记录参数 |
 | 插件加载 `.node` 原生扩展 | 安装/装载失败，`ERR_NATIVE_ADDON_UNSUPPORTED` |

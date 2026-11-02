@@ -46,6 +46,12 @@ var installSites = map[Capability]InstallSite{
 		EnforcedBy:    "Run.Allow 按程序名与参数检查；120s 超时、4MB 捕获、取消杀整棵进程树（09 §9.2、12 §6.13）",
 		Milestone:     "M1-C/D",
 	},
+	CapProcess: {
+		Capability: CapProcess, HostInstall: "安装长驻 stdin/stdout 子进程（无 shell，仅 builtin/verified）",
+		ScriptSurface: "ctx.process.start/write/read/kill",
+		EnforcedBy:    "ExecPolicy + cwd scope + env 白名单；每 Runtime 进程数/生命周期/输出上限；关闭杀整棵进程树（09 §9.2、12 §6.13）",
+		Milestone:     "v2 MCP stdio",
+	},
 	CapState: {
 		Capability: CapState, HostInstall: "安装按插件 + 线程命名空间隔离的受限 KV",
 		ScriptSurface: "ctx.state.get/set/delete",

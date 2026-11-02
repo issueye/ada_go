@@ -18,11 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -56,6 +52,11 @@ type execState struct {
 	cancels map[int]context.CancelFunc
 	// killReq 记「pid 还没分配就被要求杀」：abort 与 Start 抢跑时不能把取消丢掉。
 	killReq map[int]bool
+	// bg 是后台任务表：与同步命令分开记账，任务在轮次结束后继续跑。
+	bg     map[int]*backgroundTask
+	bgNext int
+	// closed 由 shutdown 置位：关闭后不再接受新的后台任务。
+	closed bool
 }
 
 func newExecState() *execState {
@@ -64,6 +65,8 @@ func newExecState() *execState {
 		pids:    map[int]int{},
 		cancels: map[int]context.CancelFunc{},
 		killReq: map[int]bool{},
+		bg:      map[int]*backgroundTask{},
+		bgNext:  1,
 	}
 }
 
@@ -73,6 +76,7 @@ func (e *execState) shutdown() error {
 		return nil
 	}
 	e.mu.Lock()
+	e.closed = true
 	cancels := make([]context.CancelFunc, 0, len(e.cancels))
 	for _, cancel := range e.cancels {
 		cancels = append(cancels, cancel)
@@ -81,12 +85,19 @@ func (e *execState) shutdown() error {
 	for _, pid := range e.pids {
 		pids = append(pids, pid)
 	}
+	bg := make([]*backgroundTask, 0, len(e.bg))
+	for _, task := range e.bg {
+		bg = append(bg, task)
+	}
 	e.mu.Unlock()
 	for _, cancel := range cancels {
 		cancel()
 	}
 	for _, pid := range pids {
-		killTree(pid)
+		killProcessTree(pid)
+	}
+	for _, task := range bg {
+		task.kill()
 	}
 	return nil
 }
@@ -107,23 +118,7 @@ func (e *execState) cancel(id int) {
 	if cancel != nil {
 		cancel()
 	}
-	killTree(pid)
-}
-
-// killTree 在 Windows 上用 taskkill /T 连子进程一起杀，其它平台直接杀进程。
-func killTree(pid int) {
-	if pid <= 0 {
-		return
-	}
-	if runtime.GOOS == "windows" {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = exec.CommandContext(ctx, "taskkill", "/F", "/T", "/PID", strconv.Itoa(pid)).Run()
-		return
-	}
-	if p, err := os.FindProcess(pid); err == nil {
-		_ = p.Kill()
-	}
+	killProcessTree(pid)
 }
 
 // installExec 装 node:child_process（能力位 exec + 至少 verified，矩阵已判过一遍）。
@@ -169,11 +164,20 @@ type execRequest struct {
 	id       int // 已登记进 execState 的 id（同步路径 -1）
 }
 
-// parseExecRequest 落实 6.13 的命令边界。
+// parseExecRequest 落实 6.13 的命令边界（同步命令的默认期限）。
 func (st *capsState) parseExecRequest(rt *mojsRuntime, args []moejs.Value) (*execRequest, error) {
+	return st.parseExecRequestWithTimeout(rt, args, st.limits.MaxExecTimeout)
+}
+
+// parseExecRequestWithTimeout 是 parseExecRequest 的可变期限版本：
+// 后台任务允许比同步命令更长的生命周期，但仍必须有上限。
+func (st *capsState) parseExecRequestWithTimeout(rt *mojsRuntime, args []moejs.Value, maxTimeout time.Duration) (*execRequest, error) {
 	r := rt.Realm()
 	limits := st.limits
-	req := &execRequest{maxBuffer: limits.MaxExecOutputBytes, timeout: limits.MaxExecTimeout, id: -1}
+	if maxTimeout <= 0 {
+		maxTimeout = limits.MaxExecTimeout
+	}
+	req := &execRequest{maxBuffer: limits.MaxExecOutputBytes, timeout: maxTimeout, id: -1}
 
 	fileV := moejs.Arg(args, 0)
 	if !fileV.IsString() {
@@ -210,6 +214,12 @@ func (st *capsState) parseExecRequest(rt *mojsRuntime, args []moejs.Value) (*exe
 			if n, ok := jsInt(v); ok && n > 0 {
 				req.timeout = time.Duration(n) * time.Millisecond
 			}
+		} else if v, err := rt.Get(opts, "timeoutMs"); err == nil {
+			// ctx.execBackground 用 timeoutMs（与 ctx.exec 一致）；node:child_process
+			// 的调用方用 timeout。两者都接受，上限分别由调用方传入。
+			if n, ok := jsInt(v); ok && n > 0 {
+				req.timeout = time.Duration(n) * time.Millisecond
+			}
 		}
 		if v, err := rt.Get(opts, "maxBuffer"); err == nil {
 			if n, ok := jsInt(v); ok && n > 0 {
@@ -233,8 +243,8 @@ func (st *capsState) parseExecRequest(rt *mojsRuntime, args []moejs.Value) (*exe
 			}
 		}
 	}
-	if req.timeout <= 0 || req.timeout > limits.MaxExecTimeout {
-		req.timeout = limits.MaxExecTimeout
+	if req.timeout <= 0 || req.timeout > maxTimeout {
+		req.timeout = maxTimeout
 	}
 	if req.maxBuffer <= 0 || req.maxBuffer > limits.MaxExecOutputBytes {
 		req.maxBuffer = limits.MaxExecOutputBytes
@@ -272,6 +282,7 @@ func (e *execState) run(req *execRequest) *runResult {
 	}
 	cmd := exec.CommandContext(ctx, req.file, req.args...)
 	cmd.WaitDelay = 2 * time.Second
+	configureProcessTree(cmd)
 	if req.dir != "" {
 		cmd.Dir = req.dir
 	}
@@ -317,20 +328,20 @@ func (e *execState) run(req *execRequest) *runResult {
 			if req.cancelFn != nil {
 				req.cancelFn()
 			}
-			killTree(pid)
+			killProcessTree(pid)
 		}
 	}
 	waitErr := cmd.Wait()
 	res.Stdout, res.Stderr = out.String(), errW.String()
 	switch {
-	case out.over || errW.over:
+	case out.Over() || errW.Over():
 		res.Kind = "maxbuffer"
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		res.Kind, res.ErrText = "timeout", req.timeout.String()
-		killTree(cmd.Process.Pid)
+		killProcessTree(cmd.Process.Pid)
 	case errors.Is(ctx.Err(), context.Canceled):
 		res.Kind = "aborted"
-		killTree(cmd.Process.Pid)
+		killProcessTree(cmd.Process.Pid)
 	case waitErr != nil:
 		var ee *exec.ExitError
 		if errors.As(waitErr, &ee) {
@@ -343,13 +354,21 @@ func (e *execState) run(req *execRequest) *runResult {
 }
 
 // capWriter 是带 maxBuffer 的输出缓冲（超限后保留已写入的部分）。
+//
+// 后台任务会在 checkTask 读取的同时由 cmd.Wait 侧写入，因此必须自带锁；
+// total 记录截断前的真实字节数，供检查接口报告。
 type capWriter struct {
+	mu    sync.Mutex
 	buf   bytes.Buffer
 	limit int
 	over  bool
+	total int
 }
 
 func (w *capWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.total += len(p)
 	if w.buf.Len()+len(p) > w.limit {
 		w.over = true
 		if keep := w.limit - w.buf.Len(); keep > 0 {
@@ -360,7 +379,25 @@ func (w *capWriter) Write(p []byte) (int, error) {
 	return w.buf.Write(p)
 }
 
-func (w *capWriter) String() string { return w.buf.String() }
+func (w *capWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
+
+// Stats 返回当前已保留的输出、是否截断、截断前的总字节数。
+func (w *capWriter) Stats() (string, bool, int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String(), w.over, w.total
+}
+
+// Over 报告是否发生过截断（并发安全）。
+func (w *capWriter) Over() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.over
+}
 
 // execFileSync 是同步路径：直接在 Loop 上跑完（不返回 Promise）。
 func (st *capsState) execFileSync(ex *execState) engine.NativeFunc {
@@ -517,13 +554,14 @@ func truthyJS(v moejs.Value) (bool, bool) {
 	return true, true // 对象/数组：真值
 }
 
-// addExecContextMember 给 ToolContext 补 exec（05 §6.3；能力位 exec，仅 verified/builtin）。
+// addExecContextMember 给 ToolContext 补 exec / 后台任务三件套
+// （05 §6.3；能力位 exec，仅 verified/builtin）。
 func addExecContextMember(st *capsState, hc Context, put func(string, moejs.Value) error) error {
 	ex := st.ex
 	if ex == nil || !st.caps.Has(plugins.CapExec) {
 		return nil
 	}
-	return put("exec", st.rt.Function("exec", 3, func(r *engine.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+	if err := put("exec", st.rt.Function("exec", 3, func(r *engine.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
 		cmd := moejs.Arg(args, 0).String()
 		var argv []string
 		if v := moejs.Arg(args, 1); v.IsObject() {
@@ -574,9 +612,68 @@ func addExecContextMember(st *capsState, hc Context, put func(string, moejs.Valu
 			})
 		}()
 		return promise, nil
-	}))
+	})); err != nil {
+		return err
+	}
+
+	// 后台任务：与 ctx.exec 共用同一条命令边界；任务生命周期独立于当前轮次，
+	// 由 checkTask/killTask 管理，插件 Runtime 关闭时统一杀掉。
+	if err := put("execBackground", st.rt.Function("execBackground", 3, func(r *engine.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+		req, err := st.parseExecRequestWithTimeout(st.rt, args, st.limits.MaxBackgroundTimeout)
+		if err != nil {
+			return moejs.Undefined(), err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), req.timeout)
+		req.ctx, req.cancelFn = ctx, cancel
+		task, err := ex.startBackground(req, st.limits.MaxBackgroundTasks)
+		if err != nil {
+			cancel()
+			return moejs.Undefined(), throwCoded(r, codeOutOfRange, "ctx.execBackground: "+err.Error(), nil)
+		}
+		st.audit("child_process", "execBackground", req.file, 0, "started", map[string]any{
+			"args":   backgroundSummary(req.file, req.args),
+			"cwd":    baseForLog(req.dir),
+			"taskId": task.id,
+			"pid":    task.pid,
+		})
+		promise, settle := st.loop.NewPromise()
+		settle(func(rt *mojsRuntime) (moejs.Value, error) {
+			return rt.FromGo(map[string]any{"taskId": task.id, "pid": task.pid})
+		})
+		return promise, nil
+	})); err != nil {
+		return err
+	}
+	if err := put("checkTask", st.rt.Function("checkTask", 1, func(r *engine.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+		id, ok := jsInt(moejs.Arg(args, 0))
+		if !ok || id <= 0 {
+			return moejs.Undefined(), throwCoded(r, codeInvalidArgType, "ctx.checkTask(taskId): taskId 必须是正整数", nil)
+		}
+		view, found := ex.checkBackground(int(id))
+		if !found {
+			return moejs.Undefined(), throwCoded(r, codeOutOfRange, fmt.Sprintf("ctx.checkTask(%d): 没有这个后台任务", id), nil)
+		}
+		return st.rt.FromGo(view)
+	})); err != nil {
+		return err
+	}
+	if err := put("killTask", st.rt.Function("killTask", 1, func(r *engine.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+		id, ok := jsInt(moejs.Arg(args, 0))
+		if !ok || id <= 0 {
+			return moejs.Undefined(), throwCoded(r, codeInvalidArgType, "ctx.killTask(taskId): taskId 必须是正整数", nil)
+		}
+		found, killed := ex.killBackground(int(id))
+		if found {
+			st.audit("child_process", "killTask", fmt.Sprintf("#%d", id), 0, "killed", map[string]any{
+				"taskId": id, "killed": killed,
+			})
+		}
+		return st.rt.FromGo(map[string]any{"taskId": id, "found": found, "killed": killed})
+	})); err != nil {
+		return err
+	}
+	return nil
 }
 
-// fsRealPath 在 cap_fs.go 里实现（同一份工作区根与虚拟挂载点）；这里声明它需要的
-// 语义：绝对虚拟路径 → 工作区内的真实路径，越界或不存在按 ERR_ACCESS_DENIED。
-var _ = filepath.Separator
+// fsRealPath 在 cap_fs.go 里实现（同一份工作区根与虚拟挂载点）：绝对虚拟路径
+// 映射到工作区内的真实路径，越界或不存在按 ERR_ACCESS_DENIED。

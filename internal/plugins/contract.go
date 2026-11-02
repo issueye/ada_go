@@ -222,6 +222,8 @@ const (
 	CapNetSSE   Capability = "net.sse"
 	// CapExec 只映射到 execFile（无 shell），且仅 builtin/verified。
 	CapExec Capability = "exec"
+	// CapProcess 是长驻 stdin/stdout 子进程（无 shell），仅 builtin/verified。
+	CapProcess Capability = "process"
 	// CapState 是线程/工作区级受限 KV。
 	CapState Capability = "state"
 	// CapUIAsk 允许发起通用用户交互，不授予任何工具或文件权限；仅 builtin/verified。
@@ -243,7 +245,7 @@ const (
 // backendCapabilities 是后端可声明的能力白名单。
 var backendCapabilities = []Capability{
 	CapFSRead, CapFSWrite, CapNetFetch, CapNetSSE,
-	CapExec, CapState, CapUIAsk, CapSubagentInvoke, CapModelAdmin, CapPluginAdmin,
+	CapExec, CapProcess, CapState, CapUIAsk, CapSubagentInvoke, CapModelAdmin, CapPluginAdmin,
 }
 
 // frontendCapabilities 是前端可声明的能力白名单。
@@ -270,7 +272,7 @@ func capNames(cs []Capability) []string {
 // MinTrust 返回该能力要求的最低信任级别（6.2）。
 func (c Capability) MinTrust() Trust {
 	switch c {
-	case CapExec, CapNetSSE, CapUIAsk:
+	case CapExec, CapProcess, CapNetSSE, CapUIAsk:
 		return TrustVerified
 	case CapSubagentInvoke, CapModelAdmin, CapPluginAdmin:
 		return TrustBuiltin

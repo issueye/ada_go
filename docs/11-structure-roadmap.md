@@ -51,6 +51,7 @@ ada-go/
       provider-openai-chat/ provider-anthropic-messages/ provider-openai-responses/
       tools-fs/ tools-shell/ tools-git/ tools-plan/ tools-ask/ tools-skill/ tools-subagent/（v1.5）
       policy-default/
+      mcp-client/            MCP HTTP/stdio 适配（v2；装配期发现，普通工具）
       persona-coding/ provider-admin/ token-usage/ ui-hello-tsx/
     hello-tsx/ task-plan/ ask-user/   第三方示例（装时编译）
   products/
@@ -171,8 +172,8 @@ use (
 | 轮次不设步数上限 | 模型原地打转、成本失控、长尾轮次占住线程 | 连续重复调用检测（3 次回执、5 次结束）；provider 空闲/总时长与单工具超时；压缩控制上下文；可选墙钟/token 上限；全程可取消且事件实时可见 |
 | 插件生态 API 频繁变化 | 第三方插件失效 | `apiVersion` 主版本、弃用周期、契约测试、示例即文档 |
 | 同源插件 JS 的安全边界 | XSS/数据外传 | 默认禁用；仅 verified/builtin；CSP；后续 iframe 隔离 |
-| 真实 shell 的逃逸 | 工作区外执行 | 默认策略 `ask`（`policy-default`）、readonly 禁用、审计、UI 明示；不宣称强沙箱 |
-| 进程监督在 Windows 的边界 | 孤儿进程/端口占用 | 父进程心跳、Job Object、退出握手、`adag doctor` 修复 |
+| 任意可执行程序的逃逸 | 工作区外执行 | 默认策略 `ask`（`policy-default`）、readonly 禁用、审计、UI 明示；不宣称强沙箱 |
+| 进程监督在 Windows 的边界 | 孤儿进程/端口占用 | 父进程心跳、`taskkill /T`、退出握手、`adag doctor` 修复 |
 | 协议与实现漂移 | 前端/核心不兼容 | JSON 单源 + 生成 + `adag verify` + 版本握手 |
 | 基座边界漂移 | 基座逐渐内置业务、工具或 provider | `adag verify boundary` + 空基座启动测试 + 依赖方向检查 + 评审清单 |
 | a_da UI 上游漂移 | token/class/DOM 与 a_da 分叉，出现两套观感 | 固定上游 commit；tokens/CSS/DOM 基线进仓库；`adag verify ui` + golden 截图；差异先改文档 |
@@ -182,7 +183,7 @@ use (
 1. **产品名**：`ada-go` 是工作名；若要与 a_da 明确区分，发布前统一改名。
 2. **插件 Runtime 池**：默认 1 是否足够？高并发工具调用是否需要按插件声明 `pool`？建议 v1 固定 1，压测后再开放。
 3. **策略 allowlist 持久化**：`policy-default` v1 不提供“以后都允许”；是否在 v1.1 增加按工具/路径的持久化规则，由策略插件自行决定并承担风险，基座不引入。
-4. **MCP**：是否作为“外部工具插件”接入，还是保持只支持 TS 插件？建议 v2 决策时再引入适配器，避免 v1 扩大攻击面。
+4. **MCP**：v2 以普通后端插件接入；基座只补通用装配期上下文、可配置发现预算与 stdio 进程能力，不内置 MCP 协议。设计见 [18](18-mcp-plugin.md)；stdio 进程能力与动态密钥前缀仍是开放项。
 5. **多用户**：v1 单用户；若未来多用户，需要把工作区键、cookie、审计与密钥隔离重新设计。
 6. **前端插件缓存**：只读插槽是否按数据哈希缓存？需要先测命中率，避免缓存导致状态滞后。
 7. **JIT**：暂不默认启用；若 SSR 插件规模变大，再评估按平台开启。

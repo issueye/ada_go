@@ -14,7 +14,7 @@
 |---|---|---|---|
 | L1 引擎 | moejs | 语言、ESM/CJS、Promise/job、二进制、错误、内存与中断 | 无 IO；未安装的东西不存在 |
 | L2 原生库 | moejs `stdlib` + ada-go 宿主配置 | 以 `node:*` 名字暴露的 Go 实现：`fs`、`path`、`crypto`、`child_process` 等 | 每个模块、每个能力位单独安装；边界由 Root/ReadOnly、Allow、Env 等宿主配置决定 |
-| L3 宿主能力 | ada-go Core | `agent:host`、`ctx.fs`、`ctx.fetch`、`ctx.exec`、`ctx.state`、`ctx.secret`、`ctx.ui` | 插件 API 的出口；Scope、审计、超时、密钥在这里执行 |
+| L3 宿主能力 | ada-go Core | `agent:host`、`ctx.fs`、`ctx.fetch`、`ctx.exec`、`ctx.process`、`ctx.state`、`ctx.secret`、`ctx.ui` | 插件 API 的出口；Scope、审计、超时、密钥在这里执行 |
 
 `ctx.fs`/`ctx.fetch`/`ctx.exec` 是 ada-go 的显式宿主 API；`node:*` 是给现有 Node 代码与依赖的兼容形状。两者都由宿主安装，走同一套 Scope、能力位与审计策略，不是两套权限；新增模块不能绕开宿主配置直接访问系统。
 
@@ -109,7 +109,7 @@ cfg := stdlib.Config{
 安装后还要做三件事：
 
 1. **链接期检查**：静态 `import "node:fs"` 在没有 `fs.read`/`fs.write` 时直接让插件装配失败，错误码 `ERR_ACCESS_DENIED`；不要等到第一次调用才报错。
-2. **成员裁剪**：模块存在但部分成员无权限时，被裁剪的成员访问即抛 `ERR_ACCESS_DENIED`（用 Proxy 的 `get` 陷阱），避免 `typeof fs.writeFile === "undefined"` 这种可被误判为“版本差异”的静默行为。
+2. **成员裁剪**：模块存在但部分成员无权限时，被裁剪的成员**调用即抛** `ERR_ACCESS_DENIED`（成员仍在、调用失败，见 D-7 的上游偏差），避免 `typeof fs.writeFile === "undefined"` 这种可被误判为“版本差异”的静默行为。
 3. **审计**：所有受控调用记录模块、方法、作用域内路径/主机/命令、字节数与结果；参数中的密钥与 token 脱敏。
 
 ### 6.12.2 模块矩阵
@@ -200,10 +200,11 @@ Node 代码大量依赖 `err.code` 分支，因此错误形状是兼容契约的
 ## 6.13 安全与资源边界
 
 - **无环境权限**：L2 模块不向脚本暴露原生句柄；文件、网络、命令都在宿主构造的边界内（Root/ReadOnly、Fetch.Allow、Run.Allow、Env），并统一审计。插件不能通过 Node 模块拿到第二条访问路径。
-- **文件**：写操作与 `exec` 的 cwd 固定在工作区；`..` 与 symlink 按真实落点检查；插件目录只读；密钥目录永不授予。`ctx.fs` 的读成员（`readText`/`list`/`stat`/`exists`）不限制目标路径（agent 的 `read_file`/`list_files`/`search_files` 可读宿主任意文件；`node:fs` 模块仍按上游挂载点限制）。单次读写 16MB、目录 10k 条、路径 4096 字节；超限报错而不是截断。
+- **文件**：写操作与 `exec` 的 cwd 固定在工作区；`..` 与 symlink 按真实落点检查；`node:fs` 写成员固定工作区，`ctx.fs.writeText` 额外可写已安装插件目录（`~/.adago/plugins/<id>/`）。`ctx.fs` 的读成员（`readText`/`list`/`stat`/`exists`）**不限制目标路径**：agent 的 `read_file`/`list_files`/`search_files` 可读宿主任意文件，包括插件目录、配置目录与 `secrets.toml` 所在目录（2026-10-31 决策）。密钥值仍只经 `secret` broker 按名提供，不进提示词/日志/进程环境；密钥文件的可读性由操作系统权限与部署方式承担。单次读写 16MB、目录 10k 条、路径 4096 字节；超限报错而不是截断。
 - **环境变量**：`backend.env` 是白名单，只把列出的名字注入 `process.env`；值在装配期冻结。`ADAG_*` 与密钥名是保留名，清单声明也会被拒绝。密钥不走环境变量，走 `ctx.secret(name)`；`process.env` 中永远不出现密钥。
 - **网络**：默认没有任何网络模块。`ctx.fetch` 受 `net.fetch` 约束（协议必须 http(s)、重定向 ≤5 跳、响应体 ≤16MB、超时与取消贯穿；当前不限制目标主机，host 策略留待网络策略插件）；provider 的 `ctx.http.sse` 受 `net.sse` 约束，只有 builtin/verified 可用。没有 `listen`、没有原始 socket。
-- **命令**：`child_process` 只有 `execFile`，仅 `exec` 能力且仅 builtin/verified；`Run.Allow` 再按程序名与参数检查；`cwd` 使用虚拟根并由宿主映射到工作区，越界拒绝；环境变量白名单；120s 超时；4MB 输出；取消时杀整棵进程树。`exec`/`execSync` 因走 shell 而禁用。
+- **命令**：`child_process` 只有 `execFile`，仅 `exec` 能力且仅 builtin/verified；`Run.Allow` 再按程序名与参数检查；`cwd` 使用虚拟根并由宿主映射到工作区，越界拒绝；环境变量白名单；120s 超时；4MB 输出；取消时杀整棵进程树。`exec`/`execSync` 因走 shell 而禁用。宿主另提供 `ctx.execBackground`/`ctx.checkTask`/`ctx.killTask`：后台任务同样无 shell、受程序策略与 cwd scope 约束，每 Runtime 最多 8 个、生命周期上限 30 分钟，插件 Runtime 关闭时统一终止。
+- **长驻进程**：`ctx.process` 是独立的 `process` 能力（仅 builtin/verified），只用于 stdio 类长期协议；无 shell、程序策略、cwd scope、env 白名单、输出上限、审计与进程树终止；每 Runtime 最多 8 个、单进程生命周期 30 分钟，关闭/重载时统一终止。它不是 `exec` 的别名。
 - **随机与时间**：`crypto` 的随机源由宿主注入；时间、locale、时区由宿主固定，避免插件用时间侧信道或不可复现行为。
 - **内存**：插件 Runtime 64MB（脚本堆）。宿主为一次调用分配的 Go 侧缓冲另计，单次不超过 16MB；所有 Buffer 在调用结束释放。Runtime 超内存即重建，插件标记 `degraded`。
 - **CPU**：脚本调用 5s、工具 120s、钩子 200ms（最大 2s）、provider 15s/90s/30min；宿主长调用暂停脚本计时；取消不可被 `catch`。

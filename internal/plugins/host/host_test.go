@@ -108,6 +108,58 @@ export default function (agent) {
 	}
 }
 
+// TestFactoryAssemblyContext 钉入口工厂的第二个只读参数（MCP 装配期发现的前提）。
+func TestFactoryAssemblyContext(t *testing.T) {
+	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapFSRead, plugins.CapNetFetch)
+	caps.Secrets = []string{"mcp_token"}
+	bridge, err := NewHTTPBridge(HTTPBridgeConfig{})
+	if err != nil {
+		t.Fatalf("NewHTTPBridge: %v", err)
+	}
+	defer bridge.Close()
+
+	src := `
+export default function (agent, ctx) {
+  const seen = [
+    ctx.workspace,
+    ctx.settings && ctx.settings.marker,
+    typeof (ctx.fs && ctx.fs.readText),
+    typeof ctx.fetch,
+    typeof ctx.secret,
+  ].join("|");
+  agent.registerTool({
+    name: "ctx_probe",
+    description: "装配期上下文探针",
+    parameters: { type: "object" },
+    access: "read",
+    execute() { return { content: [{ type: "text", text: seen }] }; },
+  });
+}
+`
+	hc := Context{
+		Workspace: tempWorkspace(t),
+		Settings:  map[string]any{"marker": "yes"},
+		Secret:    func(string) (string, bool) { return "s3cr3t", true },
+		HTTP:      bridge,
+	}
+	p, err := Load(context.Background(), testScript(t, caps, src), caps, hc, Options{
+		Targets: Targets{Tools: &recordingTools{}},
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	defer func() { _ = p.Close(context.Background()) }()
+
+	res, err := p.CallTool(context.Background(), p.Contribution().Tools[0].Handler, json.RawMessage(`{}`), hc)
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	want := DefaultMount + "|yes|function|function|function"
+	if len(res.Content) != 1 || res.Content[0].Text != want {
+		t.Fatalf("装配期上下文 = %+v，期望 %q", res.Content, want)
+	}
+}
+
 // TestSecondRegistrationIsIgnoredAfterFreeze 钉「运行期再注册只记警告」（06 §6.5）。
 func TestSecondRegistrationIsIgnoredAfterFreeze(t *testing.T) {
 	caps := testCaps(t, plugins.TrustThirdParty)

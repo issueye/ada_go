@@ -11,7 +11,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/adag/ada-go/app"
 	"github.com/adag/ada-go/internal/domain"
 	"github.com/adag/ada-go/internal/plugins"
 	"github.com/adag/ada-go/internal/plugins/host"
@@ -154,7 +156,10 @@ func TestToolsShell(t *testing.T) {
 			continue
 		}
 		for _, td := range inst.Contribution().Tools {
-			if td.Name == "run_command" && !strings.Contains(td.Description, "宿主平台") {
+			if td.Name != "run_command" {
+				continue
+			}
+			if !strings.Contains(td.Description, "宿主平台") {
 				t.Fatalf("run_command 描述缺少宿主平台: %q", td.Description)
 			}
 			_, err := inst.CallTool(context.Background(), td.Handler,
@@ -178,6 +183,107 @@ func TestToolsShell(t *testing.T) {
 		if !strings.Contains(text, "--- hint ---") || !strings.Contains(text, "Windows 宿主没有 Unix find") {
 			t.Fatalf("Windows find 误用没有给出提示: %q", text)
 		}
+	}
+}
+
+// TestToolsShellBackground 钉后台任务三件套：启动、轮询、终止、自然结束。
+func TestToolsShellBackground(t *testing.T) {
+	ws := tempDir(t)
+	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
+	asm := assemble(t, testProduct(t, "tools-shell", "policy-default"), hc, nil)
+
+	for _, name := range []string{"run_command", "run_background", "check_task", "kill_task"} {
+		if _, ok := asm.Tools.Lookup(context.Background(), name); !ok {
+			t.Fatalf("缺少工具 %s，现有 %v", name, toolNames(asm))
+		}
+	}
+	// check_task 必须是 repeatable 的只读轮询；run_background 必须是 exec，走策略询问。
+	for _, inst := range asm.Plugins {
+		if inst.ID() != "tools-shell" {
+			continue
+		}
+		for _, td := range inst.Contribution().Tools {
+			switch td.Name {
+			case "check_task":
+				if !td.Repeatable || td.Access != string(domain.AccessRead) {
+					t.Fatalf("check_task = access %q repeatable %v，期望 read/true", td.Access, td.Repeatable)
+				}
+			case "run_background":
+				if td.Access != string(domain.AccessExec) {
+					t.Fatalf("run_background access = %q，期望 exec", td.Access)
+				}
+			}
+		}
+	}
+
+	// 长任务：启动后应处于 running，kill_task 后变 killed。
+	cmdName, argv := "cmd.exe", []string{"/c", "ping", "-n", "6", "127.0.0.1"}
+	if runtime.GOOS != "windows" {
+		cmdName, argv = "/bin/sh", []string{"-c", "sleep 5"}
+	}
+	text, res := callTool(t, asm, hc, "run_background", map[string]any{
+		"command": cmdName, "args": argv,
+	})
+	if !strings.Contains(text, "taskId=") {
+		t.Fatalf("run_background = %q", text)
+	}
+	rawID, ok := res.Details["taskId"].(float64)
+	if !ok || rawID <= 0 {
+		t.Fatalf("run_background details.taskId = %#v", res.Details["taskId"])
+	}
+	taskID := int(rawID)
+
+	time.Sleep(150 * time.Millisecond)
+	_, st := callTool(t, asm, hc, "check_task", map[string]any{"taskId": taskID})
+	if got := st.Details["status"]; got != "running" {
+		t.Fatalf("check_task status = %v，期望 running（details=%#v）", got, st.Details)
+	}
+
+	_, killed := callTool(t, asm, hc, "kill_task", map[string]any{"taskId": taskID})
+	if killed.Details["found"] != true || killed.Details["killed"] != true {
+		t.Fatalf("kill_task details = %#v", killed.Details)
+	}
+	waitTaskStatus(t, asm, hc, taskID, "killed")
+
+	// 快任务：自然结束，check_task 应给出 exited 与 stdout。
+	cmdName, argv = "cmd.exe", []string{"/c", "echo", "bg-done"}
+	if runtime.GOOS != "windows" {
+		cmdName, argv = "/bin/sh", []string{"-c", "echo bg-done"}
+	}
+	_, quick := callTool(t, asm, hc, "run_background", map[string]any{
+		"command": cmdName, "args": argv,
+	})
+	quickID, ok := quick.Details["taskId"].(float64)
+	if !ok || quickID <= 0 {
+		t.Fatalf("quick taskId = %#v", quick.Details["taskId"])
+	}
+	final := waitTaskStatus(t, asm, hc, int(quickID), "exited")
+	if code, _ := final.Details["code"].(float64); code != 0 {
+		t.Fatalf("quick task code = %v，details=%#v", final.Details["code"], final.Details)
+	}
+	if out, _ := final.Details["stdout"].(string); !strings.Contains(out, "bg-done") {
+		t.Fatalf("quick task stdout = %q", out)
+	}
+
+	// 未知 taskId 必须显式报错，而不是伪造一个空状态。
+	if _, err := callToolErr(t, asm, hc, "check_task", map[string]any{"taskId": 999999}); err == nil {
+		t.Fatal("check_task 对未知 taskId 应报错")
+	}
+}
+
+// waitTaskStatus 轮询 check_task 直到状态命中，超时失败。
+func waitTaskStatus(t *testing.T, asm *app.Assembly, hc host.Context, taskID int, want string) domain.Result {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		_, st := callTool(t, asm, hc, "check_task", map[string]any{"taskId": taskID})
+		if st.Details["status"] == want {
+			return st
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("任务 %d 状态未到 %q，最后为 %#v", taskID, want, st.Details)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

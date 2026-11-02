@@ -34,6 +34,7 @@ ada-go 是本地优先、单二进制、插件优先的 Agent 系统：Gateway �
 | [15-ui-components.md](15-ui-components.md) | 扩展 | ada-ui 组件层：Button/Input/Select/Dropdown/Tabs/Card/Slider/Progress/Table/Modal/Message/Toast 等 |
 | [16-markdown-dynamic-blocks.md](16-markdown-dynamic-blocks.md) | 扩展 | Markdown 动态块：`adag-ui` fence、插件数据 Schema/TSX 渲染器、VNode block profile 与安全限额 |
 | [17-markdown-dynamic-blocks-plan.md](17-markdown-dynamic-blocks-plan.md) | 开发计划 | Markdown 动态块 MVP 任务分解、依赖、验收门禁、工作量与风险 |
+| [18-mcp-plugin.md](18-mcp-plugin.md) | 扩展 | MCP 插件化接入：装配期上下文、HTTP/stdio、工具映射、安全边界与分阶段交付 |
 | [development-plan.md](development-plan.md) | 实施计划 | M0–M5 任务分解、依赖与关键路径、工作量、质量门禁、发布节奏、交付状态盘点 |
 | [performance.md](performance.md) | §12 附件 | 性能基线：实测数字、采样方法、排查阈值（M5） |
 | [release-m5.md](release-m5.md) | §10 附件 | M5 发布清单：三平台产物、升级/备份/恢复步骤、审计接线、已知限制 |

@@ -375,6 +375,10 @@ type Limits struct {
 	MaxExecOutputBytes int
 	// MaxExecTimeout 是 child_process 的超时上限（120s）：脚本给更大值按本值夹住。
 	MaxExecTimeout time.Duration
+	// MaxBackgroundTimeout 是后台命令的生命周期上限（30m）：超时杀整棵进程树。
+	MaxBackgroundTimeout time.Duration
+	// MaxBackgroundTasks 是每 Runtime 同时保留的后台任务数上限（8，含已结束未回收）。
+	MaxBackgroundTasks int
 	// MaxTimers 是每 Runtime 未完成定时器上限（256）。
 	MaxTimers int
 }
@@ -382,13 +386,15 @@ type Limits struct {
 // DefaultLimits 返回 09 §9.5 表格里的默认值。
 func DefaultLimits() Limits {
 	return Limits{
-		MaxFileBytes:       16 << 20,
-		MaxDirEntries:      10000,
-		MaxPathBytes:       4096,
-		MaxFetchBytes:      16 << 20,
-		MaxExecOutputBytes: 4 << 20,
-		MaxExecTimeout:     120 * time.Second,
-		MaxTimers:          256,
+		MaxFileBytes:         16 << 20,
+		MaxDirEntries:        10000,
+		MaxPathBytes:         4096,
+		MaxFetchBytes:        16 << 20,
+		MaxExecOutputBytes:   4 << 20,
+		MaxExecTimeout:       120 * time.Second,
+		MaxBackgroundTimeout: 30 * time.Minute,
+		MaxBackgroundTasks:   8,
+		MaxTimers:            256,
 	}
 }
 
@@ -429,6 +435,12 @@ func mergeLimits(have, fallback Limits) Limits {
 	}
 	if have.MaxExecTimeout <= 0 {
 		have.MaxExecTimeout = fallback.MaxExecTimeout
+	}
+	if have.MaxBackgroundTimeout <= 0 {
+		have.MaxBackgroundTimeout = fallback.MaxBackgroundTimeout
+	}
+	if have.MaxBackgroundTasks <= 0 {
+		have.MaxBackgroundTasks = fallback.MaxBackgroundTasks
 	}
 	if have.MaxTimers <= 0 {
 		have.MaxTimers = fallback.MaxTimers

@@ -216,6 +216,7 @@ type capsState struct {
 	hc      Context // 当前调用的宿主上下文（UpdateCallContext 换）
 	fs      *fsGuard
 	ex      *execState
+	proc    *processState
 	api     nodeCloser
 	process moejs.Value
 	agent   moejs.Value
@@ -261,11 +262,14 @@ func CloseCapabilities(rt *mojsRuntime) error {
 	st := v.(*capsState)
 	states.Delete(rt)
 	st.mu.Lock()
-	ex, api := st.ex, st.api
+	ex, proc, api := st.ex, st.proc, st.api
 	st.mu.Unlock()
 	var errs []error
 	if ex != nil {
 		errs = append(errs, ex.shutdown())
+	}
+	if proc != nil {
+		proc.shutdown()
 	}
 	if api != nil {
 		errs = append(errs, api.Close())
@@ -338,6 +342,7 @@ func installCapabilities(rt *mojsRuntime, loop *mojsLoop, caps *CapabilitySet, h
 	if err := st.installExec(); err != nil {
 		return err
 	}
+	st.proc = newProcessState()
 	// 3) 求值期兜底：import.meta 填 binding、未安装模块否决、node:fs 成员按能力包装。
 	if err := st.chainImportHooks(policy); err != nil {
 		return err

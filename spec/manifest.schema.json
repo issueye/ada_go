@@ -71,10 +71,10 @@
         "capabilities": {
           "type": "array",
           "items": {
-            "enum": ["fs.read", "fs.write", "net.fetch", "net.sse", "exec", "state", "ui.ask", "subagent.invoke", "model.admin", "plugin.admin"]
+            "enum": ["fs.read", "fs.write", "net.fetch", "net.sse", "exec", "process", "state", "ui.ask", "subagent.invoke", "model.admin", "plugin.admin"]
           },
           "uniqueItems": true,
-          "description": "可安装能力的白名单（§6.2）。没声明的能力不安装：node:fs 需 fs.read/fs.write、node:child_process 需 exec、ctx.fetch 需 net.fetch、ctx.http.sse 需 net.sse、ctx.state 需 state、ctx.ui 需 ui.ask；未安装的模块链接期报 ERR_ACCESS_DENIED，不是运行期空值（§6.12）。信任规则（违反即装配失败，见根 allOf 的 x-trust-rule）：ui.ask/net.sse/exec 仅 builtin|verified；subagent.invoke 仅 builtin。",
+          "description": "可安装能力的白名单（§6.2）。没声明的能力不安装：node:fs 需 fs.read/fs.write、node:child_process 需 exec、ctx.fetch 需 net.fetch、ctx.http.sse 需 net.sse、ctx.process 需 process、ctx.state 需 state、ctx.ui 需 ui.ask；未安装的模块链接期报 ERR_ACCESS_DENIED，不是运行期空值（§6.12）。信任规则（违反即装配失败，见根 allOf 的 x-trust-rule）：ui.ask/net.sse/exec/process 仅 builtin|verified；subagent.invoke 仅 builtin。",
           "x-consumer": "coreapp/stdlib: 装配期构造 stdlib.Config，按能力位安装 node:* 模块与 ctx 成员；engine: 受控调用审计与能力门禁"
         },
         "env": {
@@ -181,6 +181,13 @@
           "default": 1,
           "description": "Runtime 池大小，保留给后续版本（§6.4）：v1 固定每插件 1 个 Runtime、绑定专用 goroutine、channel 串行进入；声明 >1 时装配失败。未来开放多实例时每实例独立初始化，共享状态必须走 ctx.state。",
           "x-consumer": "coreapp: 装配期创建 Runtime 实例数（当前仅 1 合法，>1 拒绝装配）"
+        },
+        "initTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000,
+          "description": "入口工厂（含异步 Promise 结算）的装配预算，单位毫秒；缺省 5000，上限 60000。仅 builtin/verified 可声明超过 5000；用于 MCP 这类需要装配期网络发现的插件。超时按插件装配失败处理，不影响 Core 启动。",
+          "x-consumer": "host: host.Load 把该值写入 Budgets.Factory；plugins: 校验范围与 trust 约束；verify manifest: 字段消费者核对"
         }
       }
     },
@@ -493,7 +500,7 @@
       }
     },
     {
-      "x-trust-rule": "T3：third-party（含省略 trust 走默认值）禁止 exec、net.sse、ui.ask、subagent.invoke（§6.2/§6.9「默认禁止 exec」）与前端 frontend.script（§6.9「禁止前端脚本」、§7.5「需要 frontend.script 能力且信任级别为 builtin/verified」）。声明即装配失败。",
+      "x-trust-rule": "T3：third-party（含省略 trust 走默认值）禁止 exec、process、net.sse、ui.ask、subagent.invoke（§6.2/§6.9「默认禁止 exec」）与前端 frontend.script（§6.9「禁止前端脚本」、§7.5「需要 frontend.script 能力且信任级别为 builtin/verified」）。声明即装配失败。",
       "if": {
         "required": ["trust"],
         "properties": {
@@ -528,7 +535,7 @@
       }
     },
     {
-      "x-trust-rule": "T4：subagent.invoke / model.admin / plugin.admin 仅 builtin（分别供 tools-subagent、供应商管理页、全局插件安装桥，§6.2）。verified 声明这两个能力位即装配失败；exec/net.sse/ui.ask 对 builtin|verified 开放（见 T3 的反面）。",
+      "x-trust-rule": "T4：subagent.invoke / model.admin / plugin.admin 仅 builtin（分别供 tools-subagent、供应商管理页、全局插件安装桥，§6.2）。verified 声明这两个能力位即装配失败；exec/process/net.sse/ui.ask 对 builtin|verified 开放（见 T3 的反面）。",
       "if": {
         "required": ["trust"],
         "properties": {
@@ -546,7 +553,7 @@
             "properties": {
               "capabilities": {
                 "x-consumer": "stdlib: 信任规则 T4（非 builtin 不安装 subagent.invoke / model.admin，声明即装配失败）",
-                "items": { "enum": ["fs.read", "fs.write", "net.fetch", "net.sse", "exec", "state", "ui.ask"] }
+                "items": { "enum": ["fs.read", "fs.write", "net.fetch", "net.sse", "exec", "process", "state", "ui.ask"] }
               }
             }
           }

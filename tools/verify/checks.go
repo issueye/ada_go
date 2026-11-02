@@ -438,7 +438,7 @@ func checkCapabilities(root string) error {
 		return fmt.Errorf("能力位与 Schema 枚举不一致：Schema 缺 %v，Schema 多 %v", missing, extra)
 	}
 	// ui.ask / net.sse / exec 的信任约束必须真的可判定。
-	for _, c := range []plugins.Capability{plugins.CapUIAsk, plugins.CapNetSSE, plugins.CapExec} {
+	for _, c := range []plugins.Capability{plugins.CapUIAsk, plugins.CapNetSSE, plugins.CapExec, plugins.CapProcess} {
 		if c.TrustAllows(plugins.TrustThirdParty) {
 			return fmt.Errorf("能力 %q 竟然允许第三方，违反 6.2", c)
 		}

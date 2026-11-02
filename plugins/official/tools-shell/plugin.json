@@ -3,7 +3,7 @@
   "name": "命令工具",
   "version": "0.1.0",
   "apiVersion": 1,
-  "description": "在工作区边界内执行外部命令（无 shell、程序白名单、cwd 收敛、输出截断）",
+  "description": "在工作区边界内执行外部命令与后台任务（无 shell、程序白名单、cwd 收敛、输出截断）",
   "trust": "builtin",
   "backend": {
     "entry": "index.ts",

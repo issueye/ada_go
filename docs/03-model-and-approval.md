@@ -155,7 +155,7 @@ schema/scope 校验 → tool.beforeCall 钩子链（按 priority）
 **取消**：
 
 - 一个 `context.Context` 从 RPC 贯穿到 provider、工具、插件脚本、命令进程树，以及等待中的交互请求。
-- `run_command` 在 Unix 用进程组、Windows 用 Job Object 杀整棵树；不是“等命令自己结束”。
+- `run_command`/`run_background` 在 Unix 用进程组、Windows 用 `taskkill /T` 杀整棵树；后台任务在插件 Runtime 关闭时同样终止；不是“等命令自己结束”。
 - moejs 由宿主从任意 goroutine 调用 `Runtime.Interrupt` 中止脚本；中断不可被脚本捕获。
 - 取消后仍必须发一次 `TurnFinished(cancelled)`，并保留已经产生的部分消息；未决交互标记 `cancelled`。
 

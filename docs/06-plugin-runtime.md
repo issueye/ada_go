@@ -67,7 +67,7 @@ if _, err := ret.Await(ctx); err != nil { // Await 对非 thenable 原样返回�
 
 **Node 兼容模块**：默认只安装纯计算模块；`fs`、`fetch`、`child_process` 与 `process.env` 按能力安装，`http`/`net`/`dns`/`worker_threads`/`vm` 不安装。模块矩阵、成员裁剪、错误码与 Node 20 双跑语料见 [6.12](12-node-compat.md#612-node-兼容原生库)。
 
-**为什么不在脚本里给 `node:fs` 全量**：`stdlib.FS` 已经按根目录与只读限制，但“能读整个工作区”和“能读整个磁盘”是不同风险。ada-go 的 `node:fs` 默认只授予工作区根；`ctx.fs` 的读成员（`readText`/`list`/`stat`/`exists`）不受此限制（agent 的 `read_file`/`list_files`/`search_files` 用它）。读插件目录、配置目录、密钥目录需要单独能力位，且 `secret` 只按名字取值。只读时写成员不是返回 `undefined`，而是访问即抛 `ERR_ACCESS_DENIED`，避免能力差异被误判成版本差异。
+**为什么不在脚本里给 `node:fs` 全量**：`node:fs` 默认只授予工作区根，写成员受 Scope 约束；但 `ctx.fs` 的读成员（`readText`/`list`/`stat`/`exists`）按 2026-10-31 决策**不限制目标路径**，agent 的 `read_file`/`list_files`/`search_files` 因此可以读宿主绝对路径，包括插件目录、配置目录与 `secrets.toml` 所在目录。密钥的**值**仍只经 `secret` broker 按名提供，不进入提示词、日志或进程环境；磁盘上的密钥文件是否可读由操作系统权限与部署方式决定，不能依赖“路径不可见”。只读时写成员不是返回 `undefined`，而是调用即抛 `ERR_ACCESS_DENIED`（D-7 的上游偏差），避免能力差异被误判成版本差异。
 
 **前端渲染运行时**：Gateway 侧独立一套 Runtime 池，只执行 TSX 产物，不安装任何 stdlib；`WithoutCodeGeneration()` 关闭 `eval/new Function`（TSX 在构建期已转换，不需要运行时代码生成）。每个页面/插槽渲染 100ms/300ms 超时，超时重建。
 
@@ -162,11 +162,12 @@ agent.on("tool.beforeCall", async (event, ctx) => {
 |---|---|---|---|
 | Provider | `provider-openai-chat`、`provider-anthropic-messages`、`provider-openai-responses` | TS | `registerProvider`；桥接成 `ModelClient` 适配器 |
 | 工具 | `tools-fs` | TS | `read_file` / `write_file` / `edit_file` / `list_files` / `search_files` |
-| 工具 | `tools-shell` | TS | 命令执行与后台任务；进程树管理由宿主能力完成 |
-| 工具 | `tools-git` | TS | 单工具 `git`，按 action 分派 |
+| 工具 | `tools-shell` | TS | 命令执行与后台任务（`run_command`/`run_background`/`check_task`/`kill_task`）；进程树管理由宿主能力完成 |
+| 工具 | `tools-git` | TS | 三个只读工具：`git_status`/`git_diff`/`git_log`；写操作走 `run_command` |
 | 工具 + UI | `tools-plan` | TS + TSX | `update_plan`/`read_plan` 工具，以及 `chat.corner` 的 Todo 卡片（同一插件的前端段，取自己的 `plan` 只读动作） |
 | 工具 + UI | `tools-ask` | TS + TSX | `ask_user` 工具，以及 `thread.tray` 的提问卡片（同一插件的前端段，数据来自线程交互投影） |
 | 工具 | `tools-skill` | TS | `skill_search`（正文由模型用 `read_file` 读取） |
+| 外部工具 | `mcp-client` | TS | 装配期发现 MCP server 的 `tools/list`，把每个工具注册成普通工具；HTTP/stdio transport，v2 见 [18](18-mcp-plugin.md) |
 | 工具 | `tools-subagent` | TS | `invoke_subagent`（v1.5） |
 | 策略 | `policy-default` | TS | `tool.beforeCall` + `ctx.ui`；readonly/ask/auto/full；角色 `tool-policy` |
 | 提示词 | `persona-coding` | TS | `registerPrompt`：编码助手人格与领域规则 |

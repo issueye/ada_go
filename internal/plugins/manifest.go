@@ -34,6 +34,9 @@ type Backend struct {
 	Hooks        map[string]HookAction `json:"hooks"`
 	// Pool 保留给后续版本：v1 固定每插件 1 个 Runtime，>1 时装配失败（6.4）。
 	Pool int `json:"pool,omitempty"`
+	// InitTimeoutMS 是入口工厂（含异步 Promise 结算）的装配预算，单位毫秒。
+	// 缺省 0 表示用宿主 DefaultCallTimeout；上限 60000，超过 5000 仅 builtin/verified 可声明。
+	InitTimeoutMS int `json:"initTimeoutMs,omitempty"`
 }
 
 // Frontend 是前端清单段（7.5）。
@@ -174,6 +177,12 @@ func (m *Manifest) validateBackend() error {
 	if b.Pool > 1 {
 		// 6.4：v1 固定每插件 1 个 Runtime；pool 保留给后续版本，声明即装配失败。
 		return fmt.Errorf("plugins: %s 请求 backend.pool=%d，v1 固定每插件 1 个 Runtime", m.ID, b.Pool)
+	}
+	if b.InitTimeoutMS < 0 || b.InitTimeoutMS > 60000 {
+		return fmt.Errorf("plugins: %s 的 backend.initTimeoutMs 必须在 0..60000 毫秒内", m.ID)
+	}
+	if b.InitTimeoutMS > 5000 && m.Trust == TrustThirdParty {
+		return fmt.Errorf("plugins: %s 的 backend.initTimeoutMs=%d 超过 5000，仅 builtin/verified 可声明", m.ID, b.InitTimeoutMS)
 	}
 	if !validEntryPath(b.Entry) {
 		return fmt.Errorf("plugins: %s 的 backend.entry %q 必须是插件目录内的相对路径（禁止绝对路径、反斜杠、盘符与 . / .. 段）", m.ID, b.Entry)

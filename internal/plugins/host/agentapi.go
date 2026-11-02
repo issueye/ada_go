@@ -46,13 +46,18 @@ func (p *Instance) runFactory(st *Staging) error {
 		settled    bool
 		factoryErr error
 	)
-	call := &call{kind: callInit}
+	factoryCall := p.cur
+	if factoryCall == nil {
+		// 运行时重建（rebuild）没有外层 call：造一个带预算的 init call，
+		// 保证装配期 ctx.fetch 的 hostAsync 不会碰到 nil budget。
+		factoryCall = newCall(callInit, 0, "entry", nil, p.baseContext(context.Background()), context.Background())
+	}
 	err := p.loop.Run(func(rt *mojsRuntime) error {
 		factory, ok := rt.Export("default")
 		if !ok || !engine.IsCallable(factory) {
 			return fmt.Errorf("host: 插件 %s 的入口没有 `export default function (agent) {}`（05 §6.3）", p.id)
 		}
-		res, cerr := rt.CallFunction(factory, moejs.Undefined(), api)
+		res, cerr := rt.CallFunction(factory, moejs.Undefined(), api, p.assemblyContextObject(rt, factoryCall))
 		if cerr != nil {
 			return cerr
 		}
@@ -76,7 +81,7 @@ func (p *Instance) runFactory(st *Staging) error {
 		})
 		onErr := rt.Function("__ada_factory_err", 1, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
 			settled = true
-			factoryErr = p.valueError(moejs.Arg(args, 0), call)
+			factoryErr = p.valueError(moejs.Arg(args, 0), factoryCall)
 			return moejs.Undefined(), nil
 		})
 		_, cerr = rt.CallFunction(then, res, onOk, onErr)
@@ -506,21 +511,7 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 
 	// secret：只在清单声明过名字时存在（06 §6.2：密钥不得写进 env）。
 	if len(p.caps.Secrets) > 0 && hc.Secret != nil {
-		declared := map[string]bool{}
-		for _, name := range p.caps.Secrets {
-			declared[name] = true
-		}
-		set("secret", rt.Function("secret", 1, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
-			name := moejs.Arg(args, 0).String()
-			if !declared[name] {
-				return moejs.Undefined(), nil
-			}
-			v, ok := hc.Secret(name)
-			if !ok {
-				return moejs.Undefined(), nil
-			}
-			return moejs.String(v), nil
-		}))
+		set("secret", p.secretFunction(rt, hc))
 	}
 
 	// ui：capability: ui.ask，只授予 builtin/verified（05 §6.3）。
@@ -695,9 +686,7 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 
 	// fetch：capability: net.fetch。出网只经宿主的 HTTP 桥（03 §5.5）。
 	if p.caps.Has(plugins.CapNetFetch) && hc.HTTP != nil {
-		set("fetch", rt.Function("fetch", 2, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
-			return p.fetchPromise(rt, c, hc, args)
-		}))
+		set("fetch", p.fetchFunction(rt, c, hc))
 	}
 
 	// 能力安装方补成员（ctx.fs / ctx.exec）：caps.go 的 fs guard 与 exec 适配器
@@ -709,6 +698,72 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 		if err := InstallContextMembers(rt, put, c.kind, p.caps, hc); err != nil {
 			p.warn(fmt.Sprintf("插件 %s 的 ctx 能力成员安装失败: %v", p.id, err))
 		}
+	}
+	return engine.ObjectValue(obj)
+}
+
+// assemblyContextObject 是入口工厂的第二个参数：装配期只读上下文。
+//
+// 与 ToolContext 的区别是刻意收窄：没有 state/ui/exec/process，也没有 fs.writeText。
+// 它只解决「插件在 registerTool 之前需要读配置、访问网络、取密钥」这一类装配期需求
+// （MCP 的 tools/list 是第一个消费者），不能把装配期变成有副作用的运行期。
+func (p *Instance) assemblyContextObject(rt *mojsRuntime, c *call) moejs.Value {
+	r := rt.Realm()
+	obj := r.NewObject()
+	if c == nil {
+		c = &call{kind: callInit}
+	}
+	hc := p.baseContext(c.signal)
+	set := func(key string, v moejs.Value) {
+		_ = obj.SetProp(r, r.KeyFromGoString(key), v)
+	}
+	setStr := func(key, val string) {
+		if val == "" {
+			return
+		}
+		set(key, moejs.String(val))
+	}
+	setStr("workspace", p.caps.Mount)
+	setStr("threadId", hc.ThreadID)
+	set("signal", p.signalObject(rt, c, hc))
+	if len(hc.Settings) > 0 {
+		if v, err := rt.FromGo(hc.Settings); err == nil {
+			set("settings", v)
+		}
+	}
+	set("log", rt.Function("log", 3, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+		if hc.Log == nil {
+			return moejs.Undefined(), nil
+		}
+		level := strings.ToLower(strings.TrimSpace(moejs.Arg(args, 0).String()))
+		switch level {
+		case "debug", "info", "warn", "error":
+		default:
+			level = "info"
+		}
+		fields := p.goFields(rt, moejs.Arg(args, 2))
+		hc.Log(level, moejs.Arg(args, 1).String(), fields)
+		return moejs.Undefined(), nil
+	}))
+
+	// fs 只安装读成员：装配期读 .adag/mcp.json、~/.adago/mcp.json，不允许写。
+	if st, ok := stateFor(rt); ok && p.caps.Has(plugins.CapFSRead) && st.fs != nil {
+		set("fs", ctxFSReadObject(st, hc))
+	}
+	// fetch 与运行时 ctx.fetch 同一条宿主 HTTP 桥；没有 net.fetch 就不存在。
+	if p.caps.Has(plugins.CapNetFetch) && hc.HTTP != nil {
+		set("fetch", p.fetchFunction(rt, c, hc))
+	}
+	// secret 只暴露清单声明过的名字。
+	if len(p.caps.Secrets) > 0 && hc.Secret != nil {
+		set("secret", p.secretFunction(rt, hc))
+	}
+	// process：stdio 类插件在装配期启动长驻 server。
+	if st, ok := stateFor(rt); ok && p.caps.Has(plugins.CapProcess) {
+		_ = addProcessContextMember(st, hc, func(name string, v moejs.Value) error {
+			set(name, v)
+			return nil
+		})
 	}
 	return engine.ObjectValue(obj)
 }
@@ -845,6 +900,32 @@ func (p *Instance) uiObject(rt *mojsRuntime, c *call, hc Context) moejs.Value {
 			return moejs.Undefined(), nil
 		}))
 	return engine.ObjectValue(ui)
+}
+
+// secretFunction 构造脚本侧 ctx.secret(name)：只有清单声明过的名字才返回值。
+func (p *Instance) secretFunction(rt *mojsRuntime, hc Context) moejs.Value {
+	declared := map[string]bool{}
+	for _, name := range p.caps.Secrets {
+		declared[name] = true
+	}
+	return rt.Function("secret", 1, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+		name := moejs.Arg(args, 0).String()
+		if !declared[name] {
+			return moejs.Undefined(), nil
+		}
+		v, ok := hc.Secret(name)
+		if !ok {
+			return moejs.Undefined(), nil
+		}
+		return moejs.String(v), nil
+	})
+}
+
+// fetchFunction 构造脚本侧 ctx.fetch(url, init)：只在有 net.fetch 且宿主有 HTTP 桥时安装。
+func (p *Instance) fetchFunction(rt *mojsRuntime, c *call, hc Context) moejs.Value {
+	return rt.Function("fetch", 2, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+		return p.fetchPromise(rt, c, hc, args)
+	})
 }
 
 // fetchPromise 把 ctx.fetch(url, init) 转成宿主的 HTTP 桥调用。

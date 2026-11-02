@@ -338,6 +338,9 @@ func Load(ctx context.Context, script Script, caps *CapabilitySet, hc Context, o
 		return nil, fmt.Errorf("host: 宿主上下文的 pluginId %q 与清单 id %q 不一致", hc.PluginID, script.pluginID())
 	}
 	budgets := opts.Budgets.withDefaults()
+	if script.Manifest != nil && script.Manifest.Backend != nil && script.Manifest.Backend.InitTimeoutMS > 0 {
+		budgets.Factory = time.Duration(script.Manifest.Backend.InitTimeoutMS) * time.Millisecond
+	}
 	p := &Instance{
 		id: script.pluginID(), script: script, caps: caps, hc: hc, opts: opts, budgets: budgets,
 		requests:  make(chan *call, budgets.Queue),

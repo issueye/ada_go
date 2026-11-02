@@ -414,6 +414,9 @@ func installContextMembers(rt *mojsRuntime, put func(name string, v moejs.Value)
 	if err := addExecContextMember(st, hc, put); err != nil {
 		keep(err)
 	}
+	if err := addProcessContextMember(st, hc, put); err != nil {
+		keep(err)
+	}
 	return firstErr
 }
 
@@ -426,6 +429,24 @@ func ctxFSObject(st *capsState, hc Context) moejs.Value {
 	base := ctxFSMember(st, hc)
 	obj := r.NewObject()
 	for _, op := range []string{"readText", "writeText", "list", "stat", "exists"} {
+		name := op
+		fn := st.rt.Function("fs."+name, 2, func(rr *engine.Realm, this engine.Value, args []engine.Value) (moejs.Value, error) {
+			all := make([]engine.Value, 0, len(args)+1)
+			all = append(all, moejs.String(name))
+			all = append(all, args...)
+			return base(rr, this, all)
+		})
+		_ = obj.SetProp(r, r.KeyFromGoString(name), fn)
+	}
+	return engine.ObjectValue(obj)
+}
+
+// ctxFSReadObject 是装配期只读 ctx.fs：只含 readText/list/stat/exists。
+func ctxFSReadObject(st *capsState, hc Context) moejs.Value {
+	r := st.rt.Realm()
+	base := ctxFSMember(st, hc)
+	obj := r.NewObject()
+	for _, op := range []string{"readText", "list", "stat", "exists"} {
 		name := op
 		fn := st.rt.Function("fs."+name, 2, func(rr *engine.Realm, this engine.Value, args []engine.Value) (moejs.Value, error) {
 			all := make([]engine.Value, 0, len(args)+1)

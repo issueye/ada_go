@@ -117,8 +117,8 @@ type Receipt struct {
 | 能力包 | 工具 | 说明 |
 |---|---|---|
 | `tools-fs` | `read_file`、`write_file`、`edit_file`、`list_files`、`search_files` | 读可访问宿主任意路径；写仍受 Scope；编辑要求唯一匹配 |
-| `tools-shell` | `run_command`、`run_background`、`check_task`、`kill_task` | 超时杀进程树；后台任务有 id；`check_task` 标记 `repeatable`；默认由 `policy-default` 询问 |
-| `tools-git` | `git` | 单工具 + `action`：status/diff/log/show/blame/add/commit/checkout/restore/reset/stash/branch/merge/push/pull；写动作交给策略插件 |
+| `tools-shell` | `run_command`、`run_background`、`check_task`、`kill_task` | 超时/取消杀进程树；后台任务有 id，轮次结束后继续跑；`check_task` 标记 `repeatable`；`run_command`/`run_background` 由 `policy-default` 询问，`check_task`/`kill_task` 只读控制 |
+| `tools-git` | `git_status`、`git_diff`、`git_log` | 三个只读视图，不提供 commit/checkout/push 等写 action；写操作走 `run_command` 并由策略插件裁决 |
 | `tools-plan` | `update_plan`、`read_plan`、`reflect_plan` | 维护线程级任务计划；`reflect_plan` 基于当前计划做反思，引导遵循规划路径、避免走偏或越做越多；同一插件的前端段把它渲染成 Todo 卡片 |
 | `tools-ask` | `ask_user` | 向用户提问；前端段在交互托盘里渲染提问卡片 |
 | `tools-skill` | `skill_search` | 按关键词检索技能；正文由模型按提示里的 path 用 `read_file` 读取 |

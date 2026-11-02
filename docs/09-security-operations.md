@@ -15,18 +15,18 @@
 | Node 兼容层越权 | 插件 import `node:fs`/`node:child_process` | 模块按能力安装；无 `http`/`net`/`dns`；`fs` 根限制与成员裁剪；`child_process` 无 shell；`.node` 拒绝；链接期 `ERR_ACCESS_DENIED` |
 | 插件资源耗尽 | 死循环/大对象 | 内存上限、context 中断、调用深度、超时重建、连续失败禁用 |
 | 恶意工作区内容提示注入 | 文件/命令输出 → 模型 | 工具输出标注为不可信、`tool.beforeCall` 策略钩子、危险工具默认询问、模型无法自授权限 |
-| 模型生成危险命令 | 工具调用 | `Access` 效果声明、策略插件、路径 scope、审计；真实 shell 的风险明确写进 UI |
+| 模型生成危险命令 | 工具调用 | `Access` 效果声明、策略插件、路径 scope、审计；启动任意可执行程序的风险明确写进 UI |
 | 本地其他用户访问 | 非回环监听 | token + TLS/显式明文、配对码、限速、工作区白名单 |
 | 供应链 | 插件安装 | 签名、哈希、大小/类型校验、无运行时 npm、拒绝 `.node`/N-API、信任分级 |
-| 崩溃/孤儿进程 | Core/命令树 | 进程监督、父进程心跳、进程组/Job Object 强杀 |
+| 崩溃/孤儿进程 | Core/命令树 | 进程监督、父进程心跳、Unix 进程组 / Windows `taskkill /T` 强杀 |
 
 ### 9.2 路径与命令
 
 - 所有路径参数先做字符串检查，再 `EvalSymlinks` 解析真实落点；工作区内指向外面的 symlink/junction 按真实落点拒绝。
 - `Scope` 是唯一入口；插件不能自己拼接路径绕过（宿主 API 内部也走 Scope）。
-- 读工具可读工作区；读插件目录/配置目录需要额外能力位；密钥目录永不授予。
-- `run_command` 是真实 shell，能逃出路径沙箱——这是明确保留的口子。默认策略为 `ask`（由 `policy-default` 提供，不是基座常数）；`readonly` 下禁用；未启用任何 `tool-policy` 插件时，基座直接拒绝写/执行工具；UI 在执行前显示完整命令与 cwd；环境变量默认清空，只注入白名单。
-- 命令超时/取消杀整棵进程树（Unix 进程组、Windows Job Object）；后台任务同样登记。
+- 读工具可读宿主任意路径（含插件目录、配置目录与密钥文件所在目录，2026-10-31 决策）；写与 `exec` cwd 仍受 Scope。密钥值只经 `secret` broker 按名提供，日志与 UI 脱敏；密钥文件是否可读由操作系统权限与部署方式决定，不能依赖“路径不可见”。
+- `run_command` 以 `execFile` 执行显式程序与参数，不经过 shell；但它仍能启动任意可执行文件，因此不是路径沙箱的替代。默认策略为 `ask`（由 `policy-default` 提供，不是基座常数）；`readonly` 下禁用；未启用任何 `tool-policy` 插件时，基座直接拒绝写/执行工具；UI 在执行前显示完整命令与 cwd；环境变量默认清空，只注入白名单。
+- 命令超时/取消杀整棵进程树（Unix 进程组、Windows `taskkill /T`）；后台任务同样登记，插件 Runtime 关闭时统一终止。
 - 插件经 Node 兼容层执行命令时只有 `execFile`、不经过 shell；`fs` 的写与 `exec` cwd 固定工作区，`ctx.fs` 读成员不限制目标路径（agent 的 `read_file`/`list_files`/`search_files` 可读宿主任意文件，见 [6.12](12-node-compat.md)）；`process.env` 只有清单白名单；`.node` 与 `node:http`/`net`/`dns` 不可用。
 - 写工具执行前纳入检查点；回滚结果如实列出恢复/删除/跳过/失效。
 
@@ -46,7 +46,7 @@
 - UI-only 的 notice、details、诊断永不出现在模型消息里（INV-10）。
 - 模型不能通过工具调用授予自己新能力；工具目录在轮次开始时冻结。
 - 策略插件展示原始参数（必要时脱敏），不展示模型对参数的“解释”；请求正文由基座原样转交，不加工。
-- 密钥只存在于 Core 的内存与配置；不进入提示词、工具结果、日志、前端 props，也不进入 `process.env` 或插件启动的子进程环境。供应商管理页写入的 API Key 落在机器级 `~/.adago/providers.json`（0600；显式 `--data-dir` 时落在该数据目录），前端只看到 `hasApiKey` 与尾号。
+- 密钥只存在于 Core 的内存与配置（环境变量或 `~/.adago/secrets.toml`）；**值**不进入提示词、工具结果、日志、前端 props，也不进入 `process.env` 或插件启动的子进程环境。但 `ctx.fs` 读成员可读宿主路径，磁盘文件的保护只能依赖操作系统权限与部署边界（见 9.2），不能假设 agent 看不见。供应商管理页写入的 API Key 落在机器级 `~/.adago/providers.json`（0600；显式 `--data-dir` 时落在该数据目录），前端只看到 `hasApiKey` 与尾号。
 
 ### 9.5 资源限制
 
@@ -58,6 +58,8 @@
 | Core | 每线程 1 个运行轮、无步数/工具调用次数上限、上下文水位、循环检测；墙钟与 token 上限默认关闭 |
 | Gateway | 请求体 1MB（插件动作 64KB）、单线程 64 个 SSE、每工作区 8 个 Core |
 | 命令 | 默认 120s，输出截断 50KB/2000 行，可配置上限 |
+| 后台命令 | 每 Runtime 最多 8 个、生命周期 30m、单路输出 4MB；`check_task` 单路返回尾部 64KB |
+| 长驻进程 | `process` 能力，仅 builtin/verified；每 Runtime 最多 8 个、生命周期 30m、单路缓冲 4MB；关闭/重载杀整棵进程树 |
 | 数据库 | WAL、`busy_timeout` 5s、单写者协程 + 工作区锁、CLI 只读连接、在线备份 |
 
 进程级兜底：`GOMEMLIMIT`（可按工作区配置）、Core 内存看门狗（超过 2GB 记录并拒绝新插件调用）、Gateway 连接数上限。
