@@ -72,7 +72,7 @@ plugins/my-plugin/
 
 - 后端部分（可选）：`backend.entry` 默认 `index.ts`，所有后端插件（官方与第三方）都必须提供入口。官方插件在构建期预编译成 `dist/`，桌面打包随 `resources/plugins/official` 发布，运行时与第三方一样由 moejs 宿主执行；第三方在安装或加载时编译。`backend.capabilities` 是可安装能力的白名单；`backend.hooks` 声明使用哪些点位与最高动作等级（未声明的点位在调用时拒绝）。不声明 `backend` 即纯前端插件。
 - `backend.initTimeoutMs` 是入口工厂（含异步 Promise 结算）的装配预算，缺省 5000、上限 60000 毫秒；超过 5000 仅 builtin/verified 可声明。它只放宽装配期发现预算（如 MCP 的 `tools/list`），超时仍按插件装配失败处理，不影响 Core 启动。
-- `backend.env` 是环境变量白名单：只有列出的名字出现在 `process.env`，值在装配期冻结；宿主环境里不存在的名字不注入（`undefined`），不伪造空串。密钥不得写入环境变量，仍走 `secret`。
+- `backend.env` 是环境变量白名单：只有列出的名字出现在 `process.env`，值在装配期从宿主环境取值并冻结（组合根可显式注入覆盖，例如测试）；宿主环境里不存在的名字不注入（`undefined`），不伪造空串。密钥不得写入环境变量，仍走 `secret`。
 - `backend.capabilities` 里的 `process` 只授予 builtin/verified，安装 `ctx.process`（长驻 stdin/stdout、可 kill 进程树）；它不是 `node:child_process` 的替代，也不装 `spawn`/`fork`。每 Runtime 最多 8 个、单进程生命周期 30m。
 - Node 内置模块同样由能力位安装：`node:fs` 需要 `fs.read`/`fs.write`，`node:child_process` 需要 `exec`，`node:os` 始终受限安装；`node:path`/`node:crypto`/`node:buffer` 等纯计算模块无需能力。未安装的模块在链接期报 `ERR_ACCESS_DENIED`；`node:http(s)`/`node:net`/`node:dns`/`node:worker_threads`/`node:vm` 不安装。完整矩阵见 [6.12](12-node-compat.md#612-node-兼容原生库)。
 - `backend.roles` 声明插件角色；v1 只定义 `tool-policy`（审批策略）。它只用于产品装配校验与“无策略时失败关闭”，基座不解释具体规则。
@@ -109,7 +109,7 @@ interface AssemblyContext {
   log(level: "debug" | "info" | "warn" | "error", msg: string, fields?: object): void;
   signal: AbortSignal;
   fs?: { readText(path: string, opts?: { maxBytes?: number }): Promise<string> }; // fs.read
-  fetch?: (url: string, init?: object) => Promise<{ status: number; headers: object; text: string }>; // net.fetch
+  fetch?: (url: string, init?: { method?: string; headers?: object; body?: string; timeoutMs?: number }) => Promise<{ status: number; headers: object; text: string }>; // net.fetch；timeoutMs 会真正取消请求
   process?: { start(...): Promise<ProcessHandle> }; // process，仅 builtin/verified；形状同 ToolContext.process
   secret?(name: string): string | null; // 清单 backend.secrets
 }
@@ -164,7 +164,7 @@ interface ToolContext {
     stat(path: string): Promise<{ size: number; mtime: string; dir: boolean }>;
     exists(path: string): Promise<boolean>;
   };
-  fetch?: (url: string, init?: object) => Promise<{ status: number; headers: object; text(): Promise<string> }>; // capability: net.fetch
+  fetch?: (url: string, init?: { method?: string; headers?: object; body?: string; timeoutMs?: number }) => Promise<{ status: number; headers: object; text(): Promise<string> }>; // capability: net.fetch；timeoutMs 会真正取消请求
   exec?: (cmd: string, args: string[], opts?: { cwd?: string; timeoutMs?: number }) => Promise<{ code: number; stdout: string; stderr: string }>; // capability: exec，仅 verified/builtin
   process?: {                        // capability: process，仅 verified/builtin
     start(cmd: string, args: string[], opts?: { cwd?: string; env?: string[]; timeoutMs?: number }): Promise<{
@@ -257,3 +257,4 @@ interface HookContext {
 ---
 
 **相邻文档**：[← 会话、存储与子智能体](04-sessions-storage.md) · [索引](design.md) · [插件运行时与治理 →](06-plugin-runtime.md)
+

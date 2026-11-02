@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/MoeForge/moejs"
 	"github.com/MoeForge/moejs/engine"
@@ -146,10 +147,15 @@ func (p *managedProcess) read(ctx context.Context, maxBytes int, timeout time.Du
 		exited, code, errText := p.exited, p.exitCode, p.errText
 		truncated := p.truncated
 		if len(out) > maxBytes {
-			out = tailUTF8(out, maxBytes)
-			truncated = true
+			// 返回头部片段，余量留在缓冲里等下一次 read。
+			// 读流协议（stdio MCP 的按行 JSON-RPC）不能丢中间字节：tail 截断会把
+			// 一条 >maxBytes 的 JSON 行弄成非法 JSON，插件只能等到超时。
+			head, rest := splitHeadUTF8(out, maxBytes)
+			out = head
+			_, _ = p.stdout.WriteString(rest)
 		}
 		if len(errOut) > maxBytes {
+			// stderr 只用于排障，保留尾部更有信息量。
 			errOut = tailUTF8(errOut, maxBytes)
 			truncated = true
 		}
@@ -185,6 +191,19 @@ func (p *managedProcess) read(ctx context.Context, maxBytes int, timeout time.Du
 			return nil, ctx.Err()
 		}
 	}
+}
+
+// splitHeadUTF8 把 s 在 max 字节处切成两段，切点退到一个完整 UTF-8 字符边界。
+// 与 tailUTF8 相反：这里不丢数据，余量由调用方留到下一次 read。
+func splitHeadUTF8(s string, max int) (string, string) {
+	if max <= 0 || len(s) <= max {
+		return s, ""
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut], s[cut:]
 }
 
 // kill 关闭 stdin 并杀整棵进程树。

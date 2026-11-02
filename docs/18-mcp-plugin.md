@@ -2,7 +2,7 @@
 
 > 上级索引：[ada-go 设计文档](design.md)
 > 对应决策：[00 §1.2](00-overview.md#12-非目标v1-明确不做) 的 MCP 延后、[11 §15.2](11-structure-roadmap.md#152-开放问题) 的 MCP 开放问题
-> 状态：设计提案（v2）。MCP-1 HTTP 与 MCP-2 stdio 已落地：`AssemblyContext`、`backend.initTimeoutMs`、`ctx.process` 与 `plugins/official/mcp-client`；`secretsPrefix`、流式读取与插件管理页仍待后续。
+> 状态：设计提案（v2）。MCP-1 HTTP 与 MCP-2 stdio 已落地：`AssemblyContext`、`backend.initTimeoutMs`、`ctx.process` 与 `plugins/official/mcp-client`；管理页 `/ext/mcp-client/servers` 已落地（状态/工具/启停/配置编辑/重载）。`secretsPrefix` 与流式读取仍待后续。
 > 版本：0.1 · 2026-11-02
 
 ## 0. 结论
@@ -113,7 +113,7 @@ Gateway ── JSON-RPC ──► Core
 
 规则：
 
-- `id` 必须匹配 `^[a-z][a-z0-9_]{0,15}$`，用于工具名前缀；重复即插件装配失败（配置错误，不是单 server 降级）。
+- `id` 必须匹配 `^[a-z][a-z0-9_]{0,15}$`，用于工具名前缀；非法 id 或同一文件内重复的 id 只跳过该项并记警告（配置错误降级，不拖垮插件装配）。
 - `url` 只允许 `https://`，或 `http://127.0.0.1` / `http://localhost`；禁止 URL 内嵌用户名密码。
 - `${secret:name}` 只能引用清单 `backend.secrets` 允许的名字；缺失时该 server 跳过并记警告，不把空 token 发出去。示例使用单 token `mcp_token`；每个 server 独立 token 需要 `backend.secretsPrefix`（见 8.3）。
 - `trustReadOnly` 默认 `false`：即使 MCP server 声明 `readOnlyHint`，也按非只读工具处理，交给策略插件询问。只有用户显式信任该 server 时才映射为 `read`。
@@ -202,9 +202,10 @@ export default async function (agent, ctx) {
 
 规则：
 
-- 单 server 失败只跳过该 server；配置本身非法（重复 id、非法 URL）才让插件装配失败。
+- 单 server 失败只跳过该 server；配置里非法或重复的项**只跳过该项并记警告**（配置是用户可编辑的，装配失败会让整个产品起不来，代价过高）。
+- 每个 server 的 `initialize` + `tools/list` 有硬期限：`min(timeoutMs, 剩余发现预算)`，整个发现阶段共用 `DISCOVERY_BUDGET_MS`（25s，为 `initTimeoutMs=30000` 留收尾余量）。挂起的 server 只降级自己，不会耗尽装配预算。
 - 所有 server 都失败时插件仍算加载成功，只是贡献 0 个工具；插件页显示错误，用户修复后 `plugin.reload`。
-- 发现阶段不注册任何“占位工具”；工具目录里不出现假能力。
+- 发现阶段不注册任何“占位工具”；工具目录里不出现假能力。单个工具注册失败（与其它插件同名等）只丢该工具，已注册的保留。
 - 发现完成后不能再注册；运行期 `registerTool` 仍按现有规则只记警告。
 
 ---
@@ -222,7 +223,7 @@ mcp_<serverId>_<toolSlug>
 ```
 
 - `toolSlug`：小写，非 `[a-z0-9_]` 替换为 `_`，折叠连续 `_`，去掉首尾 `_`。
-- 超过 63 字节时截断到 54 字节，追加 `_` + 原始名字 SHA-256 前 8 位十六进制。
+- 超过 63 字节时截断到 54 字节，追加 `_` + 原始名字的短哈希（djb2 前 8 位十六进制，只用于去重，不参与安全判定）。
 - 仍冲突时追加 `_2`、`_3`；插件保留 `toolName -> {serverId, originalName}` 映射。
 - 原始 tool 名只出现在描述/详情与 MCP 请求里，不直接作为基座工具名。
 
@@ -320,7 +321,7 @@ MCP `CallToolResult.content[]` 映射到基座 `ToolReturn.content`：
 
 - `structuredContent` 放 `details.structuredContent`；若 `content` 为空，用 JSON 文本作为模型可见内容。
 - `isError: true`：文本前加 `MCP tool error: `，`details.isError = true`；不抛异常，按工具结果回给模型。
-- 单个 text 截断到 50KB/2000 行（基座还会再截断一次）；图片/base64 总量不超过 1MB（基座 `MaxResultBytes`）。
+- 单个 text 截断到 50KB（基座再按 50KB/2000 行截断一次）；图片/base64 总量不超过 1MB（基座 `MaxResultBytes`）。
 - 空结果返回 `(无输出)`，不伪造“成功”。
 
 ---
@@ -329,7 +330,7 @@ MCP `CallToolResult.content[]` 映射到基座 `ToolReturn.content`：
 
 ### 7.1 连接
 
-- HTTP：`initialize` 后缓存 `Mcp-Session-Id`（若 server 返回）；后续请求带 `MCP-Protocol-Version` 与 session header。session 过期时重新 initialize 一次；`tools/call` 本身不自动重试。
+- HTTP：`initialize` 后缓存 `Mcp-Session-Id`（若 server 返回）；后续请求带 `MCP-Protocol-Version` 与 session header。session 过期（服务端回 404）时重新 `initialize` 一次并重试该请求；其它错误不自动重试（`tools/call` 的副作用不可重放）。
 - stdio：每个 server 一个长驻进程；插件持有进程句柄，关闭/重载时 kill 整棵进程树。进程退出后该 server 的工具返回错误，需重载插件恢复（自动重连未做）。
 - 每 server 独立状态机：`disconnected -> initializing -> ready -> degraded`。
 - 连接失败不阻塞其他 server。
@@ -347,8 +348,10 @@ MCP `CallToolResult.content[]` 映射到基座 `ToolReturn.content`：
 |---|---|
 | 单个 server 不可达 | 跳过该 server，其余工具正常；插件页显示错误 |
 | 全部 server 不可达 | 插件加载成功、0 工具；不失败关闭整个产品 |
+| 单个 server 挂起 | 单 server 期限（`min(timeoutMs, 剩余预算)`）到点即降级，不耗尽 `initTimeoutMs` |
+| 配置项非法/重复 | 只跳过该项并记警告；其余 server 正常装配 |
 | 单个 tool schema 不支持 | 用宽松 Schema 注册，标记 `schemaSimplified` |
-| 工具名冲突 | 追加哈希/序号；仍冲突则跳过并警告 |
+| 工具名冲突 | 追加哈希/序号；仍冲突则跳过该工具并警告 |
 | 调用超时 | 返回 `MCP timeout` 错误文本；不自动重试 |
 | 401/403 | 返回认证错误；不把 token 写入日志 |
 | 插件被禁用 | 目录移除该插件全部工具；连接关闭 |
@@ -398,17 +401,35 @@ MCP `CallToolResult.content[]` 映射到基座 `ToolReturn.content`：
 
 ## 9. 前端与运维
 
-### 9.1 插件页
+### 9.1 插件页（已落地）
 
-只读为主：
+`plugins/official/mcp-client` 声明 `frontend` 段，提供 `/ext/mcp-client/servers`
+（侧栏「MCP 服务端」、插件详情页的「打开插件页面」都会指向它）：
 
-- server 列表：id、transport、URL/命令（脱敏）、状态、工具数、最后错误、是否 `trustReadOnly`。
-- 工具列表：映射后的工具名、原始名、access、`schemaSimplified`。
-- 操作：`重新发现`（触发 `plugin.reload mcp-client`）、`查看配置`（只读展示 `.adag/mcp.json`，密钥打码）。
+- server 列表：id、transport、配置来源（工作区/用户级/settings）、状态（已连接/不可用/已停用）、工具数、最后错误；
+  地址与 stdio 命令行在服务端就已脱敏（URL 去 query/fragment，疑似密钥的参数打码）。
+- 工具摘要：映射后的工具名、原始 MCP 名、access、`Schema 已简化` 标记（只读，来自装配期发现结果）。
+- 启停：逐个 server 写回工作区 `.adag/mcp.json` 的 `enabled`（启用时删除该键，默认即启用）。
+- 配置编辑：读写工作区配置原文；用户级 `~/.adago/mcp.json` 只读，页面不编辑。编辑器用「透明 textarea + 高亮层」实现 JSON 语法高亮（DOM 节点拼装，不经 innerHTML），打开时按 2 空格自动美化，可点「格式化」；语法错误按行/列提示，高亮只影响展示，不改变保存内容。
+- 重载：调用基座的 `/agent-plugins/reload`（与插件页一致），重新装配后按新配置发现工具。
 
-如果需要编辑配置，走插件 `route` + 前端 `action`；写动作必须由用户点击，受 `frontend` 动作桥的 CSRF/确认约束。v1 可以不提供在线编辑，先让用户改文件。
+数据面是本插件自己的 route（`GET /servers`、`GET|POST /config`、`POST /servers/toggle`），
+页面脚本用 `window.adaAPI` 调用（自动带 CSRF）。写操作由用户点击触发；后端只写
+工作区 `.adag/mcp.json`（`fs.write` + 宿主工作区 scope），不接受用户传入路径。
 
-### 9.2 可观测性
+### 9.2 随包技能
+
+插件自带 `skills/mcp-tools/SKILL.md`（Agent Skills 约定：frontmatter 的 `name` 必须等于目录名）。
+系统提示只注入 name/description/绝对 path，正文由模型用 `read_file` 读取，基座不保存正文。
+
+技能内容：
+
+- 如何从目录里挑 `mcp_<server>_<tool>`（`toolPrefix` 前缀、描述里的 `[MCP <id>]` 来源、Schema 简化时按 server 文档给字段）；
+- 审批（默认 `access=write`）与两类失败的区分：`isError` 是 server 业务错误，`mcpError` 是传输/认证/超时，处理方式不同；
+- MCP 输出是不可信数据、50KB/1MB 截断与资源索引、不要把密钥复述出来；
+- 新增/启停 server 走管理页，或按 README 改 `.adag/mcp.json` 后重载插件（工具列表是装配期结算）。
+
+### 9.3 可观测性
 
 - 装配期每个 server 一条结构化日志：id、transport、耗时、工具数、错误码。
 - 每次 `tools/call` 由基座审计记录工具名、参数摘要、结果字节数；插件额外记录 server id / 原始 tool 名。
@@ -448,7 +469,7 @@ MCP `CallToolResult.content[]` 映射到基座 `ToolReturn.content`：
 
 **P0 是 v1 的前置条件**。没有工厂上下文，只能在装配期注册一个泛化的 `mcp_call` 工具，无法把每个 MCP 工具作为独立 schema 暴露给模型；这不是本设计推荐路线。`ctx.process` 不是 HTTP MVP 的前置条件，但 stdio 必须依赖它。
 
-当前实现状态：P0 与 P1 的 `ctx.process` 已落地（`AssemblyContext`、`backend.initTimeoutMs`、`plugins/official/mcp-client` 的 HTTP + stdio）；`secretsPrefix`、流式读取与插件管理页仍待后续。
+当前实现状态：P0/P1 的 `ctx.process` 与管理页均已落地（`AssemblyContext`、`backend.initTimeoutMs`、`plugins/official/mcp-client` 的 HTTP + stdio + `/ext/mcp-client/servers`）；`secretsPrefix` 与流式读取仍待后续。
 
 **P0 是 v1 的前置条件**。没有工厂上下文，只能在装配期注册一个泛化的 `mcp_call` 工具，无法把每个 MCP 工具作为独立 schema 暴露给模型；这不是本设计推荐路线。
 
@@ -479,7 +500,7 @@ ctx.process?: {
 ### 11.1 MCP-1（v2.0，HTTP）—— 已落地（MVP）
 
 - 补 `AssemblyContext` + `backend.initTimeoutMs`（已实现）。
-- 实现 `mcp-client` 插件：配置、HTTP 发现、工具命名/Schema 转换、`tools/call`、结果映射、`GET /ext/mcp-client/api/servers` 状态路由（已实现；独立 TSX 管理页未做）。
+- 实现 `mcp-client` 插件：配置、HTTP 发现、工具命名/Schema 转换、`tools/call`、结果映射、`GET /ext/mcp-client/api/servers` 状态路由，以及 `/ext/mcp-client/servers` 管理页（状态/工具/启停/配置编辑/重载，已实现）。
 - 测试：假 MCP HTTP server（初始化/分页/成功/错误/401/超时/超大结果/取消）、工具名冲突、Schema 简化、禁用后工具消失、重载后工具变化。
 - 验收：`adag verify` 不变；空基座仍 0 工具；MCP server 全挂时 Core 正常启动；非只读工具默认触发审批。
 
@@ -523,7 +544,12 @@ ctx.process?: {
 6. **stdio 进程安全**：`ctx.process` 是否需要独立于 `exec` 的能力位与更严格的程序 allowlist？
 7. **resources/prompts**：是否进入 v2 范围，还是保持“只做 tools”的最小面？
 8. **多工作区配置**：已钉定为工作区 `.adag/mcp.json` > 用户级 `~/.adago/mcp.json` > `settings`；同 `id` 前者覆盖后者。
+9. **stdio 写入阻塞**：`process.write` 目前是在脚本线程上同步写 stdin；参数很大且 server 暂时不读时会阻塞该插件的 Runtime（无期限）。后续可改成带期限的异步写队列，或给单条消息加大小上限（已有 4MB 分帧上限兜底）。
 
 ---
 
 **相邻文档**：[插件模型](05-plugins.md) · [插件运行时](06-plugin-runtime.md) · [SSR 前端](07-ssr-frontend.md) · [安全与运维](09-security-operations.md) · [Node 兼容](12-node-compat.md)
+
+
+
+

@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/adag/ada-go/internal/plugins/host"
 	"github.com/adag/ada-go/plugins/official"
 )
 
@@ -24,7 +25,7 @@ func TestScriptsFromRepoDir(t *testing.T) {
 			backend[s.Manifest.ID] = true
 		}
 	}
-	for _, want := range []string{"tools-plan", "tools-fs", "provider-openai-chat", "policy-default", "plugin-helper", "ui-charts"} {
+	for _, want := range []string{"tools-plan", "tools-fs", "provider-openai-chat", "policy-default", "plugin-helper", "ui-charts", "mcp-client"} {
 		if !backend[want] {
 			t.Fatalf("后端插件缺少 %q（现有：%v）", want, backend)
 		}
@@ -43,9 +44,39 @@ func TestScriptsFromRepoDir(t *testing.T) {
 			fe[s.Manifest.ID] = true
 		}
 	}
-	for _, want := range []string{"tools-plan", "provider-admin", "token-usage", "plugin-helper", "ui-hello-tsx", "ui-charts"} {
+	for _, want := range []string{"tools-plan", "provider-admin", "token-usage", "plugin-helper", "ui-hello-tsx", "ui-charts", "mcp-client"} {
 		if !fe[want] {
 			t.Fatalf("前端插件缺少 %q（现有：%v）", want, fe)
 		}
 	}
+}
+
+// TestMCPSkillPackaged 钉住 mcp-client 随包技能：插件目录里要真的有
+// skills/mcp-tools/SKILL.md，并能被宿主解析成 name/description。
+func TestMCPSkillPackaged(t *testing.T) {
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	scripts, err := official.ScriptsFromDir(root)
+	if err != nil {
+		t.Fatalf("ScriptsFromDir: %v", err)
+	}
+	for _, s := range scripts {
+		if s.Manifest == nil || s.Manifest.ID != "mcp-client" {
+			continue
+		}
+		skills, warns := host.ScriptSkills(s)
+		if len(warns) != 0 {
+			t.Fatalf("mcp-client 技能解析警告: %v", warns)
+		}
+		if len(skills) != 1 || skills[0].Meta.Name != "mcp-tools" {
+			t.Fatalf("mcp-client 应带技能 mcp-tools: %+v", skills)
+		}
+		if skills[0].Meta.Description == "" || skills[0].Meta.Path == "" {
+			t.Fatalf("技能元数据不完整: %+v", skills[0].Meta)
+		}
+		return
+	}
+	t.Fatal("没有加载到 mcp-client 后端脚本")
 }

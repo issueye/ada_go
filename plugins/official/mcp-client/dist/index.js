@@ -1,14 +1,15 @@
-// generated from index.ts (sha256:7a3d4bc292ec111f) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:f92c279e036dfde2) by plugins/official/build.mjs — do not edit
 // mcp-client —— 官方插件：把 MCP server 的工具接入为普通工具（v2 设计见 docs/18）。
 //
 // 范围：
-//   - HTTP / Streamable HTTP transport；
+//   - HTTP / Streamable HTTP 与 stdio transport；
 //   - 装配期 initialize + tools/list，把每个 MCP 工具 registerTool；
 //   - 运行期 tools/call，结果映射成普通 ToolReturn；
 //   - 配置来自工作区 .adag/mcp.json（或 plugins.settings.mcp-client.servers）；
-//   - stdio transport 在 phase 2 接入，本文件遇到时跳过并记警告。
+//   - 管理页数据面：GET /servers、GET|POST /config、POST /servers/toggle
+//     （页面 /ext/mcp-client/servers，配置写在宿主 fs 的工作区 scope 内）。
 //
-// 基座不知道 MCP：这里用的都是普通插件能力（fs.read / net.fetch / registerTool）。
+// 基座不知道 MCP：这里用的都是普通插件能力（fs.read/fs.write / net.fetch / process）。
 
                          
               
@@ -32,6 +33,9 @@
                    
         
                                                                           
+                                            
+                                                    
+                                                                       
     
            
                 
@@ -68,11 +72,13 @@
 
                     
                                    
-                                                                                                          
+                                                                                                               
  
 
                         
              
+                                       
+                  
                     
                      
                
@@ -107,14 +113,52 @@ const DEFAULT_TIMEOUT_MS = 60000;
 const MAX_TIMEOUT_MS = 600000;
 const MAX_TEXT_BYTES = 50 * 1024;
 const MAX_IMAGE_BYTES = 1024 * 1024;
+// details.resources 只是排障用的索引，不跟着 16MB 响应无限增长。
+const MAX_RESOURCE_DETAILS = 64;
+// 装配期发现的总预算：backend.initTimeoutMs=30000，留 5s 给宿主收尾。
+// 单个 server 挂起不能把整个插件（乃至整个产品装配）拖到超时。
+const DISCOVERY_BUDGET_MS = 25000;
+const MIN_DISCOVERY_MS = 1000;
+// stdio 分帧的单条消息上限：超过即按协议错误处理，避免 unlimited 缓冲。
+const MAX_FRAME_BYTES = 4 * 1024 * 1024;
+// 每次 proc.read 的增量上限（与宿主 MaxProcessReadBytes 对齐）。
+// 宿主在缓冲超过 maxBytes 时返回的是头部片段并把余量留到下一次 read，
+// 这里必须给足余量，否则 >50KB 的 JSON-RPC 消息会被截断成非法 JSON（Unix 管道 64KB 时必现）。
+const PROCESS_READ_BYTES = 1024 * 1024;
+// 管理页只编辑工作区配置；用户级配置按设计只读。
+const CONFIG_DISPLAY_PATH = ".adag/mcp.json";
+const USER_CONFIG_DISPLAY_PATH = "~/.adago/mcp.json";
+const MAX_CONFIG_BYTES = 256 * 1024;
+
+// ServerToolStatus 是管理页展示用的工具摘要（不含完整 Schema）。
+                            
+               
+                  
+                 
+                            
+ 
 
                         
              
                     
+                                                     
               
-                               
-                
                  
+                   
+                                            
+                
+                            
+                         
+                     
+                 
+ 
+
+// RouteRequest 是 agent.route 收到的请求形状（与 05 §6.3 一致）。
+                        
+                 
+               
+                                 
+             
  
 
 function fail(code        , message        )        {
@@ -127,6 +171,11 @@ function errorText(e     )         {
   if (!e) return "unknown error";
   if (typeof e.message === "string") return e.message;
   return String(e);
+}
+
+// isSessionExpired 识别 Streamable HTTP 的「会话已失效」（服务端用 404 表示）。
+function isSessionExpired(e     )          {
+  return !!e && e.code === "MCP_HTTP" && /HTTP 404\b/.test(String(e.message || ""));
 }
 
 function shortHash(s        )         {
@@ -165,9 +214,25 @@ function byteLength(s        )         {
 
 function capText(s        , limit        )         {
   if (byteLength(s) <= limit) return s;
-  let out = s.slice(0, limit);
-  while (out.length > 0 && byteLength(out) > limit) out = out.slice(0, -1);
-  return out + "\n…（MCP 输出已截断）";
+  // 单遍扫描：按字节预算切，不反复重算整个字符串（旧实现是 O(n²)，
+  // 一段 >50KB 的中文结果就能把插件线程阻塞 2s 以上）。
+  let bytes = 0;
+  let i = 0;
+  while (i < s.length) {
+    const c = s.charCodeAt(i);
+    let n = 3;
+    let step = 1;
+    if (c < 0x80) n = 1;
+    else if (c < 0x800) n = 2;
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+      n = 4;
+      step = 2;
+    }
+    if (bytes + n > limit) break;
+    bytes += n;
+    i += step;
+  }
+  return s.slice(0, i) + "\n…（MCP 输出已截断）";
 }
 
 function safeString(v         )         {
@@ -177,7 +242,12 @@ function safeString(v         )         {
 function headerValue(headers        , name        )         {
   const want = name.toLowerCase();
   for (const [k, v] of Object.entries(headers ?? {})) {
-    if (k.toLowerCase() === want) return String(v);
+    if (k.toLowerCase() !== want) continue;
+    // 宿主 HTTP 桥的 headers 是 http.Header 形状（值是数组）：显式取第一个，
+    // 不依赖数组 String() 的逗号拼接。
+    if (Array.isArray(v)) return v.length > 0 ? String(v[0]) : "";
+    if (v === null || v === undefined) return "";
+    return String(v);
   }
   return "";
 }
@@ -188,42 +258,137 @@ function safeUrl(raw         )         {
   return s;
 }
 
-// —— 配置 ——
+// —— 装配期期限与展示脱敏 ——
 
-function parseServers(raw     )                 {
-  const out                 = [];
-  if (!raw || !Array.isArray(raw)) return out;
-  for (const item of raw) {
-    if (!item || typeof item !== "object") continue;
-    const s = item                ;
-    if (typeof s.id !== "string" || !/^[a-z][a-z0-9_]{0,15}$/.test(s.id)) {
-      fail("ERR_INVALID_ARG_VALUE", `mcp.server.id 非法：${String(s.id)}`);
-    }
-    out.push(s);
-  }
-  return out;
+// withTimeout 给装配期发现加硬期限：宿主 fetch 的兜底是分钟级，
+// 单个 server 挂起会把 backend.initTimeoutMs(30s) 耗尽，让整个插件装配失败。
+function withTimeout   (p            , ms        , label        )             {
+  const limit = Math.max(MIN_DISCOVERY_MS, Math.trunc(ms) || DEFAULT_TIMEOUT_MS);
+  return new Promise   ((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      const e = new Error(`${label} 超时（${limit}ms）`);
+      (e       ).code = "MCP_TIMEOUT";
+      reject(e);
+    }, limit);
+    p.then(
+      (v) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
 }
 
-function settingsServers(ctx                 )                 {
-  const settings = ctx.settings ?? {};
-  return parseServers((settings       ).servers);
+const SENSITIVE_ARG = /(token|secret|password|passwd|api[-_]?key|authorization|bearer)/i;
+
+// maskArgv 把 stdio 命令行里疑似密钥的参数值打码（状态页/日志用）。
+function maskArgv(parts          )         {
+  const out           = [];
+  let maskNext = false;
+  for (const part of parts) {
+    if (maskNext) {
+      out.push("***");
+      maskNext = false;
+      continue;
+    }
+    const eq = part.indexOf("=");
+    if (eq > 0 && SENSITIVE_ARG.test(part.slice(0, eq))) {
+      out.push(`${part.slice(0, eq)}=***`);
+      continue;
+    }
+    out.push(part);
+    if (SENSITIVE_ARG.test(part)) maskNext = true;
+  }
+  return out.filter((s) => s !== "").join(" ").trim();
+}
+
+// displayEndpoint 只给插件页/状态路由看：URL 去掉 query/fragment（token 可能在里面），
+// stdio 显示打码后的命令行。
+function displayEndpoint(server              )         {
+  if (String(server.transport || "http").toLowerCase() === "stdio") {
+    const argv = [safeString(server.command), ...(Array.isArray(server.args) ? server.args.map((a) => String(a)) : [])];
+    return maskArgv(argv);
+  }
+  const url = safeString(server.url);
+  const cut = url.search(/[?#]/);
+  return cut < 0 ? url : `${url.slice(0, cut)}…`;
+}
+
+// —— 配置 ——
+
+                            
+                          
+                     
+ 
+
+function parseServers(raw     )                   {
+  const servers                 = [];
+  const warnings           = [];
+  if (raw === undefined || raw === null) return { servers, warnings };
+  if (!Array.isArray(raw)) {
+    warnings.push("servers 必须是数组，按空配置处理");
+    return { servers, warnings };
+  }
+  const seen = new Set        ();
+  for (const item of raw) {
+    if (!item || typeof item !== "object") {
+      warnings.push("servers 里有非对象配置项，已忽略");
+      continue;
+    }
+    const s = item                ;
+    if (typeof s.id !== "string" || !/^[a-z][a-z0-9_]{0,15}$/.test(s.id)) {
+      // 配置错误只降级这一项：不让 .adag/mcp.json 的笔误把整个产品装配拖垮。
+      warnings.push(`server.id 非法：${String(s.id)}（需匹配 ^[a-z][a-z0-9_]{0,15}$），该项已跳过`);
+      continue;
+    }
+    if (seen.has(s.id)) {
+      warnings.push(`server.id 重复：${s.id}，保留第一条`);
+      continue;
+    }
+    seen.add(s.id);
+    servers.push(s);
+  }
+  return { servers, warnings };
 }
 
 async function readConfigFile(ctx                 , path        , label        )                          {
   if (!ctx.fs || !path) return [];
+  let raw        ;
   try {
-    const raw = await ctx.fs.readText(path, { maxBytes: 256 * 1024 });
-    const parsed = JSON.parse(raw);
-    if (parsed?.version !== undefined && parsed.version !== CONFIG_VERSION) {
-      ctx.log("warn", "mcp: 未知配置版本，按 v1 解析", { source: label, version: parsed.version });
-    }
-    return parseServers(parsed?.servers);
+    if (typeof ctx.fs.exists === "function" && !(await ctx.fs.exists(path))) return [];
+    raw = await ctx.fs.readText(path, { maxBytes: 256 * 1024 });
   } catch (e     ) {
     // 文件不存在是正常空配置；其它错误也要可见，但不能让插件起不来。
     if (e && (e.code === "ENOENT" || String(e.message || "").includes("no such file"))) return [];
     ctx.log("warn", `mcp: 读取 ${label} 失败，按空配置处理`, { err: errorText(e) });
     return [];
   }
+  let parsed     ;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e     ) {
+    ctx.log("warn", `mcp: ${label} 不是合法 JSON，按空配置处理`, { err: errorText(e) });
+    return [];
+  }
+  if (parsed?.version !== undefined && parsed.version !== CONFIG_VERSION) {
+    ctx.log("warn", "mcp: 未知配置版本，按 v1 解析", { source: label, version: parsed.version });
+  }
+  const result = parseServers(parsed?.servers);
+  for (const w of result.warnings) ctx.log("warn", `mcp: ${label}: ${w}`);
+  // 记录来源层：合并后工作区覆盖用户级，管理页要显示每条配置最终来自哪里。
+  for (const s of result.servers) s.source = label;
+  return result.servers;
 }
 
 function mergeServers(base                , override                )                 {
@@ -234,12 +399,109 @@ function mergeServers(base                , override                )           
 }
 
 async function loadServers(ctx                 )                          {
-  const fromSettings = settingsServers(ctx);
+  const settings = parseServers((ctx.settings ?? {})["servers"]);
+  for (const w of settings.warnings) ctx.log("warn", `mcp: plugins.settings.mcp-client: ${w}`);
+  for (const s of settings.servers) s.source = "plugins.settings";
   const base = String(ctx.workspace || "").replace(/\/+$/, "");
   const global = await readConfigFile(ctx, globalConfigPath(), "~/.adago/mcp.json");
   const local = await readConfigFile(ctx, `${base}/.adag/mcp.json`, ".adag/mcp.json");
   // 优先级：工作区 > 用户级 > settings 默认值；同 id 后者被前者覆盖。
-  return mergeServers(mergeServers(fromSettings, global), local);
+  return mergeServers(mergeServers(settings.servers, global), local);
+}
+
+// workspaceConfigPath 是管理页读写的工作区配置（虚拟挂载路径，宿主按工作区根解析）。
+function workspaceConfigPath(ctx                 )         {
+  const base = String(ctx.workspace || "").replace(/\/+$/, "");
+  return `${base}/.adag/mcp.json`;
+}
+
+// readWorkspaceConfig 读工作区配置原文；文件不存在返回空文本而不是错误。
+async function readWorkspaceConfig(ctx                 )                                             {
+  if (!ctx.fs) return { exists: false, text: "" };
+  try {
+    if (typeof ctx.fs.exists === "function" && !(await ctx.fs.exists(workspaceConfigPath(ctx)))) {
+      return { exists: false, text: "" };
+    }
+    const text = await ctx.fs.readText(workspaceConfigPath(ctx), { maxBytes: MAX_CONFIG_BYTES });
+    return { exists: true, text };
+  } catch (e     ) {
+    if (e && (e.code === "ENOENT" || String(e.message || "").includes("no such file"))) {
+      return { exists: false, text: "" };
+    }
+    throw e;
+  }
+}
+
+// validateConfigText 只做形状校验：非法 JSON / 顶层不是对象直接报错；
+// 非法 server 项按 parseServers 的规则跳过并作为 warning 返回（与装配期一致）。
+function validateConfigText(text        )                                          {
+  if (!String(text || "").trim()) throw fail("ERR_INVALID_ARG_VALUE", "配置内容不能为空");
+  if (byteLength(text) > MAX_CONFIG_BYTES) {
+    throw fail("ERR_INVALID_ARG_VALUE", `配置超过 ${MAX_CONFIG_BYTES} 字节上限`);
+  }
+  let parsed     ;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e     ) {
+    throw fail("ERR_INVALID_ARG_VALUE", "配置不是合法 JSON：" + errorText(e));
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw fail("ERR_INVALID_ARG_VALUE", "配置顶层必须是 JSON 对象");
+  }
+  const result = parseServers(parsed.servers);
+  return { servers: result.servers.length, warnings: result.warnings };
+}
+
+async function saveWorkspaceConfig(ctx                 , text        )           
+                 
+                  
+                     
+                
+   {
+  const check = validateConfigText(text);
+  if (!ctx.fs || typeof ctx.fs.writeText !== "function") {
+    throw fail("ERR_ACCESS_DENIED", "mcp: 修改配置需要 fs.write 能力（清单未声明？）");
+  }
+  const res = await ctx.fs.writeText(workspaceConfigPath(ctx), text);
+  const bytes = res && typeof res.bytes === "number" ? res.bytes : byteLength(text);
+  ctx.log("info", "mcp: 工作区配置已更新", { path: CONFIG_DISPLAY_PATH, bytes, servers: check.servers });
+  return { saved: true, servers: check.servers, warnings: check.warnings, bytes };
+}
+
+// toggleServerConfig 改单个 server 的 enabled 并写回工作区配置：
+// 保留其它字段与顺序，enable 时删掉 enabled 键（默认即启用）。
+async function toggleServerConfig(ctx                 , id        , enabled         )           
+                 
+                  
+                     
+                
+             
+                   
+   {
+  const current = await readWorkspaceConfig(ctx);
+  if (!current.exists) {
+    throw fail("ERR_INVALID_ARG_VALUE", `工作区还没有 ${CONFIG_DISPLAY_PATH}；请先点「编辑配置」创建`);
+  }
+  let parsed     ;
+  try {
+    parsed = JSON.parse(current.text);
+  } catch (e     ) {
+    throw fail("ERR_INVALID_ARG_VALUE", "现有配置不是合法 JSON：" + errorText(e));
+  }
+  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.servers)) {
+    throw fail("ERR_INVALID_ARG_VALUE", "现有配置缺少 servers 数组");
+  }
+  let found = false;
+  for (const item of parsed.servers) {
+    if (!item || typeof item !== "object" || String(item.id) !== id) continue;
+    if (enabled) delete item.enabled;
+    else item.enabled = false;
+    found = true;
+    break;
+  }
+  if (!found) throw fail("ERR_INVALID_ARG_VALUE", `配置里没有 server ${id}`);
+  const saved = await saveWorkspaceConfig(ctx, `${JSON.stringify(parsed, null, 2)}\n`);
+  return { ...saved, id, enabled };
 }
 
 function globalConfigPath()         {
@@ -348,6 +610,7 @@ async function postRpc(
   session        ,
   method        ,
   params     ,
+  timeoutMs        ,
 )                     {
   if (!ctx.fetch) {
     throw fail("ERR_ACCESS_DENIED", "mcp: 需要 net.fetch 能力（清单 backend.capabilities 未声明？）");
@@ -363,7 +626,7 @@ async function postRpc(
   const payload = JSON.stringify({ jsonrpc: "2.0", id, method, params: params ?? {} });
   let res     ;
   try {
-    res = await ctx.fetch(server.url , { method: "POST", headers, body: payload });
+    res = await ctx.fetch(server.url , { method: "POST", headers, body: payload, timeoutMs });
   } catch (e) {
     throw fail("MCP_TRANSPORT", `mcp ${server.id}: ${errorText(e)}`);
   }
@@ -385,6 +648,7 @@ async function postNotification(
   session        ,
   method        ,
   params     ,
+  timeoutMs        ,
 )                {
   if (!ctx.fetch) return;
   const headers                         = {
@@ -399,6 +663,7 @@ async function postNotification(
       method: "POST",
       headers,
       body: JSON.stringify({ jsonrpc: "2.0", method, params: params ?? {} }),
+      timeoutMs,
     });
   } catch {
     // 通知失败不改变已建立的会话；下一次 tools/list 或 tools/call 会暴露真实问题。
@@ -411,9 +676,18 @@ class McpClient {
   proc                       = null;
   buffer = "";
   stderr = "";
+  // 装配期发现期限：HTTP 请求本身也用它。只用 withTimeout 不够——先到点放弃
+  // 而请求还挂着时，事件循环的 hold 会一直拖到宿主 fetch 超时，可能超过
+  // backend.initTimeoutMs，把「单 server 降级」变回「插件装配失败」。
+  discoveryTimeoutMs = 0;
 
   constructor(server              ) {
     this.server = server;
+  }
+
+  // fetchTimeoutMs 是本次请求的宿主 fetch 期限：装配期用发现预算，运行期用 server.timeoutMs。
+          fetchTimeoutMs()         {
+    return this.discoveryTimeoutMs > 0 ? this.discoveryTimeoutMs : clampTimeout(this.server.timeoutMs);
   }
 
   async initialize(ctx                 )                {
@@ -427,6 +701,14 @@ class McpClient {
         clientInfo: { name: "ada-go-mcp-client", version: "0.1.0" },
       });
       this.session = r.session;
+      // 只做记录不阻断：老版本 server 可能回一个不同的协议版本，工具面通常仍可用。
+      const negotiated = typeof r.result?.protocolVersion === "string" ? r.result.protocolVersion : "";
+      if (negotiated && negotiated !== PROTOCOL_VERSION) {
+        ctx.log("warn", `mcp: server ${this.server.id} 协议版本 ${negotiated}（客户端 ${PROTOCOL_VERSION}），按兼容模式继续`, {
+          server: this.server.id,
+          protocolVersion: negotiated,
+        });
+      }
       // 协议要求 initialize 成功后发 notifications/initialized；失败不阻断工具发现。
       await this.notify(ctx, "notifications/initialized", {});
     } catch (e) {
@@ -448,7 +730,18 @@ class McpClient {
 
   async request(ctx                 , method        , params     )                                            {
     if (this.proc) return this.stdioRequest(method, params);
-    return postRpc(ctx, this.server, this.session, method, params);
+    try {
+      return await postRpc(ctx, this.server, this.session, method, params, this.fetchTimeoutMs());
+    } catch (e     ) {
+      // Streamable HTTP 用 404 表示会话已失效：重新 initialize 一次再重试。
+      // 被 404 拒绝的请求没有执行，重试不会造成重复副作用（tools/call 也不重试别的错误）。
+      if (method !== "initialize" && this.session && isSessionExpired(e)) {
+        this.session = "";
+        await this.initialize(ctx);
+        return postRpc(ctx, this.server, this.session, method, params, this.fetchTimeoutMs());
+      }
+      throw e;
+    }
   }
 
   async notify(ctx                 , method        , params     )                {
@@ -456,7 +749,7 @@ class McpClient {
       this.writeMessage({ jsonrpc: "2.0", method, params: params ?? {} });
       return;
     }
-    await postNotification(ctx, this.server, this.session, method, params);
+    await postNotification(ctx, this.server, this.session, method, params, this.fetchTimeoutMs());
   }
 
   async listTools(ctx                 )                     {
@@ -509,7 +802,7 @@ class McpClient {
     if (!this.proc) throw fail("MCP_TRANSPORT", "stdio 进程不存在");
     const id = Math.floor(Math.random() * 0x3fffffff) + 1;
     this.writeMessage({ jsonrpc: "2.0", id, method, params: params ?? {} });
-    const timeout = clampTimeout(this.server.timeoutMs);
+    const timeout = this.fetchTimeoutMs();
     const deadline = Date.now() + timeout;
     let processExited = false;
 
@@ -541,9 +834,14 @@ class McpClient {
 
       const remain = deadline - Date.now();
       if (remain <= 0) throw fail("MCP_TIMEOUT", `mcp ${this.server.id}: ${method} 超时`);
-      const r = await this.proc.read({ timeoutMs: Math.min(500, remain), maxBytes: MAX_TEXT_BYTES });
+      const r = await this.proc.read({ timeoutMs: Math.min(500, remain), maxBytes: PROCESS_READ_BYTES });
       if (r.stderr) this.stderr = capText(this.stderr + r.stderr, 4096);
       if (r.stdout) this.buffer += r.stdout;
+      if (this.buffer.length > MAX_FRAME_BYTES) {
+        // 没有换行的巨量输出不能无限堆进字符串：按协议错误处理，别等超时。
+        this.buffer = "";
+        throw fail("MCP_PROTOCOL", `mcp ${this.server.id}: stdio 单条消息超过 ${MAX_FRAME_BYTES} 字节`);
+      }
       if (r.exited) processExited = true;
     }
   }
@@ -701,6 +999,11 @@ function toToolReturn(server              , tool         , result     )      {
   let imageBytes = 0;
   let sawError = false;
   const resources        = [];
+  let droppedResources = 0;
+  const pushResource = (entry                         )       => {
+    if (resources.length < MAX_RESOURCE_DETAILS) resources.push(entry);
+    else droppedResources++;
+  };
 
   for (const item of Array.isArray(result?.content) ? result.content : []) {
     if (!item || typeof item !== "object") continue;
@@ -725,7 +1028,7 @@ function toToolReturn(server              , tool         , result     )      {
         break;
       case "resource": {
         const r = item.resource ?? {};
-        resources.push({ uri: safeString(r.uri), mimeType: safeString(r.mimeType), text: typeof r.text === "string" });
+        pushResource({ uri: safeString(r.uri), mimeType: safeString(r.mimeType), text: typeof r.text === "string" });
         if (typeof r.text === "string") {
           content.push({ type: "text", text: capText(r.text, MAX_TEXT_BYTES) });
         } else {
@@ -736,7 +1039,7 @@ function toToolReturn(server              , tool         , result     )      {
       case "resource_link": {
         const uri = safeUrl(item.uri);
         const name = safeString(item.name) || safeString(item.uri) || "resource";
-        resources.push({ uri: safeString(item.uri), mimeType: safeString(item.mimeType) });
+        pushResource({ uri: safeString(item.uri), mimeType: safeString(item.mimeType) });
         content.push({
           type: "text",
           text: uri ? `[${name}](${uri})` : `[resource ${name}: ${safeString(item.uri) || "?"}]`,
@@ -784,6 +1087,8 @@ function toToolReturn(server              , tool         , result     )      {
     isError: sawError,
   };
   if (resources.length > 0) details.resources = resources;
+
+  if (droppedResources > 0) details.resourcesTruncated = droppedResources;
   if (result?.structuredContent !== undefined) {
     try {
       const raw = JSON.stringify(result.structuredContent);
@@ -804,18 +1109,42 @@ function toToolReturn(server              , tool         , result     )      {
 export default async function (agent          , ctx                 )                {
   const statuses                 = [];
   const usedNames = new Set        ();
-  const servers = (await loadServers(ctx)).slice(0, MAX_SERVERS);
+  let servers                 = [];
+  try {
+    servers = await loadServers(ctx);
+  } catch (e     ) {
+    // 配置读取失败（权限、半损坏的 IO）也不能让插件装配失败：
+    // 官方/builtin 插件的装配错误会让整个产品起不来，而配置是用户可编辑的。
+    ctx.log("error", "mcp: 读取配置失败，本次不接入任何 server", { err: errorText(e) });
+    servers = [];
+  }
+  if (servers.length > MAX_SERVERS) {
+    ctx.log("warn", `mcp: server 数超过上限 ${MAX_SERVERS}，其余已忽略`, { total: servers.length });
+  }
+  const budgetDeadline = Date.now() + DISCOVERY_BUDGET_MS;
 
-  for (const raw of servers) {
-    if (raw.enabled === false) continue;
+  for (const raw of servers.slice(0, MAX_SERVERS)) {
+    const disabled = raw.enabled === false;
     const status               = {
       id: raw.id,
-      transport: String(raw.transport || "http"),
-      url: safeString(raw.url) || [safeString(raw.command), ...(Array.isArray(raw.args) ? raw.args : [])].join(" ").trim(),
-      status: "degraded",
+      transport: String(raw.transport || "http").toLowerCase(),
+      url: displayEndpoint(raw),
+      source: raw.source || CONFIG_DISPLAY_PATH,
+      enabled: !disabled,
+      status: disabled ? "disabled" : "degraded",
       tools: 0,
+      items: [],
+      trustReadOnly: raw.trustReadOnly === true,
+      toolPrefix: String(raw.toolPrefix || ""),
     };
     statuses.push(status);
+    if (disabled) continue;
+    const remaining = budgetDeadline - Date.now();
+    if (remaining < MIN_DISCOVERY_MS) {
+      status.error = `装配期发现预算（${DISCOVERY_BUDGET_MS}ms）已耗尽，未探测`;
+      ctx.log("warn", `mcp: server ${raw.id} 未探测：装配期发现预算已耗尽`);
+      continue;
+    }
 
     let clientRef                   = null;
     try {
@@ -824,57 +1153,86 @@ export default async function (agent          , ctx                 )           
       if (server.transport === "http") resolveHeaders(server, ctx);
       const client = new McpClient(server);
       clientRef = client;
-      await client.initialize(ctx);
-      const tools = await client.listTools(ctx);
+      // 单个 server 的发现必须有硬期限：宿主 fetch 的兜底是分钟级，
+      // 挂起的 server 会把 backend.initTimeoutMs 耗光，让整个插件装配失败。
+      const budget = Math.min(clampTimeout(server.timeoutMs), remaining);
+      // 让宿主 fetch 也用同一个期限：否则「脚本放弃等待」与「请求真的结束」
+      // 之间有窗口，等待会一直拖到桥的超时（可能超过 initTimeoutMs）。
+      client.discoveryTimeoutMs = budget;
+      const tools = await withTimeout(
+        (async () => {
+          await client.initialize(ctx);
+          return client.listTools(ctx);
+        })(),
+        budget,
+        `mcp ${server.id}: initialize/tools/list`,
+      );
+      // 发现结束：运行期调用回到 server.timeoutMs，不再沿用装配期预算。
+      client.discoveryTimeoutMs = 0;
 
-      let count = 0;
-      for (const tool of tools.slice(0, MAX_TOOLS_PER_SERVER)) {
-        const name = uniqueName(toolSlug(server, tool), usedNames);
-        const translated = translateSchema(tool.inputSchema);
-        agent.registerTool({
-          name,
-          description: toolDescription(server, tool),
-          parameters: translated.schema,
-          access: accessOf(server, tool),
-          timeoutMs: clampTimeout(server.timeoutMs),
-          parallelSafe: false,
-          repeatable: false,
-          rollback: false,
-          execute: async (args     , callCtx             ) => {
-            try {
-              const result = await client.callTool(callCtx, tool.name, args ?? {});
-              const ret = toToolReturn(server, tool, result);
-              if (translated.simplified) {
-                ret.details.schemaSimplified = true;
-              }
-              return ret;
-            } catch (e     ) {
-              // 传输/认证/超时是服务器侧问题：作为工具结果回给模型，不抛异常触发插件禁用。
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text: `MCP ${server.id}/${tool.name} 调用失败：${errorText(e)}`,
-                  },
-                ],
-                details: {
-                  serverId: server.id,
-                  tool: tool.name,
-                  mcpError: true,
-                  schemaSimplified: translated.simplified || undefined,
-                },
-              };
-            }
-          },
+      if (tools.length > MAX_TOOLS_PER_SERVER) {
+        ctx.log("warn", `mcp: server ${server.id} 工具数超过上限 ${MAX_TOOLS_PER_SERVER}，只注册前面的`, {
+          total: tools.length,
         });
-        count++;
+      }
+      let count = 0;
+      let simplifiedCount = 0;
+      for (const tool of tools.slice(0, MAX_TOOLS_PER_SERVER)) {
+        try {
+          const name = uniqueName(toolSlug(server, tool), usedNames);
+          const translated = translateSchema(tool.inputSchema);
+          const access = accessOf(server, tool);
+          if (translated.simplified) simplifiedCount++;
+          agent.registerTool({
+            name,
+            description: toolDescription(server, tool),
+            parameters: translated.schema,
+            access,
+            timeoutMs: clampTimeout(server.timeoutMs),
+            parallelSafe: false,
+            repeatable: false,
+            rollback: false,
+            execute: async (args     , callCtx             ) => {
+              try {
+                const result = await client.callTool(callCtx, tool.name, args ?? {});
+                const ret = toToolReturn(server, tool, result);
+                if (translated.simplified) {
+                  ret.details.schemaSimplified = true;
+                }
+                return ret;
+              } catch (e     ) {
+                // 传输/认证/超时是服务器侧问题：作为工具结果回给模型，不抛异常触发插件禁用。
+                return {
+                  content: [
+                    {
+                      type: "text",
+                      text: `MCP ${server.id}/${tool.name} 调用失败：${errorText(e)}`,
+                    },
+                  ],
+                  details: {
+                    serverId: server.id,
+                    tool: tool.name,
+                    mcpError: true,
+                    schemaSimplified: translated.simplified || undefined,
+                  },
+                };
+              }
+            },
+          });
+          count++;
+          status.items.push({ name, mcpName: tool.name, access, schemaSimplified: translated.simplified });
+        } catch (e     ) {
+          // 单个工具注册失败（与其它插件同名、名字/描述非法等）只丢这个工具，
+          // 已经注册成功的保留，不把整个 server 标成「半注册 + degraded」。
+          ctx.log("warn", `mcp: 工具 ${server.id}/${tool.name} 注册失败，已跳过`, { err: errorText(e) });
+        }
       }
       status.status = "ready";
       status.tools = count;
       ctx.log("info", "mcp: server 已连接", {
         server: server.id,
         tools: count,
-        simplified: tools.filter((t) => translateSchema(t.inputSchema).simplified).length,
+        simplified: simplifiedCount,
       });
     } catch (e     ) {
       if (clientRef) clientRef.close();
@@ -884,7 +1242,43 @@ export default async function (agent          , ctx                 )           
     }
   }
 
-  agent.route("GET", "/servers", () => ({ servers: statuses }));
+  // 管理页数据面：状态列表 + 工作区配置的读写/启停。
+  // 配置写在宿主 fs 的工作区 scope 内（固定路径，不接受用户传入路径）。
+  agent.route("GET", "/servers", () => ({
+    servers: statuses,
+    configPath: CONFIG_DISPLAY_PATH,
+    userConfigPath: USER_CONFIG_DISPLAY_PATH,
+  }));
+
+  agent.route("GET", "/config", async (_req              , ctx             ) => {
+    const current = await readWorkspaceConfig(ctx);
+    return {
+      path: CONFIG_DISPLAY_PATH,
+      userPath: USER_CONFIG_DISPLAY_PATH,
+      exists: current.exists,
+      text: current.exists ? current.text : defaultConfigTemplate(),
+    };
+  });
+
+  agent.route("POST", "/config", (req              , ctx             ) => {
+    const body = (req && req.body) || {};
+    if (!body || typeof body !== "object" || typeof (body       ).text !== "string") {
+      throw fail("ERR_INVALID_ARG_VALUE", "请求体需要 text 字段（字符串）");
+    }
+    return saveWorkspaceConfig(ctx, (body       ).text);
+  });
+
+  agent.route("POST", "/servers/toggle", (req              , ctx             ) => {
+    const body = (req && req.body) || {};
+    const id = String((body       ).id || "").trim();
+    if (!id) throw fail("ERR_INVALID_ARG_VALUE", "请求体需要 server id");
+    return toggleServerConfig(ctx, id, (body       ).enabled === true);
+  });
+}
+
+// defaultConfigTemplate 是「编辑配置」时文件还不存在给的初稿。
+function defaultConfigTemplate()         {
+  return `${JSON.stringify({ version: CONFIG_VERSION, servers: [] }, null, 2)}\n`;
 }
 
 function uniqueName(base        , used             )         {
@@ -899,3 +1293,10 @@ function uniqueName(base        , used             )         {
   used.add(name);
   return name;
 }
+
+
+
+
+
+
+

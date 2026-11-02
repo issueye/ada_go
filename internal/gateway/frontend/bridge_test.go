@@ -567,6 +567,7 @@ func TestBridgeAssetsAndBindings(t *testing.T) {
 	}
 	scripts := b.Scripts()
 	wantScripts := []string{
+		"/ext/mcp-client/static/mcp-client.js?v=",
 		"/ext/plugin-helper/static/plugin-helper.js?v=",
 		"/ext/provider-admin/static/provider-admin.js?v=",
 	}

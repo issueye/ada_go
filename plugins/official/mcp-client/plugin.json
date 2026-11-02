@@ -1,15 +1,23 @@
 {
   "id": "mcp-client",
   "name": "MCP 客户端",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "apiVersion": 1,
-  "description": "把 MCP server 的工具接入为普通工具（HTTP/stdio；配置工作区 .adag/mcp.json）",
+  "description": "把 MCP server 的工具接入为普通工具（HTTP/stdio；配置工作区 .adag/mcp.json），并提供 MCP 服务端管理页",
   "trust": "builtin",
   "backend": {
     "entry": "index.ts",
-    "capabilities": ["fs.read", "net.fetch", "process"],
+    "capabilities": ["fs.read", "fs.write", "net.fetch", "process"],
     "env": ["PATH", "HOME", "USERPROFILE", "SystemRoot"],
     "secrets": ["mcp_token"],
     "initTimeoutMs": 30000
+  },
+  "frontend": {
+    "capabilities": ["frontend.script"],
+    "nav": [{ "label": "MCP 服务端", "slug": "servers" }],
+    "pages": [{ "slug": "servers", "title": "MCP 服务端", "template": "page.tsx" }],
+    "scripts": ["mcp-client.js"],
+    "styles": ["mcp-client.css"],
+    "assets": "static"
   }
 }

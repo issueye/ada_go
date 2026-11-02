@@ -704,7 +704,8 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 
 // assemblyContextObject 是入口工厂的第二个参数：装配期只读上下文。
 //
-// 与 ToolContext 的区别是刻意收窄：没有 state/ui/exec/process，也没有 fs.writeText。
+// 与 ToolContext 的区别是刻意收窄：没有 state/ui/exec，也没有 fs.writeText。
+// process 按能力安装（stdio MCP 在装配期启动长驻 server），这是唯一的装配期副作用。
 // 它只解决「插件在 registerTool 之前需要读配置、访问网络、取密钥」这一类装配期需求
 // （MCP 的 tools/list 是第一个消费者），不能把装配期变成有副作用的运行期。
 func (p *Instance) assemblyContextObject(rt *mojsRuntime, c *call) moejs.Value {
@@ -940,6 +941,10 @@ func (p *Instance) fetchPromise(rt *mojsRuntime, c *call, hc Context, args []moe
 			map[string]any{"url": baseForLog(url)})
 	}
 	method, headers, body := "GET", map[string]string{}, ""
+	// timeoutMs 是可选的整体期限：脚本侧（如 MCP 的 server.timeoutMs）需要它
+	// 把「自己放弃等待」变成「真的取消请求」，否则挂起的请求会一直占着
+	// 事件循环的 hold，让插件调用（乃至装配）等到桥的超时才结束。
+	timeout := defaultHostCallTimeout
 	if init := moejs.Arg(args, 1); init.IsObject() {
 		if v, err := rt.Get(init, "method"); err == nil && !v.IsNullish() {
 			method = strings.ToUpper(v.String())
@@ -956,8 +961,16 @@ func (p *Instance) fetchPromise(rt *mojsRuntime, c *call, hc Context, args []moe
 		if v, err := rt.Get(init, "body"); err == nil && !v.IsNullish() {
 			body = v.String()
 		}
+		if v, err := rt.Get(init, "timeoutMs"); err == nil {
+			if n, ok := jsInt(v); ok && n > 0 {
+				timeout = time.Duration(n) * time.Millisecond
+			}
+		}
 	}
-	return p.hostAsync(c, "fetch", func(ctx context.Context) (any, error) {
+	if timeout <= 0 || timeout > domain.ProviderTotalTimeout {
+		timeout = domain.ProviderTotalTimeout
+	}
+	return p.hostAsyncTimeout(c, "fetch", timeout, func(ctx context.Context) (any, error) {
 		res, err := hc.HTTP.JSON(ctx, method, url, headers, body, currentLimits().MaxFetchBytes)
 		if err != nil {
 			return nil, err

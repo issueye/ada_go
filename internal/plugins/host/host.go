@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/MoeForge/moejs"
@@ -112,7 +113,15 @@ func NewCapabilitySet(m *plugins.Manifest, workspaceRoot string, hostEnv map[str
 			c.Backend[cap] = true
 		}
 		for _, name := range m.Backend.Env {
+			// 宿主白名单语义：只交付清单声明的名字，仍不伪造空串。
+			// 组合根注入的 HostEnv 优先（测试与嵌入场景可冻结特定值）；没有注入时
+			// 回退到宿主进程环境，否则 backend.env 在生产装配里等于不存在
+			// （MCP 的 ~/.adago/mcp.json 与 stdio 子进程环境都依赖它）。
 			if v, ok := hostEnv[name]; ok {
+				c.Env[name] = v
+				continue
+			}
+			if v, ok := os.LookupEnv(name); ok {
 				c.Env[name] = v
 			}
 		}

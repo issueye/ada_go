@@ -2150,26 +2150,45 @@ func (s *Session) assembleInitial(ctx context.Context) (corecontracts.Assembly, 
 		}
 		return asm, nil
 	}
-	// 隔离重试：把装配错误归因到一个第三方插件并摘掉，直到成功或归因不出。
+	// 隔离重试：先把装配错误归因到第三方插件并摘掉；第三方摘完仍失败时，
+	// 再归因到「用户显式启用、产品未声明」的随包插件——它们是用户后加的可选能力，
+	// 坏掉不应该让整个产品起不来（产品声明的插件失败仍然是产品失败）。
 	remaining := append([]discovery.Plugin(nil), discovered...)
+	dropOptIn := map[string]bool{}
 	failures := map[string]string{}
-	for err != nil && len(remaining) > 0 {
+	for err != nil {
 		id := blameThirdParty(err, remaining)
+		isolatedOfficial := false
+		if id == "" {
+			id = blameOptIn(err, optIn, productIDs, dropOptIn)
+			isolatedOfficial = id != ""
+		}
 		if id == "" {
 			return nil, err
 		}
 		failures[id] = err.Error()
 		if s.cfg.Log != nil {
-			s.cfg.Log("warn", "第三方插件装配失败，已隔离: "+failures[id], map[string]any{"pluginId": id})
-		}
-		kept := make([]discovery.Plugin, 0, len(remaining)-1)
-		for _, p := range remaining {
-			if p.ID() != id {
-				kept = append(kept, p)
+			kind := "第三方插件"
+			if isolatedOfficial {
+				kind = "可选的随包插件"
 			}
+			s.cfg.Log("warn", kind+"装配失败，已隔离: "+failures[id], map[string]any{"pluginId": id})
 		}
-		remaining = kept
+		if isolatedOfficial {
+			dropOptIn[id] = true
+		} else {
+			kept := make([]discovery.Plugin, 0, len(remaining)-1)
+			for _, p := range remaining {
+				if p.ID() != id {
+					kept = append(kept, p)
+				}
+			}
+			remaining = kept
+		}
 		extras, disabled, optIn = pluginSelection(remaining, meta, s.baseScripts, s.frontendScripts, productIDs)
+		for dropID := range dropOptIn {
+			delete(optIn, dropID)
+		}
 		asm, err = s.assembler.AssembleWithExtras(ctx, s.product, s.baseScripts, extras, disabled, optIn, s.appDeps)
 	}
 	if err != nil {
@@ -2380,6 +2399,30 @@ func blameThirdParty(err error, candidates []discovery.Plugin) string {
 	return best
 }
 
+// blameOptIn 把装配错误归因到「用户显式启用、产品未声明」的随包插件。
+//
+// 只隔离这类可选插件：产品声明里的插件失败仍然是产品失败（声明就是承诺），
+// 但用户在插件页临时打开、结果坏掉的可选项不应该让整个 Core 起不来。
+func blameOptIn(err error, optIn, productIDs, dropped map[string]bool) string {
+	if err == nil {
+		return ""
+	}
+	text := err.Error()
+	best := ""
+	for id := range optIn {
+		if id == "" || productIDs[id] || dropped[id] {
+			continue
+		}
+		if !strings.Contains(text, "插件 "+id) {
+			continue
+		}
+		if best == "" || len(id) > len(best) {
+			best = id
+		}
+	}
+	return best
+}
+
 // fingerprintScript 是随包插件的指纹：清单身份 + 入口源码的 sha256 前 16 位
 // （对应「官方包指纹取嵌入 bundle 的哈希」，6.9）。
 func fingerprintScript(sc host.Script) string {
@@ -2548,6 +2591,13 @@ func (s *Session) pluginViews(ctx context.Context, detailID string) []PluginView
 				v.Enabled = false
 				v.LastError = ""
 			}
+		}
+		// 装配期被隔离的随包插件（用户启用但坏掉）：状态与错误必须可见，
+		// 不能因为它在 base 列表里就显示成 ready。
+		if msg, bad := failed[id]; bad {
+			v.Status = "failed"
+			v.LastError = msg
+			v.Enabled = true
 		}
 		out = append(out, v)
 	}
