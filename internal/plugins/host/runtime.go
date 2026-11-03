@@ -1104,6 +1104,7 @@ func (p *Instance) teardown(reason error) {
 	p.loop = nil
 	p.cur = nil
 	p.staging = nil
+	p.frozen = false
 	p.handlers = make([]moejs.Value, 1, 32)
 	p.roots = nil
 	p.loader = nil

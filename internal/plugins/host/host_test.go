@@ -108,6 +108,43 @@ export default function (agent) {
 	}
 }
 
+// TestRebuildRunsFactoryWithStaging 钉重建路径的 staging 接线：
+// 一次超时/取消后 dirty Runtime 会在下一次调用前重建并重跑入口工厂；
+// 工厂必须能看到新的 staging，否则会误报「agent API 已冻结」。
+func TestRebuildRunsFactoryWithStaging(t *testing.T) {
+	caps := testCaps(t, plugins.TrustThirdParty)
+	src := `
+export default function (agent) {
+  agent.registerTool({
+    name: "rebuild_probe",
+    description: "重建探针",
+    parameters: { type: "object" },
+    access: "read",
+    execute() { return { content: [{ type: "text", text: "ok" }] }; },
+  });
+}
+`
+	tools := &recordingTools{}
+	p, err := Load(context.Background(), testScript(t, caps, src), caps, Context{}, Options{Targets: Targets{Tools: tools}})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	defer func() { _ = p.Close(context.Background()) }()
+
+	// 模拟工具超时/取消后的 dirty 状态；下一次调用会触发 rebuild。
+	p.markDirty()
+	res, err := p.CallTool(context.Background(), p.Contribution().Tools[0].Handler, json.RawMessage(`{}`), Context{})
+	if err != nil {
+		t.Fatalf("rebuild 后调用失败: %v", err)
+	}
+	if len(res.Content) != 1 || res.Content[0].Text != "ok" {
+		t.Fatalf("rebuild 后结果 = %+v，期望工厂重建后注册的工具可用（ok）", res.Content)
+	}
+	if p.Dirty() {
+		t.Fatal("rebuild 成功后 dirty 应清零")
+	}
+}
+
 // TestFactoryAssemblyContext 钉入口工厂的第二个只读参数（MCP 装配期发现的前提）。
 func TestFactoryAssemblyContext(t *testing.T) {
 	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapFSRead, plugins.CapNetFetch)

@@ -35,6 +35,10 @@ func (p *Instance) runFactory(st *Staging) error {
 	if p.rt == nil || p.loop == nil {
 		return fmt.Errorf("host: 插件 %s 尚未装配运行时", p.id)
 	}
+	// 入口工厂里的 agent API 从 p.staging 取登记目标。init 路径此前在 runInit
+	// 里赋值；rebuild 路径也必须在这里接上，否则工厂会看到 nil staging 并误报
+	// 「agent API 已冻结」，插件在第一次超时后的重建就永久失败。
+	p.staging = st
 	// 让 agent:host 模块的绑定在工厂运行期间能找到本实例（模块体在 loadEntry 时已求值，
 	// 但它的导出函数要等到这时才被调用）。
 	if cs, ok := stateFor(p.rt); ok {
