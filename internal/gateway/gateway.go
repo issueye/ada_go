@@ -23,6 +23,7 @@ import (
 
 	"github.com/adag/ada-go/internal/coreapp"
 	"github.com/adag/ada-go/internal/gateway/contracts"
+	"github.com/adag/ada-go/internal/gateway/cronproc"
 	"github.com/adag/ada-go/internal/gateway/frontend"
 	"github.com/adag/ada-go/internal/gateway/relay"
 	"github.com/adag/ada-go/internal/gateway/security"
@@ -72,6 +73,11 @@ type Config struct {
 	// 会写到这里，下次启动再合并回列表。空表示不持久化。
 	// 显式传 DataDir 时忽略（隔离数据目录不共享用户级工作区列表）。
 	WorkspacesFile string
+	// CronBinary 是独立 cron 调度器（mcp_projects/cron）的可执行文件路径；
+	// 空时按 ADAG_CRON_BIN → 可执行文件同目录 → 开发布局 的顺序定位，
+	// 全部找不到则定时任务不启用（记一条日志降级，不影响其它功能）。
+	// 由 StartCron 在 HTTP 监听地址确定后拉起，随 Shutdown 回收。
+	CronBinary string
 }
 
 // Gateway 持有 HTTP handler 与它管理的 Core 进程。
@@ -83,6 +89,12 @@ type Gateway struct {
 	ownSup  bool
 	web     *web.Server
 	handler http.Handler
+
+	cronMu    sync.Mutex
+	cron      *cronproc.Daemon
+	cronCtx   context.Context
+	cronStop  context.CancelFunc
+	cronStart bool // StartCron 是否已被调用（幂等）
 }
 
 // frontendGate 提供「某工作区里某前端插件是否启用」的短期缓存。
@@ -368,7 +380,32 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 		cfg: cfg, product: product, token: accessToken, sup: sup, ownSup: ownSup, web: webSrv,
 		handler: tokenLoginGate{next: mw.Wrap(root), mw: mw},
 	}
+	// cron 调度器的生命周期挂在网关 ctx 上：Shutdown 先停守护再停 Core。
+	g.cronCtx, g.cronStop = context.WithCancel(ctx)
 	return g, nil
+}
+
+// StartCron 拉起独立 cron 调度器守护（gateway 命令在 HTTP 监听地址确定后调用）。
+// endpoint 是本网关的对外地址（如 http://127.0.0.1:52353）；cron 用它调
+// POST /api/cron/fire。幂等：重复调用只生效一次。
+func (g *Gateway) StartCron(endpoint string) {
+	if g == nil || endpoint == "" {
+		return
+	}
+	g.cronMu.Lock()
+	defer g.cronMu.Unlock()
+	if g.cronStart {
+		return
+	}
+	g.cronStart = true
+	g.cron = cronproc.Start(g.cronCtx, cronproc.Options{
+		Binary:     g.cfg.CronBinary,
+		GatewayURL: strings.TrimRight(endpoint, "/"),
+		Token:      g.token,
+		Logf: func(format string, args ...any) {
+			log.Printf("gateway: "+format, args...)
+		},
+	})
 }
 
 // tokenLoginGate 支持「?token= 自动登录」（a_da 桌面壳/托盘的同款语义）：
@@ -418,6 +455,13 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 	}
 	if g.web != nil {
 		_ = g.web.Close()
+	}
+	// 先停 cron 调度器（停止产生新的触发），再回收 Core。
+	if g.cronStop != nil {
+		g.cronStop()
+	}
+	if g.cron != nil {
+		_ = g.cron.Shutdown(ctx)
 	}
 	if g.sup != nil && g.ownSup {
 		return g.sup.Shutdown(ctx)

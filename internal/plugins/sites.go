@@ -58,6 +58,12 @@ var installSites = map[Capability]InstallSite{
 		EnforcedBy:    "键名校验、ADAG_ 保留前缀、值与文件大小上限、0600 原子写、值不写日志；仅 builtin（09 §9.2）",
 		Milestone:     "v2 环境变量管理",
 	},
+	CapCronAdmin: {
+		Capability: CapCronAdmin, HostInstall: "安装 ctx.cron（list/create/update/remove/setEnabled/trigger/runs）：全局 ~/.adago/cron.json 的定时任务管理",
+		ScriptSurface: "ctx.cron.list/create/update/remove/setEnabled/trigger/runs",
+		EnforcedBy:    "任务校验（cron 表达式/动作/大小上限）、0600 原子写 + 跨进程文件锁、审计只记 id 与名称；调度与执行在独立 cron 二进制，插件不能直接执行动作；仅 builtin",
+		Milestone:     "v2 定时任务",
+	},
 	CapState: {
 		Capability: CapState, HostInstall: "安装按插件 + 线程命名空间隔离的受限 KV",
 		ScriptSurface: "ctx.state.get/set/delete",

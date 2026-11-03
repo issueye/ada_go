@@ -91,6 +91,8 @@ func runGateway(args []string, stdout io.Writer) error {
 		return fmt.Errorf("adag gateway: 监听 %s 失败: %w", *addr, err)
 	}
 	defer ln.Close()
+	// 监听地址确定后拉起独立 cron 调度器（找不到 cron.exe 会降级为不启用）。
+	gw.StartCron("http://" + ln.Addr().String())
 	srv := &http.Server{
 		Handler:           gw.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,

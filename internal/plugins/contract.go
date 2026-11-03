@@ -226,6 +226,9 @@ const (
 	CapProcess Capability = "process"
 	// CapEnvAdmin 允许插件经 ctx.env 管理全局/工作区环境变量（仅 builtin）。
 	CapEnvAdmin Capability = "env.admin"
+	// CapCronAdmin 允许插件经 ctx.cron 管理全局定时任务 ~/.adago/cron.json（仅 builtin）。
+	// 它只授予任务定义的读写与触发标记；真正的调度与执行在独立 cron 二进制。
+	CapCronAdmin Capability = "cron.admin"
 	// CapState 是线程/工作区级受限 KV。
 	CapState Capability = "state"
 	// CapUIAsk 允许发起通用用户交互，不授予任何工具或文件权限；仅 builtin/verified。
@@ -247,7 +250,7 @@ const (
 // backendCapabilities 是后端可声明的能力白名单。
 var backendCapabilities = []Capability{
 	CapFSRead, CapFSWrite, CapNetFetch, CapNetSSE,
-	CapExec, CapProcess, CapEnvAdmin, CapState, CapUIAsk, CapSubagentInvoke, CapModelAdmin, CapPluginAdmin,
+	CapExec, CapProcess, CapEnvAdmin, CapCronAdmin, CapState, CapUIAsk, CapSubagentInvoke, CapModelAdmin, CapPluginAdmin,
 }
 
 // frontendCapabilities 是前端可声明的能力白名单。
@@ -276,7 +279,7 @@ func (c Capability) MinTrust() Trust {
 	switch c {
 	case CapExec, CapProcess, CapNetSSE, CapUIAsk:
 		return TrustVerified
-	case CapSubagentInvoke, CapModelAdmin, CapPluginAdmin, CapEnvAdmin:
+	case CapSubagentInvoke, CapModelAdmin, CapPluginAdmin, CapEnvAdmin, CapCronAdmin:
 		return TrustBuiltin
 	default:
 		return TrustThirdParty

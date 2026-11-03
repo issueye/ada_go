@@ -1,0 +1,20 @@
+{
+  "id": "cron-manager",
+  "name": "定时任务",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "管理全局定时任务（HTTP 请求与 AI 任务）；任务存于 ~/.adago/cron.json，调度由独立 cron 二进制执行，到期把消息送达 core",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts",
+    "capabilities": ["cron.admin"]
+  },
+  "frontend": {
+    "capabilities": ["frontend.script"],
+    "nav": [{ "label": "定时任务", "slug": "cron" }],
+    "pages": [{ "slug": "cron", "title": "定时任务", "template": "page.tsx" }],
+    "scripts": ["cron-manager.js"],
+    "styles": ["cron-manager.css"],
+    "assets": "static"
+  }
+}

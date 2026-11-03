@@ -134,6 +134,7 @@ agent.on("tool.beforeCall", fn, { priority?: 0, action?: "deny" });       // 策
 | `ui.available / confirm / select / input` | `ui.ask`（builtin/verified） | 通用用户交互 |
 | `skills()` | 产品 `skills: true` | 只读技能元数据 `{ name, description, path, origin }`；正文用 `read_file` 按 path 读取 |
 | `pluginAdmin.install({ id, files })` | `plugin.admin`（builtin） | 把骨架写入全局 `~/.adago/plugins/<id>/`；宿主校验 id/相对路径/大小并拒绝覆盖 |
+| `cron.list/create/update/remove/setEnabled/trigger/runs` | `cron.admin`（builtin） | 全局定时任务（`~/.adago/cron.json`）管理面；调度与执行在独立 cron 二进制（见 §5） |
 | `http` / `emit` | provider 专用 | 出网桥与归一化增量（03 §5.5） |
 
 ## 5. 能力位 × 信任矩阵
@@ -142,9 +143,15 @@ agent.on("tool.beforeCall", fn, { priority?: 0, action?: "deny" });       // 策
 | --- | --- | --- | --- |
 | `fs.read` / `fs.write` / `state` / `net.fetch` | ✅ | ✅ | ✅ |
 | `net.sse` / `exec` / `ui.ask` | ❌ | ✅ | ✅ |
-| `model.admin` / `plugin.admin` | ❌ | ❌ | ✅ |
+| `model.admin` / `plugin.admin` / `env.admin` / `cron.admin` | ❌ | ❌ | ✅ |
 | 前端 `backend.read`（数据投影） | ✅ | ✅ | ✅ |
 | 前端 `frontend.script`（自带 JS） | ❌ | ✅ | ✅ |
+
+`cron.admin`（仅 builtin）提供 `ctx.cron`：全局定时任务（`~/.adago/cron.json`）的
+`list/create/update/remove/setEnabled/trigger/runs`。它只是**管理面**——任务的调度与
+执行在独立 cron 二进制（网关拉起守护），到期后 http 动作由二进制直接发送、agent 动作
+经网关 `/api/cron/fire` 送达 core（`thread.create` + `turn.start`，每任务复用一个专用
+线程）；插件打不了执行动作，也拿不到执行结果之外的任何权限。
 
 ### 运行时环境（全局对象与出网）
 

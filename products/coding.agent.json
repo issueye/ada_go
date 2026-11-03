@@ -15,7 +15,8 @@
     "token-usage",
     "ui-charts",
     "plugin-helper",
-    "env-manager"
+    "env-manager",
+    "cron-manager"
   ],
   "capabilities": {
     "skills": true,

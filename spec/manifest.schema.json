@@ -71,10 +71,10 @@
         "capabilities": {
           "type": "array",
           "items": {
-            "enum": ["fs.read", "fs.write", "net.fetch", "net.sse", "exec", "process", "env.admin", "state", "ui.ask", "subagent.invoke", "model.admin", "plugin.admin"]
+            "enum": ["fs.read", "fs.write", "net.fetch", "net.sse", "exec", "process", "env.admin", "state", "ui.ask", "subagent.invoke", "model.admin", "plugin.admin", "cron.admin"]
           },
           "uniqueItems": true,
-          "description": "可安装能力的白名单（§6.2）。没声明的能力不安装：node:fs 需 fs.read/fs.write、node:child_process 需 exec、ctx.fetch 需 net.fetch、ctx.http.sse 需 net.sse、ctx.process 需 process、ctx.state 需 state、ctx.ui 需 ui.ask；未安装的模块链接期报 ERR_ACCESS_DENIED，不是运行期空值（§6.12）。信任规则（违反即装配失败，见根 allOf 的 x-trust-rule）：ui.ask/net.sse/exec/process 仅 builtin|verified；subagent.invoke/env.admin/model.admin/plugin.admin 仅 builtin。",
+          "description": "可安装能力的白名单（§6.2）。没声明的能力不安装：node:fs 需 fs.read/fs.write、node:child_process 需 exec、ctx.fetch 需 net.fetch、ctx.http.sse 需 net.sse、ctx.process 需 process、ctx.state 需 state、ctx.ui 需 ui.ask、ctx.cron 需 cron.admin；未安装的模块链接期报 ERR_ACCESS_DENIED，不是运行期空值（§6.12）。信任规则（违反即装配失败，见根 allOf 的 x-trust-rule）：ui.ask/net.sse/exec/process 仅 builtin|verified；subagent.invoke/env.admin/model.admin/plugin.admin/cron.admin 仅 builtin。",
           "x-consumer": "coreapp/stdlib: 装配期构造 stdlib.Config，按能力位安装 node:* 模块与 ctx 成员；engine: 受控调用审计与能力门禁"
         },
         "env": {
@@ -535,7 +535,7 @@
       }
     },
     {
-      "x-trust-rule": "T4：subagent.invoke / model.admin / plugin.admin / env.admin 仅 builtin（分别供 tools-subagent、供应商管理页、全局插件安装桥，§6.2）。verified 声明这些能力位即装配失败；exec/process/net.sse/ui.ask 对 builtin|verified 开放（见 T3 的反面）。",
+      "x-trust-rule": "T4：subagent.invoke / model.admin / plugin.admin / env.admin / cron.admin 仅 builtin（分别供 tools-subagent、供应商管理页、全局插件安装桥、ctx.cron 定时任务桥，§6.2）。verified 声明这些能力位即装配失败；exec/process/net.sse/ui.ask 对 builtin|verified 开放（见 T3 的反面）。",
       "if": {
         "required": ["trust"],
         "properties": {

@@ -567,6 +567,7 @@ func TestBridgeAssetsAndBindings(t *testing.T) {
 	}
 	scripts := b.Scripts()
 	wantScripts := []string{
+		"/ext/cron-manager/static/cron-manager.js?v=",
 		"/ext/env-manager/static/env-manager.js?v=",
 		"/ext/mcp-client/static/mcp-client.js?v=",
 		"/ext/plugin-helper/static/plugin-helper.js?v=",
