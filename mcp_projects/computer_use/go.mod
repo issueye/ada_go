@@ -4,7 +4,6 @@ go 1.27.3
 
 require (
 	github.com/MoeForge/moejs v0.1.0-alpha.11
-	github.com/egoist/mygo v0.0.0
 )
 
 require (
@@ -14,5 +13,3 @@ require (
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 )
-
-replace github.com/egoist/mygo => ../mygo
