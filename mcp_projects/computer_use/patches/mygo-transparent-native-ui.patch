@@ -1,0 +1,34 @@
+diff --git i/internal/windows/window.go w/internal/windows/window.go
+index 88ce63bf..dfd3e7e1 100644
+--- i/internal/windows/window.go
++++ w/internal/windows/window.go
+@@ -129,6 +129,12 @@ func (b *Backend) NewWindow(o *platform.WindowOptions, h platform.WindowHandler)
+ 	// style is the window's for life: Windows neither adds it nor removes it
+ 	// later.
+ 	w.noRedirect = o.Vibrancy != "" && systemBackdrops() && (!w.hiddenTitleBar && !o.Surface || b.composition() != nil)
++	if o.Vibrancy == "" && o.Surface && o.Transparent {
++		// Native UI that shows the desktop through its transparent pixels:
++		// without a redirection bitmap, the surface's alpha blends with what
++		// is behind, as a page's does.
++		w.noRedirect = b.composition() != nil
++	}
+ 	if o.Flyout != nil {
+ 		// What the content leaves transparent shows what is behind.
+ 		w.noRedirect = b.composition() != nil
+diff --git i/window.go w/window.go
+index 6c1305ed..7ab59c29 100644
+--- i/window.go
++++ w/window.go
+@@ -130,7 +130,11 @@ type WindowOptions struct {
+ 	// (Linux, Windows). Its keyboard shortcuts work all along.
+ 	AutoHideMenuBar bool
+ 	// Transparent makes the window background transparent, so a page with a
+-	// transparent background shows the desktop through.
++	// transparent background shows the desktop through. Native UI shows
++	// through the same way where the view leaves the root's background
++	// clear (ui.Context.Root().Background(ui.Transparent)); on Windows the
++	// window then has no redirection bitmap, and DirectComposition blends
++	// the content's alpha with the desktop.
+ 	Transparent bool
+ 	// BackgroundColor fills the window until the page paints, which avoids
+ 	// a flash of another color while it loads. CSS syntax: "#1e1e1e",

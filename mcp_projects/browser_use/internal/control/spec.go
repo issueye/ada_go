@@ -1,0 +1,255 @@
+package control
+
+import "encoding/json"
+
+// ToolSpec is a tool definition shared by HTTP and MCP.
+type ToolSpec struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Phase       string          `json:"phase"`
+	Schema      json.RawMessage `json:"inputSchema"`
+}
+
+func schema(s string) json.RawMessage { return json.RawMessage(s) }
+
+// Tools are the tools the M0 build exposes.
+var Tools = []ToolSpec{
+	{
+		Name: "status", Phase: "M0",
+		Description: "App version, control state, active tab, tab count and downloads directory.",
+		Schema:      schema(`{"type":"object","properties":{},"additionalProperties":false}`),
+	},
+	{
+		Name: "tabs", Phase: "M0",
+		Description: "List, create, close or select tabs.",
+		Schema: schema(`{"type":"object","properties":{
+			"action":{"type":"string","enum":["list","new","close","select"]},
+			"url":{"type":"string"},
+			"tab":{"type":"string"},
+			"activate":{"type":"boolean","default":true},
+			"force":{"type":"boolean","default":false}
+		},"required":["action"],"additionalProperties":false}`),
+	},
+	{
+		Name: "navigate", Phase: "M0",
+		Description: "Go to a URL, or go back, forward, reload or stop.",
+		Schema: schema(`{"type":"object","properties":{
+			"action":{"type":"string","enum":["goto","back","forward","reload","stop"],"default":"goto"},
+			"url":{"type":"string"},
+			"tab":{"type":"string"},
+			"wait_until":{"type":"string","enum":["load","domcontentloaded","network_idle","none"],"default":"load"},
+			"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"default":30000}
+		},"required":["action"],"additionalProperties":false}`),
+	},
+	{
+		Name: "snapshot", Phase: "M0",
+		Description: "Semantic snapshot of the page with stable refs such as e12.",
+		Schema: schema(`{"type":"object","properties":{
+			"tab":{"type":"string"},
+			"scope":{"type":"string","enum":["full","viewport"],"default":"full"},
+			"filter":{"type":"string"},
+			"max_chars":{"type":"integer","minimum":1000,"maximum":50000,"default":12000}
+		},"additionalProperties":false}`),
+	},
+	{
+		Name: "read", Phase: "M0.5",
+		Description: "Readable text of the page or of a selected element.",
+		Schema: schema(`{"type":"object","properties":{
+			"tab":{"type":"string"},
+			"selector":{"type":"string"},
+			"max_chars":{"type":"integer","minimum":1000,"maximum":50000,"default":12000}
+		},"additionalProperties":false}`),
+	},
+	{
+		Name: "script", Phase: "M1.5",
+		Description: "Run a JS/TS async function body with the browser API. Use for multi-step flows, loops and extraction; return a small JSON value.",
+		Schema: schema(`{"type":"object","properties":{
+			"source":{"type":"string"},
+			"language":{"type":"string","enum":["js","ts"],"default":"js"},
+			"args":{"type":"object"},
+			"timeout_ms":{"type":"integer","minimum":1000,"maximum":300000,"default":120000},
+			"max_output_bytes":{"type":"integer","minimum":1024,"maximum":262144,"default":32768},
+			"release_on_finish":{"type":"boolean","default":true},
+			"tab":{"type":"string"}
+		},"required":["source"],"additionalProperties":false}`),
+	},
+	{
+		Name: "network", Phase: "M1",
+		Description: "Inspect fetch/XHR requests captured from page scripts (URL, status, timing, request/response bodies). Use it to find JSON APIs behind a UI.",
+		Schema: schema(`{"type":"object","properties":{
+			"action":{"type":"string","enum":["list","get","clear","wait"],"default":"list"},
+			"tab":{"type":"string"},
+			"url_contains":{"type":"string"},
+			"method":{"type":"string"},
+			"status":{"type":"integer"},
+			"since":{"type":"string"},
+			"limit":{"type":"integer","minimum":1,"maximum":200,"default":50},
+			"include_body":{"type":"boolean","default":false},
+			"max_body":{"type":"integer","minimum":0},
+			"id":{"type":"string"},
+			"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"default":5000}
+		},"additionalProperties":false}`),
+	},
+	{
+		Name: "frames", Phase: "M2",
+		Description: "List direct iframes (same- or cross-origin), select one for page actions, or return to the main frame.",
+		Schema: schema(`{"type":"object","properties":{
+			"action":{"type":"string","enum":["list","use","main","current"],"default":"list"},
+			"tab":{"type":"string"},
+			"frame":{"type":"string"}
+		},"additionalProperties":false}`),
+	},
+	{
+		Name: "files", Phase: "M2",
+		Description: "Upload local files into a page file input (input[type=file]) by ref, selector or text.",
+		Schema: schema(`{"type":"object","properties":{
+			"action":{"type":"string","enum":["upload"],"default":"upload"},
+			"tab":{"type":"string"},
+			"ref":{"type":"string"},
+			"selector":{"type":"string"},
+			"text":{"type":"string"},
+			"paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":10}
+		},"required":["paths"],"additionalProperties":false}`),
+	},
+	{
+		Name: "cookies", Phase: "M2",
+		Description: "List, set, delete, clear or import session cookies (HTTPOnly included). Use it to reuse or repair a login. Values are sensitive.",
+		Schema: schema(`{"type":"object","properties":{
+			"action":{"type":"string","enum":["list","set","delete","clear","import","export"],"default":"list"},
+			"url":{"type":"string"},
+			"name":{"type":"string"},
+			"value":{"type":"string"},
+			"domain":{"type":"string"},
+			"path":{"type":"string"},
+			"secure":{"type":"boolean"},
+			"http_only":{"type":"boolean"},
+			"same_site":{"type":"string","enum":["lax","strict","none"]},
+			"expires":{"type":"string"},
+			"cookies":{"type":"array","items":{"type":"object"}}
+		},"additionalProperties":false}`),
+	},
+	{
+		Name: "screenshot", Phase: "M1",
+		Description: "PNG screenshot of the page, optionally annotated with snapshot refs. Saved under the app data directory.",
+		Schema: schema(`{"type":"object","properties":{
+			"tab":{"type":"string"},
+			"annotate":{"type":"boolean","default":true},
+			"inline":{"type":"boolean","default":false},
+			"max_width":{"type":"integer","minimum":320,"maximum":4096,"default":1600}
+		},"additionalProperties":false}`),
+	},
+	{
+		Name: "scroll", Phase: "M1",
+		Description: "Scroll the page up/down/left/right or to an element.",
+		Schema: schema(`{"type":"object","properties":{
+			"tab":{"type":"string"},
+			"direction":{"type":"string","enum":["up","down","left","right"],"default":"down"},
+			"amount":{"type":"number","default":600},
+			"ref":{"type":"string"},
+			"selector":{"type":"string"}
+		},"additionalProperties":false}`),
+	},
+	{
+		Name: "hover", Phase: "M1",
+		Description: "Move the pointer over an element by ref, selector or text.",
+		Schema: schema(`{"type":"object","properties":{
+			"tab":{"type":"string"},
+			"ref":{"type":"string"},
+			"selector":{"type":"string"},
+			"text":{"type":"string"}
+		},"additionalProperties":false}`),
+	},
+	{
+		Name: "eval", Phase: "M1",
+		Description: "Evaluate JavaScript in the page and return its JSON result (gated by agent.allow_eval).",
+		Schema: schema(`{"type":"object","properties":{
+			"tab":{"type":"string"},
+			"expression":{"type":"string"},
+			"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"default":30000}
+		},"required":["expression"],"additionalProperties":false}`),
+	},
+	{
+		Name: "downloads", Phase: "M1",
+		Description: "List finished downloads.",
+		Schema:      schema(`{"type":"object","properties":{},"additionalProperties":false}`),
+	},
+	{
+		Name: "dialogs", Phase: "M1",
+		Description: "List alert/confirm/prompt calls the page made (they are intercepted and non-blocking).",
+		Schema:      schema(`{"type":"object","properties":{"tab":{"type":"string"}},"additionalProperties":false}`),
+	},
+	{
+		Name: "click", Phase: "M0",
+		Description: "Click an element by ref, selector, text or point.",
+		Schema: schema(`{"type":"object","properties":{
+			"tab":{"type":"string"},
+			"ref":{"type":"string"},
+			"selector":{"type":"string"},
+			"text":{"type":"string"},
+			"point":{"type":"object","properties":{"x":{"type":"number"},"y":{"type":"number"}},"required":["x","y"]},
+			"button":{"type":"string","enum":["left","right","middle"],"default":"left"},
+			"count":{"type":"integer","enum":[1,2],"default":1},
+			"modifiers":{"type":"array","items":{"type":"string","enum":["Alt","Control","Meta","Shift"]}},
+			"force":{"type":"boolean","default":false},
+			"reveal":{"type":"boolean","default":true,"description":"reveal an opacity:0 hover-only wrapper for the click"},
+			"wait_after":{"type":"string","enum":["auto","load","none"],"default":"auto"},
+			"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"default":30000}
+		},"additionalProperties":false}`),
+	},
+	{
+		Name: "type", Phase: "M0",
+		Description: "Type text into a field, optionally submitting with Enter.",
+		Schema: schema(`{"type":"object","properties":{
+			"tab":{"type":"string"},
+			"ref":{"type":"string"},
+			"selector":{"type":"string"},
+			"text":{"type":"string"},
+			"clear":{"type":"boolean","default":true},
+			"submit":{"type":"boolean","default":false},
+			"slowly":{"type":"boolean","default":false},
+			"wait_after":{"type":"string","enum":["auto","load","none"],"default":"auto"},
+			"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"default":30000}
+		},"required":["text"],"additionalProperties":false}`),
+	},
+	{
+		Name: "select", Phase: "M0.5",
+		Description: "Choose one or more options of a <select> by value or visible label.",
+		Schema: schema(`{"type":"object","properties":{
+			"tab":{"type":"string"},
+			"ref":{"type":"string"},
+			"selector":{"type":"string"},
+			"values":{"type":"array","items":{"type":"string"}},
+			"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"default":30000}
+		},"required":["values"],"additionalProperties":false}`),
+	},
+	{
+		Name: "press", Phase: "M0",
+		Description: "Press a key or a chord such as Control+A.",
+		Schema: schema(`{"type":"object","properties":{
+			"tab":{"type":"string"},
+			"key":{"type":"string"},
+			"ref":{"type":"string"},
+			"selector":{"type":"string"},
+			"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"default":30000}
+		},"required":["key"],"additionalProperties":false}`),
+	},
+	{
+		Name: "wait", Phase: "M0",
+		Description: "Wait for load, URL, selector, text, download or time.",
+		Schema: schema(`{"type":"object","properties":{
+			"tab":{"type":"string"},
+			"for":{"type":"string","enum":["load","url","selector","text","download","time","idle"]},
+			"value":{"type":"string"},
+			"state":{"type":"string","enum":["visible","attached","hidden"],"default":"visible"},
+			"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"default":30000}
+		},"required":["for"],"additionalProperties":false}`),
+	},
+	{
+		Name: "control", Phase: "M0",
+		Description: "Release the agent's lease (and the mask), or report it.",
+		Schema: schema(`{"type":"object","properties":{
+			"action":{"type":"string","enum":["release","state"],"default":"state"},
+			"tab":{"type":"string"}
+		},"required":["action"],"additionalProperties":false}`),
+	},
+}

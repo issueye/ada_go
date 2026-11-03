@@ -1,0 +1,320 @@
+﻿{
+  "days": [
+    {
+      "date": "2026-11-01",
+      "shifts": [
+        {
+          "class_num": 0.8,
+          "dept": "默认科室",
+          "end": "18:00:00",
+          "group": "二线值班组",
+          "hours": 6.5,
+          "name": "午班",
+          "start": "11:30:00"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-03",
+      "shifts": [
+        {
+          "class_num": 1,
+          "dept": "默认科室",
+          "end": "12:00:00",
+          "group": "二线值班组",
+          "hours": 4.5,
+          "name": "白班（上）",
+          "start": "07:30:00"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-04",
+      "shifts": [
+        {
+          "class_num": 1,
+          "dept": "默认科室",
+          "end": "12:00:00",
+          "group": "二线值班组",
+          "hours": 4.5,
+          "name": "白班（上）",
+          "start": "07:30:00"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-05",
+      "shifts": [
+        {
+          "class_num": 0.8,
+          "dept": "默认科室",
+          "end": "18:00:00",
+          "group": "二线值班组",
+          "hours": 6.5,
+          "name": "午班",
+          "start": "11:30:00"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-07",
+      "shifts": [
+        {
+          "class_num": 1,
+          "dept": "默认科室",
+          "end": "12:00:00",
+          "group": "二线值班组",
+          "hours": 4.5,
+          "name": "白班（上）",
+          "start": "07:30:00"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-08",
+      "shifts": [
+        {
+          "class_num": 1,
+          "dept": "默认科室",
+          "end": "12:00:00",
+          "group": "二线值班组",
+          "hours": 4.5,
+          "name": "白班（上）",
+          "start": "07:30:00"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-09",
+      "shifts": [
+        {
+          "class_num": 0.8,
+          "dept": "默认科室",
+          "end": "18:00:00",
+          "group": "二线值班组",
+          "hours": 6.5,
+          "name": "午班",
+          "start": "11:30:00"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-11",
+      "shifts": [
+        {
+          "class_num": 1,
+          "dept": "默认科室",
+          "end": "12:00:00",
+          "group": "二线值班组",
+          "hours": 4.5,
+          "name": "白班（上）",
+          "start": "07:30:00"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-12",
+      "shifts": [
+        {
+          "class_num": 1,
+          "dept": "默认科室",
+          "end": "12:00:00",
+          "group": "二线值班组",
+          "hours": 4.5,
+          "name": "白班（上）",
+          "start": "07:30:00"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-13",
+      "shifts": [
+        {
+          "class_num": 0.8,
+          "dept": "默认科室",
+          "end": "18:00:00",
+          "group": "二线值班组",
+          "hours": 6.5,
+          "name": "午班",
+          "start": "11:30:00"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-15",
+      "shifts": [
+        {
+          "class_num": 1,
+          "dept": "默认科室",
+          "end": "12:00:00",
+          "group": "二线值班组",
+          "hours": 4.5,
+          "name": "白班（上）",
+          "start": "07:30:00"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-16",
+      "shifts": [
+        {
+          "class_num": 1,
+          "dept": "默认科室",
+          "end": "12:00:00",
+          "group": "二线值班组",
+          "hours": 4.5,
+          "name": "白班（上）",
+          "start": "07:30:00"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-17",
+      "shifts": [
+        {
+          "class_num": 0.8,
+          "dept": "默认科室",
+          "end": "18:00:00",
+          "group": "二线值班组",
+          "hours": 6.5,
+          "name": "午班",
+          "start": "11:30:00"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-19",
+      "shifts": [
+        {
+          "class_num": 1,
+          "dept": "默认科室",
+          "end": "12:00:00",
+          "group": "二线值班组",
+          "hours": 4.5,
+          "name": "白班（上）",
+          "start": "07:30:00"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-20",
+      "shifts": [
+        {
+          "class_num": 1,
+          "dept": "默认科室",
+          "end": "12:00:00",
+          "group": "二线值班组",
+          "hours": 4.5,
+          "name": "白班（上）",
+          "start": "07:30:00"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-21",
+      "shifts": [
+        {
+          "class_num": 0.8,
+          "dept": "默认科室",
+          "end": "18:00:00",
+          "group": "二线值班组",
+          "hours": 6.5,
+          "name": "午班",
+          "start": "11:30:00"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-23",
+      "shifts": [
+        {
+          "class_num": 0.8,
+          "dept": "默认科室",
+          "end": "18:00:00",
+          "group": "二线值班组",
+          "hours": 6.5,
+          "name": "午班",
+          "start": "11:30:00"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-25",
+      "shifts": [
+        {
+          "class_num": 1,
+          "dept": "默认科室",
+          "end": "12:00:00",
+          "group": "二线值班组",
+          "hours": 4.5,
+          "name": "白班（上）",
+          "start": "07:30:00"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-26",
+      "shifts": [
+        {
+          "class_num": 1,
+          "dept": "默认科室",
+          "end": "12:00:00",
+          "group": "二线值班组",
+          "hours": 4.5,
+          "name": "白班（上）",
+          "start": "07:30:00"
+        }
+      ]
+    }
+  ],
+  "plan_notes": [
+    {
+      "deptName": null,
+      "endDate": "2026-11-08",
+      "planId": "2115015703803756545",
+      "planName": "test",
+      "remark": "1111",
+      "startDate": "2026-11-01"
+    },
+    {
+      "deptName": null,
+      "endDate": "2026-11-30",
+      "planId": "2113525152055140354",
+      "planName": "test",
+      "remark": "节假日紧急联系人：xxx",
+      "startDate": "2026-11-01"
+    },
+    {
+      "deptName": null,
+      "endDate": "2026-11-22",
+      "planId": "2115015935354503169",
+      "planName": "test",
+      "remark": "22222",
+      "startDate": "2026-11-09"
+    },
+    {
+      "deptName": null,
+      "endDate": "2026-11-26",
+      "planId": "2115016121636126722",
+      "planName": "test",
+      "remark": "333",
+      "startDate": "2026-11-23"
+    }
+  ],
+  "source": {
+    "id": "n16",
+    "request": {
+      "endDate": "2026-11-30",
+      "loginName": "2035955750187278338",
+      "startDate": "2026-11-01"
+    },
+    "url": "http://198.18.0.1:8080/api/wit-hosp-schedule-service/scheduleStat/mySchedule"
+  },
+  "summary": {
+    "attendanceDays": 19,
+    "dutyDays": 19,
+    "leaveHours": 0,
+    "totalClassNum": 17.6,
+    "totalShiftDuration": 99.5
+  }
+}
