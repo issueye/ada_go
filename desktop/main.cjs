@@ -478,6 +478,24 @@ function webUiUrl() {
   return u.toString()
 }
 
+// isExternalNavigation 判断目标是否应交给系统浏览器：网关同源之外的 http(s)
+// 与 mailto: 都算外部；站内路由与表单 POST 继续留在窗口里。
+function isExternalNavigation(target) {
+  try {
+    const u = new URL(String(target))
+    if (u.protocol === 'mailto:') return true
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false
+    const gateway = webUiUrl()
+    if (gateway) {
+      const base = new URL(gateway)
+      if (u.origin === base.origin) return false
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function openWebUi() {
   const url = webUiUrl()
   if (!url) {
@@ -596,6 +614,18 @@ async function createMainWindow() {
       webSecurity: false,
       allowRunningInsecureContent: true,
     },
+  })
+
+  // 外部链接一律交给系统浏览器：窗口只承载网关页面，不能被导航走。
+  // window.open/target=_blank 走 setWindowOpenHandler；普通点击走 will-navigate。
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isExternalNavigation(url)) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!isExternalNavigation(url)) return
+    event.preventDefault()
+    void shell.openExternal(url)
   })
 
   // Electron ≥32 的 console-message 签名是 (event, details)；兼容两种。
@@ -968,3 +998,4 @@ app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) await createMainWindow()
   })
 })
+

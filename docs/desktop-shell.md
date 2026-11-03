@@ -65,6 +65,9 @@ launcher.log 位置语义（`~/.adago/launcher.log`）、网关不可用时的�
 - 网关只绑回环；令牌经环境变量注入网关，不进命令行参数。
 - `?token=` 登录只在 GET 生效，303 后 query 里的 token 即失效（cookie 是
   HttpOnly 的会话 cookie）。
+- 外部链接不进窗口：正文/页面里的 http(s)（网关同源除外）与 `mailto:` 交给系统
+  浏览器（`setWindowOpenHandler` + `will-navigate`，另有 `app.js` 点击兜底）；
+  站内路由与表单 POST 留在窗口里。
 
 ## 打包
 
@@ -86,3 +89,4 @@ NSIS 安装包把 `--win dir` 换成 `--win nsis`（`npm run dist`）。注意
 - 打包后的产品声明固定 headless；要换产品改 `desktop_launcher.json` 的
   `product_path` 或用 `--product` 传入。
 - Electron 的下载/打包依赖网络；`make desktop` 首次运行需要可达 npm registry。
+

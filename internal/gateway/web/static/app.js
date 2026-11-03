@@ -154,7 +154,26 @@
       openConfirm(confirmedLink.getAttribute('data-confirm'), function () {
         window.location.href = confirmedLink.href;
       });
+      return;
     }
+
+    // 外部链接（Markdown 正文等）交给系统浏览器/新标签：不能把应用页面导航走。
+    var anchor = target.closest('a[href]');
+    if (!anchor || anchor.hasAttribute('download')) return;
+    if (event.defaultPrevented || event.button !== 0) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    var href = anchor.getAttribute('href') || '';
+    if (!href || href.charAt(0) === '#' || href.charAt(0) === '/') return;
+    var url;
+    try {
+      url = new URL(href, window.location.href);
+    } catch (_err) {
+      return;
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:' && url.protocol !== 'mailto:') return;
+    if (url.origin === window.location.origin) return;
+    event.preventDefault();
+    window.open(url.href, '_blank', 'noopener,noreferrer');
   });
 
   /* 排序下拉框等：改选即提交 */
@@ -778,4 +797,5 @@
     boot();
   }
 })();
+
 

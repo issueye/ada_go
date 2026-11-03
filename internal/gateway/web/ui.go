@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"html"
 	"html/template"
+	"net/url"
 	"strings"
 	"time"
 
@@ -20,6 +21,8 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 	goldmarkhtml "github.com/yuin/goldmark/renderer/html"
+	xhtml "golang.org/x/net/html"
+	xhtmlatom "golang.org/x/net/html/atom"
 )
 
 // ---- 转义与类名 ----
@@ -190,7 +193,69 @@ func renderMarkdown(text string) template.HTML {
 	if err := markdownRenderer.Convert([]byte(text), &src); err != nil {
 		return template.HTML("<p>" + esc(text) + "</p>")
 	}
-	return template.HTML(markdownPolicy.Sanitize(src.String()))
+	clean := markdownPolicy.Sanitize(src.String())
+	return template.HTML(decorateExternalLinks(clean))
+}
+
+// decorateExternalLinks 给正文里的外部链接补 target/rel：点击在新标签/系统浏览器
+// 打开，不把应用页面导航走。输入已经过 bluemonday 清洗，这里只追加两个常量属性；
+// 站内相对链接与锚点保持原样。
+func decorateExternalLinks(rendered string) string {
+	if !strings.Contains(rendered, "<a ") {
+		return rendered
+	}
+	context := &xhtml.Node{Type: xhtml.ElementNode, Data: "div", DataAtom: xhtmlatom.Div}
+	nodes, err := xhtml.ParseFragment(strings.NewReader(rendered), context)
+	if err != nil {
+		return rendered
+	}
+	var b strings.Builder
+	for _, node := range nodes {
+		markExternalLinks(node)
+		_ = xhtml.Render(&b, node)
+	}
+	if b.Len() == 0 {
+		return rendered
+	}
+	return b.String()
+}
+
+func markExternalLinks(node *xhtml.Node) {
+	if node.Type == xhtml.ElementNode && node.Data == "a" {
+		for _, a := range node.Attr {
+			if a.Key != "href" || !isExternalHref(a.Val) {
+				continue
+			}
+			setNodeAttr(node, "target", "_blank")
+			setNodeAttr(node, "rel", "nofollow noopener noreferrer")
+			break
+		}
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		markExternalLinks(child)
+	}
+}
+
+func setNodeAttr(node *xhtml.Node, key, value string) {
+	for i := range node.Attr {
+		if node.Attr[i].Key == key {
+			node.Attr[i].Val = value
+			return
+		}
+	}
+	node.Attr = append(node.Attr, xhtml.Attribute{Key: key, Val: value})
+}
+
+func isExternalHref(href string) bool {
+	u, err := url.Parse(strings.TrimSpace(href))
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https", "mailto":
+		return true
+	}
+	return false
 }
 
 // ---- 侧栏 ----
