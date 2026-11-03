@@ -238,6 +238,36 @@ func (s *Server) execute(ctx context.Context, client, name string, raw json.RawM
 		}
 		return &outcome{Data: res, TabID: s.mgr.ActiveID()}, nil
 
+	case "console":
+		var req struct {
+			Action       string `json:"action"`
+			Tab          string `json:"tab"`
+			Level        string `json:"level"`
+			TextContains string `json:"text_contains"`
+			Source       string `json:"source"`
+			Since        string `json:"since"`
+			Limit        int    `json:"limit"`
+			ID           string `json:"id"`
+			TimeoutMS    int    `json:"timeout_ms"`
+		}
+		if err := decodeArgs(raw, &req); err != nil {
+			return nil, bad(err)
+		}
+		res, err := s.mgr.Console(ctx, req.Tab, client, browser.ConsoleOptions{
+			Action:       req.Action,
+			Level:        req.Level,
+			TextContains: req.TextContains,
+			Source:       req.Source,
+			Since:        req.Since,
+			Limit:        req.Limit,
+			ID:           req.ID,
+			WaitMS:       req.TimeoutMS,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return &outcome{Data: res, TabID: s.mgr.ActiveID()}, nil
+
 	case "frames":
 		var req struct {
 			Action string `json:"action"`

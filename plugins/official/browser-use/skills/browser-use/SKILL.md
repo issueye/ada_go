@@ -61,6 +61,7 @@ description: 用 browser-use 桌面浏览器完成网页任务：打开页面、
 | `browser_eval` | exec | `expression` | 读一个值/简单 DOM |
 | `browser_script` | exec | `source`、`args`、`timeout_ms` | 多步流程 |
 | `browser_network` | read | `action`（list/get/clear/wait）、`url_contains`、`include_body` | 抓接口 |
+| `browser_console` | read | `action`（list/get/clear/wait）、`level`、`text_contains`、`source` | 看页面控制台与报错 |
 | `browser_control` | write | `action`（release/state） | 交还控制权 |
 | `browser_call` | write | `tool`（cookies/files/frames/downloads/dialogs） | 长尾 |
 
@@ -188,6 +189,24 @@ return await page.evaluate(() =>
 fetch/XHR（不记录文档本身、WebSocket、SSE 体）；请求体 ≤16KB、响应体 ≤128KB、
 最多 300 条 / 4MB；`password/token/secret/cookie/session` 字段与头已脱敏。
 接口需要登录态时，先在页面里登录（或复用用户已登录的会话），抓包会带上 cookie。
+
+## 7.5 看控制台（点了没反应、数据没渲染）
+
+接口返回 200 但页面不动，多半是前端报错。控制台工具比猜 DOM 快：
+
+1. `browser_console {action:"clear"}` 清掉旧日志。
+2. 触发动作（`browser_act`），再 `browser_console {action:"wait", level:"error", timeout_ms:5000}`
+   等报错出现；不想等就直接 `list`。
+3. `browser_console {level:"error"}` / `{source:"exception"}` 过滤未捕获异常，
+   `{text_contains:"xxx"}` 按关键字找。
+4. 拿到 URL:行号后，`browser_eval` 看对应 DOM/状态，或用 `browser_screenshot` 核对渲染。
+
+**边界**：只记录**当前文档、运行时注入之后**的日志（整页刷新清空，hash 路由保留）；
+500 条 / 512KB / 单条 8KB；对象里的 `token/secret/password/cookie/session` 字段与
+`?token=` 查询串已脱敏。`wait` 超时返回 `matched:false` 的空结果，不是错误。
+`wait` 在页面里挂起，页面定时器/用户点击产生的日志会命中，但等待期间该标签页的动作槽
+被占用——**先触发动作，再 wait**（5 秒内的日志直接命中），不要在 wait 里等另一个工具调用。
+这里的"控制台"是**网页自己**的 console，不是 `browser_script` 回执里那段脚本 console。
 
 ## 8. 截图与视觉确认
 

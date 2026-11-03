@@ -66,6 +66,7 @@ func usage() {
   browser-use cli wait --tab t1 --for url --value /results
   browser-use cli network list --tab t1 --url-contains /api/
   browser-use cli network get --id n12 --max-body 20000
+  browser-use cli console list --tab t1 --level error
   browser-use cli control release
   browser-use mcp                # MCP stdio server for DSH
   browser-use mcp --http --port 8766   # Streamable HTTP MCP

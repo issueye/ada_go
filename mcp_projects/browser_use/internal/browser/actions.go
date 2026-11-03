@@ -970,6 +970,172 @@ func (t *Tab) waitNetwork(ctx context.Context, opts NetworkOptions) (*NetworkRes
 	}
 }
 
+// ConsoleOptions filters console output captured by the page runtime.
+type ConsoleOptions struct {
+	Action       string
+	Level        string
+	TextContains string
+	Source       string
+	Since        string
+	Limit        int
+	ID           string
+	WaitMS       int
+}
+
+// ConsoleEntry is one console line or page error.
+type ConsoleEntry struct {
+	ID        string `json:"id"`
+	TS        int64  `json:"ts"`
+	Level     string `json:"level"`
+	Text      string `json:"text"`
+	Source    string `json:"source"`
+	URL       string `json:"url,omitempty"`
+	Line      int    `json:"line,omitempty"`
+	Column    int    `json:"column,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+}
+
+// ConsoleResult is a console list/get/clear/wait result.
+type ConsoleResult struct {
+	Entries    []ConsoleEntry `json:"entries,omitempty"`
+	Entry      *ConsoleEntry  `json:"entry,omitempty"`
+	Count      int            `json:"count"`
+	Dropped    int            `json:"dropped"`
+	TotalBytes int            `json:"total_bytes"`
+	Cleared    int            `json:"cleared,omitempty"`
+	Matched    bool           `json:"matched"`
+	ElapsedMS  int64          `json:"elapsed_ms,omitempty"`
+}
+
+// Console returns console output captured in the page: console.* calls,
+// uncaught errors and unhandled rejections. wait blocks until a matching line
+// arrives or the budget runs out; an empty result is not an error.
+func (m *Manager) Console(ctx context.Context, tabID, client string, opts ConsoleOptions) (*ConsoleResult, error) {
+	if !validConsoleLevel(opts.Level) {
+		return nil, &Error{Code: CodeBadRequest, Message: "level must be log/info/warn/error/debug"}
+	}
+	if !validConsoleSource(opts.Source) {
+		return nil, &Error{Code: CodeBadRequest, Message: "source must be console/exception/rejection"}
+	}
+	t, done, err := m.begin(ctx, tabID, client, "console", false)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	if opts.Action == "" {
+		opts.Action = "list"
+	}
+	if opts.Action == "wait" {
+		return t.waitConsole(ctx, opts)
+	}
+	raw, err := t.invoke(ctx, "console", consoleArgs(opts.Action, opts))
+	if err != nil {
+		return nil, err
+	}
+	var res ConsoleResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, &Error{Code: CodeInternal, Message: "bad console result: " + err.Error()}
+	}
+	res.Matched = len(res.Entries) > 0 || res.Entry != nil
+	return &res, nil
+}
+
+func validConsoleLevel(level string) bool {
+	switch level {
+	case "", "log", "info", "warn", "error", "debug":
+		return true
+	}
+	return false
+}
+
+func validConsoleSource(source string) bool {
+	switch source {
+	case "", "console", "exception", "rejection":
+		return true
+	}
+	return false
+}
+
+func consoleArgs(action string, opts ConsoleOptions) map[string]any {
+	return map[string]any{
+		"action":        action,
+		"level":         opts.Level,
+		"text_contains": opts.TextContains,
+		"source":        opts.Source,
+		"since":         opts.Since,
+		"limit":         opts.Limit,
+		"id":            opts.ID,
+	}
+}
+
+func (t *Tab) waitConsole(ctx context.Context, opts ConsoleOptions) (*ConsoleResult, error) {
+	wait := time.Duration(opts.WaitMS) * time.Millisecond
+	if wait <= 0 {
+		wait = 5 * time.Second
+	}
+	if wait > 120*time.Second {
+		wait = 120 * time.Second
+	}
+	if opts.Limit <= 0 {
+		opts.Limit = 20
+	}
+	started := time.Now()
+	// Without a caller cursor, a line logged while the triggering action was
+	// running (last five seconds) counts as a hit. This keeps "click, then
+	// console wait" working even though the click already finished.
+	if opts.Since == "" {
+		page, err := t.consoleList(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		cutoff := started.UnixMilli() - 5000
+		var recent []ConsoleEntry
+		for _, e := range page.Entries {
+			if e.TS >= cutoff {
+				recent = append(recent, e)
+			}
+		}
+		if len(recent) > 0 {
+			page.Entries = recent
+			page.Matched = true
+			page.ElapsedMS = time.Since(started).Milliseconds()
+			return page, nil
+		}
+		if len(page.Entries) > 0 {
+			opts.Since = page.Entries[len(page.Entries)-1].ID
+		}
+	}
+	// The wait happens inside the page: one pending promise resolves as soon as
+	// a matching line is recorded, instead of Go polling eval every 100 ms.
+	args := consoleArgs("wait", opts)
+	args["timeout_ms"] = int(wait / time.Millisecond)
+	raw, err := t.invoke(ctx, "console", args)
+	if err != nil {
+		return nil, err
+	}
+	var page ConsoleResult
+	if err := json.Unmarshal(raw, &page); err != nil {
+		return nil, &Error{Code: CodeInternal, Message: "bad console result: " + err.Error()}
+	}
+	page.Matched = len(page.Entries) > 0
+	page.ElapsedMS = time.Since(started).Milliseconds()
+	return &page, nil
+}
+
+func (t *Tab) consoleList(ctx context.Context, opts ConsoleOptions) (*ConsoleResult, error) {
+	raw, err := t.invoke(ctx, "console", consoleArgs("list", ConsoleOptions{
+		Limit: opts.Limit, Level: opts.Level, TextContains: opts.TextContains, Source: opts.Source,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	var page ConsoleResult
+	if err := json.Unmarshal(raw, &page); err != nil {
+		return nil, &Error{Code: CodeInternal, Message: err.Error()}
+	}
+	return &page, nil
+}
+
 type WaitResult struct {
 	Matched   bool   `json:"matched"`
 	ElapsedMS int64  `json:"elapsed_ms"`

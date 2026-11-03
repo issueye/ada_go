@@ -91,6 +91,21 @@ var Tools = []ToolSpec{
 		},"additionalProperties":false}`),
 	},
 	{
+		Name: "console", Phase: "M2",
+		Description: "Read console output captured by the runtime: console.log/info/warn/error/debug plus uncaught errors and unhandled rejections. Use wait to block until a matching line appears.",
+		Schema: schema(`{"type":"object","properties":{
+			"action":{"type":"string","enum":["list","get","clear","wait"],"default":"list"},
+			"tab":{"type":"string"},
+			"level":{"type":"string","enum":["log","info","warn","error","debug"]},
+			"text_contains":{"type":"string"},
+			"source":{"type":"string","enum":["console","exception","rejection"]},
+			"since":{"type":"string"},
+			"limit":{"type":"integer","minimum":1,"maximum":200,"default":50},
+			"id":{"type":"string"},
+			"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"default":5000}
+		},"additionalProperties":false}`),
+	},
+	{
 		Name: "frames", Phase: "M2",
 		Description: "List direct iframes (same- or cross-origin), select one for page actions, or return to the main frame.",
 		Schema: schema(`{"type":"object","properties":{

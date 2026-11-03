@@ -8,7 +8,7 @@
 
   const RELAY_OPS = new Set([
     "snapshot", "read", "click", "type", "press", "select", "scroll",
-    "hover", "query", "info", "dialogs", "network", "upload",
+    "hover", "query", "info", "dialogs", "network", "console", "upload",
   ]);
 
   const state = {
@@ -25,6 +25,11 @@
     netEntries: [],
     netDropped: 0,
     netBytes: 0,
+    consoleSeq: 0,
+    consoleEntries: [],
+    consoleDropped: 0,
+    consoleBytes: 0,
+    consoleWaiters: new Set(),
     activeFrame: null,
     frameWindows: new Map(),
     framePongs: new Map(),
@@ -39,6 +44,13 @@
   const NET_MAX_RESPONSE = 128 * 1024;
   const NET_MAX_TOTAL = 4 * 1024 * 1024;
   const NET_SECRET = /(password|passwd|pwd|token|secret|authorization|cookie|session)/i;
+
+  // Console capture: one ring buffer per document. 500 lines / 512 KiB are
+  // plenty for debugging a page without letting a chatty page pin memory.
+  const CONSOLE_MAX_ENTRIES = 500;
+  const CONSOLE_MAX_TEXT = 8 * 1024;
+  const CONSOLE_MAX_TOTAL = 512 * 1024;
+  const CONSOLE_LEVELS = ["log", "info", "warn", "error", "debug"];
 
   const INTERACTIVE_ROLES = new Set([
     "button", "link", "textbox", "searchbox", "checkbox", "radio", "combobox",
@@ -353,6 +365,239 @@
         return origSend.apply(this, arguments);
       };
     }
+  }
+
+  // ---- console capture ---------------------------------------------------
+  //
+  // The runtime is injected at document start, before the page's own scripts,
+  // so wrapping console.* here sees every line the page logs from its first
+  // script on. Uncaught errors and unhandled rejections are recorded too: a
+  // broken SPA usually shows up there before the DOM changes.
+
+  function consoleValue(v, depth) {
+    depth = depth || 0;
+    try {
+      if (v === undefined) return "undefined";
+      if (v === null) return "null";
+      const t = typeof v;
+      if (t === "string") return v;
+      if (t === "number" || t === "boolean" || t === "bigint") return String(v);
+      if (t === "symbol") return String(v);
+      if (t === "function") return "[function " + (v.name || "anonymous") + "]";
+      if (v instanceof Error || (typeof v.message === "string" && typeof v.stack === "string")) {
+        return (v.name ? v.name + ": " : "") + String(v.message == null ? "" : v.message) +
+          (v.stack ? "\n" + v.stack : "");
+      }
+      if (v.nodeType === 1) {
+        const tag = String(v.tagName || "").toLowerCase();
+        const id = v.id ? "#" + v.id : "";
+        const cls = typeof v.className === "string" && v.className.trim()
+          ? "." + v.className.trim().split(/\s+/).slice(0, 2).join(".")
+          : "";
+        return "<" + tag + id + cls + ">";
+      }
+      if (v.nodeType === 3) return "#text " + sliceText(v.nodeValue || "", 200);
+      if (typeof v.toJSON === "function") {
+        const j = v.toJSON();
+        if (j !== v) return consoleValue(j, depth + 1);
+      }
+      const seen = new WeakSet();
+      const walk = (x, d) => {
+        if (x === null || typeof x !== "object") return x;
+        if (seen.has(x)) return "[circular]";
+        seen.add(x);
+        if (Array.isArray(x)) {
+          return d >= 3 ? "[array " + x.length + "]" : x.slice(0, 50).map((it) => walk(it, d + 1));
+        }
+        const out = {};
+        Object.keys(x).slice(0, 50).forEach((k) => {
+          out[k] = NET_SECRET.test(k) ? "***" : walk(x[k], d + 1);
+        });
+        return out;
+      };
+      const s = JSON.stringify(walk(v, depth));
+      return s === undefined ? String(v) : s;
+    } catch (e) {
+      return "[unprintable]";
+    }
+  }
+
+  function consoleRedact(s) {
+    return String(s == null ? "" : s).replace(
+      /((?:^|[?&\s])(?:password|passwd|pwd|token|access_token|refresh_token|secret|api_key|apikey|authorization|cookie|session)=)[^&\s]*/gi,
+      "$1***",
+    );
+  }
+
+  function consoleRecord(level, text, source, meta) {
+    const full = consoleRedact(typeof text === "string" ? text : consoleValue(text));
+    const entry = {
+      id: "c" + (++state.consoleSeq),
+      ts: Date.now(),
+      level: String(level || "log"),
+      text: sliceText(full, CONSOLE_MAX_TEXT),
+      source: source || "console",
+      url: (meta && meta.url) || location.href,
+      line: (meta && meta.line) || 0,
+      column: (meta && meta.column) || 0,
+      truncated: full.length > CONSOLE_MAX_TEXT,
+    };
+    state.consoleEntries.push(entry);
+    state.consoleBytes += entry.text.length;
+    while (state.consoleEntries.length > CONSOLE_MAX_ENTRIES || state.consoleBytes > CONSOLE_MAX_TOTAL) {
+      const old = state.consoleEntries.shift();
+      if (!old) break;
+      state.consoleBytes -= old.text.length;
+      state.consoleDropped++;
+    }
+    if (state.consoleWaiters.size > 0) {
+      // Copy: each waiter removes itself from the set when it resolves.
+      Array.from(state.consoleWaiters).forEach((w) => {
+        if (w.done || !consoleMatch(entry, w.args)) return;
+        w.done = true;
+        clearTimeout(w.timer);
+        state.consoleWaiters.delete(w);
+        w.resolve({
+          entries: [consoleSummary(entry)],
+          count: state.consoleEntries.length,
+          dropped: state.consoleDropped,
+          total_bytes: state.consoleBytes,
+          matched: true,
+          elapsed_ms: 0,
+        });
+      });
+    }
+  }
+
+  function consoleSummary(e) {
+    return {
+      id: e.id, ts: e.ts, level: e.level, text: e.text, source: e.source,
+      url: e.url || "", line: e.line || 0, column: e.column || 0,
+      truncated: !!e.truncated,
+    };
+  }
+
+  function consoleQuery(args) {
+    args = args || {};
+    const action = args.action || "list";
+    if (action === "clear") {
+      const n = state.consoleEntries.length;
+      state.consoleEntries = [];
+      state.consoleDropped = 0;
+      state.consoleBytes = 0;
+      return { cleared: n, entries: [], count: 0, dropped: 0, total_bytes: 0 };
+    }
+    if (action === "get") {
+      const id = String(args.id || "");
+      if (!id) throw err("bad_request", "id is required for console get");
+      const found = state.consoleEntries.find((e) => e.id === id);
+      if (!found) throw err("not_found", "no console entry " + id, "run console list to see the current buffer");
+      return {
+        entry: consoleSummary(found),
+        count: state.consoleEntries.length,
+        dropped: state.consoleDropped,
+        total_bytes: state.consoleBytes,
+      };
+    }
+    if (action !== "list" && action !== "wait") throw err("bad_request", "unknown console action: " + action);
+    if (action === "wait") return consoleWait(args);
+    const list = state.consoleEntries.filter((e) => consoleMatch(e, args)).slice(-limitOf(args));
+    return {
+      entries: list.map(consoleSummary),
+      count: state.consoleEntries.length,
+      dropped: state.consoleDropped,
+      total_bytes: state.consoleBytes,
+      matched: list.length > 0,
+    };
+  }
+
+  function limitOf(args) {
+    return Math.max(1, Math.min(200, Number(args.limit) || 50));
+  }
+
+  // consoleMatch 是 list 与 wait 共用的过滤：级别、来源、文本子串、游标。
+  function consoleMatch(e, args) {
+    if (args.level && e.level !== String(args.level).toLowerCase()) return false;
+    if (args.source && e.source !== String(args.source).toLowerCase()) return false;
+    if (args.text_contains && e.text.toLowerCase().indexOf(String(args.text_contains).toLowerCase()) < 0) {
+      return false;
+    }
+    if (args.since) {
+      const n = Number(String(args.since).replace(/^c/, "")) || 0;
+      if (Number(e.id.slice(1)) <= n) return false;
+    }
+    return true;
+  }
+
+  // consoleWait 在页面里等一条匹配的新日志：命中时由 consoleRecord 直接 resolve，
+  // 不再让 Go 侧每 100ms 发一次 eval（那会把整个动作队列占满）。
+  function consoleWait(args) {
+    const timeout = Math.max(100, Math.min(120000, Number(args.timeout_ms) || 5000));
+    const started = Date.now();
+    const pending = state.consoleEntries.filter((e) => consoleMatch(e, args)).slice(-limitOf(args));
+    if (pending.length > 0) {
+      return {
+        entries: pending.map(consoleSummary),
+        count: state.consoleEntries.length,
+        dropped: state.consoleDropped,
+        total_bytes: state.consoleBytes,
+        matched: true,
+        elapsed_ms: 0,
+      };
+    }
+    return new Promise((resolve) => {
+      const waiter = { args, done: false, resolve, timer: null };
+      waiter.timer = setTimeout(() => {
+        if (waiter.done) return;
+        waiter.done = true;
+        state.consoleWaiters.delete(waiter);
+        resolve({
+          entries: [],
+          count: state.consoleEntries.length,
+          dropped: state.consoleDropped,
+          total_bytes: state.consoleBytes,
+          matched: false,
+          elapsed_ms: Date.now() - started,
+        });
+      }, timeout);
+      state.consoleWaiters.add(waiter);
+    });
+  }
+
+  function installConsole() {
+    if (window.__buConsoleInstalled) return;
+    try {
+      Object.defineProperty(window, "__buConsoleInstalled", { value: true, configurable: true });
+    } catch (e) { window.__buConsoleInstalled = true; }
+    if (window.console) {
+      CONSOLE_LEVELS.forEach((level) => {
+        const orig = window.console[level];
+        const call = typeof orig === "function" ? orig.bind(window.console) : null;
+        try {
+          window.console[level] = function () {
+            try {
+              consoleRecord(level, Array.prototype.map.call(arguments, (a) => consoleValue(a)).join(" "), "console");
+            } catch (e) { /* never break the page because of logging */ }
+            if (call) return call.apply(null, arguments);
+          };
+        } catch (e) { /* frozen console */ }
+      });
+    }
+    window.addEventListener("error", (ev) => {
+      try {
+        const where = ev && ev.filename
+          ? " @ " + ev.filename + ":" + (ev.lineno || 0) + ":" + (ev.colno || 0)
+          : "";
+        consoleRecord("error", String((ev && ev.message) || "uncaught error") + where, "exception", {
+          line: (ev && ev.lineno) || 0, column: (ev && ev.colno) || 0,
+        });
+      } catch (e) { /* ignore */ }
+    }, true);
+    window.addEventListener("unhandledrejection", (ev) => {
+      try {
+        consoleRecord("error", consoleValue(ev && ev.reason), "rejection");
+      } catch (e) { /* ignore */ }
+    });
   }
 
   function roleOf(el) {
@@ -1393,6 +1638,7 @@
         case "setInputLock": return JSON.stringify({ ok: true, ...setInputLock(args.on) });
         case "dialogs": return JSON.stringify({ ok: true, dialogs: state.dialogs.slice() });
         case "network": return JSON.stringify({ ok: true, ...network(args) });
+        case "console": return JSON.stringify({ ok: true, ...(await consoleQuery(args)) });
         case "upload": return JSON.stringify({ ok: true, ...(await upload(args)) });
         default: throw err("bad_request", "unknown op: " + op);
       }
@@ -1406,6 +1652,7 @@
 
   installDialogs();
   installNetwork();
+  installConsole();
   installFrameRelay();
 
   Object.defineProperty(window, "__browserUse", {
@@ -1417,6 +1664,7 @@
       setInputLock,
       dialogs: () => state.dialogs.slice(),
       network: (args) => network(args || {}),
+      console: (args) => consoleQuery(args || {}),
       upload: (args) => upload(args || {}),
       frames: (args) => frames(args || {}),
     }),

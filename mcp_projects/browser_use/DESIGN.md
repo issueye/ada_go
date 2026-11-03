@@ -594,6 +594,7 @@ HTTP 映射：鉴权/参数错误用 4xx；工具执行失败用 200 + `ok=false
 | `files` | 上传/下载 | `action: upload/list`, `ref/selector`, `paths` | `files`、`downloads` | M2 |
 | `cookies` | Cookie | `action: list/set/clear`, `url`, `name`, `value`…… | `cookies` | M2 |
 | `dialogs` | 对话框策略 | `action: list/policy`, `confirm`, `prompt` | `dialogs`、`policy` | M2 |
+| `console` | 页面控制台 | `action: list/get/clear/wait`, `level`, `text_contains`, `source`, `since`, `limit`, `id`, `timeout_ms` | `entries[]`/`entry`、`count`、`dropped`、`matched` | M2 |
 | `events` | 事件长轮询 | `after`, `types`, `timeout_ms` | `events`、`next` | M2 |
 
 ### 7.4 核心工具 schema

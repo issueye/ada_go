@@ -6,8 +6,8 @@ and a moejs JavaScript/TypeScript script engine.
 
 **Status: M1 + M1.5** — tabs, snapshots with refs, click/type/press/select/
 scroll/hover/read/eval/navigate/wait, annotated screenshots, downloads,
-intercepted dialogs, audit log + activity panel, the agent mask with
-`Take over`, and `browser-use run flow.ts` on moejs.
+intercepted dialogs, console capture, audit log + activity panel, the agent
+mask with `Take over`, and `browser-use run flow.ts` on moejs.
 
 ![browser-use](docs/ui.png)
 
@@ -138,6 +138,37 @@ Example from the test site: `n16` is
 `POST /api/wit-hosp-schedule-service/scheduleStat/mySchedule`; its request body
 is `{"loginName":…,"startDate":"2026-11-01","endDate":"2026-11-30"}` and the
 response contains `summary` plus 19 shift days.
+
+## Console capture
+
+The same preload wraps `console.log/info/warn/error/debug` **before page
+scripts**, and records uncaught exceptions (`error` event) and unhandled
+promise rejections. `console list/get/clear/wait` read that buffer: every line
+keeps its id, timestamp, level, text, source (`console`/`exception`/
+`rejection`), document URL and source position.
+
+Buffers are per document: a full navigation starts empty, hash routes keep the
+log. Limits are 500 lines / 512 KiB total / 8 KiB per line (truncation is
+flagged). `token`, `secret`, `password`, `cookie` and `session` fields inside
+logged objects, plus `?token=`-style query strings, are redacted.
+
+`console wait` arms after the current last line, so it can be paired with a
+click to catch the error that click triggers. The wait lives in the page (one
+pending promise, no polling), so page timers, user clicks and other in-page
+events still log while it waits; the tab's action slot is busy for the
+duration, so trigger the action first and wait after it. A timeout is a normal
+empty result (`matched: false`), not an error.
+
+```sh
+.\bin\browser-use.exe cli console list --level error --limit 20
+.\bin\browser-use.exe cli console list --contains Uncaught --source exception
+.\bin\browser-use.exe cli console wait --contains /api/ --timeout 5000
+.\bin\browser-use.exe cli console get --id c12
+.\bin\browser-use.exe cli console clear
+```
+
+This is the *page* console; `console.log` inside a `script` is the script
+engine's own console and comes back in the script result's `console` array.
 
 ## Long calls (async API)
 
@@ -301,7 +332,7 @@ go build -o bin/browser-use.exe .
 - Native tabs: new, close, switch, background pages, popups from
   `target="_blank"` become tabs.
 - Tools: `status`, `tabs`, `navigate`, `snapshot`, `read`, `screenshot`,
-  `scroll`, `hover`, `eval`, `network`, `cookies`, `files`, `frames`,
+  `scroll`, `hover`, `eval`, `network`, `console`, `cookies`, `files`, `frames`,
   `downloads`, `dialogs`, `click`, `type`, `select`, `press`, `wait`,
   `control`, `script`.
 - Snapshot refs (`e12`), CSS/text/role locators, actionability checks,

@@ -84,11 +84,30 @@
 | `browser_eval` | exec | 在页面里执行 JS 表达式 |
 | `browser_script` | exec | 一段 JS/TS 异步函数体跑多步流程（一个调用代替十几次动作） |
 | `browser_network` | read | 查看 fetch/XHR 抓包（URL、状态、请求/响应体） |
+| `browser_console` | read | 页面控制台：console.log/info/warn/error/debug、未捕获异常、未处理的 Promise 拒绝 |
 | `browser_control` | write | 释放租约（收起遮罩）或查询控制状态 |
 | `browser_call` | write | 长尾工具透传：`cookies` / `files` / `frames` / `downloads` / `dialogs` |
 
 `browser_call` 故意只开放这五个工具：`eval` 与 `script` 必须走 `browser_eval` /
 `browser_script`，否则可以用 `write` 级的透传绕过 `exec` 级的审批。
+
+### 控制台（`browser_console`）
+
+页面运行时在 document start 注入，先于页面脚本包住 `console.log/info/warn/error/debug`，
+并监听 `error` 与 `unhandledrejection`——所以 SPA「点了没反应、数据没渲染」时，报错通常
+已经在缓冲里。每条记录带 id、时间、级别、正文、来源（`console` / `exception` /
+`rejection`）、文档 URL 与源码位置。
+
+- `list`（缺省）/ `get` / `clear` / `wait`；`level`、`text_contains`、`source`、`since`、
+  `limit` 过滤，`wait` 等到匹配行出现或等待上限（缺省 5s，最多 60s）。`wait` 在页面里
+  等（一个挂起 promise，不轮询），页面定时器/用户点击产生的日志照样会命中；等待期间该
+  标签页的动作槽被占用，所以先触发动作再 `wait`（5 秒内的日志直接命中）。
+- 缓冲按文档隔离：整页导航会清空，hash 路由保留；上限 500 条 / 512KB 总量 / 单条 8KB
+  （截断会标记）。
+- 日志对象里的 `token` / `secret` / `password` / `cookie` / `session` 字段与
+  `?token=` 这类查询串会脱敏。
+- 与 `browser_script` 回执里的「控制台」不同：那是脚本自身的 `console.log`，这里读的是
+  **网页自己**的控制台。`wait` 超时是正常空结果（`matched: false`），不是错误。
 
 ### 结果形状
 
@@ -98,7 +117,7 @@
 
 ## 审批与边界
 
-- `read` 工具（状态、快照、正文、截图、抓包）不受审批策略影响。
+- `read` 工具（状态、快照、正文、截图、抓包、控制台）不受审批策略影响。
 - `write` / `exec` 工具按 `policy-default` 的当前模式走：`ask` 每次确认、`auto` 自动放行写、
   `readonly` 全部拒绝。`parallelTools=1`，同一线程内浏览器动作是串行的。
 - 浏览器租约 120s 空闲自动释放；用户点 `Take over` 后写操作返回 `control_locked`，

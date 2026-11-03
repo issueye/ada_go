@@ -277,6 +277,30 @@ func Run(args []string) int {
 			"limit": *limit, "include_body": *includeBody, "max_body": *maxBody, "id": *id,
 			"timeout_ms": *timeout,
 		}
+	case "console":
+		name = "console"
+		action := "list"
+		if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
+			action = rest[0]
+			rest = rest[1:]
+		}
+		fs := flag.NewFlagSet("console", flag.ContinueOnError)
+		tab := fs.String("tab", "", "tab id")
+		level := fs.String("level", "", "log|info|warn|error|debug")
+		contains := fs.String("contains", "", "text substring")
+		source := fs.String("source", "", "console|exception|rejection")
+		since := fs.String("since", "", "only entries after this id")
+		limit := fs.Int("limit", 50, "max entries")
+		id := fs.String("id", "", "entry id for get")
+		timeout := fs.Int("timeout", 5000, "wait timeout in ms")
+		if err := fs.Parse(rest); err != nil {
+			return 2
+		}
+		params = map[string]any{
+			"action": action, "tab": *tab, "level": *level, "text_contains": *contains,
+			"source": *source, "since": *since, "limit": *limit, "id": *id,
+			"timeout_ms": *timeout,
+		}
 	case "frames":
 		name = "frames"
 		action := "list"

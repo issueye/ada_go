@@ -168,7 +168,7 @@ agent.on("tool.beforeCall", async (event, ctx) => {
 | 工具 + UI | `tools-ask` | TS + TSX | `ask_user` 工具，以及 `thread.tray` 的提问卡片（同一插件的前端段，数据来自线程交互投影） |
 | 工具 | `tools-skill` | TS | `skill_search`（正文由模型用 `read_file` 读取） |
 | 外部工具 | `mcp-client` | TS | 装配期发现 MCP server 的 `tools/list`，把每个工具注册成普通工具；HTTP/stdio transport，v2 见 [18](18-mcp-plugin.md) |
-| 外部工具 | `browser-use` | TS | 把 browser-use 桌面浏览器的回环 API（`runtime.json` + `POST /v1/call`，长任务走 `/v1/calls`）接成 13 个工具：启动/进程检测、状态、导航、标签页、快照、正文、交互、截图、eval、script、抓包、租约、长尾；默认以 HTTP 模式（`cli start`/`--serve`）按需启动，进程在但 API 无响应时不重复启动；随包技能 `browser-use` 教模型「先快照拿 ref 再动作」的黄金循环 |
+| 外部工具 | `browser-use` | TS | 把 browser-use 桌面浏览器的回环 API（`runtime.json` + `POST /v1/call`，长任务走 `/v1/calls`）接成 14 个工具：启动/进程检测、状态、导航、标签页、快照、正文、交互、截图、eval、script、抓包、控制台、租约、长尾；默认以 HTTP 模式（`cli start`/`--serve`）按需启动，进程在但 API 无响应时不重复启动；随包技能 `browser-use` 教模型「先快照拿 ref 再动作」的黄金循环 |
 | 工具 | `tools-subagent` | TS | `invoke_subagent`（v1.5） |
 | 策略 | `policy-default` | TS | `tool.beforeCall` + `ctx.ui`；readonly/ask/auto/full；角色 `tool-policy` |
 | 提示词 | `persona-coding` | TS | `registerPrompt`：编码助手人格与领域规则 |

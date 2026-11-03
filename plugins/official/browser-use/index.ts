@@ -1029,6 +1029,39 @@ function networkText(env) {
   return withMeta(lines, env);
 }
 
+function consoleText(env) {
+  const data = (env && env.data) || {};
+  const lines = [];
+  if (typeof data.cleared === "number") lines.push("已清空 " + data.cleared + " 条控制台记录。");
+  const entries = Array.isArray(data.entries) ? data.entries.slice() : [];
+  if (data.entry && typeof data.entry === "object") entries.unshift(data.entry);
+  if (entries.length === 0) {
+    if (typeof data.cleared !== "number") {
+      if (data.matched === false && typeof data.elapsed_ms === "number") {
+        lines.push("等待 " + data.elapsed_ms + "ms 没有新的匹配日志。");
+      } else {
+        lines.push("没有匹配的控制台输出（只记录运行时注入之后、当前文档里的日志；刷新会清空）。");
+      }
+    }
+  }
+  for (const item of entries) {
+    const source = trimStr(item.source);
+    const tag = source === "exception" ? "（页面异常）" : source === "rejection" ? "（未处理的 Promise）" : "";
+    const where = trimStr(item.url) && item.line
+      ? "  (" + trimStr(item.url) + ":" + item.line + (item.column ? ":" + item.column : "") + ")"
+      : "";
+    lines.push(
+      "[" + (trimStr(item.id) || "?") + "] " + (trimStr(item.level) || "log") + tag + " " +
+        clip(item.text, 4000) + where,
+    );
+    if (item.truncated) lines.push("  （这条日志已按 8KB 上限截断）");
+  }
+  if (typeof data.count === "number") {
+    lines.push("（缓冲共 " + data.count + " 条，丢弃 " + (data.dropped || 0) + " 条，合计 " + (data.total_bytes || 0) + " 字节）");
+  }
+  return withMeta(lines, env);
+}
+
 function screenshotText(env) {
   const data = (env && env.data) || {};
   const lines = ["截图已保存：" + (trimStr(data.path) || "（未知路径）")];
@@ -1697,6 +1730,73 @@ export default function register(agent) {
         details: {
           action,
           count: Array.isArray((env.data || {}).entries) ? (env.data || {}).entries.length : 0,
+        },
+      };
+    },
+  });
+
+  agent.registerTool({
+    name: "browser_console",
+    description:
+      "读取页面控制台：console.log/info/warn/error/debug、未捕获异常与未处理的 Promise 拒绝。页面点了没反应、数据没渲染、报错却看不见时先看这里。" +
+      "页面行为可疑时用 wait 等某条日志出现（例如点按钮后等 error）。只记录运行时注入之后、当前文档里的日志，整页刷新即清空；" +
+      "token/secret 等敏感字段会脱敏。",
+    access: "read",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["list", "get", "clear", "wait"], description: "缺省 list" },
+        tab: { type: "string", description: "标签页 id（缺省用活动标签页）" },
+        level: {
+          type: "string",
+          enum: ["log", "info", "warn", "error", "debug"],
+          description: "按级别过滤",
+        },
+        text_contains: { type: "string", description: "文本子串过滤" },
+        source: {
+          type: "string",
+          enum: ["console", "exception", "rejection"],
+          description: "按来源过滤：页面 console / 未捕获异常 / 未处理的 Promise",
+        },
+        since: { type: "string", description: "只看这条记录之后的（如 c12）" },
+        limit: { type: "integer", minimum: 1, maximum: 200, description: "最多返回条数，缺省 50" },
+        id: { type: "string", description: "action=get 时的记录 id" },
+        timeout_ms: {
+          type: "integer",
+          minimum: 100,
+          maximum: 110000,
+          description: "action=wait 的等待上限，缺省 5000",
+        },
+      },
+      required: [],
+    },
+    execute: async (args, ctx) => {
+      const action = oneOf(args.action, ["list", "get", "clear", "wait"], "list");
+      const params = { action, ...optionalTab(args) };
+      const level = oneOf(args.level, ["log", "info", "warn", "error", "debug"], "");
+      if (level) params.level = level;
+      const contains = trimStr(args.text_contains);
+      if (contains) params.text_contains = contains;
+      const source = oneOf(args.source, ["console", "exception", "rejection"], "");
+      if (source) params.source = source;
+      const since = trimStr(args.since);
+      if (since) params.since = since;
+      if (args.limit != null) params.limit = intIn(args.limit, 1, 200, 50);
+      const id = trimStr(args.id);
+      if (id) params.id = id;
+      if (action === "wait") {
+        params.timeout_ms = args.timeout_ms != null
+          ? intIn(args.timeout_ms, 100, 60000, 5000)
+          : 5000;
+      }
+      const env = await rpc(ctx, "console", params, callTimeout(args));
+      const data = (env && env.data) || {};
+      return {
+        content: [{ type: "text", text: consoleText(env) }],
+        details: {
+          action,
+          count: Array.isArray(data.entries) ? data.entries.length : 0,
+          matched: !!data.matched,
         },
       };
     },
