@@ -27,11 +27,11 @@
 | workspace | `workspace.updatePolicy` | 资源上限、循环检测、模型等运行参数（审批等策略设置由插件自己管理） |
 | thread | `thread.create` | 创建线程 |
 | thread | `thread.list` | 列表（分页、归档过滤） |
-| thread | `thread.get` | 快照（items 窗口 + 运行状态） |
-| thread | `thread.entries` | 历史分页（游标） |
+| thread | `thread.get` | 快照（当前 head 路径的 items 窗口 + 运行状态） |
+| thread | `thread.entries` | 历史分页（游标；只返回当前 head 路径） |
 | thread | `thread.rename` | 重命名 |
 | thread | `thread.archive` | 归档/恢复 |
-| thread | `thread.branch` | 从某 entry 分支 |
+| thread | `thread.branch` | 从某 entry 分支（空 `entryId` 清空 head，从根重发时用） |
 | thread | `thread.delete` | 删除（软删 + 清理任务） |
 | turn | `turn.start` | 开始一轮（幂等键防重复提交） |
 | turn | `turn.cancel` | 取消当前轮 |

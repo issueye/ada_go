@@ -386,7 +386,9 @@ func (s *Server) handleThreadGet(ctx context.Context, raw json.RawMessage) (any,
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	page, err := s.sess.EntriesBefore(ctx, p.ThreadID, 0, int64(limit))
+	// 只读当前 head 路径：分支（编辑并重发）之后，被舍弃的兄弟分支不能再出现在
+	// 界面与模型上下文里（04 §5.7）。seq 仍用于分页游标。
+	page, err := s.sess.Store().EntriesOnPath(ctx, p.ThreadID, th.HeadEntryID, 0, int64(limit))
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -415,7 +417,16 @@ func (s *Server) handleThreadEntries(ctx context.Context, raw json.RawMessage) (
 	if err != nil {
 		return nil, invalid("thread.entries: " + err.Error())
 	}
-	page, err := s.sess.EntriesBefore(ctx, p.ThreadID, fromSeq, p.Limit)
+	th, err := s.sess.GetThread(ctx, p.ThreadID)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	// 历史分页同样只走 head 路径；游标是路径上更早一条 entry 的 seq。
+	limit := p.Limit
+	if limit <= 0 {
+		limit = 100 // 与 EntriesBefore 的缺省窗口保持一致
+	}
+	page, err := s.sess.Store().EntriesOnPath(ctx, p.ThreadID, th.HeadEntryID, fromSeq, limit)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -483,8 +494,8 @@ func (s *Server) handleThreadBranch(ctx context.Context, raw json.RawMessage) (a
 	if err := decode(raw, &p); err != nil {
 		return nil, invalid("thread.branch: " + err.Error())
 	}
-	if p.ThreadID == "" || p.EntryID == "" {
-		return nil, invalid("thread.branch: 需要 threadId 与 entryId")
+	if p.ThreadID == "" {
+		return nil, invalid("thread.branch: 需要 threadId")
 	}
 	if len([]rune(p.Title)) > 200 {
 		return nil, invalid("thread.branch: title 不能超过 200 字符")
@@ -492,12 +503,23 @@ func (s *Server) handleThreadBranch(ctx context.Context, raw json.RawMessage) (a
 	if _, err := s.sess.GetThread(ctx, p.ThreadID); err != nil {
 		return nil, rpcError(err)
 	}
-	entry, err := s.sess.Store().GetEntry(ctx, p.EntryID)
-	if err != nil {
-		return nil, rpcError(err)
+	// 运行中移动 head 会让正在落库的轮次读到另一条路径，直接拒绝。
+	s.mu.Lock()
+	busy := s.runs[p.ThreadID] != nil && s.runs[p.ThreadID].status == "running"
+	s.mu.Unlock()
+	if busy {
+		return nil, rpcError(domain.NewError(domain.CodeThreadBusy, "线程已有运行中轮次"))
 	}
-	if entry.ThreadID != p.ThreadID {
-		return nil, invalid("thread.branch: entry 不属于该线程")
+	// entryId 为空表示清空 head（从根分支）：编辑重发首条消息时需要。
+	// MoveHead 的端口语义已支持空串（04 §5.7：只改指针，不改写历史）。
+	if p.EntryID != "" {
+		entry, err := s.sess.Store().GetEntry(ctx, p.EntryID)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		if entry.ThreadID != p.ThreadID {
+			return nil, invalid("thread.branch: entry 不属于该线程")
+		}
 	}
 	if p.Title != "" {
 		if err := s.sess.Store().RenameThread(ctx, p.ThreadID, p.Title); err != nil {
@@ -1830,7 +1852,10 @@ func decodeSeqCursor(s string) (int64, error) {
 	if err != nil {
 		return 0, errors.New("游标无法解码")
 	}
-	n, err := strconv.ParseInt(string(raw), 10, 64)
+	// 与 sqlite 的 encodeSeqCursor 对齐：历史游标是 "seq:<n>"，
+	// 同时容忍早期/手工输入的纯十进制。
+	text := strings.TrimPrefix(string(raw), "seq:")
+	n, err := strconv.ParseInt(text, 10, 64)
 	if err != nil || n <= 0 {
 		return 0, errors.New("游标形状非法")
 	}

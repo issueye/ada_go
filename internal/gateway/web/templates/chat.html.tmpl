@@ -199,7 +199,27 @@
 
 {{define "row"}}
 {{if eq .Kind "user"}}
-<div class="ada-msg ada-msg--user" data-item-key="{{.Key}}"><div class="ada-bubble">{{template "parts_user" .}}</div></div>
+<div class="ada-msg ada-msg--user" data-item-key="{{.Key}}">
+  <div class="ada-msg__group">
+    <div class="ada-bubble">{{template "parts_user" .}}</div>
+    {{if .CanEdit}}
+    <details class="ada-msg__edit" data-msg-edit>
+      <summary class="ada-msg__edit-trigger">编辑并重发</summary>
+      <form class="ada-msg__edit-form" method="post" action="/threads/{{.ThreadID}}/resend">
+        {{template "csrf" .}}
+        <input type="hidden" name="entryId" value="{{.Key}}">
+        <input type="hidden" name="idempotencyKey" value="{{.EditKey}}">
+        <textarea class="ada-input ada-msg__edit-text" name="text" rows="3" maxlength="65536" required aria-label="编辑消息">{{.EditText}}</textarea>
+        <p class="ada-msg__edit-hint">重新发送后，这条消息及其之后的所有对话会被舍弃；旧分支仍保留在存储里，不删除。原消息的图片会保留。</p>
+        <div class="ada-msg__edit-actions">
+          <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/threads/{{.ThreadID}}">取消</a>
+          <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit">重新发送</button>
+        </div>
+      </form>
+    </details>
+    {{end}}
+  </div>
+</div>
 {{else if eq .Kind "assistant"}}
 <div class="ada-msg ada-msg--assistant" data-item-key="{{.Key}}"><span class="ada-avatar" title="助手">{{icon "i-bot" 14}}</span><div class="ada-msg__body markdown-body ada-markdown">{{template "parts_assistant" .}}</div></div>
 {{else if eq .Kind "tool"}}

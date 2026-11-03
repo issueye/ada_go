@@ -98,10 +98,15 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 	}
 
 	transcript := buildTranscript(page.Entries)
+	entriesUsable := len(transcript) > 0
 	if len(transcript) == 0 {
 		transcript = transcriptFromItems(get.Items)
 	}
 	transcript = append(transcript, noticesFromItems(get.Items)...)
+	if entriesUsable {
+		// 回退路径的 item key 不保证是 entry id，不能拿来做编辑重发的目标。
+		s.prepareTranscriptEdits(r, transcript, id, get.Run.Status)
+	}
 	run := buildRun(get.Run)
 	threads, _ := s.listThreads(r, 50)
 	title := strings.TrimSpace(get.Thread.Title)
@@ -169,10 +174,14 @@ func (s *Server) handleTranscriptJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	transcript := buildTranscript(page.Entries)
+	entriesUsable := len(transcript) > 0
 	if len(transcript) == 0 {
 		transcript = transcriptFromItems(get.Items)
 	}
 	transcript = append(transcript, noticesFromItems(get.Items)...)
+	if entriesUsable {
+		s.prepareTranscriptEdits(r, transcript, id, get.Run.Status)
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(s.transcriptPayload(r, id, get.Run.Status, transcript, newBlockBudget()))
@@ -233,6 +242,37 @@ func (s *Server) transcriptPayload(r *http.Request, threadID, runStatus string, 
 		})
 	}
 	return transcriptPayload{ThreadID: threadID, RunStatus: runStatus, Rows: rows}
+}
+
+// prepareTranscriptEdits 给用户消息补上“编辑并重发”的内联表单上下文。
+// 只有当前 head 路径上的 user 行（Key 是 entry id）才会出现表单；运行中禁用，
+// 避免用户改写正在落库的历史。
+func (s *Server) prepareTranscriptEdits(r *http.Request, items []transcriptItem, threadID, runStatus string) {
+	editable := editableRunStatus(runStatus)
+	token := s.csrf(r)
+	for i := range items {
+		if items[i].Kind != "user" || items[i].Key == "" {
+			continue
+		}
+		var b strings.Builder
+		for _, p := range items[i].Parts {
+			if p.Type != "text" || strings.TrimSpace(p.Text) == "" {
+				continue
+			}
+			if b.Len() > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(p.Text)
+		}
+		text := b.String()
+		items[i].ThreadID = threadID
+		items[i].CSRF = token
+		items[i].EditText = text
+		items[i].CanEdit = editable && strings.TrimSpace(text) != ""
+		if items[i].CanEdit {
+			items[i].EditKey = newIdempotencyKey()
+		}
+	}
 }
 
 // handleSlotPartial 只返回一个插槽的宿主容器，供运行中动态刷新。
@@ -833,6 +873,139 @@ func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirect(w, threadPath(id))
+}
+
+// handleTurnResend 编辑并重发一条用户消息：把 head 移到该消息的父节点（舍弃它
+// 之后的整条分支），再用新文本开始一轮。entry 只读、不改写；旧分支保留在存储里
+// 但不再出现在当前 head 路径上（04 §5.7「编辑并重发」）。
+func (s *Server) handleTurnResend(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		s.renderError(w, r, http.StatusNotFound, "没有找到这个会话",
+			"链接里缺少会话 id。请从会话列表重新打开一个会话。", "", "/", "返回会话列表")
+		return
+	}
+
+	images, form, err := s.parseTurnForm(w, r)
+	if err != nil {
+		s.renderError(w, r, http.StatusBadRequest, "无法读取表单或图片",
+			"请求体无效：可能超过大小上限（文本 1MB，图片单张 8MB、最多 4 张）。请返回后重试。",
+			err.Error(), threadPath(id), "返回会话")
+		return
+	}
+	entryID := strings.TrimSpace(form.Get("entryId"))
+	text := strings.TrimSpace(form.Get("text"))
+	if entryID == "" {
+		redirect(w, flashRedirect(threadPath(id), "error", "缺少要编辑的消息，请刷新页面后重试"))
+		return
+	}
+	if text == "" && len(images) == 0 {
+		redirect(w, flashRedirect(threadPath(id), "error", "消息不能为空"))
+		return
+	}
+
+	// 运行中丢弃历史会和正在落库的增量打架：先中止，再编辑。
+	rawGet, err := s.call(r, "thread.get", map[string]any{"threadId": id, "itemLimit": 100})
+	if err != nil {
+		s.renderCoreError(w, r, err, threadPath(id))
+		return
+	}
+	var get threadGetResult
+	if err := json.Unmarshal(rawGet, &get); err != nil {
+		s.renderError(w, r, http.StatusBadGateway, "无法解析会话",
+			"Core 返回了无法识别的会话数据。请重试；若持续出现，请检查 Core 日志。",
+			err.Error(), threadPath(id), "重试")
+		return
+	}
+	if !editableRunStatus(get.Run.Status) {
+		redirect(w, flashRedirect(threadPath(id), "error", "当前轮次尚未结束（运行中或等待答复），请先中止再编辑重发"))
+		return
+	}
+
+	// 目标消息必须落在当前 head 路径上；thread.entries 已按路径过滤。
+	rawEntries, err := s.call(r, "thread.entries", map[string]any{"threadId": id, "limit": 500})
+	if err != nil {
+		s.renderCoreError(w, r, err, threadPath(id))
+		return
+	}
+	var page entryPage
+	if err := json.Unmarshal(rawEntries, &page); err != nil {
+		s.renderError(w, r, http.StatusBadGateway, "无法解析会话历史",
+			"Core 返回了无法识别的历史数据。请重试；若持续出现，请检查 Core 日志。",
+			err.Error(), threadPath(id), "重试")
+		return
+	}
+	var target *entryDTO
+	for i := range page.Entries {
+		if page.Entries[i].ID == entryID {
+			target = &page.Entries[i]
+			break
+		}
+	}
+	if target == nil {
+		redirect(w, flashRedirect(threadPath(id), "error", "找不到这条消息；它可能已不在当前对话分支上"))
+		return
+	}
+	var payload messagePayload
+	_ = json.Unmarshal(target.Payload, &payload)
+	role := target.Role
+	if role == "" {
+		role = payload.Role
+	}
+	if target.Kind != "message" || role != "user" {
+		redirect(w, flashRedirect(threadPath(id), "error", "只能编辑并重发用户消息"))
+		return
+	}
+
+	// 编辑框只改文字：没有重新附加图片时沿用原消息里的图片，避免编辑文字时丢附件。
+	if len(images) == 0 {
+		for _, p := range payload.Parts {
+			if p.Type == "image" && p.Mime != "" && p.Data != "" {
+				images = append(images, map[string]any{"type": "image", "mime": p.Mime, "data": p.Data})
+			}
+		}
+	}
+
+	oldHead := get.Thread.HeadEntryID
+	// entryId 为空表示目标是首条消息，清空 head 后从根重新开始。
+	if _, err := s.call(r, "thread.branch", map[string]any{
+		"threadId": id, "entryId": target.ParentID,
+	}); err != nil {
+		s.renderCoreError(w, r, err, threadPath(id))
+		return
+	}
+
+	// 每个编辑表单带独立幂等键：双击提交时 turn.start 是幂等的，
+	// 不会在分支后又起第二条轮次。
+	key := strings.TrimSpace(form.Get("idempotencyKey"))
+	if len(key) < 8 || len(key) > 64 {
+		key = newIdempotencyKey()
+	}
+	startParams := map[string]any{
+		"threadId":       id,
+		"idempotencyKey": key,
+		"text":           text,
+	}
+	if len(images) > 0 {
+		startParams["images"] = images
+	}
+	if _, err := s.call(r, "turn.start", startParams); err != nil {
+		// 起轮失败时把 head 拨回原分支，别把会话停在半截。
+		_, _ = s.call(r, "thread.branch", map[string]any{"threadId": id, "entryId": oldHead})
+		s.renderCoreError(w, r, err, threadPath(id))
+		return
+	}
+	redirect(w, flashRedirect(threadPath(id), "notice", "已重新发送；这条消息之后的内容已舍弃"))
+}
+
+// editableRunStatus 报告当前轮次状态是否允许改写历史：只有空闲/已终态可以。
+func editableRunStatus(status string) bool {
+	switch status {
+	case "", "terminal":
+		return true
+	default:
+		return false
+	}
 }
 
 // parseTurnForm 解析发送表单：multipart（带图片）与 urlencoded（纯文本）双形态。

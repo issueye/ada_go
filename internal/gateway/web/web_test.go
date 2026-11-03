@@ -291,6 +291,45 @@ const entriesAscending = `{
   "hasMore": false
 }`
 
+const threadGetIdle = `{
+  "thread": {"id":"th_1","workspace":"/tmp/ws","title":"测试会话","headEntryId":"e3","createdAt":"2026-10-28T09:00:00Z","updatedAt":"2026-10-28T10:00:00Z","archived":false},
+  "items": [],
+  "seq": 3,
+  "run": {"runId":"run_1","status":"terminal","terminal":"completed","startedAt":"2026-10-28T10:00:00Z","endedAt":"2026-10-28T10:00:05Z"},
+  "interactions": [],
+  "hasMore": false
+}`
+
+// entriesResend 是 head 路径上的两问两答：e3 带图，便于验证编辑重发沿用附件。
+const entriesResend = `{
+  "entries": [
+    {
+      "id":"e1","threadId":"th_1","seq":1,"kind":"message","role":"user",
+      "payload":{"role":"user","parts":[{"type":"text","text":"第一问"}]},
+      "createdAt":"2026-10-28T10:00:01Z"
+    },
+    {
+      "id":"e2","threadId":"th_1","seq":2,"kind":"message","role":"assistant",
+      "payload":{"role":"assistant","parts":[{"type":"text","text":"第一答"}]},
+      "createdAt":"2026-10-28T10:00:02Z"
+    },
+    {
+      "id":"e3","threadId":"th_1","parentId":"e2","seq":3,"kind":"message","role":"user",
+      "payload":{"role":"user","parts":[
+        {"type":"image","mime":"image/png","data":"aW1n"},
+        {"type":"text","text":"第二问"}
+      ]},
+      "createdAt":"2026-10-28T10:00:03Z"
+    },
+    {
+      "id":"e4","threadId":"th_1","parentId":"e3","seq":4,"kind":"message","role":"assistant",
+      "payload":{"role":"assistant","parts":[{"type":"text","text":"第二答"}]},
+      "createdAt":"2026-10-28T10:00:04Z"
+    }
+  ],
+  "hasMore": false
+}`
+
 // ---- 用例 ----
 
 func TestHomeRendersThreadList(t *testing.T) {
@@ -818,6 +857,153 @@ func TestTurnStartGeneratesKeyAndRejectsEmptyText(t *testing.T) {
 }
 
 // 运行中发送不再撞 thread_busy 整页报错，而是排进 steering 队列。
+// 编辑重发：head 移到目标消息的父节点，再 turn.start；旧分支保留但不显示。
+func TestTurnResendBranchesToParentAndStartsTurn(t *testing.T) {
+	core := newFakeCore().
+		on("thread.get", threadGetIdle).
+		on("thread.entries", entriesResend).
+		on("thread.branch", `{"thread":{"id":"th_1"}}`).
+		on("turn.start", `{"runId":"run_2","duplicate":false,"seq":5}`)
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "POST", "/threads/th_1/resend", url.Values{
+		"entryId":        {"e3"},
+		"text":           {"改写后的第二问"},
+		"idempotencyKey": {"edit-key-0001"},
+	})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("resend = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); !strings.Contains(loc, "notice=") {
+		t.Fatalf("Location = %q，期望带成功提示", loc)
+	}
+	branch, ok := core.lastCall("thread.branch")
+	if !ok || branch.Params["entryId"] != "e2" {
+		t.Fatalf("thread.branch = %+v，期望 entryId=e2（目标消息的父节点）", branch)
+	}
+	start, ok := core.lastCall("turn.start")
+	if !ok || start.Params["text"] != "改写后的第二问" || start.Params["threadId"] != "th_1" {
+		t.Fatalf("turn.start = %+v", start)
+	}
+	// 编辑框只改文字：原消息里的图片必须沿用，不能因为重发丢附件。
+	images, _ := start.Params["images"].([]map[string]any)
+	if len(images) != 1 || images[0]["mime"] != "image/png" {
+		t.Fatalf("turn.start images = %#v，期望沿用原消息的图片", start.Params["images"])
+	}
+	if key, _ := start.Params["idempotencyKey"].(string); key != "edit-key-0001" {
+		t.Fatalf("idempotencyKey = %q，期望沿用表单里的幂等键", key)
+	}
+}
+
+// 首条消息没有父节点：编辑重发必须用空 entryId 清空 head，而不是伪造父节点。
+func TestTurnResendFromRootClearsHead(t *testing.T) {
+	core := newFakeCore().
+		on("thread.get", threadGetIdle).
+		on("thread.entries", entriesResend).
+		on("thread.branch", `{"thread":{"id":"th_1"}}`).
+		on("turn.start", `{"runId":"run_3","duplicate":false,"seq":5}`)
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "POST", "/threads/th_1/resend", url.Values{
+		"entryId": {"e1"},
+		"text":    {"改写后的第一问"},
+	})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("resend root = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	branch, ok := core.lastCall("thread.branch")
+	if !ok {
+		t.Fatal("没有调用 thread.branch")
+	}
+	if v, exists := branch.Params["entryId"]; !exists || v != "" {
+		t.Fatalf("thread.branch entryId = %#v, exists=%v，期望空串（清空 head）", v, exists)
+	}
+	if start, _ := core.lastCall("turn.start"); start.Params["text"] != "改写后的第一问" {
+		t.Fatalf("turn.start = %+v", start)
+	}
+}
+
+// 运行中/非用户消息不能改写历史；前者提示先中止，后者明确只能编辑用户消息。
+func TestTurnResendRejectsUnsafeTargets(t *testing.T) {
+	running := newFakeCore().
+		on("thread.get", threadGetRunning).
+		on("thread.entries", entriesResend)
+	srv, _ := newServer(t, running)
+	rec := serve(t, srv, "POST", "/threads/th_1/resend", url.Values{
+		"entryId": {"e3"}, "text": {"不该生效"},
+	})
+	if rec.Code != http.StatusSeeOther || !strings.Contains(rec.Header().Get("Location"), "error=") {
+		t.Fatalf("运行中 resend = %d / %q", rec.Code, rec.Header().Get("Location"))
+	}
+	if running.countCalls("thread.branch") != 0 || running.countCalls("turn.start") != 0 {
+		t.Fatal("运行中不能调用 thread.branch / turn.start")
+	}
+
+	assistant := newFakeCore().
+		on("thread.get", threadGetIdle).
+		on("thread.entries", entriesResend)
+	srv2, _ := newServer(t, assistant)
+	rec = serve(t, srv2, "POST", "/threads/th_1/resend", url.Values{
+		"entryId": {"e2"}, "text": {"改助手消息"},
+	})
+	if rec.Code != http.StatusSeeOther || !strings.Contains(rec.Header().Get("Location"), "error=") {
+		t.Fatalf("助手消息 resend = %d / %q", rec.Code, rec.Header().Get("Location"))
+	}
+	if assistant.countCalls("thread.branch") != 0 || assistant.countCalls("turn.start") != 0 {
+		t.Fatal("非用户消息不能触发分支或起轮")
+	}
+}
+
+// 起轮失败时把 head 拨回原分支，避免会话停在半截。
+func TestTurnResendRestoresHeadWhenStartFails(t *testing.T) {
+	core := newFakeCore().
+		on("thread.get", threadGetIdle).
+		on("thread.entries", entriesResend).
+		on("thread.branch", `{"thread":{"id":"th_1"}}`).
+		fail("turn.start", errors.New("thread_busy"))
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "POST", "/threads/th_1/resend", url.Values{
+		"entryId": {"e3"}, "text": {"改写"},
+	})
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("起轮失败应返回 502，得到 %d（body=%s）", rec.Code, rec.Body.String())
+	}
+	if core.countCalls("thread.branch") != 2 {
+		t.Fatalf("thread.branch 调用 %d 次，期望 2（分支 + 回滚）", core.countCalls("thread.branch"))
+	}
+	last, _ := core.lastCall("thread.branch")
+	if last.Params["entryId"] != "e3" {
+		t.Fatalf("回滚 branch = %+v，期望回到原 head e3", last)
+	}
+}
+
+// 空闲页的用户消息渲染“编辑并重发”内联表单；运行中不渲染（避免改写落库中的历史）。
+func TestThreadPageRendersEditResendForm(t *testing.T) {
+	idle := newFakeCore().
+		on("thread.get", threadGetIdle).
+		on("thread.entries", entriesResend)
+	srv, _ := newServer(t, idle)
+	body := serve(t, srv, "GET", "/threads/th_1", nil).Body.String()
+
+	for _, want := range []string{
+		`action="/threads/th_1/resend"`,
+		`name="entryId" value="e3"`,
+		`name="idempotencyKey" value="`,
+		`name="csrf_token" value="csrf-token"`,
+		">第二问</textarea>",
+		"这条消息及其之后的所有对话会被舍弃",
+	} {
+		wantContains(t, body, want)
+	}
+
+	running := newFakeCore().
+		on("thread.get", threadGetRunning).
+		on("thread.entries", entriesResend)
+	srv2, _ := newServer(t, running)
+	wantNotContains(t, serve(t, srv2, "GET", "/threads/th_1", nil).Body.String(), "/resend")
+}
+
 func TestTurnSendSteersWhileRunning(t *testing.T) {
 	core := newFakeCore().
 		on("turn.get", `{"run":{"runId":"run_1","status":"running","startedAt":"2026-10-28T10:00:00Z"},"queueLength":0}`).

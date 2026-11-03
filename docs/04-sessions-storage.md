@@ -91,7 +91,7 @@ CREATE TABLE audit (
 
 - 线程 id 为 `th_<workspaceHash>_<ulid>`，entry id 为 ULID；Gateway 可由线程 id 前缀定位工作区。
 - entry 通过 `parent_id` 形成 DAG；线程只有 `head_entry_id` 一个指针。
-- “编辑并重发”追加一个同级的新用户 entry，并把 head 移到新分支；旧分支不删除。
+- “编辑并重发”追加一个同级的新用户 entry，并把 head 移到新分支；旧分支不删除。目标是首条消息时把 head 清空（`thread.branch` 的空 `entryId`），再从根追加；`thread.get`/`thread.entries` 只返回当前 head 路径，被舍弃的分支不进入界面与模型上下文。
 - 恢复会话：从 head 回溯到最近 `compaction` entry，放入摘要，再从 `first_kept_entry_id` 重放。
 - entry 一旦写入不可修改；分支切换只改指针，保证审计与回放。
 

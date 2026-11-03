@@ -1094,6 +1094,71 @@ select:focus {
   margin-bottom: 0;
 }
 
+/* 用户消息的“编辑并重发”：气泡下方一个轻量折叠表单。
+   无 JS 时 <details> 原生展开/收起；轮次未结束时服务端不渲染这段。 */
+.ada-msg__group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  width: 100%;
+  max-width: 680px;
+  min-width: 0;
+}
+.ada-msg__group .ada-bubble {
+  max-width: 100%;
+}
+.ada-msg__edit {
+  width: 100%;
+  text-align: right;
+}
+.ada-msg__edit-trigger {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 0;
+  color: var(--ph-muted);
+  font-size: var(--ada-text-xs);
+  line-height: 1.4;
+  cursor: pointer;
+  list-style: none;
+}
+.ada-msg__edit-trigger::-webkit-details-marker {
+  display: none;
+}
+.ada-msg__edit-trigger:hover,
+.ada-msg__edit[open] .ada-msg__edit-trigger {
+  color: var(--ph-ink);
+}
+.ada-msg__edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 2px;
+  padding: 10px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-surface);
+  text-align: left;
+}
+.ada-msg__edit-text {
+  width: 100%;
+  min-height: 84px;
+  resize: vertical;
+  font: inherit;
+  line-height: 1.6;
+}
+.ada-msg__edit-hint {
+  margin: 0;
+  color: var(--ph-muted);
+  font-size: var(--ada-text-xs);
+  line-height: 1.5;
+}
+.ada-msg__edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* ── 页面宽度：模板不再写内联 style（CSP style-src 'self' 会拦掉） ────── */
 .ada-wrap--page {
   max-width: 1040px;

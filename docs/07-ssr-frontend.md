@@ -352,6 +352,7 @@ Go 组件库按 a_da 的组件清单实现，名字与输出对齐：
 - **状态颜色**：运行中用 warn（顶栏徽标）或品牌色（左侧呼吸条）；等待批准用 warn；待答复用 brand；失败/停止用 danger。完成态不加绿标；颜色不是唯一信号，同时有文字或图标。
 - **布局稳定**：审批/排队托盘位于 transcript 与 Composer 之间，出现时不覆盖输入框；提问卡浮在托盘区顶部，不占布局；浮层出现/消失不顶动对话流。
 - **Composer**：Enter 发送、Shift+Enter 换行、IME 组合输入中不发送；空内容禁用发送；运行中允许继续输入，提交后按 `turn.steer` 排队并在当前步骤后送达（内容为空时不发）；图片 PNG/JPEG/WebP/GIF，单张 ≤8MB、最多 4 张。
+- **编辑并重发**：空闲会话里，用户消息气泡下方提供“编辑并重发”折叠入口（原生 `<details>`）；轮次未结束（运行中/等待答复）时不渲染，需先中止或作答。提交后 head 移到该消息的父节点（首条则清空 head），其后的当前分支被舍弃，旧分支只留在存储里；编辑框只改文字，原消息的图片自动沿用。
 - **工具卡**：执行中的耗时是活的（服务端 `startedAt` + 客户端每秒续走）；长输出只有一层折叠（10 行预览 + “展开全部”），展开后 420px 内滚；JSON 走等宽原文，其余按 Markdown。
 - **回到最新**：离开底部时出现底部中央胶囊；点击回到底部并恢复自动跟随；与 `composer.above` 插件卡分开，互不遮挡。
 - **通信**：`flash` 横幅 error 9s、其它 6s，可手动关闭；失败 Notice 带“重试这一轮”真实表单；离线保留外壳并显示“未连接/重新连接”，不显示假统计。
@@ -375,6 +376,7 @@ Todo 卡片是插件的前端段，不是基座组件：`plugins/official/tools-
 | 路由 | 页面 | 数据来源 |
 |---|---|---|
 | `GET /`、`GET /threads`、`GET /threads/{id}` | 对话页 / 会话页（持久化行可用 AdaUI keyed patch；流式仍走 SSE + live-stream） | `thread.list`、`thread.get`、`thread.entries` |
+| `POST /threads/{id}/send`、`POST /threads/{id}/resend` | 发送 / 编辑并重发。`resend` 把 head 移到目标用户消息的父节点（首条则清空 head），再用新文本 `turn.start`；该消息之后的当前分支被舍弃，旧分支只留在存储里 | `turn.start`、`turn.steer`、`thread.branch` |
 | `GET /overview`、`GET /partials/dashboard.json` | 概览（统计卡、最近会话、插件卡片；AdaUI 岛每 5 秒轮询 JSON） | `thread.list`、`plugin.list`、`dashboard.widgets` 插槽 |
 | `GET /workspaces` | 工作区选择（AdaUI 岛 + SSR 回退；目录浏览限制在当前工作区子树内） | Gateway 配置 + `os.ReadDir` |
 | `GET /extensions` | 插件列表（AdaUI 岛 + SSR 回退；全部随包/已安装插件合并成一张表，不分区；产品未声明的随包插件显示为「未启用 / unused」，不误报 failed） | `PluginLister`、`plugin.list`、`extensions.list` 插槽 |
@@ -399,7 +401,7 @@ Todo 卡片是插件的前端段，不是基座组件：`plugins/official/tools-
 
 ### 7.8 渐进增强与可访问性
 
-- 没有 JS：发消息、响应交互、重载插件、切换线程全部是原生表单 + 303；运行中页面用 `<meta http-equiv="refresh" content="2">` 轮询，完成后停止。`<ada-select>` 在无 JS 时展示 `<noscript>` 原生 select（交互回答、分步表单、模型选择都可提交）。
+- 没有 JS：发消息、响应交互、重载插件、切换线程全部是原生表单 + 303；用户消息下方的“编辑并重发”用原生 `<details>` + 表单，同样可用；运行中页面用 `<meta http-equiv="refresh" content="2">` 轮询，完成后停止。`<ada-select>` 在无 JS 时展示 `<noscript>` 原生 select（交互回答、分步表单、模型选择都可提交）。
 - 有 JS：表单拦截为 `fetch`，SSE 增量更新；提交后不整页刷新。运行中发送转成 `turn.steer` 排队，不再以 `thread_busy` 整页报错。
 - 语义结构：`<main>`、`<nav>`、`<form>`、`<button>`；消息列表 `aria-live="polite"`，流式期间不逐 token 播报，只在完成时播报。
 - 键盘：Tab 顺序自然；交互托盘打开时聚焦安全选项（确认框默认“拒绝”），Esc 关闭；`Ctrl/Cmd+K` 聚焦会话搜索，`Esc` 清空搜索。

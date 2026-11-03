@@ -592,6 +592,101 @@ func TestThreadLifecycleMethods(t *testing.T) {
 	}
 }
 
+// TestThreadBranchResendHidesDiscardedPath 钉“编辑并重发”的 DAG 语义：
+// head 移到目标消息的父节点后，旧分支仍保留在存储里，但 thread.get/thread.entries
+// 只返回新 head 路径；从根重发（空 entryId）后再起一轮只看到新消息。
+func TestThreadBranchResendHidesDiscardedPath(t *testing.T) {
+	sess := newSession(t, nil)
+	url, _ := startServer(t, sess, "")
+	c := dial(t, url, "")
+
+	threadID := createThread(t, c, "resend")
+	runTurn(t, c, threadID, "resend-0001", "first question")
+	runTurn(t, c, threadID, "resend-0002", "second question")
+
+	type entry struct {
+		ID       string `json:"id"`
+		ParentID string `json:"parentId"`
+		Seq      int64  `json:"seq"`
+		Role     string `json:"role"`
+	}
+	var page struct {
+		Entries []entry `json:"entries"`
+	}
+	readEntries := func(params map[string]any) []entry {
+		t.Helper()
+		raw := c.call(t, "thread.entries", params)
+		var out struct {
+			Entries []entry `json:"entries"`
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("thread.entries = %s (%v)", raw, err)
+		}
+		return out.Entries
+	}
+
+	page.Entries = readEntries(map[string]any{"threadId": threadID})
+	if len(page.Entries) != 4 {
+		t.Fatalf("初始路径应有 4 条 entry，得到 %d（%+v）", len(page.Entries), page.Entries)
+	}
+	firstUser := page.Entries[0]
+	if firstUser.Role != "user" || firstUser.ParentID != "" {
+		t.Fatalf("首条 entry = %+v，期望无父节点的 user 消息", firstUser)
+	}
+
+	// 等价于“编辑首条并重发”：清空 head，再从根追加新消息。
+	raw := c.call(t, "thread.branch", map[string]any{"threadId": threadID})
+	var got threadResult
+	if err := json.Unmarshal(raw, &got); err != nil || got.Thread.HeadEntryID != "" {
+		t.Fatalf("thread.branch(清空 head) = %s (%v)", raw, err)
+	}
+	if got := readEntries(map[string]any{"threadId": threadID}); len(got) != 0 {
+		t.Fatalf("清空 head 后不应再返回旧分支，得到 %d 条：%+v", len(got), got)
+	}
+
+	runTurn(t, c, threadID, "resend-0003", "edited question")
+
+	// 当前路径只剩新的一问一答；旧分支不出现在 thread.entries / thread.get。
+	path := readEntries(map[string]any{"threadId": threadID})
+	if len(path) != 2 {
+		t.Fatalf("重发后的路径 = %d 条，期望 2：%+v", len(path), path)
+	}
+	for _, e := range path {
+		if e.ID == firstUser.ID {
+			t.Fatalf("被舍弃的旧首条仍在路径上：%+v", path)
+		}
+	}
+	var get struct {
+		Items []struct {
+			Key string `json:"key"`
+		} `json:"items"`
+	}
+	raw = c.call(t, "thread.get", map[string]any{"threadId": threadID, "itemLimit": 100})
+	if err := json.Unmarshal(raw, &get); err != nil || len(get.Items) != 2 {
+		t.Fatalf("thread.get 重发后 = %s (%v)，期望 2 条", raw, err)
+	}
+
+	// 分页游标仍沿 head 路径回翻，不把旧分支混进来。
+	latest := readEntries(map[string]any{"threadId": threadID, "limit": 1})
+	if len(latest) != 1 || latest[0].ID != path[1].ID {
+		t.Fatalf("limit=1 = %+v，期望最新一条 %s", latest, path[1].ID)
+	}
+	var pageOut struct {
+		Entries    []entry `json:"entries"`
+		NextCursor string  `json:"nextCursor"`
+	}
+	raw = c.call(t, "thread.entries", map[string]any{"threadId": threadID, "limit": 1})
+	if err := json.Unmarshal(raw, &pageOut); err != nil || pageOut.NextCursor == "" {
+		t.Fatalf("thread.entries(limit=1) = %s (%v)", raw, err)
+	}
+	older := readEntries(map[string]any{
+		"threadId": threadID, "limit": 1, "cursor": pageOut.NextCursor,
+	})
+	if len(older) != 1 || older[0].ID != path[0].ID {
+		t.Fatalf("游标回翻 = %+v，期望 %s", older, path[0].ID)
+	}
+}
+
 func containsThread(threads []struct {
 	ID       string `json:"id"`
 	Archived bool   `json:"archived"`

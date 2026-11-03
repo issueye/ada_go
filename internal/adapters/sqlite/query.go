@@ -275,18 +275,41 @@ ORDER BY seq DESC LIMIT ?`, threadID, fromSeq, limit)
 	return page, nil
 }
 
-// EntriesOnPath 是 EntriesBefore 的 DAG 正确版：只回翻 head→root 这条路径上的 entry。
-// 分支存在时（04 §5.7「编辑并重发」）它才不会出现「把兄弟分支混进历史」的问题。
-func (r *Reader) EntriesOnPath(ctx context.Context, threadID, entryID string, limit int64) (ports.EntriesPage, error) {
-	path, err := r.pathFrom(ctx, threadID, entryID)
+// EntriesOnPath 只回翻 head→root 这条路径上的 entry（04 §5.7 的 DAG 语义）。
+// 分支存在时（「编辑并重发」）它不会把被舍弃的兄弟分支混进历史。
+//
+// fromSeq>0 时只取 seq 不超过它的路径 entry（线程历史分页游标）；limit<=0 表示
+// 取整条路径。返回按 seq 升序的窗口与可继续回翻的游标。
+func (r *Reader) EntriesOnPath(ctx context.Context, threadID, headEntryID string, fromSeq, limit int64) (ports.EntriesPage, error) {
+	path, err := r.pathFrom(ctx, threadID, headEntryID)
 	if err != nil {
 		return ports.EntriesPage{}, err
+	}
+	if fromSeq > 0 {
+		filtered := make([]ports.Entry, 0, len(path))
+		for _, e := range path {
+			if e.Seq <= fromSeq {
+				filtered = append(filtered, e)
+			}
+		}
+		path = filtered
 	}
 	if limit <= 0 || limit > int64(len(path)) {
 		limit = int64(len(path))
 	}
-	window := path[len(path)-int(limit):]
-	return ports.EntriesPage{Items: window}, nil
+	start := len(path) - int(limit)
+	window := path[start:]
+	page := ports.EntriesPage{Items: window}
+	if start > 0 && len(window) > 0 {
+		next := window[0].Seq - 1
+		if next > 0 {
+			page.NextCursor = encodeSeqCursor(next)
+		}
+	}
+	if page.Items == nil {
+		page.Items = []ports.Entry{}
+	}
+	return page, nil
 }
 
 func encodeSeqCursor(seq int64) string {

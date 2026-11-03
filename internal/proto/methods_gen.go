@@ -67,7 +67,7 @@ const (
 	MethodThreadEntries         = "thread.entries"         // 历史分页（游标）；截断内容的完整来源
 	MethodThreadRename          = "thread.rename"          // 重命名线程
 	MethodThreadArchive         = "thread.archive"         // 归档/恢复线程
-	MethodThreadBranch          = "thread.branch"          // 从某 entry 分支（移动 head 指针，不改写历史）
+	MethodThreadBranch          = "thread.branch"          // 从某 entry 分支（移动 head 指针，不改写历史；空 entryId 表示清空 head）
 	MethodThreadDelete          = "thread.delete"          // 删除线程（软删 + 清理任务）
 	MethodTurnStart             = "turn.start"             // 开始一轮（幂等键防重复提交；抢线程写锁，busy 返回 thread_busy）
 	MethodTurnCancel            = "turn.cancel"            // 取消当前轮（贯穿模型/工具/脚本/命令进程树与等待中的交互）
@@ -159,7 +159,7 @@ var Methods = []MethodMeta{
 	{Name: "thread.entries", Group: "thread", Summary: "历史分页（游标）；截断内容的完整来源", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "thread.rename", Group: "thread", Summary: "重命名线程", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "thread.archive", Group: "thread", Summary: "归档/恢复线程", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
-	{Name: "thread.branch", Group: "thread", Summary: "从某 entry 分支（移动 head 指针，不改写历史）", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
+	{Name: "thread.branch", Group: "thread", Summary: "从某 entry 分支（移动 head 指针，不改写历史；空 entryId 表示清空 head）", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "thread.delete", Group: "thread", Summary: "删除线程（软删 + 清理任务）", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "turn.start", Group: "turn", Summary: "开始一轮（幂等键防重复提交；抢线程写锁，busy 返回 thread_busy）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "turn.cancel", Group: "turn", Summary: "取消当前轮（贯穿模型/工具/脚本/命令进程树与等待中的交互）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},

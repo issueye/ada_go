@@ -321,6 +321,14 @@ type transcriptItem struct {
 	Tool  *toolView
 	Level string
 	Text  string
+	// 以下字段只给 user 行：内联“编辑并重发”表单的上下文。
+	// EditText 是原文（只含文本段，图片由服务端沿用），CanEdit 由轮次状态决定；
+	// EditKey 是每个表单独立的幂等键，防止双击重复起轮。
+	EditText string
+	EditKey  string
+	ThreadID string
+	CSRF     string
+	CanEdit  bool
 }
 
 // transcriptPartState 是助手消息的一段：text 段带 VNode 数据（由 ui-markdown

@@ -203,6 +203,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /partials/slot/{name}", s.handleSlotPartial)
 	mux.HandleFunc("GET /threads/{id}", s.handleThread)
 	mux.HandleFunc("POST /threads/{id}/send", s.handleTurn)
+	mux.HandleFunc("POST /threads/{id}/resend", s.handleTurnResend)
 	mux.HandleFunc("POST /threads/{id}/abort", s.handleCancel)
 	mux.HandleFunc("POST /threads/{id}/delete", s.handleThreadDelete)
 	mux.HandleFunc("POST /threads/{id}/interaction/{requestId}", s.handleInteraction)

@@ -815,7 +815,7 @@
     {
       "name": "thread.branch",
       "group": "thread",
-      "summary": "从某 entry 分支（移动 head 指针，不改写历史）",
+      "summary": "从某 entry 分支（移动 head 指针，不改写历史；空 entryId 表示清空 head）",
       "direction": "gateway->core",
       "since": "1.0",
       "idempotent": false,
@@ -825,10 +825,10 @@
         "additionalProperties": false,
         "properties": {
           "threadId": { "type": "string" },
-          "entryId": { "type": "string", "description": "分支基点 entry（ULID）；旧分支不删除" },
+          "entryId": { "type": "string", "description": "分支基点 entry（ULID）；空串表示清空 head（从根开始）；旧分支不删除" },
           "title": { "type": "string", "maxLength": 200, "description": "缺省沿用原标题" }
         },
-        "required": ["threadId", "entryId"]
+        "required": ["threadId"]
       },
       "result": {
         "type": "object",
