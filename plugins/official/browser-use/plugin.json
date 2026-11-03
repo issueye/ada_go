@@ -1,0 +1,23 @@
+{
+  "id": "browser-use",
+  "name": "browser-use 浏览器",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "把 browser-use 桌面浏览器接入为工具：标签页、语义快照与 ref 点击输入、多步脚本、接口抓包、截图、租约控制",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts",
+    "capabilities": ["fs.read", "net.fetch", "exec"],
+    "env": [
+      "BROWSER_USE_EXE",
+      "BROWSER_USE_APP_NAME",
+      "BROWSER_USE_START",
+      "BROWSER_USE_PORT",
+      "APPDATA",
+      "LOCALAPPDATA",
+      "USERPROFILE",
+      "HOME",
+      "XDG_CONFIG_HOME"
+    ]
+  }
+}
