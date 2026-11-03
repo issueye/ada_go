@@ -1,11 +1,11 @@
 package host
 
-// 后台命令：ctx.execBackground / ctx.checkTask / ctx.killTask 的宿主实现。
+// 后台命令：ctx.execBackground / ctx.checkTask / ctx.waitTask / ctx.killTask 的宿主实现。
 //
 // 语义（12 §6.13、02 §5.4）：
 //   - 后台任务与同步 execFile 走同一份命令边界：无 shell、程序策略、cwd scope、
 //     env 白名单、输出截断、进程树取消；
-//   - 任务在轮次结束后继续跑，用 taskId 轮询/终止；插件 Runtime 关闭时全部杀掉；
+//   - 任务在轮次结束后继续跑，用 taskId 轮询/等待/终止；插件 Runtime 关闭时全部杀掉；
 //   - 生命周期有上限（MaxBackgroundTimeout），超时杀整棵进程树；
 //   - 每个 Runtime 的任务数有上限，已结束任务在下次启动时回收。
 
@@ -30,6 +30,11 @@ const (
 	// bgCheckOutputBytes 是 checkTask 单路输出返回上限：工具回执最终还会按
 	// 50KB/2000 行截断，这里先取尾部 64KB，避免把 4MB 缓冲塞进一次 RPC。
 	bgCheckOutputBytes = 64 << 10
+
+	// DefaultWaitTaskTimeout / MaxWaitTaskTimeout 是 waitTask 单次等待的缺省值与上限。
+	// 上限低于工具默认预算（120s），给取消与回执留出余量。
+	DefaultWaitTaskTimeout = 30 * time.Second
+	MaxWaitTaskTimeout     = 60 * time.Second
 )
 
 // backgroundTask 是一个已启动的后台命令。
@@ -47,6 +52,8 @@ type backgroundTask struct {
 	stdout    *capWriter
 	stderr    *capWriter
 	cancel    context.CancelFunc
+	// doneCh 在任务进入终态时关闭，供 waitTask 阻塞等待（不要在锁外 close）。
+	doneCh chan struct{}
 }
 
 // startBackground 启动一条后台命令。调用方负责已经通过 parseExecRequestWithTimeout
@@ -115,6 +122,7 @@ func (e *execState) startBackground(req *execRequest, maxTasks int) (*background
 		stdout:    stdout,
 		stderr:    stderr,
 		cancel:    req.cancelFn,
+		doneCh:    make(chan struct{}),
 	}
 
 	e.mu.Lock()
@@ -166,6 +174,9 @@ func (t *backgroundTask) finish(ctx context.Context, waitErr error) {
 		}
 	default:
 		t.status = bgExited
+	}
+	if t.doneCh != nil {
+		close(t.doneCh)
 	}
 }
 
@@ -242,6 +253,40 @@ func (e *execState) checkBackground(id int) (map[string]any, bool) {
 		return nil, false
 	}
 	return task.view(), true
+}
+
+// waitBackground 阻塞到任务进入终态、等待预算耗尽或调用被取消。
+//
+// found=false 表示任务不存在；timedOut=true 表示预算先到（任务可能仍在 running）；
+// err 只会在 ctx 被取消时返回，调用方据此把回执标成取消/超时。
+func (e *execState) waitBackground(ctx context.Context, id int, timeout time.Duration) (view map[string]any, found, timedOut bool, err error) {
+	e.mu.Lock()
+	task, ok := e.bg[id]
+	e.mu.Unlock()
+	if !ok {
+		return nil, false, false, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if timeout < 0 {
+		timeout = 0
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case <-task.doneCh:
+		return task.view(), true, false, nil
+	case <-timer.C:
+		// 预算与任务结束同时就绪时以终态为准，避免报「仍在运行」。
+		if task.done() {
+			return task.view(), true, false, nil
+		}
+		return task.view(), true, true, nil
+	case <-ctx.Done():
+		return task.view(), true, false, ctx.Err()
+	}
 }
 
 // killBackground 终止任务；found 表示任务存在，killed 表示本次确实从 running 终止。

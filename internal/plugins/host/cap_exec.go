@@ -554,7 +554,7 @@ func truthyJS(v moejs.Value) (bool, bool) {
 	return true, true // 对象/数组：真值
 }
 
-// addExecContextMember 给 ToolContext 补 exec / 后台任务三件套
+// addExecContextMember 给 ToolContext 补 exec / 后台任务四件套
 // （05 §6.3；能力位 exec，仅 verified/builtin）。
 func addExecContextMember(st *capsState, hc Context, put func(string, moejs.Value) error) error {
 	ex := st.ex
@@ -617,7 +617,7 @@ func addExecContextMember(st *capsState, hc Context, put func(string, moejs.Valu
 	}
 
 	// 后台任务：与 ctx.exec 共用同一条命令边界；任务生命周期独立于当前轮次，
-	// 由 checkTask/killTask 管理，插件 Runtime 关闭时统一杀掉。
+	// 由 checkTask/waitTask/killTask 管理，插件 Runtime 关闭时统一杀掉。
 	if err := put("execBackground", st.rt.Function("execBackground", 3, func(r *engine.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
 		req, err := st.parseExecRequestWithTimeout(st.rt, args, st.limits.MaxBackgroundTimeout)
 		if err != nil {
@@ -654,6 +654,47 @@ func addExecContextMember(st *capsState, hc Context, put func(string, moejs.Valu
 			return moejs.Undefined(), throwCoded(r, codeOutOfRange, fmt.Sprintf("ctx.checkTask(%d): 没有这个后台任务", id), nil)
 		}
 		return st.rt.FromGo(view)
+	})); err != nil {
+		return err
+	}
+	// waitTask 是 checkTask 的阻塞版本：等到终态或等待预算耗尽再返回，
+	// 让工具层一次调用拿到结果，而不是让模型反复轮询。
+	if err := put("waitTask", st.rt.Function("waitTask", 2, func(r *engine.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+		id, ok := jsInt(moejs.Arg(args, 0))
+		if !ok || id <= 0 {
+			return moejs.Undefined(), throwCoded(r, codeInvalidArgType, "ctx.waitTask(taskId, timeoutMs): taskId 必须是正整数", nil)
+		}
+		timeout := DefaultWaitTaskTimeout
+		if v := moejs.Arg(args, 1); !v.IsUndefined() && !v.IsNull() {
+			n, ok := jsInt(v)
+			if !ok || n <= 0 {
+				return moejs.Undefined(), throwCoded(r, codeInvalidArgType, "ctx.waitTask(taskId, timeoutMs): timeoutMs 必须是正整数", nil)
+			}
+			timeout = time.Duration(n) * time.Millisecond
+			if timeout > MaxWaitTaskTimeout {
+				timeout = MaxWaitTaskTimeout
+			}
+		}
+		ctx := st.signalOf()
+		promise, settle := st.loop.NewPromise()
+		go func() {
+			started := time.Now()
+			view, found, timedOut, werr := ex.waitBackground(ctx, int(id), timeout)
+			waited := time.Since(started).Milliseconds()
+			settle(func(rt *mojsRuntime) (moejs.Value, error) {
+				if werr != nil {
+					return moejs.Undefined(), throwCoded(rt.Realm(), codeAbort, "ctx.waitTask: 已取消", nil)
+				}
+				if !found {
+					return moejs.Undefined(), throwCoded(rt.Realm(), codeOutOfRange,
+						fmt.Sprintf("ctx.waitTask(%d): 没有这个后台任务", id), nil)
+				}
+				view["timedOut"] = timedOut
+				view["waitedMs"] = waited
+				return rt.FromGo(view)
+			})
+		}()
+		return promise, nil
 	})); err != nil {
 		return err
 	}

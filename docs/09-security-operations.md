@@ -60,7 +60,7 @@
 | Core | 每线程 1 个运行轮、无步数/工具调用次数上限、上下文水位、循环检测；墙钟与 token 上限默认关闭 |
 | Gateway | 请求体 1MB（插件动作 64KB）、单线程 64 个 SSE、每工作区 8 个 Core |
 | 命令 | 默认 120s，输出截断 50KB/2000 行，可配置上限 |
-| 后台命令 | 每 Runtime 最多 8 个、生命周期 30m、单路输出 4MB；`check_task` 单路返回尾部 64KB |
+| 后台命令 | 每 Runtime 最多 8 个、生命周期 30m、单路输出 4MB；`check_task` 单路返回尾部 64KB，`wait_task` 单次等待上限 60s |
 | 长驻进程 | `process` 能力，仅 builtin/verified；每 Runtime 最多 8 个、生命周期 30m、单路缓冲 4MB；关闭/重载杀整棵进程树 |
 | 数据库 | WAL、`busy_timeout` 5s、单写者协程 + 工作区锁、CLI 只读连接、在线备份 |
 

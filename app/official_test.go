@@ -192,21 +192,21 @@ func TestToolsShellBackground(t *testing.T) {
 	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
 	asm := assemble(t, testProduct(t, "tools-shell", "policy-default"), hc, nil)
 
-	for _, name := range []string{"run_command", "run_background", "check_task", "kill_task"} {
+	for _, name := range []string{"run_command", "run_background", "check_task", "wait_task", "kill_task"} {
 		if _, ok := asm.Tools.Lookup(context.Background(), name); !ok {
 			t.Fatalf("缺少工具 %s，现有 %v", name, toolNames(asm))
 		}
 	}
-	// check_task 必须是 repeatable 的只读轮询；run_background 必须是 exec，走策略询问。
+	// check_task/wait_task 必须是 repeatable 的只读控制；run_background 必须是 exec，走策略询问。
 	for _, inst := range asm.Plugins {
 		if inst.ID() != "tools-shell" {
 			continue
 		}
 		for _, td := range inst.Contribution().Tools {
 			switch td.Name {
-			case "check_task":
+			case "check_task", "wait_task":
 				if !td.Repeatable || td.Access != string(domain.AccessRead) {
-					t.Fatalf("check_task = access %q repeatable %v，期望 read/true", td.Access, td.Repeatable)
+					t.Fatalf("%s = access %q repeatable %v，期望 read/true", td.Name, td.Access, td.Repeatable)
 				}
 			case "run_background":
 				if td.Access != string(domain.AccessExec) {
@@ -239,13 +239,28 @@ func TestToolsShellBackground(t *testing.T) {
 		t.Fatalf("check_task status = %v，期望 running（details=%#v）", got, st.Details)
 	}
 
+	// wait_task 在任务未结束时应阻塞到等待预算耗尽，而不是立即返回 running。
+	waitedText, waited := callTool(t, asm, hc, "wait_task", map[string]any{
+		"taskId": taskID, "timeoutMs": 150,
+	})
+	if waited.Details["timedOut"] != true || waited.Details["status"] != "running" {
+		t.Fatalf("wait_task 超时回执 = %q / %#v", waitedText, waited.Details)
+	}
+	if !strings.Contains(waitedText, "仍在运行") {
+		t.Fatalf("wait_task 超时文本缺少提示: %q", waitedText)
+	}
+
 	_, killed := callTool(t, asm, hc, "kill_task", map[string]any{"taskId": taskID})
 	if killed.Details["found"] != true || killed.Details["killed"] != true {
 		t.Fatalf("kill_task details = %#v", killed.Details)
 	}
-	waitTaskStatus(t, asm, hc, taskID, "killed")
+	// 任务进入终态后，wait_task 应立即返回 killed 而不是再等满预算。
+	killedFinal := waitTaskStatus(t, asm, hc, taskID, "killed", 5000)
+	if killedFinal.Details["timedOut"] != false {
+		t.Fatalf("任务结束后 wait_task timedOut = %#v", killedFinal.Details["timedOut"])
+	}
 
-	// 快任务：自然结束，check_task 应给出 exited 与 stdout。
+	// 快任务：自然结束，wait_task 应返回 exited 与 stdout。
 	cmdName, argv = "cmd.exe", []string{"/c", "echo", "bg-done"}
 	if runtime.GOOS != "windows" {
 		cmdName, argv = "/bin/sh", []string{"-c", "echo bg-done"}
@@ -257,7 +272,7 @@ func TestToolsShellBackground(t *testing.T) {
 	if !ok || quickID <= 0 {
 		t.Fatalf("quick taskId = %#v", quick.Details["taskId"])
 	}
-	final := waitTaskStatus(t, asm, hc, int(quickID), "exited")
+	final := waitTaskStatus(t, asm, hc, int(quickID), "exited", 10000)
 	if code, _ := final.Details["code"].(float64); code != 0 {
 		t.Fatalf("quick task code = %v，details=%#v", final.Details["code"], final.Details)
 	}
@@ -269,22 +284,21 @@ func TestToolsShellBackground(t *testing.T) {
 	if _, err := callToolErr(t, asm, hc, "check_task", map[string]any{"taskId": 999999}); err == nil {
 		t.Fatal("check_task 对未知 taskId 应报错")
 	}
+	if _, err := callToolErr(t, asm, hc, "wait_task", map[string]any{"taskId": 999999}); err == nil {
+		t.Fatal("wait_task 对未知 taskId 应报错")
+	}
 }
 
-// waitTaskStatus 轮询 check_task 直到状态命中，超时失败。
-func waitTaskStatus(t *testing.T, asm *app.Assembly, hc host.Context, taskID int, want string) domain.Result {
+// waitTaskStatus 用 wait_task 等任务进入期望状态（超时失败）。
+func waitTaskStatus(t *testing.T, asm *app.Assembly, hc host.Context, taskID int, want string, timeoutMs int) domain.Result {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		_, st := callTool(t, asm, hc, "check_task", map[string]any{"taskId": taskID})
-		if st.Details["status"] == want {
-			return st
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("任务 %d 状态未到 %q，最后为 %#v", taskID, want, st.Details)
-		}
-		time.Sleep(50 * time.Millisecond)
+	_, st := callTool(t, asm, hc, "wait_task", map[string]any{
+		"taskId": taskID, "timeoutMs": timeoutMs,
+	})
+	if st.Details["status"] != want {
+		t.Fatalf("任务 %d 状态未到 %q，最后为 %#v", taskID, want, st.Details)
 	}
+	return st
 }
 
 // TestPolicyDefaultModes 钉 policy-default 的四种模式与两条失败关闭。

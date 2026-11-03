@@ -4,8 +4,8 @@
 // cwd 只能在工作区内、env 只注入清单白名单、超时与 maxBuffer 由宿主兜底；
 // 本插件只负责「把模型给的结构化参数翻译成一次受控调用，并把输出整理成可读文本」。
 //
-// 后台任务走同一套宿主边界：run_background 启动，check_task 轮询，kill_task 终止。
-// 任务在轮次结束后继续存在，插件 Runtime 关闭时宿主统一杀掉。
+// 后台任务走同一套宿主边界：run_background 启动，wait_task 等待结束/check_task 看快照，
+// kill_task 终止。任务在轮次结束后继续存在，插件 Runtime 关闭时宿主统一杀掉。
 //
 // 类型形状与 agent:api 一致，本地声明避免官方插件依赖 sdk 的类型包。
 
@@ -41,6 +41,11 @@ interface KillResult {
   killed: boolean;
 }
 
+interface WaitStatus extends TaskStatus {
+  timedOut: boolean;
+  waitedMs: number;
+}
+
 interface ToolContext {
   exec?: (cmd: string, args: string[], opts?: { cwd?: string; timeoutMs?: number }) => Promise<ExecResult>;
   execBackground?: (
@@ -49,6 +54,7 @@ interface ToolContext {
     opts?: { cwd?: string; timeoutMs?: number },
   ) => Promise<BackgroundStart>;
   checkTask?: (taskId: number) => TaskStatus;
+  waitTask?: (taskId: number, timeoutMs?: number) => Promise<WaitStatus>;
   killTask?: (taskId: number) => KillResult;
   log: (level: string, msg: string, fields?: object) => void;
 }
@@ -58,6 +64,7 @@ interface ToolDef {
   description: string;
   parameters: object;
   access: "read" | "write" | "exec" | "network";
+  timeoutMs?: number;
   repeatable?: boolean;
   execute: (args: any, ctx: ToolContext) => unknown;
 }
@@ -71,6 +78,9 @@ const MAX_LINES = 2000;
 const MAX_TIMEOUT_MS = 600000;
 // 与宿主 Limits.MaxBackgroundTimeout 一致：后台任务最长 30 分钟。
 const MAX_BACKGROUND_TIMEOUT_MS = 30 * 60 * 1000;
+// wait_task 单次等待：缺省 30s，上限 60s（低于工具默认预算，给取消留余量）。
+const DEFAULT_WAIT_MS = 30 * 1000;
+const MAX_WAIT_MS = 60 * 1000;
 
 // 宿主平台（win32/darwin/linux）：命令是直接 execFile 的，没有 shell；
 // Windows 自带的 find/grep/ls 与 Unix 语义不同，需要提前告诉模型。
@@ -126,12 +136,13 @@ function requireExec(ctx: ToolContext) {
 }
 
 function requireBackground(ctx: ToolContext) {
-  if (!ctx.execBackground || !ctx.checkTask || !ctx.killTask) {
+  if (!ctx.execBackground || !ctx.checkTask || !ctx.waitTask || !ctx.killTask) {
     fail("ERR_ACCESS_DENIED", "tools-shell 的后台任务需要能力 exec（清单 backend.capabilities 未声明？）");
   }
   return {
     start: ctx.execBackground!,
     check: ctx.checkTask!,
+    wait: ctx.waitTask!,
     kill: ctx.killTask!,
   };
 }
@@ -263,9 +274,9 @@ export default function (agent: AgentAPI): void {
   agent.registerTool({
     name: "run_background",
     description:
-      "启动一条后台命令并立即返回 taskId；用 check_task 轮询输出/状态，用 kill_task 终止。" +
-      "适用长任务（构建、测试、监听服务等）。命令与参数必须分开传，不经过 shell；" +
-      "cwd 只能在工作区内；后台任务最长 30 分钟，超时由宿主杀整棵进程树。",
+      "启动一条后台命令并立即返回 taskId；启动后用 wait_task 等待结束（推荐，一次调用拿到最终结果），" +
+      "check_task 只看即时快照，kill_task 终止。适用长任务（构建、测试、监听服务等）。" +
+      "命令与参数必须分开传，不经过 shell；cwd 只能在工作区内；后台任务最长 30 分钟，超时由宿主杀整棵进程树。",
     access: "exec",
     parameters: {
       type: "object",
@@ -308,7 +319,7 @@ export default function (agent: AgentAPI): void {
             type: "text",
             text:
               `后台任务已启动：taskId=${started.taskId} pid=${started.pid}\n` +
-              "用 check_task 轮询状态；任务结束前不会阻塞当前轮次。",
+              "用 wait_task 等待结果；任务在后台继续运行，轮次结束后也不受影响。",
           },
         ],
         details: { taskId: started.taskId, pid: started.pid, cwd: cwd ?? null },
@@ -319,8 +330,9 @@ export default function (agent: AgentAPI): void {
   agent.registerTool({
     name: "check_task",
     description:
-      "查看 run_background 启动的后台任务：状态（running/exited/timeout/killed/failed）、" +
-      "退出码、stdout/stderr 尾部与字节数。轮询类工具，不参与连续重复调用检测。",
+      "查看 run_background 启动的后台任务的即时快照（不等待）：状态（running/exited/timeout/killed/failed）、" +
+      "退出码、stdout/stderr 尾部与字节数。要等任务结束请用 wait_task，不要用 check_task 反复轮询。" +
+      "轮询类工具，不参与连续重复调用检测。",
     access: "read",
     repeatable: true,
     parameters: {
@@ -336,9 +348,57 @@ export default function (agent: AgentAPI): void {
         fail("ERR_INVALID_ARG_VALUE", "taskId 必须是正整数");
       }
       const st = requireBackground(ctx).check(taskId);
+      const parts = [formatTask(st)];
+      if (st.status === "running") {
+        parts.push(
+          "--- hint ---",
+          "任务仍在运行；需要等它结束请用 wait_task（阻塞到结束或超时），不要反复 check_task。",
+        );
+      }
       return {
-        content: [{ type: "text", text: formatTask(st) }],
+        content: [{ type: "text", text: parts.join("\n") }],
         details: st,
+      };
+    },
+  });
+
+  agent.registerTool({
+    name: "wait_task",
+    description:
+      "等待 run_background 启动的后台任务结束（阻塞到任务进入终态或等待超时），返回最终状态、退出码与输出。" +
+      "启动后台任务后优先用它拿结果，不要用 check_task 反复轮询；任务已结束时会立即返回。" +
+      "单次最多等 60s；超时后任务仍在运行会返回 status=running 且 timedOut=true，可再次 wait_task。" +
+      "等待类工具，不参与连续重复调用检测。",
+    access: "read",
+    repeatable: true,
+    timeoutMs: MAX_WAIT_MS + 30 * 1000,
+    parameters: {
+      type: "object",
+      properties: {
+        taskId: { type: "number", description: "run_background 返回的 taskId" },
+        timeoutMs: { type: "number", description: "最长等待毫秒数，缺省 30000，上限 60000" },
+      },
+      required: ["taskId"],
+    },
+    execute: async (args: any, ctx: ToolContext) => {
+      const taskId = Number(args?.taskId);
+      if (!Number.isInteger(taskId) || taskId <= 0) {
+        fail("ERR_INVALID_ARG_VALUE", "taskId 必须是正整数");
+      }
+      const timeoutMs = readTimeout(args, MAX_WAIT_MS) ?? DEFAULT_WAIT_MS;
+      const started = Date.now();
+      const st = await requireBackground(ctx).wait(taskId, timeoutMs);
+      const waitedMs = Date.now() - started;
+      const parts = [formatTask(st)];
+      if (st.timedOut) {
+        parts.push(
+          "--- wait ---",
+          `等待 ${waitedMs}ms 后任务仍在运行；可再次 wait_task（单次最多 60s）或 kill_task。`,
+        );
+      }
+      return {
+        content: [{ type: "text", text: parts.join("\n") }],
+        details: { ...st, waitedMs },
       };
     },
   });

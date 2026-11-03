@@ -162,12 +162,13 @@ agent.on("tool.beforeCall", async (event, ctx) => {
 |---|---|---|---|
 | Provider | `provider-openai-chat`、`provider-anthropic-messages`、`provider-openai-responses` | TS | `registerProvider`；桥接成 `ModelClient` 适配器 |
 | 工具 | `tools-fs` | TS | `read_file` / `write_file` / `edit_file` / `list_files` / `search_files` |
-| 工具 | `tools-shell` | TS | 命令执行与后台任务（`run_command`/`run_background`/`check_task`/`kill_task`）；进程树管理由宿主能力完成 |
+| 工具 | `tools-shell` | TS | 命令执行与后台任务（`run_command`/`run_background`/`check_task`/`wait_task`/`kill_task`）；进程树管理由宿主能力完成 |
 | 工具 | `tools-git` | TS | 三个只读工具：`git_status`/`git_diff`/`git_log`；写操作走 `run_command` |
 | 工具 + UI | `tools-plan` | TS + TSX | `update_plan`/`read_plan` 工具，以及 `chat.corner` 的 Todo 卡片（同一插件的前端段，取自己的 `plan` 只读动作） |
 | 工具 + UI | `tools-ask` | TS + TSX | `ask_user` 工具，以及 `thread.tray` 的提问卡片（同一插件的前端段，数据来自线程交互投影） |
 | 工具 | `tools-skill` | TS | `skill_search`（正文由模型用 `read_file` 读取） |
 | 外部工具 | `mcp-client` | TS | 装配期发现 MCP server 的 `tools/list`，把每个工具注册成普通工具；HTTP/stdio transport，v2 见 [18](18-mcp-plugin.md) |
+| 外部工具 | `browser-use` | TS | 把 browser-use 桌面浏览器的回环 API（`runtime.json` + `POST /v1/call`，长任务走 `/v1/calls`）接成 13 个工具：启动/进程检测、状态、导航、标签页、快照、正文、交互、截图、eval、script、抓包、租约、长尾；默认以 HTTP 模式（`cli start`/`--serve`）按需启动，进程在但 API 无响应时不重复启动；随包技能 `browser-use` 教模型「先快照拿 ref 再动作」的黄金循环 |
 | 工具 | `tools-subagent` | TS | `invoke_subagent`（v1.5） |
 | 策略 | `policy-default` | TS | `tool.beforeCall` + `ctx.ui`；readonly/ask/auto/full；角色 `tool-policy` |
 | 提示词 | `persona-coding` | TS | `registerPrompt`：编码助手人格与领域规则 |

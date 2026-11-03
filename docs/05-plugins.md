@@ -136,7 +136,7 @@ interface ToolDef {
   access: "read" | "write" | "exec" | "network"; // 外部效果分类；线程级 KV 不算 write；基座不据此审批
   timeoutMs?: number;
   parallelSafe?: boolean;
-  repeatable?: boolean;         // 轮询类工具（如 check_task）允许连续相同调用，不参与循环检测
+  repeatable?: boolean;         // 轮询/等待类工具（如 check_task、wait_task）允许连续相同调用，不参与循环检测
   rollback?: boolean;
   execute(args: any, ctx: ToolContext): Promise<ToolReturn> | ToolReturn;
 }
@@ -176,6 +176,7 @@ interface ToolContext {
   };
   execBackground?: (cmd: string, args: string[], opts?: { cwd?: string; timeoutMs?: number }) => Promise<{ taskId: number; pid: number }>; // capability: exec
   checkTask?: (taskId: number) => { taskId: number; pid: number; status: "running" | "exited" | "timeout" | "killed" | "failed"; code: number; stdout: string; stderr: string; truncated: boolean; stdoutBytes: number; stderrBytes: number; startedAt: string; endedAt?: string; error?: string }; // capability: exec
+  waitTask?: (taskId: number, timeoutMs?: number) => Promise<{ taskId: number; pid: number; status: "running" | "exited" | "timeout" | "killed" | "failed"; code: number; stdout: string; stderr: string; truncated: boolean; stdoutBytes: number; stderrBytes: number; startedAt: string; endedAt?: string; error?: string; timedOut: boolean; waitedMs: number }>; // capability: exec；等到终态或等待上限（≤60s）
   killTask?: (taskId: number) => { taskId: number; found: boolean; killed: boolean }; // capability: exec
   state?: {                          // capability: state
     get<T>(key: string): Promise<T | null>;
