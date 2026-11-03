@@ -8,7 +8,7 @@
   "backend": {
     "entry": "index.ts",
     "capabilities": ["fs.read", "fs.write", "net.fetch", "process"],
-    "env": ["PATH", "HOME", "USERPROFILE", "SystemRoot"],
+    "env": ["PATH", "HOME", "USERPROFILE", "SystemRoot", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME"],
     "secrets": ["mcp_token"],
     "initTimeoutMs": 30000
   },
@@ -21,3 +21,4 @@
     "assets": "static"
   }
 }
+

@@ -208,6 +208,24 @@ audit entries cannot be attributed to the caller.
 
 ## MCP
 
+The tray menu's **Copy MCP Config** copies this stdio entry for ada-go's
+`.adago/mcp.json` `servers` array (the command is the running executable):
+
+```json
+{
+  "id": "browser_use",
+  "transport": "stdio",
+  "command": "C:\\path\\to\\browser-use.exe",
+  "args": ["mcp"]
+}
+```
+
+`browser-use mcp` reuses the running app through `runtime.json` and speaks MCP
+on stdin/stdout. HTTP mode is a separate process
+(`browser-use mcp --http --port 8766`) serving `/mcp`; do not point the client
+at the app's control port — that API requires the runtime bearer token and is
+not MCP (a 401 "missing or wrong token" means the client hit the control API).
+
 `browser-use mcp` is a stdio MCP server. `initialize`, `tools/list` and
 `tools/call` are implemented; tool schemas come from the same
 `internal/control` registry as `/v1/tools`, so there is one source of truth.
@@ -330,8 +348,8 @@ go build -o bin/browser-use.exe .
 ## What works now
 
 - **Tray icon**: a notification-area (Windows) / menu-bar (macOS) icon with
-  Show Window, Hide Window and Quit; hiding keeps the control server and the
-  agent's tabs running.
+  Show Window, Hide Window, Copy MCP Config and Quit; hiding keeps the control
+  server and the agent's tabs running.
 - **Frameless title bar**: app icon, tabs, `+` and the window controls in
   one native strip; drag the empty title bar to move the window. Tabs use a
   colored site initial as a favicon fallback.
@@ -368,4 +386,5 @@ M2 remaining: popup windows with `window.opener`, approvals/policies, nested
 iframe traversal and command palette/favicons.
 
 See [DESIGN.md](DESIGN.md) for the full design.
+
 

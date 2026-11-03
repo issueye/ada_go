@@ -10,6 +10,8 @@
 
 配置优先级：工作区 `.adago/mcp.json` > 用户级 `~/.adago/mcp.json` > `[plugins.settings.mcp-client].servers`；同 `id` 前者覆盖后者。旧工作区 `.adag/mcp.json` 只读兼容（新文件存在时忽略），页面保存写 `.adago/mcp.json`。
 
+stdio 子进程默认继承宿主白名单里的 `PATH`/`HOME`/`USERPROFILE`/`SystemRoot`/`APPDATA`/`LOCALAPPDATA`/`XDG_CONFIG_HOME`，再叠加环境变量模块的用户变量；需要别的宿主变量时在配置的 `env` 里列出（仍在清单 `backend.env` 白名单内）。
+
 ```json
 {
   "version": 1,
@@ -79,6 +81,7 @@ name/description 与 SKILL.md 的绝对路径，模型按路径读取正文。�
 ## 构建
 
 `index.ts` 是源码，`dist/index.js` 由 `node plugins/official/build.mjs` 生成；不要手改 `dist/`。`page.tsx` 与 `static/` 由 Gateway 渲染桥在运行时加载，不进 `dist/`。
+
 
 
 
