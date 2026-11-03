@@ -322,12 +322,10 @@ func renderSidebar(d sidebarData) template.HTML {
 	// 系统导航
 	b.WriteString(`<nav class="ada-nav ada-nav--util" aria-label="系统">`)
 	if len(d.PluginNav) > 0 {
-		const limit = 4
 		b.WriteString(`<div class="ada-nav__label"><span>插件</span></div>`)
-		for i, link := range d.PluginNav {
-			if i >= limit {
-				break
-			}
+		// 插件页多时用滚动条展示全部条目（固定高度内滚动），不再截断成「还有 N 个…」。
+		b.WriteString(`<div class="ada-nav__scroll" role="group" aria-label="插件页面" tabindex="0">`)
+		for _, link := range d.PluginNav {
 			active := d.Active == "ext:"+link.PluginID
 			current := ""
 			if active {
@@ -339,9 +337,7 @@ func renderSidebar(d sidebarData) template.HTML {
 				esc(link.Href), current, attr("title", link.Label), iconHTML("i-plug", 14), esc(link.Label),
 			))
 		}
-		if rest := len(d.PluginNav) - limit; rest > 0 {
-			b.WriteString(fmt.Sprintf(`<a class="ada-nav__item ada-nav__item--more" href="/extensions">还有 %d 个…</a>`, rest))
-		}
+		b.WriteString(`</div>`)
 	}
 	b.WriteString(navItem(d.Active, "extensions", "i-plug", "插件", "/extensions"))
 	b.WriteString(navItem(d.Active, "overview", "i-chart", "概览", "/overview"))

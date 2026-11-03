@@ -224,6 +224,8 @@ const (
 	CapExec Capability = "exec"
 	// CapProcess 是长驻 stdin/stdout 子进程（无 shell），仅 builtin/verified。
 	CapProcess Capability = "process"
+	// CapEnvAdmin 允许插件经 ctx.env 管理全局/工作区环境变量（仅 builtin）。
+	CapEnvAdmin Capability = "env.admin"
 	// CapState 是线程/工作区级受限 KV。
 	CapState Capability = "state"
 	// CapUIAsk 允许发起通用用户交互，不授予任何工具或文件权限；仅 builtin/verified。
@@ -245,7 +247,7 @@ const (
 // backendCapabilities 是后端可声明的能力白名单。
 var backendCapabilities = []Capability{
 	CapFSRead, CapFSWrite, CapNetFetch, CapNetSSE,
-	CapExec, CapProcess, CapState, CapUIAsk, CapSubagentInvoke, CapModelAdmin, CapPluginAdmin,
+	CapExec, CapProcess, CapEnvAdmin, CapState, CapUIAsk, CapSubagentInvoke, CapModelAdmin, CapPluginAdmin,
 }
 
 // frontendCapabilities 是前端可声明的能力白名单。
@@ -274,7 +276,7 @@ func (c Capability) MinTrust() Trust {
 	switch c {
 	case CapExec, CapProcess, CapNetSSE, CapUIAsk:
 		return TrustVerified
-	case CapSubagentInvoke, CapModelAdmin, CapPluginAdmin:
+	case CapSubagentInvoke, CapModelAdmin, CapPluginAdmin, CapEnvAdmin:
 		return TrustBuiltin
 	default:
 		return TrustThirdParty

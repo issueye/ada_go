@@ -237,7 +237,7 @@ agent.route({ method: "POST", path: "/items", handler(req, ctx) { return { ok: t
 - 线程上下文：`adaAPI` 在 `/threads/{id}` 页面自动带 `?threadId=`（可用 `options.threadId` 覆盖，传 `null` 关闭）；Gateway 也接受从 Referer 的会话页路径推断。route 的 `ctx.state` 按该线程命名空间读写，没有线程上下文时是工作区级操作。
 - 路由按插件隔离；同一方法+路径重复登记在加载期报错；`/*` 是前缀匹配，`Path` 保留剩余段由插件自行解析（[G-14](decisions.md)）。
 - 接口不是工具、不进模型上下文；能力位与 scope 仍由插件清单决定，`exec` 等能力不因此放开。
-- 浏览器侧统一用 `window.adaAPI(pluginId, path, { method, body })`（`api.js`，自动带 CSRF），不要手写 `/ext/...` URL。
+- 浏览器侧统一用 `window.adaAPI(pluginId, path, { method, body })`（`api.js`，自动带 CSRF），不要手写 `/ext/...` URL。需要确认再执行的操作（删除等）用 `window.adaConfirm(message, onConfirm)`（复用共享 ConfirmDialog），不要用 `window.confirm`/`alert`/`prompt`。
 
 #### 7.6.2 SSE 路由
 
@@ -410,3 +410,4 @@ Todo 卡片是插件的前端段，不是基座组件：`plugins/official/tools-
 ---
 
 **相邻文档**：[← 插件运行时与治理](06-plugin-runtime.md) · [索引](design.md) · [协议契约 →](08-protocol.md)
+

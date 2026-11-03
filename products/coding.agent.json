@@ -14,7 +14,8 @@
     "provider-admin",
     "token-usage",
     "ui-charts",
-    "plugin-helper"
+    "plugin-helper",
+    "env-manager"
   ],
   "capabilities": {
     "skills": true,
@@ -35,3 +36,4 @@
     "parallelTools": 1
   }
 }
+

@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -100,9 +101,12 @@ func (e *execState) startBackground(req *execRequest, maxTasks int) (*background
 	if req.dir != "" {
 		cmd.Dir = req.dir
 	}
-	if len(req.env) > 0 {
-		cmd.Env = req.env
+	// 与同步 execFile 同一份环境语义：继承/白名单 + 环境变量模块的用户变量。
+	baseEnv := req.env
+	if len(baseEnv) == 0 {
+		baseEnv = os.Environ()
 	}
+	cmd.Env = mergeEnv(baseEnv, req.baseEnv)
 	stdout := &capWriter{limit: req.maxBuffer}
 	stderr := &capWriter{limit: req.maxBuffer}
 	cmd.Stdout, cmd.Stderr = stdout, stderr

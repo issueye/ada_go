@@ -354,6 +354,8 @@ func assembleSet(ctx context.Context, p *coreapp.Product, base, extras []host.Sc
 	asm.skills = skillTable
 	baseCtx := deps.Context
 	baseCtx.Skills = nil
+	// 环境变量模块的用户变量：注入到每个插件启动的子进程（exec/后台/process.start）。
+	baseCtx.EnvVars = deps.EnvVars
 	if p.Capabilities.Skills {
 		baseCtx.Skills = asm.Skills
 	}

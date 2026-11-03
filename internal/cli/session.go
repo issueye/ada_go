@@ -33,6 +33,7 @@ import (
 	"github.com/adag/ada-go/internal/devfake"
 	"github.com/adag/ada-go/internal/domain"
 	"github.com/adag/ada-go/internal/engine"
+	"github.com/adag/ada-go/internal/envstore"
 	"github.com/adag/ada-go/internal/plugins"
 	"github.com/adag/ada-go/internal/plugins/discovery"
 	"github.com/adag/ada-go/internal/plugins/host"
@@ -2129,6 +2130,7 @@ func (s *Session) pickModel(asm corecontracts.Assembly) (ports.ModelClient, erro
 // 状态 failed），其余插件照常装配——Core 不因一个坏插件起不来（6.5「其他插件不受影响」），
 // 也不会降级成空基座（随包 base 仍在）。归因不到第三方时让 Open 失败（诚实报错）。
 func (s *Session) assembleInitial(ctx context.Context) (corecontracts.Assembly, error) {
+	s.refreshEnvVars()
 	discovered, warnings := s.discoverThirdParty()
 	s.logWarnings(warnings)
 	s.mu.Lock()
@@ -2202,6 +2204,19 @@ func (s *Session) assembleInitial(ctx context.Context) (corecontracts.Assembly, 
 		return nil, serr
 	}
 	return asm, nil
+}
+
+// refreshEnvVars 在每次装配前重读环境变量文件（~/.adago/env.json +
+// <workspace>/.adag/env.json，工作区覆盖全局）：改完 env.json 后 plugin.reload
+// 重建装配即可生效。读取失败只记警告，不影响装配。
+func (s *Session) refreshEnvVars() {
+	vars, warnings := envstore.LoadForWorkspace(s.cfg.Workspace)
+	for _, w := range warnings {
+		if s.cfg.Log != nil {
+			s.cfg.Log("warn", "环境变量: "+w, nil)
+		}
+	}
+	s.appDeps.EnvVars = vars
 }
 
 // discoverThirdParty 扫描工作区与全局插件目录，合并成一份第三方快照：
@@ -2442,6 +2457,7 @@ func fingerprintScript(sc host.Script) string {
 //
 // 随包插件的启停也在这里生效（pluginSelection 把 enabled=false 的随包 id 传给装配）。
 func (s *Session) reloadAssembly(ctx context.Context) error {
+	s.refreshEnvVars()
 	discovered, warnings := s.discoverThirdParty()
 	if len(warnings) > 0 {
 		msgs := make([]string, 0, len(warnings))

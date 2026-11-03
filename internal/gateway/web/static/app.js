@@ -93,6 +93,10 @@
     if (window.AdaComponents) window.AdaComponents.closeModal('confirm');
   }
 
+  // 公共确认 API：插件页/组件需要「先确认再执行」时用它（复用 ui::ConfirmDialog）。
+  // 不要用 window.confirm：原生对话框不可样式化、会阻塞脚本，且与聊天页观感不一致。
+  window.adaConfirm = openConfirm;
+
   function wireDialog() {
     if (!dialog) return;
     dialog.addEventListener('click', function (event) {
@@ -774,3 +778,4 @@
     boot();
   }
 })();
+

@@ -1,0 +1,116 @@
+package app_test
+
+// 环境变量管理页的数据面：env-manager 的 route 走 capability env.admin。
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/adag/ada-go/internal/plugins/host"
+)
+
+type envManagerState struct {
+	Global struct {
+		Path string            `json:"path"`
+		Vars map[string]string `json:"vars"`
+	} `json:"global"`
+	Workspace struct {
+		Path string            `json:"path"`
+		Vars map[string]string `json:"vars"`
+	} `json:"workspace"`
+	Merged map[string]string `json:"merged"`
+}
+
+func TestEnvManagerRoutes(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("ADAGO_HOME", home)
+	ws := tempDir(t)
+	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
+	asm := assemble(t, testProduct(t, "env-manager"), hc, nil)
+	ctx := context.Background()
+
+	call := func(method, path string, body map[string]any) (json.RawMessage, error) {
+		t.Helper()
+		if body == nil {
+			return asm.CallHTTPAPI(ctx, "env-manager", method, path, nil, "")
+		}
+		payload, err := json.Marshal(map[string]any{"method": method, "path": path, "body": body})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return asm.CallHTTPAPI(ctx, "env-manager", method, path, payload, "")
+	}
+	loadState := func() envManagerState {
+		t.Helper()
+		out, err := call("GET", "/state", nil)
+		if err != nil {
+			t.Fatalf("GET /state: %v", err)
+		}
+		var state envManagerState
+		if err := json.Unmarshal(out, &state); err != nil {
+			t.Fatalf("解析 /state: %v\n%s", err, out)
+		}
+		return state
+	}
+
+	// 初始状态：两层路径 + 空变量。
+	state := loadState()
+	if len(state.Global.Vars) != 0 || len(state.Workspace.Vars) != 0 {
+		t.Fatalf("初始应为空: %+v", state)
+	}
+	if !strings.HasPrefix(state.Global.Path, home) || !strings.HasPrefix(state.Workspace.Path, ws) {
+		t.Fatalf("路径不符: global=%q workspace=%q", state.Global.Path, state.Workspace.Path)
+	}
+
+	// 写工作区与全局。
+	if _, err := call("POST", "/set", map[string]any{"scope": "workspace", "key": "WS_TOKEN", "value": "w1"}); err != nil {
+		t.Fatalf("set workspace: %v", err)
+	}
+	if _, err := call("POST", "/set", map[string]any{"scope": "global", "key": "G_TOKEN", "value": "g1"}); err != nil {
+		t.Fatalf("set global: %v", err)
+	}
+	wsRaw, err := os.ReadFile(filepath.Join(ws, ".adag", "env.json"))
+	if err != nil || !strings.Contains(string(wsRaw), `"WS_TOKEN": "w1"`) {
+		t.Fatalf("工作区文件: %v %q", err, wsRaw)
+	}
+	globalRaw, err := os.ReadFile(filepath.Join(home, "env.json"))
+	if err != nil || !strings.Contains(string(globalRaw), `"G_TOKEN": "g1"`) {
+		t.Fatalf("全局文件: %v %q", err, globalRaw)
+	}
+
+	// 合并视图与工作区覆盖。
+	if _, err := call("POST", "/set", map[string]any{"scope": "global", "key": "OVERRIDE", "value": "from-global"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("POST", "/set", map[string]any{"scope": "workspace", "key": "OVERRIDE", "value": "from-ws"}); err != nil {
+		t.Fatal(err)
+	}
+	state = loadState()
+	if state.Merged["WS_TOKEN"] != "w1" || state.Merged["G_TOKEN"] != "g1" || state.Merged["OVERRIDE"] != "from-ws" {
+		t.Fatalf("合并视图不符: %+v", state.Merged)
+	}
+
+	// 删除工作区变量不影响全局。
+	if _, err := call("POST", "/remove", map[string]any{"scope": "workspace", "key": "WS_TOKEN"}); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	state = loadState()
+	if _, ok := state.Workspace.Vars["WS_TOKEN"]; ok {
+		t.Fatalf("删除后仍在工作区: %+v", state.Workspace.Vars)
+	}
+	if state.Global.Vars["G_TOKEN"] != "g1" {
+		t.Fatalf("全局变量被误删: %+v", state.Global.Vars)
+	}
+
+	// 非法 scope / 非法键被拒绝。
+	if _, err := call("POST", "/set", map[string]any{"scope": "nope", "key": "A", "value": "1"}); err == nil {
+		t.Fatal("非法 scope 应报错")
+	}
+	if _, err := call("POST", "/set", map[string]any{"scope": "global", "key": "BAD-KEY", "value": "1"}); err == nil {
+		t.Fatal("非法键应报错")
+	}
+}

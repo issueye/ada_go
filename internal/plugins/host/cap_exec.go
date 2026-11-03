@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -152,16 +153,17 @@ func (st *capsState) installExec() error {
 
 // execRequest 是一次已过策略检查的执行。
 type execRequest struct {
-	file      string
-	args      []string
-	dir       string
-	env       []string
+	file string
+	args []string
+	dir  string
+	env  []string
+	// baseEnv 是环境变量模块注入的用户变量（装配期快照），同名覆盖 base/env。
+	baseEnv   map[string]string
 	timeout   time.Duration
 	maxBuffer int
-
-	ctx      context.Context
-	cancelFn context.CancelFunc
-	id       int // 已登记进 execState 的 id（同步路径 -1）
+	ctx       context.Context
+	cancelFn  context.CancelFunc
+	id        int // 已登记进 execState 的 id（同步路径 -1）
 }
 
 // parseExecRequest 落实 6.13 的命令边界（同步命令的默认期限）。
@@ -177,7 +179,10 @@ func (st *capsState) parseExecRequestWithTimeout(rt *mojsRuntime, args []moejs.V
 	if maxTimeout <= 0 {
 		maxTimeout = limits.MaxExecTimeout
 	}
-	req := &execRequest{maxBuffer: limits.MaxExecOutputBytes, timeout: maxTimeout, id: -1}
+	req := &execRequest{
+		maxBuffer: limits.MaxExecOutputBytes, timeout: maxTimeout, id: -1,
+		baseEnv: st.baseEnv,
+	}
 
 	fileV := moejs.Arg(args, 0)
 	if !fileV.IsString() {
@@ -286,9 +291,13 @@ func (e *execState) run(req *execRequest) *runResult {
 	if req.dir != "" {
 		cmd.Dir = req.dir
 	}
-	if len(req.env) > 0 {
-		cmd.Env = req.env
+	// 子进程环境 = 宿主/显式白名单 + 环境变量模块的用户变量（后者同名覆盖）。
+	// 没有显式 env 时保持原有继承语义（os.Environ），但用户变量始终生效。
+	baseEnv := req.env
+	if len(baseEnv) == 0 {
+		baseEnv = os.Environ()
 	}
+	cmd.Env = mergeEnv(baseEnv, req.baseEnv)
 	out := &capWriter{limit: req.maxBuffer}
 	errW := &capWriter{limit: req.maxBuffer}
 	cmd.Stdout, cmd.Stderr = out, errW
@@ -574,7 +583,10 @@ func addExecContextMember(st *capsState, hc Context, put func(string, moejs.Valu
 				return moejs.Undefined(), throwCoded(r, codeAccessDenied, "执行策略拒绝: "+err.Error(), nil)
 			}
 		}
-		req := &execRequest{file: cmd, args: argv, maxBuffer: st.limits.MaxExecOutputBytes, timeout: st.limits.MaxExecTimeout, id: -1}
+		req := &execRequest{
+			file: cmd, args: argv, maxBuffer: st.limits.MaxExecOutputBytes,
+			timeout: st.limits.MaxExecTimeout, id: -1, baseEnv: st.baseEnv,
+		}
 		if opts := moejs.Arg(args, 2); opts.IsObject() {
 			if v, err := st.rt.Get(opts, "cwd"); err == nil && !v.IsNullish() {
 				real, cerr := st.fsRealPath(v.String())

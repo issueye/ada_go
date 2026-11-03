@@ -417,6 +417,9 @@ func installContextMembers(rt *mojsRuntime, put func(name string, v moejs.Value)
 	if err := addProcessContextMember(st, hc, put); err != nil {
 		keep(err)
 	}
+	if err := addEnvAdminContextMember(st, hc, put); err != nil {
+		keep(err)
+	}
 	return firstErr
 }
 

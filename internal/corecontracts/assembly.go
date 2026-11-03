@@ -18,8 +18,11 @@ import (
 
 // Deps 是一次装配的输入（字段语义见 app.Deps 的历史注释）。
 type Deps struct {
-	Context     host.Context
-	HostEnv     map[string]string
+	Context host.Context
+	HostEnv map[string]string
+	// EnvVars 是环境变量模块解析出的用户变量（全局 + 工作区，工作区覆盖），
+	// 由宿主注入插件子进程；见 internal/envstore。
+	EnvVars     map[string]string
 	Secrets     func(name string) bool
 	Settings    map[string]map[string]any
 	OnWarning   func(string)

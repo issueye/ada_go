@@ -1,0 +1,226 @@
+/* 环境变量管理页（env-manager）：颜色/尺寸只引用 --ph-* / --ada-* 令牌。 */
+
+.em-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 1080px;
+  padding-bottom: 32px;
+}
+
+.em-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.em-head__text {
+  min-width: 0;
+}
+
+.em-title {
+  margin: 0;
+  font-size: var(--ada-text-xl);
+  font-weight: 600;
+  color: var(--ph-ink);
+}
+
+.em-sub {
+  margin: 6px 0 0;
+  font-size: var(--ada-text-sm);
+  line-height: 1.7;
+  color: var(--ph-muted);
+}
+
+.em-sub code,
+.em-hint code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ph-ink) 6%, transparent);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.95em;
+}
+
+.em-head__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.em-status {
+  margin: 0;
+  min-height: 1.25em;
+  font-size: var(--ada-text-sm);
+  color: var(--ph-muted);
+}
+
+.em-status[data-tone="success"] {
+  color: var(--ph-success-ink);
+}
+
+.em-status[data-tone="warn"] {
+  color: var(--ph-warn-ink);
+}
+
+.em-status[data-tone="error"] {
+  color: var(--ph-danger-ink);
+}
+
+.em-add {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-lg);
+  background: var(--ph-surface);
+}
+
+.em-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.em-field--grow {
+  flex: 1 1 200px;
+  min-width: 160px;
+}
+
+.em-field__label {
+  font-size: var(--ada-text-xs);
+  color: var(--ph-muted);
+}
+
+.em-input {
+  min-width: 0;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-surface);
+  color: var(--ph-ink);
+  font-size: var(--ada-text-sm);
+}
+
+.em-input:focus {
+  outline: 2px solid color-mix(in srgb, var(--ph-ink) 25%, transparent);
+  outline-offset: 1px;
+}
+
+.em-input--inline {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.em-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-lg);
+  background: var(--ph-surface);
+}
+
+.em-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--ada-text-sm);
+}
+
+.em-table th,
+.em-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--ph-line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.em-table th {
+  font-weight: 600;
+  color: var(--ph-muted);
+  font-size: var(--ada-text-xs);
+  white-space: nowrap;
+}
+
+.em-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.em-col-scope {
+  width: 84px;
+  white-space: nowrap;
+}
+
+.em-col-key {
+  width: 30%;
+}
+
+.em-col-actions {
+  width: 180px;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.em-col-actions .ada-btn + .ada-btn {
+  margin-left: 4px;
+}
+
+.em-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border: 1px solid var(--ph-line);
+  border-radius: 999px;
+  font-size: var(--ada-text-xs);
+  color: var(--ph-muted);
+  white-space: nowrap;
+}
+
+.em-chip--workspace {
+  color: var(--ph-success-ink);
+  border-color: color-mix(in srgb, var(--ph-success-ink) 35%, transparent);
+  background: var(--ph-success-soft);
+}
+
+.em-chip--global {
+  color: var(--ph-muted);
+  background: color-mix(in srgb, var(--ph-ink) 4%, transparent);
+}
+
+.em-chip--warn {
+  margin-left: 6px;
+  color: var(--ph-warn-ink);
+  border-color: color-mix(in srgb, var(--ph-warn-ink) 35%, transparent);
+  background: var(--ph-warn-soft);
+}
+
+.em-key {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: var(--ada-text-sm);
+  color: var(--ph-ink);
+  word-break: break-all;
+}
+
+.em-value {
+  color: var(--ph-muted);
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: var(--ada-text-xs);
+}
+
+.em-empty {
+  padding: 26px 12px;
+  text-align: center;
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
+}
+
+.em-hint {
+  margin: 0;
+  font-size: var(--ada-text-sm);
+  line-height: 1.6;
+  color: var(--ph-muted);
+}

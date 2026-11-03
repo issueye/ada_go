@@ -156,12 +156,16 @@ func (c *CapabilitySet) Has(cap plugins.Capability) bool { return c.Backend[cap]
 // 引擎只交出这些字段，插件拿不到数据库句柄、密钥文件、原始 socket 或进程（1.5.2）。
 type Context struct {
 	Workspace string
-	ThreadID  string
-	RunID     string
-	CallID    string
-	PluginID  string
-	Now       time.Time
-	Signal    context.Context // 取消贯穿：ctx 取消即中止脚本与宿主长调用。
+	// EnvVars 是用户管理的环境变量（~/.adago/env.json + <workspace>/.adag/env.json），
+	// 注入到插件启动的所有子进程（exec / 后台任务 / process.start），同名覆盖宿主环境；
+	// 不进入插件 process.env（那里仍按清单 backend.env 白名单）。值不写日志。
+	EnvVars  map[string]string
+	ThreadID string
+	RunID    string
+	CallID   string
+	PluginID string
+	Now      time.Time
+	Signal   context.Context // 取消贯穿：ctx 取消即中止脚本与宿主长调用。
 
 	// Secret 只在清单声明过该名字时返回值；否则第二返回值为 false。
 	Secret func(name string) (string, bool)

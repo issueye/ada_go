@@ -61,6 +61,9 @@ description: 插件手册：创建、检查、修改、移除 ada-go 插件，�
   `data.usage`、`data.interactions`），副作用走动作桥或 `agent.route`。
 - 浏览器脚本统一用 `window.adaAPI(pluginId, path, { method, body })` 调插件 route
   （自动带 CSRF 与线程上下文）；不要手写 `/ext/...` URL。
+- 需要确认再执行的操作（删除/覆盖等）用 `window.adaConfirm(message, onConfirm)`
+  （共享 ConfirmDialog）；不要用 `window.confirm` / `alert` / `prompt`（原生对话框
+  不可样式化、会阻塞脚本，官方插件脚本有门禁测试）。
 - 样式放 `static/*.css` 并在清单 `styles` 里声明；CSP 禁止内联 style/script，
   颜色只用 `--ph-*` 设计令牌。
 - 插件自带 JS（清单 `scripts`）默认不加载：需要 `frontend.script` 能力且仅
@@ -275,3 +278,4 @@ h1–h6 ul ol li span strong em code small a table thead tbody tr th td caption 
   SVG 白名单，当前用 `bar`/`column`/`stacked`/`spark` 表达；
 - 在块 `data` 里塞整段正文、密钥、超过 12 条 items 或超过 48 个 spark 点；
 - 不写 `fallback` 就交付包含动态块的回答。
+

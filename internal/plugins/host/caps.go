@@ -207,6 +207,8 @@ type capsState struct {
 	loop   *mojsLoop
 	caps   *CapabilitySet
 	limits Limits
+	// baseEnv 是环境变量模块注入的子进程基础环境（装配期快照，同名覆盖宿主环境）。
+	baseEnv map[string]string
 
 	// inst 由 runFactory 接上：agent:host 的模块体在装配早期求值，
 	// 但它的导出函数要等到入口工厂运行时才知道该往哪个实例登记。
@@ -314,6 +316,12 @@ func installCapabilities(rt *mojsRuntime, loop *mojsLoop, caps *CapabilitySet, h
 	st := &capsState{
 		rt: rt, loop: loop, caps: caps, hc: hc,
 		limits: currentLimits(), installed: map[string]provider{},
+	}
+	if len(hc.EnvVars) > 0 {
+		st.baseEnv = make(map[string]string, len(hc.EnvVars))
+		for key, value := range hc.EnvVars {
+			st.baseEnv[key] = value
+		}
 	}
 	policy := NewModulePolicy(caps)
 	st.policy = policy

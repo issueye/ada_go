@@ -263,7 +263,7 @@ func (s *processState) startProcess(st *capsState, args []moejs.Value) (int, err
 		}
 	}
 
-	req := &execRequest{file: file, args: argv, maxBuffer: st.limits.MaxExecOutputBytes, timeout: DefaultProcessLifetime}
+	req := &execRequest{file: file, args: argv, maxBuffer: st.limits.MaxExecOutputBytes, timeout: DefaultProcessLifetime, baseEnv: st.baseEnv}
 	cwd := st.caps.WorkspaceRoot
 	envNames := make([]string, 0, len(st.caps.Env))
 	for name := range st.caps.Env {
@@ -327,13 +327,15 @@ func (s *processState) startProcess(st *capsState, args []moejs.Value) (int, err
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
-	cmd.Env = []string{}
+	// 只注入清单白名单里的宿主变量，再叠加环境变量模块的用户变量（同名覆盖）。
+	baseEnv := make([]string, 0, len(envNames))
 	if len(envNames) > 0 {
 		sortStrings(envNames)
 		for _, name := range envNames {
-			cmd.Env = append(cmd.Env, name+"="+st.caps.Env[name])
+			baseEnv = append(baseEnv, name+"="+st.caps.Env[name])
 		}
 	}
+	cmd.Env = mergeEnv(baseEnv, st.baseEnv)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
