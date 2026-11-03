@@ -3,7 +3,7 @@
  *
  * 数据与操作全部走本插件 route（window.adaAPI 自动带 CSRF）：
  *   GET  /servers        server 状态 + 工具摘要
- *   GET  /config         工作区 .adag/mcp.json 原文
+ *   GET  /config         工作区 .adago/mcp.json 原文
  *   POST /config         保存配置
  *   POST /servers/toggle 启用/停用单个 server
  * 保存后需要重载插件（POST /agent-plugins/reload），工具列表才会更新。
@@ -276,7 +276,7 @@
       var empty = el("div", "mcp-empty");
       empty.appendChild(el("p", "mcp-empty__title", "还没有 MCP server"));
       empty.appendChild(
-        el("p", "mcp-empty__hint", "点右上角「编辑配置」，按 .adag/mcp.json 的格式添加 server，保存后重载插件。")
+        el("p", "mcp-empty__hint", "点右上角「编辑配置」，按 .adago/mcp.json 的格式添加 server，保存后重载插件。")
       );
       serversNode.appendChild(empty);
       return;

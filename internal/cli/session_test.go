@@ -48,7 +48,7 @@ func productPath(t *testing.T) string {
 	return filepath.Join(root, "products", "headless.agent.json")
 }
 
-// 工作区根目录启动时就有 .adag（TODO 等插件状态的宿主目录）。
+// 工作区根目录启动时就有 .adago（TODO 等插件状态的宿主目录）。
 func TestSessionCreatesAdagDir(t *testing.T) {
 	cfg := testConfig(t, "")
 	ctx := context.Background()
@@ -57,8 +57,8 @@ func TestSessionCreatesAdagDir(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	defer sess.Close(ctx)
-	if st, err := os.Stat(filepath.Join(cfg.Workspace, ".adag")); err != nil || !st.IsDir() {
-		t.Fatalf(".adag 目录未创建: %v", err)
+	if st, err := os.Stat(filepath.Join(cfg.Workspace, ".adago")); err != nil || !st.IsDir() {
+		t.Fatalf(".adago 目录未创建: %v", err)
 	}
 }
 

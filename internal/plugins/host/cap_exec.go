@@ -27,6 +27,7 @@ import (
 	"github.com/MoeForge/moejs"
 	"github.com/MoeForge/moejs/engine"
 
+	"github.com/adag/ada-go/internal/binpaths"
 	"github.com/adag/ada-go/internal/plugins"
 )
 
@@ -158,7 +159,9 @@ type execRequest struct {
 	dir  string
 	env  []string
 	// baseEnv 是环境变量模块注入的用户变量（装配期快照），同名覆盖 base/env。
-	baseEnv   map[string]string
+	baseEnv map[string]string
+	// binDirs 是服务程序目录，启动时前置到 PATH（工作区优先）。
+	binDirs   []binpaths.Dir
 	timeout   time.Duration
 	maxBuffer int
 	ctx       context.Context
@@ -181,7 +184,7 @@ func (st *capsState) parseExecRequestWithTimeout(rt *mojsRuntime, args []moejs.V
 	}
 	req := &execRequest{
 		maxBuffer: limits.MaxExecOutputBytes, timeout: maxTimeout, id: -1,
-		baseEnv: st.baseEnv,
+		baseEnv: st.baseEnv, binDirs: st.binDirs,
 	}
 
 	fileV := moejs.Arg(args, 0)
@@ -297,7 +300,7 @@ func (e *execState) run(req *execRequest) *runResult {
 	if len(baseEnv) == 0 {
 		baseEnv = os.Environ()
 	}
-	cmd.Env = mergeEnv(baseEnv, req.baseEnv)
+	cmd.Env = applyBinPath(mergeEnv(baseEnv, req.baseEnv), req.binDirs)
 	out := &capWriter{limit: req.maxBuffer}
 	errW := &capWriter{limit: req.maxBuffer}
 	cmd.Stdout, cmd.Stderr = out, errW
@@ -585,7 +588,8 @@ func addExecContextMember(st *capsState, hc Context, put func(string, moejs.Valu
 		}
 		req := &execRequest{
 			file: cmd, args: argv, maxBuffer: st.limits.MaxExecOutputBytes,
-			timeout: st.limits.MaxExecTimeout, id: -1, baseEnv: st.baseEnv,
+			timeout: st.limits.MaxExecTimeout, id: -1,
+			baseEnv: st.baseEnv, binDirs: st.binDirs,
 		}
 		if opts := moejs.Arg(args, 2); opts.IsObject() {
 			if v, err := st.rt.Get(opts, "cwd"); err == nil && !v.IsNullish() {

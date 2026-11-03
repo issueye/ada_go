@@ -457,7 +457,7 @@ export default function (agent: AgentAPI): void {
     name: "check_plugin",
     description:
       "检查插件的健康状态并给出诊断报告：发现位置（随包/全局/工作区）、清单字段、" +
-      "启停决策来源（全局 plugins.json / 工作区 .adag/plugins.json / 产品声明）、" +
+      "启停决策来源（全局 plugins.json / 工作区 .adago/plugins.json / 产品声明）、" +
       "装配状态与 last_error，并对未停用的落盘插件做入口预加载校验。" +
       "用户说「插件不工作/加载失败/检查一下插件」或报告插件异常时调用；" +
       "id 留空时返回全部插件的摘要列表。",

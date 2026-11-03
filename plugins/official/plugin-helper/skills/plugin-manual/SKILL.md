@@ -201,7 +201,7 @@ h1–h6 ul ol li span strong em code small a table thead tbody tr th td caption 
 
 1. `id` 留空：返回全部插件摘要（启停/状态/错误），先定位是哪个插件的问题；
 2. 带 `id`：返回单个插件的诊断报告——发现位置（随包/全局/工作区）、清单字段、
-   启停决策来源（全局 plugins.json / 工作区 .adag/plugins.json / 产品声明）、
+   启停决策来源（全局 plugins.json / 工作区 .adago/plugins.json / 产品声明）、
    装配状态与 last_error，并对未停用的落盘插件做入口预加载校验；
 3. 把报告里的失败项原样转告用户；`入口加载` 失败通常是入口源码形状或
    能力声明问题，按反模式清单逐条核对后修复重装。
@@ -209,9 +209,9 @@ h1–h6 ul ol li span strong em code small a table thead tbody tr th td caption 
 ## 5. 启用 / 停用
 
 - 默认写到全局 `~/.adago/plugins.json`：一次启停，所有工作区生效。
-- 某个工作区想单独启停（覆盖全局）：该工作区会有 `<workspace>/.adag/plugins.json`；
+- 某个工作区想单独启停（覆盖全局）：该工作区会有 `<workspace>/.adago/plugins.json`（旧 `.adag/plugins.json` 只读兼容）；
   存在这个文件时，本工作区的启停只写它。
-- 用户问「为什么这个工作区不一样」时，检查工作区下有没有 `.adag/plugins.json`。
+- 用户问「为什么这个工作区不一样」时，检查工作区下有没有 `.adago/plugins.json`。
 
 ## 6. 移除 / 修改
 
@@ -278,4 +278,5 @@ h1–h6 ul ol li span strong em code small a table thead tbody tr th td caption 
   SVG 白名单，当前用 `bar`/`column`/`stacked`/`spark` 表达；
 - 在块 `data` 里塞整段正文、密钥、超过 12 条 items 或超过 48 个 spark 点；
 - 不写 `fallback` 就交付包含动态块的回答。
+
 

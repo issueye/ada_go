@@ -1,4 +1,5 @@
-// Command icopack builds assets/icon.ico from internal/app/icon.png.
+// Command icopack builds assets/icon.ico and internal/app/tray.png from
+// internal/app/icon.png.
 //
 //	go run ./tools/icopack
 package main
@@ -79,6 +80,20 @@ func main() {
 		fatal(err)
 	}
 	fmt.Printf("wrote %s (%d bytes, %d sizes)\n", dst, out.Len(), len(entries))
+
+	// The tray icon: 32px is the high-DPI notification area on Windows and
+	// scales to the 18pt menu bar icon on macOS.
+	trayImg := image.NewRGBA(image.Rect(0, 0, 32, 32))
+	xdraw.CatmullRom.Scale(trayImg, trayImg.Bounds(), img, img.Bounds(), xdraw.Over, nil)
+	var trayBuf bytes.Buffer
+	if err := png.Encode(&trayBuf, trayImg); err != nil {
+		fatal(err)
+	}
+	trayPath := filepath.Join(root, "internal", "app", "tray.png")
+	if err := os.WriteFile(trayPath, trayBuf.Bytes(), 0o644); err != nil {
+		fatal(err)
+	}
+	fmt.Printf("wrote %s (%d bytes, 32x32)\n", trayPath, trayBuf.Len())
 }
 
 func fatal(err error) {

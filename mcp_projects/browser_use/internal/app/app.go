@@ -33,6 +33,7 @@ type App struct {
 	lastErr      string
 	showActivity bool
 
+	tray         *mygo.Tray
 	restore      *sessionState
 	sessionReady bool
 	sessionSave  bool
@@ -95,6 +96,7 @@ func Run(cfg config.Config, initialURL string) error {
 			Content:         ui.View(a.view),
 		})
 		applyIcon(a.win)
+		a.tray = startTray(a)
 		a.mgr = browser.New(a.win, cfg, sess)
 		a.mgr.SetOnChange(a.onChange)
 		if a.addressAuto {
@@ -143,6 +145,13 @@ func Run(cfg config.Config, initialURL string) error {
 		a.win.Invalidate()
 	})
 
+	// 托盘图标要在退出前销毁（loop 还在跑，能处理 onMain）。
+	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
+		if a.tray != nil {
+			a.tray.Destroy()
+			a.tray = nil
+		}
+	})
 	mygo.App.OnQuit(func() {
 		if a.saveTimer != nil {
 			a.saveTimer.Stop()

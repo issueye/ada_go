@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -23,12 +24,36 @@ type envManagerState struct {
 		Vars map[string]string `json:"vars"`
 	} `json:"workspace"`
 	Merged map[string]string `json:"merged"`
+	Bins   struct {
+		Paths []struct {
+			Scope  string `json:"scope"`
+			Path   string `json:"path"`
+			Exists bool   `json:"exists"`
+		} `json:"paths"`
+		Programs []struct {
+			Scope string `json:"scope"`
+			Name  string `json:"name"`
+			Size  int64  `json:"size"`
+		} `json:"programs"`
+	} `json:"bins"`
 }
 
 func TestEnvManagerRoutes(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("ADAGO_HOME", home)
 	ws := tempDir(t)
+	// 工作区服务程序：env-manager 的 /state 应列出它，并把它前置到 PATH。
+	binDir := filepath.Join(ws, ".adago", "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	toolName := "probe"
+	if runtime.GOOS == "windows" {
+		toolName = "probe.exe"
+	}
+	if err := os.WriteFile(filepath.Join(binDir, toolName), []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
 	asm := assemble(t, testProduct(t, "env-manager"), hc, nil)
 	ctx := context.Background()
@@ -65,6 +90,15 @@ func TestEnvManagerRoutes(t *testing.T) {
 	if !strings.HasPrefix(state.Global.Path, home) || !strings.HasPrefix(state.Workspace.Path, ws) {
 		t.Fatalf("路径不符: global=%q workspace=%q", state.Global.Path, state.Workspace.Path)
 	}
+	if len(state.Bins.Paths) != 2 || state.Bins.Paths[0].Scope != "workspace" || !state.Bins.Paths[0].Exists {
+		t.Fatalf("服务程序目录不符: %+v", state.Bins.Paths)
+	}
+	if state.Bins.Paths[0].Path != binDir {
+		t.Fatalf("工作区服务程序目录 = %q，期望 %q", state.Bins.Paths[0].Path, binDir)
+	}
+	if len(state.Bins.Programs) != 1 || state.Bins.Programs[0].Name != toolName || state.Bins.Programs[0].Scope != "workspace" {
+		t.Fatalf("服务程序列表不符: %+v", state.Bins.Programs)
+	}
 
 	// 写工作区与全局。
 	if _, err := call("POST", "/set", map[string]any{"scope": "workspace", "key": "WS_TOKEN", "value": "w1"}); err != nil {
@@ -73,7 +107,7 @@ func TestEnvManagerRoutes(t *testing.T) {
 	if _, err := call("POST", "/set", map[string]any{"scope": "global", "key": "G_TOKEN", "value": "g1"}); err != nil {
 		t.Fatalf("set global: %v", err)
 	}
-	wsRaw, err := os.ReadFile(filepath.Join(ws, ".adag", "env.json"))
+	wsRaw, err := os.ReadFile(filepath.Join(ws, ".adago", "env.json"))
 	if err != nil || !strings.Contains(string(wsRaw), `"WS_TOKEN": "w1"`) {
 		t.Fatalf("工作区文件: %v %q", err, wsRaw)
 	}

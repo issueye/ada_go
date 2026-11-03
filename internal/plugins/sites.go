@@ -53,7 +53,7 @@ var installSites = map[Capability]InstallSite{
 		Milestone:     "v2 MCP stdio",
 	},
 	CapEnvAdmin: {
-		Capability: CapEnvAdmin, HostInstall: "安装 ctx.env（list/set/remove）：全局 ~/.adago/env.json 与工作区 .adag/env.json 的读写",
+		Capability: CapEnvAdmin, HostInstall: "安装 ctx.env（list/set/remove）：全局 ~/.adago/env.json 与工作区 .adago/env.json 的读写",
 		ScriptSurface: "ctx.env.list/set/remove",
 		EnforcedBy:    "键名校验、ADAG_ 保留前缀、值与文件大小上限、0600 原子写、值不写日志；仅 builtin（09 §9.2）",
 		Milestone:     "v2 环境变量管理",

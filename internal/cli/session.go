@@ -216,10 +216,10 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 	if cfg.Err == nil {
 		cfg.Err = os.Stderr
 	}
-	// 工作区本地数据目录：TODO 等插件状态放在 .adag/ 下。
+	// 工作区本地数据目录：TODO 等插件状态放在 .adago/ 下。
 	// 只读工作区不阻塞启动；真正需要写入时会给出明确错误。
-	if mkErr := os.MkdirAll(filepath.Join(abs, ".adag"), 0o755); mkErr != nil {
-		fmt.Fprintf(cfg.Err, "adag: 创建 %s 失败（TODO 等插件状态可能需要它）: %v\n", filepath.Join(abs, ".adag"), mkErr)
+	if mkErr := os.MkdirAll(filepath.Join(abs, ".adago"), 0o755); mkErr != nil {
+		fmt.Fprintf(cfg.Err, "adag: 创建 %s 失败（TODO 等插件状态可能需要它）: %v\n", filepath.Join(abs, ".adago"), mkErr)
 	}
 	var debugLog *host.DebugLog
 	if cfg.Debug {
@@ -2207,7 +2207,7 @@ func (s *Session) assembleInitial(ctx context.Context) (corecontracts.Assembly, 
 }
 
 // refreshEnvVars 在每次装配前重读环境变量文件（~/.adago/env.json +
-// <workspace>/.adag/env.json，工作区覆盖全局）：改完 env.json 后 plugin.reload
+// <workspace>/.adago/env.json，工作区覆盖全局）：改完 env.json 后 plugin.reload
 // 重建装配即可生效。读取失败只记警告，不影响装配。
 func (s *Session) refreshEnvVars() {
 	vars, warnings := envstore.LoadForWorkspace(s.cfg.Workspace)
@@ -2353,7 +2353,7 @@ func productIDSet(p *coreapp.Product) map[string]bool {
 // syncPluginMeta 把当前发现的插件写进 plugin_meta（6.9：id+版本+指纹）：
 // enabled 只落「产品默认」（声明=启用；第三方缺省启用），user_set 恒为 0 ——
 // 启用决策的真源是 JSON 状态（全局 ~/.adago/plugins.json + 工作区
-// .adag/plugins.json，见 plugin_state.go），读取时由 listPluginMeta 叠加，
+// .adago/plugins.json，见 plugin_state.go），读取时由 listPluginMeta 叠加，
 // 出现在 JSON 里即视为用户显式选择并覆盖本行的 enabled。
 func (s *Session) syncPluginMeta(ctx context.Context, discovered []discovery.Plugin, meta map[string]sqlite.PluginMetaRecord, failures map[string]string) error {
 	productIDs := productIDSet(s.product)
@@ -3051,15 +3051,18 @@ func (s *Session) SetPluginEnabled(ctx context.Context, pluginID string, enabled
 			fmt.Sprintf("插件 %s 是审批策略插件，目录里仍有写/执行工具，禁用会被拒绝（失败关闭，5.4）", pluginID))
 	}
 	// 启停状态的真源是 JSON：默认写全局（~/.adago/plugins.json，跨工作区共享）；
-	// 工作区已有覆盖文件（.adag/plugins.json）时继续写工作区，保持该工作区的
+	// 工作区已有覆盖文件（.adago/plugins.json）时继续写工作区，保持该工作区的
 	// 单独启停语义。SQLite 不再存启用决策。
 	wsPath := workspacePluginStatePath(s.cfg.Workspace)
 	path := s.globalPluginStatePath()
 	if path == "" {
 		// 主目录不可用：退回工作区文件，保证启停仍可用。
 		path = wsPath
-	} else if _, exists, err := loadPluginStateFile(wsPath); err == nil && exists {
+	} else if _, exists, _ := workspacePluginState(s.cfg.Workspace); exists {
 		path = wsPath
+	}
+	if path == wsPath {
+		materializeWorkspacePluginState(s.cfg.Workspace)
 	}
 	prev, hadPrev, err := setPluginStateEntry(path, pluginID, enabled)
 	if err != nil {
@@ -3085,7 +3088,7 @@ func manifestVersionOf(sc host.Script) string {
 
 // ListPluginMetaOffline 用只读连接读取插件启用状态（adag plugin list 用）。
 // 数据库还不存在时返回空表：插件目录可以先安装、后启动。
-// 启用决策叠加 JSON 状态（工作区 .adag/plugins.json 覆盖全局 plugins.json）。
+// 启用决策叠加 JSON 状态（工作区 .adago/plugins.json 覆盖全局 plugins.json）。
 func ListPluginMetaOffline(ctx context.Context, workspace, dataDir string) (map[string]sqlite.PluginMetaRecord, error) {
 	abs, dir, err := paths(workspace, dataDir)
 	if err != nil {
@@ -3107,7 +3110,7 @@ func ListPluginMetaOffline(ctx context.Context, workspace, dataDir string) (map[
 	for _, rec := range rows {
 		out[rec.ID] = rec
 	}
-	wsEntries, wsExists, _ := loadPluginStateFile(workspacePluginStatePath(abs))
+	wsEntries, wsExists, _ := workspacePluginState(abs)
 	globalEntries, _, _ := loadPluginStateFile(globalPluginStatePath())
 	apply := func(entries map[string]pluginStateEntry) {
 		for id, entry := range entries {

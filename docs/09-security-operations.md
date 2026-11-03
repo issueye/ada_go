@@ -27,7 +27,7 @@
 - 读工具可读宿主任意路径（含插件目录、配置目录与密钥文件所在目录，2026-10-31 决策）；写与 `exec` cwd 仍受 Scope。密钥值只经 `secret` broker 按名提供，日志与 UI 脱敏；密钥文件是否可读由操作系统权限与部署方式决定，不能依赖“路径不可见”。
 - `run_command` 以 `execFile` 执行显式程序与参数，不经过 shell；但它仍能启动任意可执行文件，因此不是路径沙箱的替代。默认策略为 `ask`（由 `policy-default` 提供，不是基座常数）；`readonly` 下禁用；未启用任何 `tool-policy` 插件时，基座直接拒绝写/执行工具；UI 在执行前显示完整命令与 cwd；环境变量默认清空，只注入白名单。
 - 命令超时/取消杀整棵进程树（Unix 进程组、Windows `taskkill /T`）；后台任务同样登记，插件 Runtime 关闭时统一终止。
-- 环境变量模块：全局 `~/.adago/env.json` + 工作区 `.adag/env.json`（工作区覆盖全局；文件 0600，目录 0700）。变量只注入插件启动的子进程（`ctx.exec`、后台任务、`ctx.process.start`），同名覆盖宿主环境；不进入插件 `process.env` 白名单，值不写日志（CLI `adag env` 由用户主动查看时除外）。变量名需匹配 `^[A-Za-z_][A-Za-z0-9_]*$`，`ADAG_` 前缀保留。改完文件后 `plugin.reload` 重建装配即可生效。管理页：`/ext/env-manager/settings`（侧栏「环境变量」，builtin 插件 `env-manager`，经 capability `env.admin` 读写，能力仅 builtin）。
+- 环境变量模块：全局 `~/.adago/env.json` + 工作区 `.adago/env.json`（工作区覆盖全局；文件 0600，目录 0700）。变量只注入插件启动的子进程（`ctx.exec`、后台任务、`ctx.process.start`），同名覆盖宿主环境；不进入插件 `process.env` 白名单，值不写日志（CLI `adag env` 由用户主动查看时除外）。变量名需匹配 `^[A-Za-z_][A-Za-z0-9_]*$`，`ADAG_` 前缀保留。改完文件后 `plugin.reload` 重建装配即可生效。旧工作区 `.adag/env.json` 只读兼容。服务程序目录：工作区 `<workspace>/.adago/bin` 与用户级 `~/.adago/bin` 会被前置到插件子进程的 `PATH`（工作区优先、去重；没有 PATH 时只填这两个目录），页面列出目录与可执行文件。管理页：`/ext/env-manager/settings`（侧栏「环境变量」，builtin 插件 `env-manager`，经 capability `env.admin` 读写，能力仅 builtin）。
 - 插件经 Node 兼容层执行命令时只有 `execFile`、不经过 shell；`fs` 的写与 `exec` cwd 固定工作区，`ctx.fs` 读成员不限制目标路径（agent 的 `read_file`/`list_files`/`search_files` 可读宿主任意文件，见 [6.12](12-node-compat.md)）；`process.env` 只有清单白名单（组合根未注入时按白名单从宿主环境取值）；`.node` 与 `node:http`/`net`/`dns` 不可用。
 - `process` 能力（长驻 stdin/stdout，仅 builtin/verified）在**装配期**就能启动子进程，这条路径不经过 `tool.beforeCall` / `policy-default` 审批，程序边界同样只由 `ExecPolicy` 约束；第三方插件不可声明该能力。需要审批的交互式命令仍走工具调用（`Access=exec`）。
 - 长驻进程与后台任务都按「每 Runtime 进程数 / 生命周期 / 输出上限」登记，Runtime 关闭或插件重载时杀整棵进程树。
@@ -82,6 +82,8 @@
 ---
 
 **相邻文档**：[← 协议契约](08-protocol.md) · [索引](design.md) · [测试与性能 →](10-testing-performance.md)
+
+
 
 
 

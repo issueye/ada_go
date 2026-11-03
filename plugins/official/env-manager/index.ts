@@ -100,3 +100,4 @@ export default function (agent: AgentAPI): void {
     return ctx.env.remove(scopeOf(body), keyOf(body));
   });
 }
+

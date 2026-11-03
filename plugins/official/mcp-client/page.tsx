@@ -3,7 +3,7 @@
  *
  * 首屏只渲染骨架；数据与操作由 static/mcp-client.js 经本插件 route 完成：
  *   GET  /servers        server 状态 + 工具摘要
- *   GET  /config         工作区 .adag/mcp.json 原文
+ *   GET  /config         工作区 .adago/mcp.json 原文
  *   POST /config         保存配置
  *   POST /servers/toggle 启用/停用单个 server
  * 保存后需要重载插件（POST /agent-plugins/reload），工具列表才会更新。
@@ -18,7 +18,7 @@ export default function Page(_props: any) {
         <div class="mcp-head__text">
           <h1 class="mcp-title">MCP 服务端</h1>
           <p class="mcp-sub">
-            管理接入本工作区的 MCP server。配置来自 <code>.adag/mcp.json</code>（用户级 <code>~/.adago/mcp.json</code> 只读）；保存或启停后需要重载插件，工具才会更新。
+            管理接入本工作区的 MCP server。配置来自 <code>.adago/mcp.json</code>（用户级 <code>~/.adago/mcp.json</code> 只读）；保存或启停后需要重载插件，工具才会更新。
           </p>
         </div>
         <div class="mcp-head__actions">
@@ -44,7 +44,7 @@ export default function Page(_props: any) {
         <div class="mcp-config__head">
           <div class="mcp-config__text">
             <h2 class="mcp-config__title">工作区配置</h2>
-            <p class="mcp-config__path" data-mcp-config-path>.adag/mcp.json</p>
+            <p class="mcp-config__path" data-mcp-config-path>.adago/mcp.json</p>
           </div>
           <div class="mcp-config__actions">
             <button class="ada-btn ada-btn--secondary ada-btn--sm" type="button" data-mcp-config-reload>

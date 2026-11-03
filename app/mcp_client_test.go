@@ -142,7 +142,7 @@ func TestMCPClientHTTP(t *testing.T) {
 	}
 	defer bridge.Close()
 
-	if err := os.MkdirAll(filepath.Join(ws, ".adag"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(ws, ".adago"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cfg := fmt.Sprintf(`{
@@ -155,7 +155,7 @@ func TestMCPClientHTTP(t *testing.T) {
 	    "trustReadOnly": false
 	  }]
 	}`, srv.URL)
-	if err := os.WriteFile(filepath.Join(ws, ".adag", "mcp.json"), []byte(cfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(ws, ".adago", "mcp.json"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -229,7 +229,7 @@ func TestMCPClientServerUnavailable(t *testing.T) {
 	}
 	defer bridge.Close()
 
-	if err := os.MkdirAll(filepath.Join(ws, ".adag"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(ws, ".adago"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cfg := `{
@@ -241,7 +241,7 @@ func TestMCPClientServerUnavailable(t *testing.T) {
 	    "timeoutMs": 500
 	  }]
 	}`
-	if err := os.WriteFile(filepath.Join(ws, ".adag", "mcp.json"), []byte(cfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(ws, ".adago", "mcp.json"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	hc := host.Context{
@@ -319,7 +319,7 @@ func TestMCPStdioHelper(t *testing.T) {
 func TestMCPClientStdio(t *testing.T) {
 	ws := tempDir(t)
 	scripts := mcpScriptsWithStdioHelper(t)
-	if err := os.MkdirAll(filepath.Join(ws, ".adag"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(ws, ".adago"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cfg := fmt.Sprintf(`{
@@ -333,7 +333,7 @@ func TestMCPClientStdio(t *testing.T) {
 	    "timeoutMs": 5000
 	  }]
 	}`, os.Args[0])
-	if err := os.WriteFile(filepath.Join(ws, ".adag", "mcp.json"), []byte(cfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(ws, ".adago", "mcp.json"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
@@ -429,7 +429,7 @@ func TestMCPStdioBigHelper(t *testing.T) {
 func TestMCPClientStdioLargeResponse(t *testing.T) {
 	ws := tempDir(t)
 	scripts := mcpScriptsWithStdioHelper(t)
-	if err := os.MkdirAll(filepath.Join(ws, ".adag"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(ws, ".adago"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cfg := fmt.Sprintf(`{
@@ -443,7 +443,7 @@ func TestMCPClientStdioLargeResponse(t *testing.T) {
 	    "timeoutMs": 8000
 	  }]
 	}`, os.Args[0])
-	if err := os.WriteFile(filepath.Join(ws, ".adag", "mcp.json"), []byte(cfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(ws, ".adago", "mcp.json"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
@@ -482,7 +482,7 @@ func TestMCPClientInvalidConfigDegrades(t *testing.T) {
 	}
 	defer bridge.Close()
 
-	if err := os.MkdirAll(filepath.Join(ws, ".adag"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(ws, ".adago"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cfg := fmt.Sprintf(`{
@@ -493,7 +493,7 @@ func TestMCPClientInvalidConfigDegrades(t *testing.T) {
 	    {"id": "demo", "transport": "http", "url": "http://127.0.0.1:1/mcp"}
 	  ]
 	}`, srv.URL, srv.URL)
-	if err := os.WriteFile(filepath.Join(ws, ".adag", "mcp.json"), []byte(cfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(ws, ".adago", "mcp.json"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	hc := host.Context{
@@ -529,7 +529,7 @@ func TestMCPClientHangingServerDegrades(t *testing.T) {
 	defer bridge.Close()
 
 	ws := tempDir(t)
-	if err := os.MkdirAll(filepath.Join(ws, ".adag"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(ws, ".adago"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cfg := fmt.Sprintf(`{
@@ -539,7 +539,7 @@ func TestMCPClientHangingServerDegrades(t *testing.T) {
 	    {"id": "demo", "transport": "http", "url": %q, "timeoutMs": 5000}
 	  ]
 	}`, hang.URL, srv.URL)
-	if err := os.WriteFile(filepath.Join(ws, ".adag", "mcp.json"), []byte(cfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(ws, ".adago", "mcp.json"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	hc := host.Context{
@@ -577,14 +577,14 @@ func TestMCPClientSessionExpiryReinit(t *testing.T) {
 	}
 	defer bridge.Close()
 
-	if err := os.MkdirAll(filepath.Join(ws, ".adag"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(ws, ".adago"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cfg := fmt.Sprintf(`{
 	  "version": 1,
 	  "servers": [{"id": "demo", "transport": "http", "url": %q, "timeoutMs": 5000}]
 	}`, srv.URL)
-	if err := os.WriteFile(filepath.Join(ws, ".adag", "mcp.json"), []byte(cfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(ws, ".adago", "mcp.json"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	hc := host.Context{
@@ -629,14 +629,14 @@ func TestMCPClientCallTimeoutBounded(t *testing.T) {
 	}
 	defer bridge.Close()
 
-	if err := os.MkdirAll(filepath.Join(ws, ".adag"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(ws, ".adago"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cfg := fmt.Sprintf(`{
 	  "version": 1,
 	  "servers": [{"id": "demo", "transport": "http", "url": %q, "timeoutMs": 1000}]
 	}`, srv.URL)
-	if err := os.WriteFile(filepath.Join(ws, ".adag", "mcp.json"), []byte(cfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(ws, ".adago", "mcp.json"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	hc := host.Context{
@@ -671,7 +671,7 @@ func TestMCPClientAdminRoutes(t *testing.T) {
 	}
 	defer bridge.Close()
 
-	if err := os.MkdirAll(filepath.Join(ws, ".adag"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(ws, ".adago"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	initial := fmt.Sprintf(`{
@@ -681,7 +681,7 @@ func TestMCPClientAdminRoutes(t *testing.T) {
     {"id": "off", "transport": "http", "url": %q, "enabled": false}
   ]
 }`, srv.URL, srv.URL)
-	cfgPath := filepath.Join(ws, ".adag", "mcp.json")
+	cfgPath := filepath.Join(ws, ".adago", "mcp.json")
 	if err := os.WriteFile(cfgPath, []byte(initial), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -716,7 +716,7 @@ func TestMCPClientAdminRoutes(t *testing.T) {
 	if err := json.Unmarshal(out, &state); err != nil {
 		t.Fatalf("解析 /servers: %v\n%s", err, out)
 	}
-	if state.ConfigPath != ".adag/mcp.json" {
+	if state.ConfigPath != ".adago/mcp.json" {
 		t.Fatalf("configPath = %q", state.ConfigPath)
 	}
 	byID := map[string]int{}
@@ -727,7 +727,7 @@ func TestMCPClientAdminRoutes(t *testing.T) {
 	if !ok {
 		t.Fatalf("缺少 demo: %s", out)
 	}
-	if got := state.Servers[demo]; got.Status != "ready" || !got.Enabled || got.Source != ".adag/mcp.json" || got.Tools != 2 || len(got.Items) != 2 {
+	if got := state.Servers[demo]; got.Status != "ready" || !got.Enabled || got.Source != ".adago/mcp.json" || got.Tools != 2 || len(got.Items) != 2 {
 		t.Fatalf("demo 状态不符: %+v", got)
 	}
 	off, ok := byID["off"]
@@ -763,7 +763,7 @@ func TestMCPClientAdminRoutes(t *testing.T) {
 	if err := json.Unmarshal(out, &cfg); err != nil {
 		t.Fatalf("解析 /config: %v", err)
 	}
-	if cfg.Path != ".adag/mcp.json" || !cfg.Exists || cfg.Text != initial {
+	if cfg.Path != ".adago/mcp.json" || !cfg.Exists || cfg.Text != initial {
 		t.Fatalf("工作区配置读取不符: path=%q exists=%v text=%q", cfg.Path, cfg.Exists, cfg.Text)
 	}
 
@@ -850,7 +850,7 @@ func TestMCPClientAdminRoutes(t *testing.T) {
 	}
 }
 
-// TestMCPClientAdminConfigBootstrap：工作区还没有 .adag/mcp.json 时，管理页应能
+// TestMCPClientAdminConfigBootstrap：工作区还没有 .adago/mcp.json 时，管理页应能
 // 拿到初稿并通过保存创建文件（宿主负责补建父目录）。
 func TestMCPClientAdminConfigBootstrap(t *testing.T) {
 	ws := tempDir(t)
@@ -884,12 +884,99 @@ func TestMCPClientAdminConfigBootstrap(t *testing.T) {
 	if _, err := asm.CallHTTPAPI(ctx, "mcp-client", "POST", "/config", body, ""); err != nil {
 		t.Fatalf("POST /config: %v", err)
 	}
-	raw, err := os.ReadFile(filepath.Join(ws, ".adag", "mcp.json"))
+	raw, err := os.ReadFile(filepath.Join(ws, ".adago", "mcp.json"))
 	if err != nil {
-		t.Fatalf("保存应创建 .adag/mcp.json: %v", err)
+		t.Fatalf("保存应创建 .adago/mcp.json: %v", err)
 	}
 	if string(raw) != text {
 		t.Fatalf("文件内容 = %q", raw)
+	}
+}
+
+// TestMCPClientAdminLegacyConfig：旧工作区 .adag/mcp.json 只读兼容；管理页能读到
+// 原文，保存写 .adago/mcp.json，旧文件保持原样。
+func TestMCPClientAdminLegacyConfig(t *testing.T) {
+	ws := tempDir(t)
+	legacyText := `{"version":1,"servers":[{"id":"legacy","enabled":false,"transport":"http","url":"https://example.com/mcp"}]}`
+	legacyPath := filepath.Join(ws, ".adag", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyPath, []byte(legacyText), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
+	asm := assemble(t, testProduct(t, "mcp-client", "policy-default"), hc, nil)
+	ctx := context.Background()
+
+	out, err := asm.CallHTTPAPI(ctx, "mcp-client", "GET", "/config", nil, "")
+	if err != nil {
+		t.Fatalf("GET /config: %v", err)
+	}
+	var cfg struct {
+		Path   string `json:"path"`
+		Exists bool   `json:"exists"`
+		Text   string `json:"text"`
+	}
+	if err := json.Unmarshal(out, &cfg); err != nil {
+		t.Fatalf("解析 /config: %v\n%s", err, out)
+	}
+	if cfg.Path != ".adago/mcp.json" || !cfg.Exists || cfg.Text != legacyText {
+		t.Fatalf("旧配置读取不符: %+v", cfg)
+	}
+
+	out, err = asm.CallHTTPAPI(ctx, "mcp-client", "GET", "/servers", nil, "")
+	if err != nil {
+		t.Fatalf("GET /servers: %v", err)
+	}
+	var state struct {
+		Servers []struct {
+			ID      string `json:"id"`
+			Status  string `json:"status"`
+			Enabled bool   `json:"enabled"`
+			Source  string `json:"source"`
+		} `json:"servers"`
+	}
+	if err := json.Unmarshal(out, &state); err != nil {
+		t.Fatalf("解析 /servers: %v", err)
+	}
+	found := false
+	for _, s := range state.Servers {
+		if s.ID != "legacy" {
+			continue
+		}
+		found = true
+		if s.Enabled || s.Status != "disabled" || s.Source != ".adag/mcp.json（旧目录）" {
+			t.Fatalf("旧目录 server 状态不符: %+v", s)
+		}
+	}
+	if !found {
+		t.Fatalf("旧目录 server 未加载: %s", out)
+	}
+
+	newText := `{"version":1,"servers":[]}` + "\n"
+	body, _ := json.Marshal(map[string]any{
+		"method": "POST", "path": "/config",
+		"body": map[string]any{"text": newText},
+	})
+	if _, err := asm.CallHTTPAPI(ctx, "mcp-client", "POST", "/config", body, ""); err != nil {
+		t.Fatalf("POST /config: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(ws, ".adago", "mcp.json"))
+	if err != nil || string(raw) != newText {
+		t.Fatalf("新配置写入不符: %v %q", err, raw)
+	}
+	oldRaw, err := os.ReadFile(legacyPath)
+	if err != nil || string(oldRaw) != legacyText {
+		t.Fatalf("旧配置不应被改写: %v %q", err, oldRaw)
+	}
+	out, _ = asm.CallHTTPAPI(ctx, "mcp-client", "GET", "/config", nil, "")
+	if err := json.Unmarshal(out, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Text != newText {
+		t.Fatalf("保存后应读新文件: %q", cfg.Text)
 	}
 }
 

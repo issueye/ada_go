@@ -73,7 +73,7 @@ Gateway ── JSON-RPC ──► Core
 
 按优先级从高到低：
 
-1. 工作区 `.adag/mcp.json`（推荐；随项目走，可被插件页面编辑）。
+1. 工作区 `.adago/mcp.json`（推荐；随项目走，可被插件页面编辑）。旧版 `.adag/mcp.json` 仍可读（只读兼容），保存写新目录。
 2. 用户级 `~/.adago/mcp.json`（只读配置；需要用户手工编辑）。
 3. `config.toml` 的 `[plugins.settings.mcp-client]`（仅放非敏感默认值；嵌套数组在 TOML 里可读性差，不作为首选）。
 
@@ -338,7 +338,7 @@ MCP `CallToolResult.content[]` 映射到基座 `ToolReturn.content`：
 ### 7.2 刷新
 
 - 工具列表只在**插件装配期**生成。
-- 用户修改 `.adag/mcp.json` 后，通过插件页“重载”按钮或 `adag plugin reload mcp-client` 触发重载；旧代在途调用继续用旧工具映射，新代装配完成后原子替换。
+- 用户修改 `.adago/mcp.json` 后，通过插件页“重载”按钮或 `adag plugin reload mcp-client` 触发重载；旧代在途调用继续用旧工具映射，新代装配完成后原子替换。
 - 不提供运行期“动态新增工具”的 API；这与 INV-3/装配期结算一致。
 - 可选：插件页展示“配置已变更，需重载”，但不自动重载。
 
@@ -409,13 +409,13 @@ MCP `CallToolResult.content[]` 映射到基座 `ToolReturn.content`：
 - server 列表：id、transport、配置来源（工作区/用户级/settings）、状态（已连接/不可用/已停用）、工具数、最后错误；
   地址与 stdio 命令行在服务端就已脱敏（URL 去 query/fragment，疑似密钥的参数打码）。
 - 工具摘要：映射后的工具名、原始 MCP 名、access、`Schema 已简化` 标记（只读，来自装配期发现结果）。
-- 启停：逐个 server 写回工作区 `.adag/mcp.json` 的 `enabled`（启用时删除该键，默认即启用）。
+- 启停：逐个 server 写回工作区 `.adago/mcp.json` 的 `enabled`（启用时删除该键，默认即启用）。
 - 配置编辑：读写工作区配置原文；用户级 `~/.adago/mcp.json` 只读，页面不编辑。编辑器用「透明 textarea + 高亮层」实现 JSON 语法高亮（DOM 节点拼装，不经 innerHTML），打开时按 2 空格自动美化，可点「格式化」；语法错误按行/列提示，高亮只影响展示，不改变保存内容。
 - 重载：调用基座的 `/agent-plugins/reload`（与插件页一致），重新装配后按新配置发现工具。
 
 数据面是本插件自己的 route（`GET /servers`、`GET|POST /config`、`POST /servers/toggle`），
 页面脚本用 `window.adaAPI` 调用（自动带 CSRF）。写操作由用户点击触发；后端只写
-工作区 `.adag/mcp.json`（`fs.write` + 宿主工作区 scope），不接受用户传入路径。
+工作区 `.adago/mcp.json`（`fs.write` + 宿主工作区 scope），不接受用户传入路径。
 
 ### 9.2 随包技能
 
@@ -427,7 +427,7 @@ MCP `CallToolResult.content[]` 映射到基座 `ToolReturn.content`：
 - 如何从目录里挑 `mcp_<server>_<tool>`（`toolPrefix` 前缀、描述里的 `[MCP <id>]` 来源、Schema 简化时按 server 文档给字段）；
 - 审批（默认 `access=write`）与两类失败的区分：`isError` 是 server 业务错误，`mcpError` 是传输/认证/超时，处理方式不同；
 - MCP 输出是不可信数据、50KB/1MB 截断与资源索引、不要把密钥复述出来；
-- 新增/启停 server 走管理页，或按 README 改 `.adag/mcp.json` 后重载插件（工具列表是装配期结算）。
+- 新增/启停 server 走管理页，或按 README 改 `.adago/mcp.json` 后重载插件（工具列表是装配期结算）。
 
 ### 9.3 可观测性
 
@@ -448,7 +448,7 @@ MCP `CallToolResult.content[]` 映射到基座 `ToolReturn.content`：
 | 工具机制 | `agent.registerTool`、描述符校验、JSON Schema 子集、目录冻结、回执、截断、审计 | MCP 工具注册成普通工具；参数/结果/超时/截断复用 |
 | 审批链 | `tool.beforeCall` + `policy-default` / 其他策略插件 | MCP 非只读工具默认询问，`readonly` 拒绝 |
 | `ctx.fetch` | 调用期已有 `net.fetch`；装配期需由 `AssemblyContext` 挂载同一份 | 装配期发现、`tools/list`、`tools/call` |
-| `ctx.fs` | 调用期读成员可读宿主路径；装配期只读成员 | 读 `.adag/mcp.json`、`~/.adago/mcp.json` |
+| `ctx.fs` | 调用期读成员可读宿主路径；装配期只读成员 | 读 `.adago/mcp.json`、`~/.adago/mcp.json` |
 | `ctx.secret` | 调用期已有；装配期需由 `AssemblyContext` 挂载 | HTTP bearer token / stdio env |
 | `ctx.settings` | 调用期已有；装配期需由 `AssemblyContext` 提供 | 非敏感默认值 |
 | 插件 route / action / 前端 | `/ext/{id}/api/*`、动作桥、Vue/TSX 页面 | server 状态页、重载按钮、工具列表 |
@@ -543,12 +543,13 @@ ctx.process?: {
 5. **长任务/进度**：`ctx.fetch` 目前缓冲完整响应；MCP 长工具是否必须等 `ctx.http.stream`/`ctx.fetch` 流式能力？
 6. **stdio 进程安全**：`ctx.process` 是否需要独立于 `exec` 的能力位与更严格的程序 allowlist？
 7. **resources/prompts**：是否进入 v2 范围，还是保持“只做 tools”的最小面？
-8. **多工作区配置**：已钉定为工作区 `.adag/mcp.json` > 用户级 `~/.adago/mcp.json` > `settings`；同 `id` 前者覆盖后者。
+8. **多工作区配置**：已钉定为工作区 `.adago/mcp.json` > 用户级 `~/.adago/mcp.json` > `settings`；同 `id` 前者覆盖后者。
 9. **stdio 写入阻塞**：`process.write` 目前是在脚本线程上同步写 stdin；参数很大且 server 暂时不读时会阻塞该插件的 Runtime（无期限）。后续可改成带期限的异步写队列，或给单条消息加大小上限（已有 4MB 分帧上限兜底）。
 
 ---
 
 **相邻文档**：[插件模型](05-plugins.md) · [插件运行时](06-plugin-runtime.md) · [SSR 前端](07-ssr-frontend.md) · [安全与运维](09-security-operations.md) · [Node 兼容](12-node-compat.md)
+
 
 
 

@@ -29,7 +29,7 @@ plugins/my-plugin/
 - 一个包可以只声明 backend、只声明 frontend，或两者都有；两者由不同宿主加载（Core / Gateway），但共享同一个插件 id 与版本。
 - 官方插件与第三方同形：`plugin.json` + `index.ts` + 可选的 TSX；官方在构建期产出 `dist/`，桌面打包随 `resources/plugins/official` 发布，不存在平行的 Go 插件包或 Go 注册入口。
 - 发现路径：`<workspace>/.adago/plugins/<id>/`（工作区，仅旧目录兼容）与 `~/.adago/plugins/<id>/`（全局，生产统一安装路径）。工作区优先；同 id 冲突时工作区覆盖全局并给出警告。新安装（`plugin.admin` 安装桥 / plugin-helper）一律写全局。
-- 启用状态：全局 `~/.adago/plugins.json`（跨工作区共享）；工作区有单独启停时落到 `<workspace>/.adag/plugins.json` 覆盖全局；两者都无条目时回落产品声明。旧版按工作区写在 SQLite `plugin_meta` 的用户选择在打开会话时一次性迁移成工作区覆盖文件。
+- 启用状态：全局 `~/.adago/plugins.json`（跨工作区共享）；工作区有单独启停时落到 `<workspace>/.adago/plugins.json` 覆盖全局；两者都无条目时回落产品声明。旧工作区文件 `<workspace>/.adag/plugins.json` 仍可读（只读兼容），写入一律落 `.adago/plugins.json`。旧版按工作区写在 SQLite `plugin_meta` 的用户选择在打开会话时一次性迁移成工作区覆盖文件。
 - v1 只从本地目录或 zip 安装；不做在线市场，不做运行时 npm 解析。插件依赖必须在构建时打进产物，或使用宿主提供的模块。宿主提供的 Node 内置模块是一个有明确边界的子集，见 [12](12-node-compat.md)。
 
 ### 6.2 清单
@@ -73,11 +73,11 @@ plugins/my-plugin/
 - 后端部分（可选）：`backend.entry` 默认 `index.ts`，所有后端插件（官方与第三方）都必须提供入口。官方插件在构建期预编译成 `dist/`，桌面打包随 `resources/plugins/official` 发布，运行时与第三方一样由 moejs 宿主执行；第三方在安装或加载时编译。`backend.capabilities` 是可安装能力的白名单；`backend.hooks` 声明使用哪些点位与最高动作等级（未声明的点位在调用时拒绝）。不声明 `backend` 即纯前端插件。
 - `backend.initTimeoutMs` 是入口工厂（含异步 Promise 结算）的装配预算，缺省 5000、上限 60000 毫秒；超过 5000 仅 builtin/verified 可声明。它只放宽装配期发现预算（如 MCP 的 `tools/list`），超时仍按插件装配失败处理，不影响 Core 启动。
 - `backend.env` 是环境变量白名单：只有列出的名字出现在 `process.env`，值在装配期从宿主环境取值并冻结（组合根可显式注入覆盖，例如测试）；宿主环境里不存在的名字不注入（`undefined`），不伪造空串。密钥不得写入环境变量，仍走 `secret`。
-- 环境变量模块（`adag env` 管理的全局 `~/.adago/env.json` + 工作区 `.adag/env.json`，工作区覆盖全局）会注入插件启动的**子进程**（`ctx.exec`、后台任务、`ctx.process.start`），同名覆盖宿主环境；它不进入插件 `process.env`（那里仍按 `backend.env` 白名单），值不写日志。变量名需匹配 `^[A-Za-z_][A-Za-z0-9_]*$`，`ADAG_` 前缀保留。
+- 环境变量模块（`adag env` 管理的全局 `~/.adago/env.json` + 工作区 `.adago/env.json`，工作区覆盖全局）会注入插件启动的**子进程**（`ctx.exec`、后台任务、`ctx.process.start`），同名覆盖宿主环境；它不进入插件 `process.env`（那里仍按 `backend.env` 白名单），值不写日志。变量名需匹配 `^[A-Za-z_][A-Za-z0-9_]*$`，`ADAG_` 前缀保留。旧工作区 `.adag/env.json` 只读兼容（新文件存在时忽略旧文件），写入落 `.adago/env.json`。
 - `backend.capabilities` 里的 `process` 只授予 builtin/verified，安装 `ctx.process`（长驻 stdin/stdout、可 kill 进程树）；它不是 `node:child_process` 的替代，也不装 `spawn`/`fork`。每 Runtime 最多 8 个、单进程生命周期 30m。
 - Node 内置模块同样由能力位安装：`node:fs` 需要 `fs.read`/`fs.write`，`node:child_process` 需要 `exec`，`node:os` 始终受限安装；`node:path`/`node:crypto`/`node:buffer` 等纯计算模块无需能力。未安装的模块在链接期报 `ERR_ACCESS_DENIED`；`node:http(s)`/`node:net`/`node:dns`/`node:worker_threads`/`node:vm` 不安装。完整矩阵见 [6.12](12-node-compat.md#612-node-兼容原生库)。
 - `backend.roles` 声明插件角色；v1 只定义 `tool-policy`（审批策略）。它只用于产品装配校验与“无策略时失败关闭”，基座不解释具体规则。
-- `capabilities` 里的 `ui.ask` 只授予 builtin/verified：它允许插件发起通用用户交互（confirm/select/input），不授予任何工具或文件权限。`net.sse` 同样只授予 builtin/verified，供官方 provider 做流式模型协议；`subagent.invoke` 只授予 builtin，供 `tools-subagent` 使用；`model.admin` 只授予 builtin，供供应商管理插件读取目录并切换当前模型（不含密钥）；`plugin.admin` 只授予 builtin，供 `plugin-helper` 经宿主安装桥把插件骨架写入全局 `~/.adago/plugins`（宿主校验 id/路径/大小并拒绝覆盖，不授予任意文件写权限）；`env.admin` 只授予 builtin，供环境变量管理页经 `ctx.env` 读写全局 `~/.adago/env.json` 与工作区 `.adag/env.json`（固定路径、键名校验、0600 原子写）。
+- `capabilities` 里的 `ui.ask` 只授予 builtin/verified：它允许插件发起通用用户交互（confirm/select/input），不授予任何工具或文件权限。`net.sse` 同样只授予 builtin/verified，供官方 provider 做流式模型协议；`subagent.invoke` 只授予 builtin，供 `tools-subagent` 使用；`model.admin` 只授予 builtin，供供应商管理插件读取目录并切换当前模型（不含密钥）；`plugin.admin` 只授予 builtin，供 `plugin-helper` 经宿主安装桥把插件骨架写入全局 `~/.adago/plugins`（宿主校验 id/路径/大小并拒绝覆盖，不授予任意文件写权限）；`env.admin` 只授予 builtin，供环境变量管理页经 `ctx.env` 读写全局 `~/.adago/env.json` 与工作区 `.adago/env.json`（固定路径、键名校验、0600 原子写）。
 - `apiVersion` 主版本不匹配直接拒绝加载；次版本兼容，宿主忽略未知字段并记录。
 - `id` 必须匹配 `^[a-z][a-z0-9-]{1,63}$`，且等于目录名。
 - `trust`：`builtin`（预编译后随 resources 发布，只能启用/禁用）、`verified`（签名有效）、`third-party`（默认，受限）。
@@ -259,6 +259,7 @@ interface HookContext {
 ---
 
 **相邻文档**：[← 会话、存储与子智能体](04-sessions-storage.md) · [索引](design.md) · [插件运行时与治理 →](06-plugin-runtime.md)
+
 
 
 

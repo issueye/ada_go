@@ -313,9 +313,12 @@ the token can still call the API.
 
 - Window title bar / taskbar: [internal/app/icon.png](internal/app/icon.png),
   embedded and set with `Window.SetIcon`; macOS also gets it on the Dock.
+- Tray: [internal/app/tray.png](internal/app/tray.png), a 32x32 copy scaled
+  from the app icon and embedded for the notification area (Windows) or menu
+  bar (macOS).
 - Executable: [assets/icon.ico](assets/icon.ico) is linked into
   `rsrc_windows_amd64.syso` / `rsrc_windows_arm64.syso`.
-- Regenerate the ICO and resources after changing the PNG:
+- Regenerate the ICO, the tray PNG and the resources after changing the icon:
 
 ```sh
 go run ./tools/icopack
@@ -326,6 +329,9 @@ go build -o bin/browser-use.exe .
 
 ## What works now
 
+- **Tray icon**: a notification-area (Windows) / menu-bar (macOS) icon with
+  Show Window, Hide Window and Quit; hiding keeps the control server and the
+  agent's tabs running.
 - **Frameless title bar**: app icon, tabs, `+` and the window controls in
   one native strip; drag the empty title bar to move the window. Tabs use a
   colored site initial as a favicon fallback.
@@ -362,3 +368,4 @@ M2 remaining: popup windows with `window.opener`, approvals/policies, nested
 iframe traversal and command palette/favicons.
 
 See [DESIGN.md](DESIGN.md) for the full design.
+

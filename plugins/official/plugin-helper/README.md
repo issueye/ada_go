@@ -34,7 +34,7 @@
 
 对话里说「检查一下 XXX 插件 / 插件为什么不工作」时，AI 调用 `check_plugin`
 （`access: read`）：返回发现位置（随包/全局/工作区）、清单字段、启停决策来源
-（全局 plugins.json / 工作区 .adag/plugins.json / 产品声明）、装配状态与
+（全局 plugins.json / 工作区 .adago/plugins.json / 产品声明；旧 .adag/plugins.json 只读兼容）、装配状态与
 last_error，并对未停用的落盘插件做入口预加载校验；`id` 留空返回全部插件摘要。
 向导页同款能力走 `POST /check-plugin` route。
 
@@ -52,3 +52,4 @@ last_error，并对未停用的落盘插件做入口预加载校验；`id` 留�
 提示词/供应商/route）、`ctx` 能力与信任矩阵、资源上限、生命周期、前端段契约
 与当前渲染边界，以及本插件自身 route/工具的完整契约。AI 生成插件代码前按它
 自检；工作区即仓库时可用 fs 工具直接读取。
+

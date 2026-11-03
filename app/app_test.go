@@ -105,6 +105,44 @@ func toolNames(asm *app.Assembly) []string {
 	return out
 }
 
+// TestToolsPlanLegacyTodo：旧工作区 .adag/todo 只读兼容；读到计划后迁移到
+// .adago/todo，旧文件保持原样。
+func TestToolsPlanLegacyTodo(t *testing.T) {
+	ws := tempDir(t)
+	hc := host.Context{
+		Workspace: ws,
+		ThreadID:  "th_legacy",
+		Log:       func(string, string, map[string]any) {},
+	}
+	legacyPath := filepath.Join(ws, ".adag", "todo", "TODO_th_legacy.json")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"threadId":"th_legacy","steps":[{"step":"旧计划","status":"pending"}]}`
+	if err := os.WriteFile(legacyPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	asm := assemble(t, testProduct(t, "tools-plan"), hc, nil)
+	text, _ := callTool(t, asm, hc, "read_plan", map[string]any{})
+	if !strings.Contains(text, "旧计划") {
+		t.Fatalf("read_plan 应读到旧目录计划: %q", text)
+	}
+
+	newPath := filepath.Join(ws, ".adago", "todo", "TODO_th_legacy.json")
+	raw, err := os.ReadFile(newPath)
+	if err != nil {
+		t.Fatalf("计划应迁移到 .adago/todo: %v", err)
+	}
+	if !strings.Contains(string(raw), "旧计划") {
+		t.Fatalf("迁移内容不符: %s", raw)
+	}
+	old, err := os.ReadFile(legacyPath)
+	if err != nil || string(old) != body {
+		t.Fatalf("旧文件不应被改写: %v %q", err, old)
+	}
+}
+
 // TestToolsPlan 钉 tools-plan 的完整链路：装配 → 注册 → 调 update_plan → read_plan。
 func TestToolsPlan(t *testing.T) {
 	ws := tempDir(t)
@@ -156,7 +194,7 @@ func TestToolsPlan(t *testing.T) {
 	}
 
 	// 数据必须落在按会话命名的文件里，并由工具自己读写。
-	todo := filepath.Join(ws, ".adag", "todo", "TODO_th_test_plan.json")
+	todo := filepath.Join(ws, ".adago", "todo", "TODO_th_test_plan.json")
 	raw, err := os.ReadFile(todo)
 	if err != nil {
 		t.Fatalf("TODO 文件未写出（%s）: %v", todo, err)
@@ -184,7 +222,7 @@ func TestToolsPlan(t *testing.T) {
 	}
 }
 
-// 旧版本线程级 state KV 里的计划：首次读文件时迁移到 .adag/todo/TODO_<threadId>.json。
+// 旧版本线程级 state KV 里的计划：首次读文件时迁移到 .adago/todo/TODO_<threadId>.json。
 func TestToolsPlanMigratesLegacyState(t *testing.T) {
 	ws := tempDir(t)
 	hc := host.Context{
@@ -204,7 +242,7 @@ func TestToolsPlanMigratesLegacyState(t *testing.T) {
 	if !strings.Contains(text, "1/1 完成") || !strings.Contains(text, "旧计划") {
 		t.Fatalf("read_plan 没读到旧 KV 计划: %q", text)
 	}
-	raw, err := os.ReadFile(filepath.Join(ws, ".adag", "todo", "TODO_th_legacy_plan.json"))
+	raw, err := os.ReadFile(filepath.Join(ws, ".adago", "todo", "TODO_th_legacy_plan.json"))
 	if err != nil {
 		t.Fatalf("旧计划没有迁移到 TODO 文件: %v", err)
 	}

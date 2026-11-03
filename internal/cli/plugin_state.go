@@ -5,11 +5,11 @@ package cli
 //   - 插件本体：全局 ~/.adago/plugins/<id>/（plugin.admin 安装桥的唯一落点；
 //     工作区 .adago/plugins 仅作为旧目录继续被发现，新安装不再写入）。
 //   - 启用状态：全局 ~/.adago/plugins.json 是用户级启停，跨工作区共享；
-//     工作区 <workspace>/.adag/plugins.json 只在「该工作区有单独启停」时存在，
+//     工作区 <workspace>/.adago/plugins.json 只在「该工作区有单独启停」时存在，
 //     其条目覆盖全局。两者都没有条目时回落产品声明（声明=启用）。
 //   - 旧版把启停写在 plugin_meta（SQLite，按工作区）：打开会话时若发现用户
 //     显式选择（user_set=1）且工作区覆盖文件还不存在，就一次性落成
-//     .adag/plugins.json，之后 SQLite 只保留版本/指纹/last_error 等运行元信息。
+//     .adago/plugins.json，之后 SQLite 只保留版本/指纹/last_error 等运行元信息。
 
 import (
 	"context"
@@ -65,7 +65,43 @@ func (s *Session) globalPluginStatePath() string {
 }
 
 func workspacePluginStatePath(workspace string) string {
+	return filepath.Join(workspace, ".adago", "plugins.json")
+}
+
+// legacyWorkspacePluginStatePath 是旧工作区启停文件（只读兼容）。
+func legacyWorkspacePluginStatePath(workspace string) string {
 	return filepath.Join(workspace, ".adag", "plugins.json")
+}
+
+// workspacePluginState 读取工作区覆盖：优先 .adago/plugins.json，新文件不存在时
+// 回落到旧 .adag/plugins.json（legacy=true，只读兼容）。
+func workspacePluginState(workspace string) (entries map[string]pluginStateEntry, exists, legacy bool) {
+	entries, exists, err := loadPluginStateFile(workspacePluginStatePath(workspace))
+	if err != nil || exists {
+		return entries, exists, false
+	}
+	entries, exists, err = loadPluginStateFile(legacyWorkspacePluginStatePath(workspace))
+	if err != nil {
+		return nil, false, false
+	}
+	return entries, exists, exists
+}
+
+// materializeWorkspacePluginState 在首次写新工作区文件前，把旧 .adag/plugins.json
+// 的条目带到 .adago/plugins.json，避免切换一个插件时丢掉其它覆盖。
+func materializeWorkspacePluginState(workspace string) {
+	if strings.TrimSpace(workspace) == "" {
+		return
+	}
+	wsPath := workspacePluginStatePath(workspace)
+	if _, err := os.Stat(wsPath); err == nil {
+		return
+	}
+	entries, exists, err := loadPluginStateFile(legacyWorkspacePluginStatePath(workspace))
+	if err != nil || !exists || len(entries) == 0 {
+		return
+	}
+	_ = savePluginStateFile(wsPath, entries)
 }
 
 // loadPluginStateFile 读取一份启停状态；文件不存在返回 (nil, false, nil)，
@@ -132,16 +168,13 @@ func savePluginStateFile(path string, entries map[string]pluginStateEntry) error
 
 // overlayPluginState 把 JSON 启停状态（工作区覆盖 > 全局）套到 plugin_meta
 // 记录上：出现在文件里即视为用户显式选择。同时负责一次性迁移：工作区覆盖
-// 文件还不存在、而 plugin_meta 里有用户显式选择时，把它们落成 .adag/plugins.json。
+// 文件还不存在、而 plugin_meta 里有用户显式选择时，把它们落成 .adago/plugins.json。
 func (s *Session) overlayPluginState(ctx context.Context, out map[string]sqlite.PluginMetaRecord) {
 	wsPath := workspacePluginStatePath(s.cfg.Workspace)
-	wsEntries, wsExists, err := loadPluginStateFile(wsPath)
-	if err != nil {
-		s.logWarn("工作区插件启停状态读取失败，忽略: " + err.Error())
-	}
+	wsEntries, wsExists, _ := workspacePluginState(s.cfg.Workspace)
 	if !wsExists {
 		s.migrateWorkspacePluginOverrides(ctx, wsPath, out)
-		wsEntries, _, _ = loadPluginStateFile(wsPath)
+		wsEntries, _, _ = workspacePluginState(s.cfg.Workspace)
 	}
 	globalEntries, _, err := loadPluginStateFile(s.globalPluginStatePath())
 	if err != nil {
@@ -169,7 +202,7 @@ func overlayPluginStateEntry(out map[string]sqlite.PluginMetaRecord, id string, 
 }
 
 // migrateWorkspacePluginOverrides 把旧版 per-workspace 的用户启停（plugin_meta
-// 里 user_set=1 的行）一次性物化成 <workspace>/.adag/plugins.json。
+// 里 user_set=1 的行）一次性物化成 <workspace>/.adago/plugins.json。
 func (s *Session) migrateWorkspacePluginOverrides(
 	ctx context.Context, wsPath string, out map[string]sqlite.PluginMetaRecord,
 ) {
@@ -551,9 +584,9 @@ func locationDetail(path string) string {
 // enabledDetail 说明启停决策来自哪一层：工作区覆盖 / 全局 / 产品声明。
 func enabledDetail(s *Session, view PluginView) string {
 	decision := "产品声明"
-	if entries, exists, _ := loadPluginStateFile(workspacePluginStatePath(s.cfg.Workspace)); exists {
+	if entries, exists, _ := workspacePluginState(s.cfg.Workspace); exists {
 		if _, ok := entries[view.ID]; ok {
-			decision = "工作区覆盖 .adag/plugins.json"
+			decision = "工作区覆盖 .adago/plugins.json"
 		}
 	}
 	if decision == "产品声明" {

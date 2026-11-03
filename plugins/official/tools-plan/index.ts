@@ -1,12 +1,12 @@
 // tools-plan —— 官方插件：维护当前线程的任务计划（05 §6.3、02 §5.4 的 tools-plan）。
 //
-// 计划不写进会话 entry：插件自己把每个会话的计划保存到工作区 `.adag/todo/`
+// 计划不写进会话 entry：插件自己把每个会话的计划保存到工作区 `.adago/todo/`
 // 下的 TODO_<threadId>.json。工具调用与前端只读动作都从 ctx.threadId 取对应会话的
 // ID，读写同一个文件；结构化步骤只走 details 给界面（INV-10），模型只拿到一段
 // 渲染好的文本。旧版本留在线程级 state KV 里的计划会在首次读文件时迁移一次，
 // 之后文件是唯一真源。
 //
-// 为什么 access=read：.adag/todo/TODO_<threadId>.json 是本插件自己的会话状态文件（与原先
+// 为什么 access=read：.adago/todo/TODO_<threadId>.json 是本插件自己的会话状态文件（与原先
 // 线程级 KV 同一语义），不是用户文件编辑，不应触发写/执行审批。
 
 type PlanStatus = "pending" | "in_progress" | "done";
@@ -186,19 +186,51 @@ function requireThreadID(ctx: ToolContext): string {
   return id;
 }
 
-// .adag/todo/TODO_<threadId>.json：文件名带会话 ID，插件自己读写；目录由宿主挂载为
+// .adago/todo/TODO_<threadId>.json：文件名带会话 ID，插件自己读写；目录由宿主挂载为
 // /workspace（ctx.workspace）。ID 里的非法文件名字符做保守替换。
 function todoPath(ctx: ToolContext): string {
+  const threadID = requireThreadID(ctx);
+  const safe = threadID.replace(/[^A-Za-z0-9_-]/g, "_");
+  const workspace = String(ctx.workspace || "/workspace").replace(/\/+$/, "");
+  return workspace + "/.adago/todo/TODO_" + safe + ".json";
+}
+
+// legacyTodoPath 是旧工作区目录（只读兼容：读到后迁到 .adago/todo）。
+function legacyTodoPath(ctx: ToolContext): string {
   const threadID = requireThreadID(ctx);
   const safe = threadID.replace(/[^A-Za-z0-9_-]/g, "_");
   const workspace = String(ctx.workspace || "/workspace").replace(/\/+$/, "");
   return workspace + "/.adag/todo/TODO_" + safe + ".json";
 }
 
+function parseTodo(text: string, path: string): PlanStep[] {
+  if (!text.trim()) return [];
+  let parsed: any;
+  try {
+    parsed = JSON.parse(text);
+  } catch (_err) {
+    fail("ERR_INVALID_ARG_VALUE", `TODO 文件不是合法 JSON：${path}`);
+  }
+  return stepsFromStored(Array.isArray(parsed) ? parsed : parsed && parsed.steps);
+}
+
 async function loadSteps(ctx: ToolContext): Promise<PlanStep[]> {
   const fs = requireFs(ctx);
   const path = todoPath(ctx);
   if (!(await fs.exists(path))) {
+    // 旧工作区 .adag/todo：读到后迁到 .adago/todo（写失败也不影响本次返回）。
+    const oldPath = legacyTodoPath(ctx);
+    if (await fs.exists(oldPath)) {
+      const steps = parseTodo(await fs.readText(oldPath), oldPath);
+      if (steps.length > 0) {
+        try {
+          await saveSteps(ctx, steps);
+        } catch (_err) {
+          /* 迁移失败不致命 */
+        }
+      }
+      return steps;
+    }
     // 旧版本把计划放在线程级 state KV；首次读文件时顺手迁移一次，
     // 之后文件就是唯一真源（写失败也不影响本次返回旧计划）。
     const legacy = await loadLegacyState(ctx);
@@ -212,15 +244,7 @@ async function loadSteps(ctx: ToolContext): Promise<PlanStep[]> {
     }
     return [];
   }
-  const text = await fs.readText(path);
-  if (!text.trim()) return [];
-  let parsed: any;
-  try {
-    parsed = JSON.parse(text);
-  } catch (_err) {
-    fail("ERR_INVALID_ARG_VALUE", `TODO 文件不是合法 JSON：${path}`);
-  }
-  return stepsFromStored(Array.isArray(parsed) ? parsed : parsed && parsed.steps);
+  return parseTodo(await fs.readText(path), path);
 }
 
 // loadLegacyState 只在文件还不存在时读一次旧 KV（state 能力仅为此保留）。
@@ -252,7 +276,7 @@ export default function (agent: AgentAPI): void {
     name: "update_plan",
     description:
       "创建或更新当前会话的任务计划。传入完整步骤列表（会整体替换），每步标 pending/in_progress/done。适合把多步工作显式化并在推进中更新。",
-    access: "read", // 只写插件自己的 .adag/todo/TODO_<threadId>.json（会话状态，不是用户文件编辑）
+    access: "read", // 只写插件自己的 .adago/todo/TODO_<threadId>.json（会话状态，不是用户文件编辑）
     parameters: {
       type: "object",
       properties: {
@@ -344,3 +368,4 @@ export default function (agent: AgentAPI): void {
     },
   });
 }
+

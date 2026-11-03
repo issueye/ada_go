@@ -106,7 +106,7 @@ func (e *execState) startBackground(req *execRequest, maxTasks int) (*background
 	if len(baseEnv) == 0 {
 		baseEnv = os.Environ()
 	}
-	cmd.Env = mergeEnv(baseEnv, req.baseEnv)
+	cmd.Env = applyBinPath(mergeEnv(baseEnv, req.baseEnv), req.binDirs)
 	stdout := &capWriter{limit: req.maxBuffer}
 	stderr := &capWriter{limit: req.maxBuffer}
 	cmd.Stdout, cmd.Stderr = stdout, stderr

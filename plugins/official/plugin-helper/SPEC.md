@@ -182,7 +182,7 @@ JSON 用 `JSON.parse(res.text)`；响应 ≤16MB。
    不拖垮其它插件。
 2. **装配**：产品声明选择默认启用集合；未声明的随包插件呈 `unused`，可手动启用。
 3. **启停状态**：真源是 JSON——全局 `~/.adago/plugins.json`（跨工作区共享）+
-   工作区 `<workspace>/.adag/plugins.json`（仅该工作区有单独启停时存在，条目覆盖
+   工作区 `<workspace>/.adago/plugins.json`（仅该工作区有单独启停时存在，旧 `.adag/plugins.json` 只读兼容，写入落 `.adago`；条目覆盖
    全局）；两者都没有条目时回落产品声明。旧版按工作区写在 SQLite `plugin_meta`
    的用户选择会在打开会话时一次性迁移成工作区覆盖文件。
 4. **工具目录**：启用插件的工具进入同一目录，`access=write/exec/network` 受审批策略约束。
@@ -384,8 +384,10 @@ Route（向导页面用）：
   清理启停条目；随包插件拒绝；移除后需重载生效
 
 启停状态：全局 `~/.adago/plugins.json`（跨工作区共享）+ 工作区
-`<workspace>/.adag/plugins.json`（单独启停的覆盖，见 §7.3）。
+`<workspace>/.adago/plugins.json`（单独启停的覆盖，见 §7.3）。
 
 随包技能：`skills/plugin-manual/SKILL.md` — 插件手册（工作流层）：创建/检查/启停/
 移除的操作指引，外加 `adag-ui` 动态块的使用说明（语法、可用 renderer、data 规则与
 降级）；本文件是契约层，两者配合使用。
+
+

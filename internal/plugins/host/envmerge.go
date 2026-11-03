@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/adag/ada-go/internal/binpaths"
 )
 
 // mergeEnv 把用户管理环境变量（overrides）叠加到 base：
@@ -39,6 +41,31 @@ func mergeEnv(base []string, overrides map[string]string) []string {
 		out = append(out, item.name+"="+item.value)
 	}
 	return out
+}
+
+// applyBinPath 把服务程序目录前置到 PATH：有 PATH 时保留原值并去重前置，
+// 没有 PATH 时只用这些目录填一个（不让子进程凭空继承宿主 PATH）。
+func applyBinPath(env []string, dirs []binpaths.Dir) []string {
+	if len(dirs) == 0 {
+		return env
+	}
+	for i, item := range env {
+		j := strings.IndexByte(item, '=')
+		if j <= 0 || !isPathName(item[:j]) {
+			continue
+		}
+		env[i] = item[:j] + "=" + binpaths.PrependPath(item[j+1:], dirs)
+		return env
+	}
+	return append(env, "PATH="+binpaths.PrependPath("", dirs))
+}
+
+// isPathName 判断变量名是不是 PATH（Windows 大小写不敏感）。
+func isPathName(name string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(name, "PATH")
+	}
+	return name == "PATH"
 }
 
 // envKey 是环境变量名比较用的规范形式（Windows 大小写不敏感）。

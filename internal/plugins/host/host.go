@@ -156,7 +156,7 @@ func (c *CapabilitySet) Has(cap plugins.Capability) bool { return c.Backend[cap]
 // 引擎只交出这些字段，插件拿不到数据库句柄、密钥文件、原始 socket 或进程（1.5.2）。
 type Context struct {
 	Workspace string
-	// EnvVars 是用户管理的环境变量（~/.adago/env.json + <workspace>/.adag/env.json），
+	// EnvVars 是用户管理的环境变量（~/.adago/env.json + <workspace>/.adago/env.json），
 	// 注入到插件启动的所有子进程（exec / 后台任务 / process.start），同名覆盖宿主环境；
 	// 不进入插件 process.env（那里仍按清单 backend.env 白名单）。值不写日志。
 	EnvVars  map[string]string

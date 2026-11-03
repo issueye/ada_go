@@ -1,11 +1,11 @@
-// generated from index.ts (sha256:889e31687ca3c5d0) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:be074d0d150153cc) by plugins/official/build.mjs — do not edit
 // mcp-client —— 官方插件：把 MCP server 的工具接入为普通工具（v2 设计见 docs/18）。
 //
 // 范围：
 //   - HTTP / Streamable HTTP 与 stdio transport；
 //   - 装配期 initialize + tools/list，把每个 MCP 工具 registerTool；
 //   - 运行期 tools/call，结果映射成普通 ToolReturn；
-//   - 配置来自工作区 .adag/mcp.json（或 plugins.settings.mcp-client.servers）；
+//   - 配置来自工作区 .adago/mcp.json（或 plugins.settings.mcp-client.servers）；
 //   - 管理页数据面：GET /servers、GET|POST /config、POST /servers/toggle
 //     （页面 /ext/mcp-client/servers，配置写在宿主 fs 的工作区 scope 内）。
 //
@@ -34,7 +34,7 @@
         
                                                                           
                                             
-                                                    
+                                                     
                                                                        
     
            
@@ -126,7 +126,7 @@ const MAX_FRAME_BYTES = 4 * 1024 * 1024;
 // 这里必须给足余量，否则 >50KB 的 JSON-RPC 消息会被截断成非法 JSON（Unix 管道 64KB 时必现）。
 const PROCESS_READ_BYTES = 1024 * 1024;
 // 管理页只编辑工作区配置；用户级配置按设计只读。
-const CONFIG_DISPLAY_PATH = ".adag/mcp.json";
+const CONFIG_DISPLAY_PATH = ".adago/mcp.json";
 const USER_CONFIG_DISPLAY_PATH = "~/.adago/mcp.json";
 const MAX_CONFIG_BYTES = 256 * 1024;
 
@@ -348,7 +348,7 @@ function parseServers(raw     )                   {
     }
     const s = item                ;
     if (typeof s.id !== "string" || !/^[a-z][a-z0-9_]{0,15}$/.test(s.id)) {
-      // 配置错误只降级这一项：不让 .adag/mcp.json 的笔误把整个产品装配拖垮。
+      // 配置错误只降级这一项：不让 .adago/mcp.json 的笔误把整个产品装配拖垮。
       warnings.push(`server.id 非法：${String(s.id)}（需匹配 ^[a-z][a-z0-9_]{0,15}$），该项已跳过`);
       continue;
     }
@@ -398,19 +398,47 @@ function mergeServers(base                , override                )           
   return Array.from(byID.values());
 }
 
+async function configExists(ctx                 , path        )                   {
+  if (!ctx.fs || typeof ctx.fs.exists !== "function") return false;
+  try {
+    return await ctx.fs.exists(path);
+  } catch (_err) {
+    return false;
+  }
+}
+
+// readWorkspaceServers 读工作区配置：新目录 .adago/mcp.json 优先；新文件不存在时
+// 读旧 .adag/mcp.json（只读兼容，保存仍写新目录）。
+async function readWorkspaceServers(ctx                 )                          {
+  const primary = workspaceConfigPath(ctx);
+  if (await configExists(ctx, primary)) {
+    return readConfigFile(ctx, primary, ".adago/mcp.json");
+  }
+  const legacy = legacyWorkspaceConfigPath(ctx);
+  if (await configExists(ctx, legacy)) {
+    return readConfigFile(ctx, legacy, ".adag/mcp.json（旧目录）");
+  }
+  return [];
+}
+
 async function loadServers(ctx                 )                          {
   const settings = parseServers((ctx.settings ?? {})["servers"]);
   for (const w of settings.warnings) ctx.log("warn", `mcp: plugins.settings.mcp-client: ${w}`);
   for (const s of settings.servers) s.source = "plugins.settings";
-  const base = String(ctx.workspace || "").replace(/\/+$/, "");
   const global = await readConfigFile(ctx, globalConfigPath(), "~/.adago/mcp.json");
-  const local = await readConfigFile(ctx, `${base}/.adag/mcp.json`, ".adag/mcp.json");
+  const local = await readWorkspaceServers(ctx);
   // 优先级：工作区 > 用户级 > settings 默认值；同 id 后者被前者覆盖。
   return mergeServers(mergeServers(settings.servers, global), local);
 }
 
 // workspaceConfigPath 是管理页读写的工作区配置（虚拟挂载路径，宿主按工作区根解析）。
 function workspaceConfigPath(ctx                 )         {
+  const base = String(ctx.workspace || "").replace(/\/+$/, "");
+  return `${base}/.adago/mcp.json`;
+}
+
+// legacyWorkspaceConfigPath 是旧工作区目录里的配置（只读兼容）。
+function legacyWorkspaceConfigPath(ctx                 )         {
   const base = String(ctx.workspace || "").replace(/\/+$/, "");
   return `${base}/.adag/mcp.json`;
 }
@@ -419,10 +447,15 @@ function workspaceConfigPath(ctx                 )         {
 async function readWorkspaceConfig(ctx                 )                                             {
   if (!ctx.fs) return { exists: false, text: "" };
   try {
-    if (typeof ctx.fs.exists === "function" && !(await ctx.fs.exists(workspaceConfigPath(ctx)))) {
-      return { exists: false, text: "" };
+    let path = workspaceConfigPath(ctx);
+    if (!(await configExists(ctx, path))) {
+      const legacy = legacyWorkspaceConfigPath(ctx);
+      if (!(await configExists(ctx, legacy))) {
+        return { exists: false, text: "" };
+      }
+      path = legacy;
     }
-    const text = await ctx.fs.readText(workspaceConfigPath(ctx), { maxBytes: MAX_CONFIG_BYTES });
+    const text = await ctx.fs.readText(path, { maxBytes: MAX_CONFIG_BYTES });
     return { exists: true, text };
   } catch (e     ) {
     if (e && (e.code === "ENOENT" || String(e.message || "").includes("no such file"))) {
@@ -1293,6 +1326,7 @@ function uniqueName(base        , used             )         {
   used.add(name);
   return name;
 }
+
 
 
 

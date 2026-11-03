@@ -2,7 +2,7 @@ package cli_test
 
 // 插件启停状态的存储分层（plugin_state.go）：
 //   - 全局 ~/.adago/plugins.json：跨工作区共享的用户决定（默认写入目标）；
-//   - 工作区 <workspace>/.adag/plugins.json：仅在「该工作区有单独启停」时存在，
+//   - 工作区 <workspace>/.adago/plugins.json：仅在「该工作区有单独启停」时存在，
 //     条目覆盖全局；
 //   - 旧版写在 plugin_meta（SQLite）的用户选择在打开会话时一次性迁移成工作区文件。
 
@@ -104,7 +104,7 @@ func TestPluginEnabledWorkspaceOverride(t *testing.T) {
 	globalState := filepath.Join(home, ".adago", "plugins.json")
 
 	ws, data := t.TempDir(), t.TempDir()
-	overridePath := filepath.Join(ws, ".adag", "plugins.json")
+	overridePath := filepath.Join(ws, ".adago", "plugins.json")
 	if err := os.MkdirAll(filepath.Dir(overridePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -130,8 +130,51 @@ func TestPluginEnabledWorkspaceOverride(t *testing.T) {
 	}
 }
 
+// TestPluginEnabledLegacyWorkspaceOverride：旧工作区目录 .adag/plugins.json
+// 只读兼容；第一次切换时把条目物化到 .adago/plugins.json，旧文件保持原样。
+func TestPluginEnabledLegacyWorkspaceOverride(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	ws, data := t.TempDir(), t.TempDir()
+	legacyPath := filepath.Join(ws, ".adag", "plugins.json")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"version":1,"plugins":{"tools-git":{"enabled":true},"token-usage":{"enabled":false}}}`
+	if err := os.WriteFile(legacyPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sess := openWithPluginState(t, ws, data, "")
+	if v, ok := sess.PluginViewDetail(ctx, "token-usage"); !ok || v.Enabled {
+		t.Fatalf("旧工作区覆盖未生效（token-usage）: %+v", v)
+	}
+	if v, ok := sess.PluginViewDetail(ctx, "tools-git"); !ok || !v.Enabled {
+		t.Fatalf("旧工作区覆盖未生效（tools-git）: %+v", v)
+	}
+
+	if _, err := sess.SetPluginEnabled(ctx, "tools-git", false); err != nil {
+		t.Fatalf("SetPluginEnabled(false): %v", err)
+	}
+	wsPath := filepath.Join(ws, ".adago", "plugins.json")
+	entries := readPluginState(t, wsPath)
+	if e, ok := entries["tools-git"]; !ok || e.Enabled {
+		t.Fatalf("新工作区文件缺少 tools-git=false: %v", entries)
+	}
+	if e, ok := entries["token-usage"]; !ok || e.Enabled {
+		t.Fatalf("物化时应保留 token-usage=false: %v", entries)
+	}
+	old := readPluginState(t, legacyPath)
+	if e, ok := old["tools-git"]; !ok || !e.Enabled {
+		t.Fatalf("旧文件不应被改写: %v", old)
+	}
+}
+
 // TestPluginStateMigratedFromSQLite：旧版按工作区写在 plugin_meta 的用户启停
-// 在打开会话时一次性迁移成 <workspace>/.adag/plugins.json。
+// 在打开会话时一次性迁移成 <workspace>/.adago/plugins.json。
 func TestPluginStateMigratedFromSQLite(t *testing.T) {
 	ctx := context.Background()
 	ws, data := t.TempDir(), t.TempDir()
@@ -155,7 +198,7 @@ func TestPluginStateMigratedFromSQLite(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	sess := openWithPluginState(t, ws, data, "")
 
-	overridePath := filepath.Join(ws, ".adag", "plugins.json")
+	overridePath := filepath.Join(ws, ".adago", "plugins.json")
 	entries := readPluginState(t, overridePath)
 	if e, ok := entries["tools-git"]; !ok || e.Enabled {
 		t.Fatalf("迁移后的工作区覆盖缺少 tools-git=false: %v", entries)
@@ -168,5 +211,5 @@ func TestPluginStateMigratedFromSQLite(t *testing.T) {
 // workspaceOverridePathFor 供断言用：工作区覆盖文件的路径。
 func workspaceOverridePathFor(t *testing.T, workspace string) string {
 	t.Helper()
-	return filepath.Join(workspace, ".adag", "plugins.json")
+	return filepath.Join(workspace, ".adago", "plugins.json")
 }

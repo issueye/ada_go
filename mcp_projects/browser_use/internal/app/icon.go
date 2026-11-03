@@ -14,6 +14,13 @@ import (
 //go:embed icon.png
 var appIconPNG []byte
 
+// trayIconPNG is the 32x32 notification-area / menu-bar icon, scaled from
+// icon.png by tools/icopack. It is small so Windows and macOS do not have
+// to shrink the 256px app icon for the tray.
+//
+//go:embed tray.png
+var trayIconPNG []byte
+
 var (
 	iconOnce sync.Once
 	iconSrc  ui.ImageSource

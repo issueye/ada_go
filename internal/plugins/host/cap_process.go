@@ -263,7 +263,7 @@ func (s *processState) startProcess(st *capsState, args []moejs.Value) (int, err
 		}
 	}
 
-	req := &execRequest{file: file, args: argv, maxBuffer: st.limits.MaxExecOutputBytes, timeout: DefaultProcessLifetime, baseEnv: st.baseEnv}
+	req := &execRequest{file: file, args: argv, maxBuffer: st.limits.MaxExecOutputBytes, timeout: DefaultProcessLifetime, baseEnv: st.baseEnv, binDirs: st.binDirs}
 	cwd := st.caps.WorkspaceRoot
 	envNames := make([]string, 0, len(st.caps.Env))
 	for name := range st.caps.Env {
@@ -335,7 +335,7 @@ func (s *processState) startProcess(st *capsState, args []moejs.Value) (int, err
 			baseEnv = append(baseEnv, name+"="+st.caps.Env[name])
 		}
 	}
-	cmd.Env = mergeEnv(baseEnv, st.baseEnv)
+	cmd.Env = applyBinPath(mergeEnv(baseEnv, st.baseEnv), st.binDirs)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()

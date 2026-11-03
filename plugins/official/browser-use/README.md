@@ -33,7 +33,7 @@
 - 产品默认（推荐给长期使用）：把 `browser-use` 加进 `products/coding.agent.json` 的
   `plugins`。注意 `adag verify products` 与 `internal/conformance` 里冻结了 coding 产品的
   插件数（当前 13），改这里要同步改门禁与文档里的数字。
-- 本工作区单独启用（不改产品声明）：在工作区 `.adag/plugins.json` 里写
+- 本工作区单独启用（不改产品声明）：在工作区 `.adago/plugins.json` 里写
 
   ```json
   { "version": 1, "plugins": { "browser-use": { "enabled": true } } }

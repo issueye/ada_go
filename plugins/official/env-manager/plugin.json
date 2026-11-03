@@ -3,7 +3,7 @@
   "name": "环境变量",
   "version": "0.1.0",
   "apiVersion": 1,
-  "description": "管理全局与工作区环境变量（注入插件启动的子进程；配置在 ~/.adago/env.json 与 .adag/env.json）",
+  "description": "管理全局与工作区环境变量（注入插件启动的子进程；配置在 ~/.adago/env.json 与 .adago/env.json）",
   "trust": "builtin",
   "backend": {
     "entry": "index.ts",

@@ -40,6 +40,9 @@ func TestEnvManagerPageRenders(t *testing.T) {
 		"data-em-rows",
 		"data-em-scope",
 		"data-em-value",
+		"data-em-bins",
+		"data-em-bins-list",
+		"服务程序",
 	} {
 		if !strings.Contains(string(html), want) {
 			t.Fatalf("管理页缺少 %q:\n%s", want, html)

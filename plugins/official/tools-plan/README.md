@@ -23,7 +23,7 @@
 | `reflect_plan` | 工具 | `read` | 基于当前计划做反思：确认下一步聚焦、是否在计划路径上、有没有走偏或越做越多 |
 | `plan` | 只读动作 | — | 给 Todo 卡片取数，返回 `{ plan: { done, total, steps } }` |
 
-`update_plan` 标 `access=read` 是刻意的：它只写插件自己的会话状态文件 `.adag/todo/TODO_<threadId>.json`，不是用户文件编辑，不应触发写/执行审批。`reflect_plan` 也是 `access=read`：它只读取计划并输出反思结论，不修改任何状态。
+`update_plan` 标 `access=read` 是刻意的：它只写插件自己的会话状态文件 `.adago/todo/TODO_<threadId>.json`，不是用户文件编辑，不应触发写/执行审批。`reflect_plan` 也是 `access=read`：它只读取计划并输出反思结论，不修改任何状态。
 
 ## 反思工具 `reflect_plan`
 
@@ -47,7 +47,7 @@
 
 ## 存储
 
-- 每个会话一份计划，文件位于工作区 `.adag/todo/` 下：`.adag/todo/TODO_<threadId>.json`。
+- 每个会话一份计划，文件位于工作区 `.adago/todo/` 下：`.adago/todo/TODO_<threadId>.json`。旧工作区 `.adag/todo` 只读兼容：读到后迁移到新目录，旧文件不删。
 - 文件内容：`{ threadId, steps: [{ step, status }], updatedAt }`；`status` 为 `pending` / `in_progress` / `done`。
 - 会话 ID 中的非法文件名字符会替换为 `_`。
 - 旧版本曾把计划放在线程级 state KV；首次读文件时迁移一次，之后文件是唯一真源。
@@ -76,3 +76,4 @@
 
 - [插件模型与后端 API](../../../docs/05-plugins.md)
 - [SSR 前端](../../../docs/07-ssr-frontend.md)
+

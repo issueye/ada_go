@@ -2,7 +2,7 @@
 //
 // 两层文件，工作区覆盖全局：
 //   - 全局：~/.adago/env.json（ADAGO_HOME 优先，与 plugins.json 同一约定）
-//   - 工作区：<workspace>/.adag/env.json
+//   - 工作区：<workspace>/.adago/env.json
 //
 // 文件是带版本的 JSON 信封；为了手改方便也接受扁平对象（键值都是字符串）：
 //
@@ -36,6 +36,10 @@ const (
 	MaxValueBytes = 32 << 10
 	// MaxFileBytes 是单个 env.json 的大小上限。
 	MaxFileBytes = 256 << 10
+	// WorkspaceDirName 是工作区本地数据目录。
+	WorkspaceDirName = ".adago"
+	// legacyWorkspaceDirName 是旧工作区目录（只读兼容，写入仍落到新目录）。
+	legacyWorkspaceDirName = ".adag"
 )
 
 // ReservedPrefix 是宿主保留的环境变量前缀（与清单 backend.env 的规则一致）：
@@ -51,10 +55,10 @@ type file struct {
 	Vars    map[string]string `json:"vars"`
 }
 
-// GlobalPath 返回用户级 env.json 路径：ADAGO_HOME 优先，否则 ~/.adago/env.json。
-func GlobalPath() (string, error) {
+// GlobalDir 返回用户级数据目录：ADAGO_HOME 优先，否则 ~/.adago。
+func GlobalDir() (string, error) {
 	if dir := strings.TrimSpace(os.Getenv("ADAGO_HOME")); dir != "" {
-		return filepath.Join(dir, FileName), nil
+		return dir, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -63,11 +67,37 @@ func GlobalPath() (string, error) {
 	if strings.TrimSpace(home) == "" {
 		return "", errors.New("envstore: 用户主目录为空")
 	}
-	return filepath.Join(home, ".adago", FileName), nil
+	return filepath.Join(home, ".adago"), nil
+}
+
+// GlobalPath 返回用户级 env.json 路径：ADAGO_HOME 优先，否则 ~/.adago/env.json。
+func GlobalPath() (string, error) {
+	dir, err := GlobalDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, FileName), nil
 }
 
 // WorkspacePath 返回工作区 env.json 路径（工作区先转绝对路径）。
 func WorkspacePath(workspace string) (string, error) {
+	abs, err := workspaceAbs(workspace)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(abs, WorkspaceDirName, FileName), nil
+}
+
+// legacyWorkspacePath 返回旧工作区 env.json 路径（只读兼容）。
+func legacyWorkspacePath(workspace string) (string, error) {
+	abs, err := workspaceAbs(workspace)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(abs, legacyWorkspaceDirName, FileName), nil
+}
+
+func workspaceAbs(workspace string) (string, error) {
 	ws := strings.TrimSpace(workspace)
 	if ws == "" {
 		return "", errors.New("envstore: 需要工作区目录")
@@ -76,7 +106,51 @@ func WorkspacePath(workspace string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("envstore: 解析工作区 %q 失败: %w", ws, err)
 	}
-	return filepath.Join(abs, ".adag", FileName), nil
+	return abs, nil
+}
+
+// WorkspaceReadPath 选择工作区 env.json：新目录优先；新文件不存在时回落到旧
+// .adag/env.json（返回 legacy=true）。两者都不存在时用新路径（读取为空）。
+func WorkspaceReadPath(workspace string) (path string, legacy bool, err error) {
+	newPath, err := WorkspacePath(workspace)
+	if err != nil {
+		return "", false, err
+	}
+	if _, statErr := os.Stat(newPath); statErr == nil {
+		return newPath, false, nil
+	}
+	oldPath, err := legacyWorkspacePath(workspace)
+	if err != nil {
+		return "", false, err
+	}
+	if _, statErr := os.Stat(oldPath); statErr == nil {
+		return oldPath, true, nil
+	}
+	return newPath, false, nil
+}
+
+// MigrateWorkspace 在写入前把旧 .adag/env.json 物化到新目录：换目录后第一次
+// set/unset 不会丢掉旧变量，后续写入只落到 .adago/env.json。
+func MigrateWorkspace(workspace string) error {
+	newPath, err := WorkspacePath(workspace)
+	if err != nil {
+		return err
+	}
+	if _, statErr := os.Stat(newPath); statErr == nil {
+		return nil
+	}
+	oldPath, err := legacyWorkspacePath(workspace)
+	if err != nil {
+		return err
+	}
+	if _, statErr := os.Stat(oldPath); statErr != nil {
+		return nil
+	}
+	vars, _, err := LoadFile(oldPath)
+	if err != nil {
+		return err
+	}
+	return SaveFile(newPath, vars)
 }
 
 // ValidateKey 校验变量名。返回的错误可以安全展示（不含值）。
@@ -203,9 +277,13 @@ func LoadForWorkspace(workspace string) (map[string]string, []string) {
 		layers = append(layers, layer{label: "全局", path: path})
 	}
 	if ws := strings.TrimSpace(workspace); ws != "" {
-		if path, err := WorkspacePath(ws); err != nil {
+		path, legacy, err := WorkspaceReadPath(ws)
+		if err != nil {
 			warns = append(warns, "工作区环境变量不可用: "+err.Error())
 		} else {
+			if legacy {
+				warns = append(warns, "工作区环境变量读取自旧目录 .adag/env.json；写入会落到 .adago/env.json")
+			}
 			layers = append(layers, layer{label: "工作区", path: path})
 		}
 	}

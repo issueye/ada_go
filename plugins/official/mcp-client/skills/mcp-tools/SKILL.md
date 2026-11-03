@@ -51,9 +51,9 @@ MCP server 的工具在装配期被转换成**普通工具**：名字形如 `mcp
 ## 5. 需要新增或调整 server 时
 
 - 首选让用户在 **MCP 服务端管理页**（`/ext/mcp-client/servers`）启停 server、编辑工作区
-  `.adag/mcp.json`，然后点「重载插件」。
+  `.adago/mcp.json`，然后点「重载插件」。
 - 用户明确要求你代改配置时：按 MCP 插件 README 里的配置格式写
-  `.adag/mcp.json`（`id` 匹配 `^[a-z][a-z0-9_]{0,15}$`；HTTP 只允许 https 或回环 http；
+  `.adago/mcp.json`（`id` 匹配 `^[a-z][a-z0-9_]{0,15}$`；HTTP 只允许 https 或回环 http；
   stdio 需要可执行程序与参数），保存后提醒用户重载插件——工具列表不会在运行期动态出现。
 - 用户级 `~/.adago/mcp.json` 只读；管理页只改工作区配置。
 

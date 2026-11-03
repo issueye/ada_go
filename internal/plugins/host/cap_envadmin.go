@@ -4,16 +4,18 @@ package host
 //
 // 只通过 internal/envstore 读写两份固定文件：
 //   - global：~/.adago/env.json（ADAGO_HOME 优先）
-//   - workspace：<工作区根>/.adag/env.json
+//   - workspace：<工作区根>/.adago/env.json
 // 脚本不能传路径；键值校验、大小上限、0600 原子写都在 envstore 里，宿主只做
 // 能力门禁、scope 解析与审计（只记键名与路径，不记值）。
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/MoeForge/moejs"
 	"github.com/MoeForge/moejs/engine"
 
+	"github.com/adag/ada-go/internal/binpaths"
 	"github.com/adag/ada-go/internal/envstore"
 	"github.com/adag/ada-go/internal/plugins"
 )
@@ -30,14 +32,29 @@ func envAdminPath(st *capsState, scope string) (string, error) {
 	}
 }
 
-// envAdminView 是 ctx.env.list() 的返回：两层原文 + 合并结果 + 警告。
+// envAdminView 是 ctx.env.list() 的返回：两层原文 + 合并结果 + 服务程序目录 + 警告。
 func envAdminView(st *capsState) map[string]any {
 	warnings := []string{}
 	loadLayer := func(scope string) (string, map[string]string) {
-		path, err := envAdminPath(st, scope)
-		if err != nil {
-			warnings = append(warnings, scope+": "+err.Error())
-			return "", map[string]string{}
+		var path string
+		if scope == "workspace" {
+			// 读兼容旧目录 .adag/env.json；写入始终落 .adago/env.json。
+			p, legacy, err := envstore.WorkspaceReadPath(st.caps.WorkspaceRoot)
+			if err != nil {
+				warnings = append(warnings, scope+": "+err.Error())
+				return "", map[string]string{}
+			}
+			if legacy {
+				warnings = append(warnings, "工作区环境变量读取自旧目录 .adag/env.json；写入会落到 .adago/env.json")
+			}
+			path = p
+		} else {
+			p, err := envAdminPath(st, scope)
+			if err != nil {
+				warnings = append(warnings, scope+": "+err.Error())
+				return "", map[string]string{}
+			}
+			path = p
 		}
 		vars, layerWarns, err := envstore.LoadFile(path)
 		if err != nil {
@@ -56,6 +73,20 @@ func envAdminView(st *capsState) map[string]any {
 	for key, value := range workspaceVars {
 		merged[key] = value
 	}
+	pathViews := make([]map[string]any, 0, len(st.binDirs))
+	for _, dir := range st.binDirs {
+		exists := false
+		if info, err := os.Stat(dir.Path); err == nil && info.IsDir() {
+			exists = true
+		}
+		pathViews = append(pathViews, map[string]any{
+			"scope":  dir.Scope,
+			"path":   dir.Path,
+			"exists": exists,
+		})
+	}
+	programs, binWarnings := binpaths.List(st.binDirs, 0)
+	warnings = append(warnings, binWarnings...)
 	return map[string]any{
 		"global": map[string]any{
 			"path": globalPath,
@@ -67,6 +98,10 @@ func envAdminView(st *capsState) map[string]any {
 		},
 		"merged":   merged,
 		"warnings": warnings,
+		"bins": map[string]any{
+			"paths":    pathViews,
+			"programs": programs,
+		},
 	}
 }
 
@@ -90,6 +125,11 @@ func addEnvAdminContextMember(st *capsState, hc Context, put func(string, moejs.
 		if err != nil {
 			return moejs.Undefined(), throwCoded(rr, codeInvalidArgType, "ctx.env.set: "+err.Error(), nil)
 		}
+		if scope == "workspace" {
+			if err := envstore.MigrateWorkspace(st.caps.WorkspaceRoot); err != nil {
+				return moejs.Undefined(), throwCoded(rr, codeOutOfRange, "ctx.env.set: 迁移旧工作区环境变量失败: "+err.Error(), nil)
+			}
+		}
 		if err := envstore.ValidateKey(key); err != nil {
 			return moejs.Undefined(), throwCoded(rr, codeInvalidArgType, "ctx.env.set: "+err.Error(), nil)
 		}
@@ -109,6 +149,11 @@ func addEnvAdminContextMember(st *capsState, hc Context, put func(string, moejs.
 		path, err := envAdminPath(st, scope)
 		if err != nil {
 			return moejs.Undefined(), throwCoded(rr, codeInvalidArgType, "ctx.env.remove: "+err.Error(), nil)
+		}
+		if scope == "workspace" {
+			if err := envstore.MigrateWorkspace(st.caps.WorkspaceRoot); err != nil {
+				return moejs.Undefined(), throwCoded(rr, codeOutOfRange, "ctx.env.remove: 迁移旧工作区环境变量失败: "+err.Error(), nil)
+			}
 		}
 		if err := envstore.ValidateKey(key); err != nil {
 			return moejs.Undefined(), throwCoded(rr, codeInvalidArgType, "ctx.env.remove: "+err.Error(), nil)

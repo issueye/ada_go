@@ -9,7 +9,7 @@ import (
 )
 
 func TestSaveLoadRoundtrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), ".adag", FileName)
+	path := filepath.Join(t.TempDir(), ".adago", FileName)
 	vars := map[string]string{"GITHUB_TOKEN": "ghp_secret", "EMPTY": ""}
 	if err := SaveFile(path, vars); err != nil {
 		t.Fatalf("SaveFile: %v", err)
@@ -110,10 +110,10 @@ func TestLoadForWorkspacePrecedence(t *testing.T) {
 	if err := SaveFile(filepath.Join(home, FileName), map[string]string{"A": "global", "B": "keep"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(ws, ".adag"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(ws, ".adago"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := SaveFile(filepath.Join(ws, ".adag", FileName), map[string]string{"A": "workspace"}); err != nil {
+	if err := SaveFile(filepath.Join(ws, ".adago", FileName), map[string]string{"A": "workspace"}); err != nil {
 		t.Fatal(err)
 	}
 	vars, warns := LoadForWorkspace(ws)
@@ -125,6 +125,90 @@ func TestLoadForWorkspacePrecedence(t *testing.T) {
 	}
 }
 
+// TestLoadForWorkspaceLegacyFallback：新目录没有 env.json 时读旧 .adag/env.json，
+// 并给出迁移警告；新文件出现后旧文件不再参与合并。
+func TestLoadForWorkspaceLegacyFallback(t *testing.T) {
+	home := t.TempDir()
+	ws := t.TempDir()
+	t.Setenv("ADAGO_HOME", home)
+	if err := SaveFile(filepath.Join(home, FileName), map[string]string{"GLOBAL": "g"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(ws, ".adag"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveFile(filepath.Join(ws, ".adag", FileName), map[string]string{"OLD": "1", "GLOBAL": "old"}); err != nil {
+		t.Fatal(err)
+	}
+
+	vars, warns := LoadForWorkspace(ws)
+	if vars["OLD"] != "1" || vars["GLOBAL"] != "old" {
+		t.Fatalf("旧工作区变量未生效: %v", vars)
+	}
+	if len(warns) != 1 || !strings.Contains(warns[0], "旧目录") {
+		t.Fatalf("应有旧目录警告: %v", warns)
+	}
+
+	if err := os.MkdirAll(filepath.Join(ws, ".adago"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveFile(filepath.Join(ws, ".adago", FileName), map[string]string{"NEW": "2"}); err != nil {
+		t.Fatal(err)
+	}
+	vars, warns = LoadForWorkspace(ws)
+	if vars["NEW"] != "2" || vars["OLD"] != "" {
+		t.Fatalf("新文件应覆盖旧文件: %v", vars)
+	}
+	if vars["GLOBAL"] != "g" {
+		t.Fatalf("全局变量应保留: %v", vars)
+	}
+	if len(warns) != 0 {
+		t.Fatalf("新文件存在时不应有旧目录警告: %v", warns)
+	}
+}
+
+// TestMigrateWorkspace：第一次写新目录前把旧 .adag/env.json 物化过去，
+// 之后 Set/Unset 只改新文件。
+func TestMigrateWorkspace(t *testing.T) {
+	home := t.TempDir()
+	ws := t.TempDir()
+	t.Setenv("ADAGO_HOME", home)
+	if err := os.MkdirAll(filepath.Join(ws, ".adag"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveFile(filepath.Join(ws, ".adag", FileName), map[string]string{"A": "1", "B": "2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateWorkspace(ws); err != nil {
+		t.Fatalf("MigrateWorkspace: %v", err)
+	}
+	newPath, err := WorkspacePath(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vars, _, err := LoadFile(newPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vars["A"] != "1" || vars["B"] != "2" {
+		t.Fatalf("迁移后内容不符: %v", vars)
+	}
+	if _, _, err := Unset(newPath, "A"); err != nil {
+		t.Fatalf("Unset: %v", err)
+	}
+	vars, _, _ = LoadFile(newPath)
+	if _, ok := vars["A"]; ok {
+		t.Fatalf("A 应被删除: %v", vars)
+	}
+	if vars["B"] != "2" {
+		t.Fatalf("B 应保留: %v", vars)
+	}
+	// 旧文件保持原样（只读兼容）。
+	oldVars, _, _ := LoadFile(filepath.Join(ws, ".adag", FileName))
+	if oldVars["A"] != "1" {
+		t.Fatalf("旧文件不应被改写: %v", oldVars)
+	}
+}
 func TestSetUnset(t *testing.T) {
 	path := filepath.Join(t.TempDir(), FileName)
 	if _, err := Set(path, "A", "1"); err != nil {

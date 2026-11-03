@@ -15,6 +15,7 @@ import (
 	"github.com/MoeForge/moejs/engine"
 	mojsnode "github.com/MoeForge/moejs/node"
 
+	"github.com/adag/ada-go/internal/binpaths"
 	"github.com/adag/ada-go/internal/plugins"
 	"github.com/adag/ada-go/internal/plugins/host/nodemods"
 )
@@ -209,6 +210,9 @@ type capsState struct {
 	limits Limits
 	// baseEnv 是环境变量模块注入的子进程基础环境（装配期快照，同名覆盖宿主环境）。
 	baseEnv map[string]string
+	// binDirs 是服务程序目录（工作区 .adago/bin + 用户级 ~/.adago/bin），
+	// 启动子进程时前置到 PATH。
+	binDirs []binpaths.Dir
 
 	// inst 由 runFactory 接上：agent:host 的模块体在装配早期求值，
 	// 但它的导出函数要等到入口工厂运行时才知道该往哪个实例登记。
@@ -316,6 +320,9 @@ func installCapabilities(rt *mojsRuntime, loop *mojsLoop, caps *CapabilitySet, h
 	st := &capsState{
 		rt: rt, loop: loop, caps: caps, hc: hc,
 		limits: currentLimits(), installed: map[string]provider{},
+	}
+	if dirs, derr := binpaths.Dirs(st.caps.WorkspaceRoot); derr == nil {
+		st.binDirs = dirs
 	}
 	if len(hc.EnvVars) > 0 {
 		st.baseEnv = make(map[string]string, len(hc.EnvVars))

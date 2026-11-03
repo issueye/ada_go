@@ -8,7 +8,7 @@
 
 ## 配置
 
-配置优先级：工作区 `.adag/mcp.json` > 用户级 `~/.adago/mcp.json` > `[plugins.settings.mcp-client].servers`；同 `id` 前者覆盖后者。
+配置优先级：工作区 `.adago/mcp.json` > 用户级 `~/.adago/mcp.json` > `[plugins.settings.mcp-client].servers`；同 `id` 前者覆盖后者。旧工作区 `.adag/mcp.json` 只读兼容（新文件存在时忽略），页面保存写 `.adago/mcp.json`。
 
 ```json
 {
@@ -60,11 +60,11 @@
 
 - server 列表：id、transport、配置来源、状态（已连接 / 不可用 / 已停用）、工具数、最后错误；
 - 工具摘要：映射后的工具名、原始 MCP 名、access、`Schema 已简化` 标记；
-- 逐个 server 启用 / 停用（写回工作区 `.adag/mcp.json` 的 `enabled`，启用时删掉该键）；
+- 逐个 server 启用 / 停用（写回工作区 `.adago/mcp.json` 的 `enabled`，启用时删掉该键）；
 - 编辑工作区配置原文并保存（用户级 `~/.adago/mcp.json` 只读，页面不编辑）；编辑器带 JSON 语法高亮，打开时按 2 空格自动美化，可在保存前点「格式化」，语法错误按行/列提示；
 - 「重载插件」：重新装配并按新配置发现工具。保存或启停后都需要重载才会生效。
 
-数据面是本插件自己的 route（`GET /servers`、`GET|POST /config`、`POST /servers/toggle`），页面脚本用 `window.adaAPI` 调用（自动带 CSRF）。写入只发生在工作区 `.adag/mcp.json`（`fs.write`，宿主工作区 scope 内），不接受用户传入路径；页面数据里的地址/命令行已脱敏，配置原文只在用户点开编辑器时返回。
+数据面是本插件自己的 route（`GET /servers`、`GET|POST /config`、`POST /servers/toggle`），页面脚本用 `window.adaAPI` 调用（自动带 CSRF）。写入只发生在工作区 `.adago/mcp.json`（`fs.write`，宿主工作区 scope 内），不接受用户传入路径；页面数据里的地址/命令行已脱敏，配置原文只在用户点开编辑器时返回。
 
 ## 随包技能
 
@@ -74,11 +74,12 @@ name/description 与 SKILL.md 的绝对路径，模型按路径读取正文。�
 - 从工具目录挑 `mcp_<server>_<tool>`（前缀与 `[MCP <id>]` 来源标记、Schema 被简化时的注意事项）；
 - 审批与两类失败的区分（`isError` 是 server 业务错误；`mcpError` 是传输/认证/超时）；
 - 输出按不可信数据处理、截断与资源索引、不要把 token 复述出来；
-- 新增/启停 server 走管理页，或按本 README 改 `.adag/mcp.json` 后重载插件。
+- 新增/启停 server 走管理页，或按本 README 改 `.adago/mcp.json` 后重载插件。
 
 ## 构建
 
 `index.ts` 是源码，`dist/index.js` 由 `node plugins/official/build.mjs` 生成；不要手改 `dist/`。`page.tsx` 与 `static/` 由 Gateway 渲染桥在运行时加载，不进 `dist/`。
+
 
 
 

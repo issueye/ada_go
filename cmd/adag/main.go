@@ -49,7 +49,7 @@ const usage = `adag —— 本地优先的 Agent 系统（单二进制，两角�
   adag plugin     <list|install|reload>         插件管理（M3 落地）
   adag env        <list|set|unset> [--workspace <dir>] [--json]
                                                 环境变量管理（全局 ~/.adago/env.json
-                                                + 工作区 .adag/env.json，注入插件子进程）
+                                                + 工作区 .adago/env.json，注入插件子进程）
   adag doctor     [--fake] [--data-dir <dir>] [--gateway-addr 127.0.0.1:52353]
                                                 无模型依赖的启动自检（含 Gateway 端口）
   adag verify     [检查名...]                    开发门禁：generated dispatch hooks slots

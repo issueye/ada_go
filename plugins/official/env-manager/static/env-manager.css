@@ -218,9 +218,87 @@
   font-size: var(--ada-text-sm);
 }
 
+/* 服务程序：PATH 前缀目录与扫描到的可执行文件。 */
+.em-bins {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.em-bins__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.em-bins__text {
+  min-width: 0;
+}
+
+.em-bins__title {
+  margin: 0;
+  font-size: var(--ada-text-md);
+  font-weight: 600;
+  color: var(--ph-ink);
+}
+
+.em-bins__sub {
+  margin: 4px 0 0;
+  font-size: var(--ada-text-sm);
+  line-height: 1.6;
+  color: var(--ph-muted);
+}
+
+.em-bins__paths {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-lg);
+  background: var(--ph-surface);
+}
+
+.em-bin-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: var(--ada-text-sm);
+}
+
+.em-bin-path__code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: var(--ada-text-xs);
+  color: var(--ph-ink);
+  word-break: break-all;
+}
+
+.em-bin-path__state {
+  font-size: var(--ada-text-xs);
+  color: var(--ph-success-ink);
+}
+
+.em-bin-path__state.is-missing {
+  color: var(--ph-warn-ink);
+}
+
+.em-col-size {
+  width: 90px;
+  white-space: nowrap;
+}
+
+.em-col-time {
+  width: 170px;
+  white-space: nowrap;
+}
+
 .em-hint {
   margin: 0;
   font-size: var(--ada-text-sm);
   line-height: 1.6;
   color: var(--ph-muted);
 }
+

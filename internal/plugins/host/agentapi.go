@@ -751,7 +751,7 @@ func (p *Instance) assemblyContextObject(rt *mojsRuntime, c *call) moejs.Value {
 		return moejs.Undefined(), nil
 	}))
 
-	// fs 只安装读成员：装配期读 .adag/mcp.json、~/.adago/mcp.json，不允许写。
+	// fs 只安装读成员：装配期读 .adago/mcp.json、~/.adago/mcp.json，不允许写。
 	if st, ok := stateFor(rt); ok && p.caps.Has(plugins.CapFSRead) && st.fs != nil {
 		set("fs", ctxFSReadObject(st, hc))
 	}

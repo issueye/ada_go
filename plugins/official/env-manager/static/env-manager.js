@@ -23,6 +23,8 @@
   var valueInput = root.querySelector("[data-em-value]");
   var refreshBtn = root.querySelector("[data-em-refresh]");
   var reloadBtn = root.querySelector("[data-em-reload]");
+  var binsPathsNode = root.querySelector("[data-em-bins-paths]");
+  var binsListNode = root.querySelector("[data-em-bins-list]");
 
   var state = null;
   var revealed = Object.create(null);
@@ -64,6 +66,61 @@
     return scope + ":" + key;
   }
 
+  function formatBytes(bytes) {
+    var n = Number(bytes) || 0;
+    if (n <= 0) return "—";
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+    return (n / 1024 / 1024).toFixed(1) + " MB";
+  }
+
+  function formatTime(value) {
+    if (!value) return "—";
+    var d = new Date(value);
+    if (isNaN(d.getTime())) return String(value);
+    return d.toLocaleString();
+  }
+
+  // 服务程序：展示宿主前置到 PATH 的两个目录与扫描到的可执行文件。
+  function renderBins(bins) {
+    var paths = (bins && bins.paths) || [];
+    var programs = (bins && bins.programs) || [];
+    if (binsPathsNode) {
+      binsPathsNode.textContent = "";
+      paths.forEach(function (item) {
+        var row = el("div", "em-bin-path");
+        row.appendChild(el("span", "em-chip em-chip--" + item.scope, scopeLabel(item.scope)));
+        row.appendChild(el("code", "em-bin-path__code", item.path || ""));
+        var state = el("span", "em-bin-path__state", item.exists ? "已创建" : "未创建");
+        if (!item.exists) state.className += " is-missing";
+        row.appendChild(state);
+        binsPathsNode.appendChild(row);
+      });
+    }
+    if (!binsListNode) return;
+    binsListNode.textContent = "";
+    if (!programs.length) {
+      var tr = document.createElement("tr");
+      var td = el("td", "em-empty", "还没有服务程序。把可执行文件放进上面的目录即可。");
+      td.setAttribute("colspan", "4");
+      tr.appendChild(td);
+      binsListNode.appendChild(tr);
+      return;
+    }
+    programs.forEach(function (item) {
+      var tr = document.createElement("tr");
+      var scopeTd = el("td", "em-col-scope");
+      scopeTd.appendChild(el("span", "em-chip em-chip--" + item.scope, scopeLabel(item.scope)));
+      tr.appendChild(scopeTd);
+      var nameTd = el("td");
+      nameTd.appendChild(el("code", "em-key", item.name || ""));
+      tr.appendChild(nameTd);
+      tr.appendChild(el("td", "em-value", formatBytes(item.size)));
+      tr.appendChild(el("td", "em-value", formatTime(item.modified)));
+      binsListNode.appendChild(tr);
+    });
+  }
+
   function maskValue(value) {
     var text = String(value === undefined || value === null ? "" : value);
     if (text === "") return "（空）";
@@ -101,6 +158,7 @@
     if (state.warnings && state.warnings.length) {
       status(state.warnings.join("；"), "warn");
     }
+    renderBins(state.bins);
   }
 
   function buildRow(scope, key, value, overridesGlobal) {
@@ -306,5 +364,6 @@
       status("读取失败：" + errorText(err), "error");
     });
 })();
+
 
 
