@@ -1,7 +1,8 @@
 // Package cronproc 守护独立 cron 调度器二进制（mcp_projects/cron 的 cron.exe）。
 //
 // 网关是常驻进程，cron 的生命周期与它对齐：网关启动后调用 Start 拉起 cron
-// （传入网关地址与 Bearer 令牌），崩溃后指数退避重启；网关 Shutdown 时一并回收。
+// （传入网关地址，令牌经环境变量 ADAG_CRON_TOKEN 注入，不进 argv），崩溃后
+// 指数退避重启；网关 Shutdown 时一并回收。
 // 找不到二进制不报错——定时任务是可选能力，降级为不启用并记一条日志。
 //
 // 二进制定位顺序：显式配置 → ADAG_CRON_BIN → 可执行文件同目录 → 开发布局
@@ -28,7 +29,8 @@ import (
 type Options struct {
 	// Binary 是 cron 可执行文件路径；空表示按默认顺序定位。
 	Binary string
-	// GatewayURL 与 Token 传给 cron（--gateway-url/--token，agent 动作必需）。
+	// GatewayURL 传给 cron（--gateway-url）；Token 经环境变量 ADAG_CRON_TOKEN
+	// 注入（agent 动作必需）。
 	GatewayURL string
 	Token      string
 	// Logf 是守护日志（nil 用标准 log）。
@@ -169,21 +171,37 @@ func (d *Daemon) loop() {
 func (d *Daemon) spawnOnce() error {
 	cmd := exec.CommandContext(d.ctx, d.binPath,
 		"--gateway-url", d.opts.GatewayURL,
-		"--token", d.opts.Token,
 		"--parent-pid", fmt.Sprint(os.Getpid()),
 	)
+	// 令牌走环境变量而不是 argv：同用户进程可以读到别的进程的命令行
+	// （任务管理器 / WMI），网关 Bearer 令牌不该出现在那里。
+	cmd.Env = append(os.Environ(), "ADAG_CRON_TOKEN="+d.opts.Token)
 	// cron 的日志直接透传到网关 stderr，加前缀区分；不缓存不截断——
-	// 调度器的输出就是排障的第一手资料。
-	stdout, err := cmd.StdoutPipe()
+	// 调度器的输出就是排障的第一手资料。这里用自管管道而不是 StdoutPipe：
+	// Wait 会关掉 StdoutPipe 的读端，与读日志的 goroutine 竞争会把进程退出
+	// 前的最后几行（往往是崩溃原因）截掉；改为等 copy 完成后再返回。
+	pr, pw, err := os.Pipe()
 	if err != nil {
-		return fmt.Errorf("cronproc: 创建 stdout 管道失败: %w", err)
+		return fmt.Errorf("cronproc: 创建日志管道失败: %w", err)
 	}
-	cmd.Stderr = cmd.Stdout
+	cmd.Stdout = pw
+	cmd.Stderr = pw
 	if err := cmd.Start(); err != nil {
+		_ = pw.Close()
+		_ = pr.Close()
 		return fmt.Errorf("cronproc: 启动 %s 失败: %w", d.binPath, err)
 	}
-	go copyCronLog(d.logf, stdout)
-	return cmd.Wait()
+	// 父进程侧关掉写端：子进程退出后读端才能拿到 EOF。
+	_ = pw.Close()
+	copyDone := make(chan struct{})
+	go func() {
+		defer close(copyDone)
+		copyCronLog(d.logf, pr)
+	}()
+	err = cmd.Wait()
+	<-copyDone
+	_ = pr.Close()
+	return err
 }
 
 // copyCronLog 把 cron 的输出按行转成守护日志。

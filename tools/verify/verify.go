@@ -65,6 +65,7 @@ func Registry() []Check {
 		{Name: "nodecompat", Summary: "Node 模块矩阵、能力位、错误码与偏差表自洽", Milestone: "M0", Run: checkNodeCompat},
 		{Name: "ui", Summary: "a_da token/CSS/DOM 基线一致；无硬编码色与奇数尺寸", Milestone: "M2", Run: checkUI, Skippable: uiBaselinePending},
 		{Name: "boundary", Summary: "基座边界：不 import official、源码无官方插件 id、无平行 Go 注册 API", Milestone: "M0", Run: checkBoundary},
+		{Name: "cron-sync", Summary: "定时任务双写镜像逐字节一致：cronstore ↔ cron 二进制的 cronexpr 与 store", Milestone: "M4", Run: checkCronSync},
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out

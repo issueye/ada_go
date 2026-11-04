@@ -46,7 +46,7 @@ func setupTasks(t *testing.T, tasks ...store.Task) (path, lock string) {
 	path = filepath.Join(dir, store.FileName)
 	lock = filepath.Join(dir, store.LockName)
 	if len(tasks) > 0 {
-		if err := store.Save(path, tasks); err != nil {
+		if err := store.SaveFile(path, tasks); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}
@@ -65,7 +65,7 @@ func TestTickMissedRecordsOnce(t *testing.T) {
 	r.tick(context.Background())
 	r.tick(context.Background())
 
-	loaded, _, err := store.Load(path)
+	loaded, _, err := store.LoadFile(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestTickAgentFireAndThreadReuse(t *testing.T) {
 	if g.lastBody.Workspace != "/tmp/project-ws" {
 		t.Fatalf("任务工作区未透传: %+v", g.lastBody)
 	}
-	loaded, _, _ := store.Load(path)
+	loaded, _, _ := store.LoadFile(path)
 	if loaded[0].Runs[0].Status != store.RunStarted {
 		t.Fatalf("状态应为 started: %+v", loaded[0].Runs[0])
 	}
@@ -126,13 +126,15 @@ func TestTickAgentBusyRecorded(t *testing.T) {
 	r := New(path, lock, g.server.URL, "tok")
 	r.tick(context.Background())
 
-	loaded, _, _ := store.Load(path)
+	loaded, _, _ := store.LoadFile(path)
 	if loaded[0].Runs[0].Status != store.RunBusy {
 		t.Fatalf("状态应为 busy: %+v", loaded[0].Runs[0])
 	}
 }
 
 func TestTickTriggerRequestedFiresImmediately(t *testing.T) {
+	// Enabled=false 是刻意的：立即运行是显式用户动作，不受启停约束
+	// （管理页对停用任务同样提供按钮），停用只停周期调度。
 	g := newFakeGateway(t, http.StatusOK, fireResponse{Started: true, ThreadID: "thr_t"})
 	path, lock := setupTasks(t, store.Task{
 		ID: "crn_trigger", Name: "t", Enabled: false, Cron: "0 9 * * *",
@@ -146,7 +148,7 @@ func TestTickTriggerRequestedFiresImmediately(t *testing.T) {
 	if g.called != 1 {
 		t.Fatalf("立即运行应触发网关调用，实际 %d", g.called)
 	}
-	loaded, _, _ := store.Load(path)
+	loaded, _, _ := store.LoadFile(path)
 	if loaded[0].TriggerRequested {
 		t.Fatalf("trigger 标记应被清零")
 	}
@@ -167,7 +169,7 @@ func TestTickDisabledTaskSkipped(t *testing.T) {
 	if g.called != 0 {
 		t.Fatalf("停用任务不应触发网关")
 	}
-	loaded, _, _ := store.Load(path)
+	loaded, _, _ := store.LoadFile(path)
 	if len(loaded[0].Runs) != 0 {
 		t.Fatalf("停用任务不应有历史: %+v", loaded[0].Runs)
 	}
@@ -191,7 +193,7 @@ func TestTickAgentThreadMissingClearsThread(t *testing.T) {
 	r := New(path, lock, g.server.URL, "tok")
 	r.tick(context.Background())
 
-	loaded, _, _ := store.Load(path)
+	loaded, _, _ := store.LoadFile(path)
 	if loaded[0].ThreadID != "" {
 		t.Fatalf("死线程 id 应被清除，得到 %q", loaded[0].ThreadID)
 	}
@@ -220,7 +222,7 @@ func TestTickAgentDeletedThreadRebuiltInSameRun(t *testing.T) {
 	r := New(path, lock, g.server.URL, "tok")
 	r.tick(context.Background())
 
-	loaded, _, _ := store.Load(path)
+	loaded, _, _ := store.LoadFile(path)
 	if loaded[0].ThreadID != "thr_new" {
 		t.Fatalf("新线程 id 应回写到任务，得到 %q", loaded[0].ThreadID)
 	}

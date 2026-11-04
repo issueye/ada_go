@@ -6,7 +6,8 @@
 ## 职责边界
 
 - 读取任务定义：`~/.adago/cron.json`（`cron-manager` 插件的管理页经 `ctx.cron` 读写，
-  文件格式与主模块 `internal/cronstore` 同构，改动必须两侧同步）。
+  文件与 cron 表达式和主模块 `internal/cronstore` 逐字节镜像——仅 package 行、
+  import 块与 `cronexpr.` 限定名允许不同，verify 的 `cron-sync` 检查拦截漂移）。
 - 到期判定（5 段 cron 表达式，Vixie 语义，本地时间；与主模块 `internal/cronstore/cronexpr.go`
   保持同一份实现语义）。
 - 执行动作（只有 AI 任务一种）：
@@ -29,7 +30,7 @@ bin\cron.exe --gateway-url http://127.0.0.1:8080 --token <网关令牌>
 | 参数 | 说明 |
 |---|---|
 | `--gateway-url` | 网关地址（AI 任务必需） |
-| `--token` | 网关 Bearer 令牌（AI 任务必需） |
+| `--token` | 网关 Bearer 令牌（AI 任务必需；也可用环境变量 `ADAG_CRON_TOKEN`——守护拉起时走环境变量，令牌不进进程命令行） |
 | `--parent-pid` | 父进程 PID，父进程退出则本进程退出（守护拉起时传入） |
 | `--interval` | tick 周期秒数（默认 5，最小 5） |
 | `--file` / `--lock` | 任务文件与锁路径覆盖（默认 `~/.adago/cron.json` / `.lock`） |

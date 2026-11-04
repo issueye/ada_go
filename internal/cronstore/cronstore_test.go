@@ -112,9 +112,9 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	if err != nil || len(warns) != 0 {
 		t.Fatalf("LoadFile: %v, warns=%v", err, warns)
 	}
-	if len(loaded.Tasks) != 1 || loaded.Tasks[0].ID != id ||
-		loaded.Tasks[0].Action.Text != "总结昨天的工作" || loaded.Tasks[0].Workspace != "/tmp/report-ws" {
-		t.Fatalf("往返不一致: %+v", loaded.Tasks)
+	if len(loaded) != 1 || loaded[0].ID != id ||
+		loaded[0].Action.Text != "总结昨天的工作" || loaded[0].Workspace != "/tmp/report-ws" {
+		t.Fatalf("往返不一致: %+v", loaded)
 	}
 }
 
@@ -131,11 +131,77 @@ func TestLoadSkipsInvalidTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
 	}
-	if len(warns) != 1 || len(loaded.Tasks) != 1 || loaded.Tasks[0].Name != "好任务" {
-		t.Fatalf("应跳过旧 HTTP 任务保留 AI 任务: tasks=%+v warns=%v", loaded.Tasks, warns)
+	if len(warns) != 1 || len(loaded) != 1 || loaded[0].Name != "好任务" {
+		t.Fatalf("应跳过旧 HTTP 任务保留 AI 任务: tasks=%+v warns=%v", loaded, warns)
 	}
 	if !strings.Contains(warns[0], "HTTP 动作已移除") {
 		t.Fatalf("跳过原因应说明 HTTP 动作已移除: %v", warns)
+	}
+}
+
+func TestLoadCorruptFileBacksUp(t *testing.T) {
+	// 与 cron 二进制同一容错：损坏文件备份为 *.corrupt-* 后按空表启动，
+	// 不让管理页/调度器因坏文件拒启，原文件保住即可排查。
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	if err := os.WriteFile(path, []byte("{不是 JSON"), 0o600); err != nil {
+		t.Fatalf("写坏文件: %v", err)
+	}
+	tasks, warns, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile 应按空表启动而不是报错: %v", err)
+	}
+	if len(tasks) != 0 || len(warns) != 1 {
+		t.Fatalf("期望空表 + 一条警告: tasks=%d warns=%v", len(tasks), warns)
+	}
+	matches, _ := filepath.Glob(path + ".corrupt-*")
+	if len(matches) != 1 {
+		t.Fatalf("损坏文件应被备份，glob=%v", matches)
+	}
+}
+
+func TestUpdateBacksUpBeforeDroppingInvalid(t *testing.T) {
+	// Load 跳过的非法任务会在下一次 Update 落盘时从文件里消失；
+	// 落盘前必须先把原文件备份下来，不能无声清除。
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	lock := filepath.Join(dir, LockName)
+	raw := `{"version":1,"tasks":[
+		{"id":"crn_bad1","name":"坏任务","enabled":true,"cron":"0 9 * * *","action":{"type":"http"}},
+		{"id":"crn_good","name":"好任务","enabled":true,"cron":"0 9 * * *","action":{"type":"agent","text":"早报"}}]}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatalf("写测试文件: %v", err)
+	}
+	err := Update(path, lock, 5*time.Second, func(tasks *[]Task) error {
+		for j := range *tasks {
+			if (*tasks)[j].ID == "crn_good" {
+				AppendRun(&(*tasks)[j], Run{At: time.Now().UTC().Format(time.RFC3339), Status: RunStarted})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	matches, _ := filepath.Glob(path + ".backup-*")
+	if len(matches) != 1 {
+		t.Fatalf("落盘前应留一份备份，glob=%v", matches)
+	}
+	bak, _ := os.ReadFile(matches[0])
+	if !strings.Contains(string(bak), "crn_bad1") {
+		t.Fatalf("备份应保留被跳过的任务: %s", bak)
+	}
+	loaded, warns, err := LoadFile(path)
+	if err != nil || len(loaded) != 1 || len(warns) != 0 {
+		t.Fatalf("落盘后坏任务应消失: tasks=%+v warns=%v err=%v", loaded, warns, err)
+	}
+	// 坏任务已不在文件里：再次 Update 不应再产生新备份。
+	if err := Update(path, lock, 5*time.Second, func(tasks *[]Task) error { return nil }); err != nil {
+		t.Fatalf("第二次 Update: %v", err)
+	}
+	matches, _ = filepath.Glob(path + ".backup-*")
+	if len(matches) != 1 {
+		t.Fatalf("无跳过时不应新增备份，glob=%v", matches)
 	}
 }
 
@@ -164,6 +230,7 @@ func TestValidateTask(t *testing.T) {
 			t.Action = Action{Type: ActionAgent, Text: "t"}
 		}, false},
 		{"空名", func(t *Task) { t.Name = " " }, false},
+		{"任务名含控制字符", func(t *Task) { t.Name = "早报\n第二轮" }, false},
 		{"空 id", func(t *Task) { t.ID = "" }, false},
 		{"坏 cron", func(t *Task) { t.Cron = "0 9 * *" }, false},
 	}
@@ -209,8 +276,8 @@ func TestUpdateConcurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
 	}
-	if len(loaded.Tasks) != 1 || len(loaded.Tasks[0].Runs) != 2 {
-		t.Fatalf("并发追加丢失: %+v", loaded.Tasks)
+	if len(loaded) != 1 || len(loaded[0].Runs) != 2 {
+		t.Fatalf("并发追加丢失: %+v", loaded)
 	}
 }
 

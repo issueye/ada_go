@@ -12,8 +12,8 @@ func TestParseErrors(t *testing.T) {
 		"*/0 * * * *", "a * * * *", "5-1 * * * *", "*,, * * * *", // 形状
 	}
 	for _, expr := range bad {
-		if _, err := Parse(expr); err == nil {
-			t.Errorf("Parse(%q) 应报错", expr)
+		if _, err := ParseCron(expr); err == nil {
+			t.Errorf("ParseCron(%q) 应报错", expr)
 		}
 	}
 }
@@ -36,9 +36,9 @@ func TestNextBasics(t *testing.T) {
 		{"0 9 * * *", "2026-11-04T09:00:00Z", "2026-11-05T09:00:00Z"},
 	}
 	for _, tc := range cases {
-		s, err := Parse(tc.expr)
+		s, err := ParseCron(tc.expr)
 		if err != nil {
-			t.Fatalf("Parse(%q): %v", tc.expr, err)
+			t.Fatalf("ParseCron(%q): %v", tc.expr, err)
 		}
 		if got := s.Next(at(tc.after)); got.Format(time.RFC3339) != tc.want {
 			t.Errorf("Next(%q, after %s) = %s，期望 %s", tc.expr, tc.after, got.Format(time.RFC3339), tc.want)
@@ -48,18 +48,18 @@ func TestNextBasics(t *testing.T) {
 
 func TestNextVixieRule(t *testing.T) {
 	// dom 与 dow 都受限：取「或」。2026-11-04 是周三。
-	s, _ := Parse("0 9 5 * 5")
+	s, _ := ParseCron("0 9 5 * 5")
 	if got := s.Next(time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)); got.Format(time.RFC3339) != "2026-11-05T09:00:00Z" {
 		t.Errorf("OR 规则 = %s", got)
 	}
-	s, _ = Parse("0 9 * * 5")
+	s, _ = ParseCron("0 9 * * 5")
 	if got := s.Next(time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)); got.Format(time.RFC3339) != "2026-11-06T09:00:00Z" {
 		t.Errorf("dow 规则 = %s", got)
 	}
 }
 
 func TestNextImpossible(t *testing.T) {
-	s, _ := Parse("0 0 30 2 *")
+	s, _ := ParseCron("0 0 30 2 *")
 	if got := s.Next(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)); !got.IsZero() {
 		t.Errorf("不存在的日期应返回零值，得到 %s", got)
 	}

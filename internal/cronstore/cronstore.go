@@ -1,13 +1,15 @@
-// Package cronstore 是定时任务（cron-manager 插件 + cron 二进制）共享的任务存储。
+// 定时任务的任务文件读写：~/.adago/cron.json 与跨进程锁（双写镜像）。
+//
+// 本文件是双写镜像：主模块 internal/cronstore/cronstore.go（package cronstore）与
+// 独立 cron 二进制 mcp_projects/cron/internal/store/store.go（package store）除
+// package 行、import 块与 cronexpr 限定名外逐字节一致；verify 的 cron-sync 检查
+// 会拦截漂移，改动必须双侧同步。cron 表达式语义见同目录 cronexpr.go 顶部。
 //
 // 单一文件：~/.adago/cron.json（ADAGO_HOME 优先，与 env.json / plugins.json 同一
 // 约定），0600 原子写；跨进程读改写用 ~/.adago/cron.lock（gofrs/flock）串行化。
 // 写入方有三处：插件 ctx.cron（管理页 CRUD，经 Core 进程）、cron 二进制（回写
 // lastFiredAt / runs / threadId / 消费 triggerRequested）；都走 Update 的
 // 「锁 → 读 → 改 → 原子写」路径，不做覆盖式整文件写。
-//
-// JSON 契约与独立二进制 mcp_projects/cron 的 internal/store 保持同构：
-// cron 表达式语义见 cronexpr.go 顶部；两侧注释互指，改字段必须同步。
 //
 // 本包不承担执行；到期判定与触发在 cron 二进制（internal/runner）。
 // 动作只有 agent（AI 任务）：到期后经网关 /api/cron/fire 送达 core；HTTP 动作已移除。
@@ -16,12 +18,14 @@ package cronstore
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -47,6 +51,8 @@ const (
 	MaxFileBytes = 1 << 20
 	// MaxRunsPerTask 是每个任务保留的运行历史条数（保留最新）。
 	MaxRunsPerTask = 20
+	// maxTaskBackups 是任务文件备份（backup-*）保留的最新份数。
+	maxTaskBackups = 5
 )
 
 // 动作类型与运行状态常量。
@@ -144,43 +150,59 @@ func NewID() (string, error) {
 	return "crn_" + hex.EncodeToString(b[:]), nil
 }
 
-// LoadFile 读取 cron.json：文件不存在返回空表。单条任务非法时跳过并返回警告，
-// 不让一条手改坏数据拖垮整个管理页。
-func LoadFile(path string) (*file, []string, error) {
-	out := &file{Version: FileVersion, Tasks: []Task{}}
+// LoadFile 读取任务文件：文件不存在返回空表；损坏与非法任务的容错见 loadFile。
+func LoadFile(path string) ([]Task, []string, error) {
+	tasks, warns, _, err := loadFile(path)
+	return tasks, warns, err
+}
+
+// loadFile 读取任务文件，返回（任务列表, 警告, 被校验跳过的任务数）。
+// 文件不存在返回空表；JSON 损坏时把原文件备份为 *.corrupt-<时间戳> 后按空表
+// 启动——调度器与管理页都不能因坏文件拒启，原文件保住即可排查；单条任务
+// 非法时跳过并计入警告与 skipped，不让一条手改坏数据拖垮管理页或调度器。
+// skipped 供 Update 在落盘前决定是否备份原文件（见 Update）。
+func loadFile(path string) ([]Task, []string, int, error) {
+	tasks := []Task{}
 	if strings.TrimSpace(path) == "" {
-		return out, nil, errors.New("cronstore: 需要文件路径")
+		return tasks, nil, 0, errors.New("cronstore: 需要文件路径")
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return out, nil, nil
+			return tasks, nil, 0, nil
 		}
-		return out, nil, fmt.Errorf("cronstore: 读取 %s 失败: %w", path, err)
+		return tasks, nil, 0, fmt.Errorf("cronstore: 读取 %s 失败: %w", path, err)
 	}
 	if len(raw) > MaxFileBytes {
-		return out, nil, fmt.Errorf("cronstore: %s 超过 %d 字节上限", path, MaxFileBytes)
+		return tasks, nil, 0, fmt.Errorf("cronstore: %s 超过 %d 字节上限", path, MaxFileBytes)
 	}
 	var body file
 	if err := json.Unmarshal(raw, &body); err != nil {
-		return out, nil, fmt.Errorf("cronstore: %s 不是合法 JSON: %w", path, err)
+		// 损坏文件备份后按空表启动：写路径随后按空表落盘，原文件保住。
+		bak := path + ".corrupt-" + time.Now().UTC().Format("20060102T150405")
+		if berr := os.Rename(path, bak); berr != nil {
+			return tasks, nil, 0, fmt.Errorf("cronstore: %s 不是合法 JSON，且备份为 %s 失败: %v（原始错误: %w）", path, bak, berr, err)
+		}
+		return tasks, []string{fmt.Sprintf("%s: 解析失败已备份为 %s，按空表启动", path, filepath.Base(bak))}, 0, nil
 	}
 	warns := []string{}
 	if body.Version != FileVersion && body.Version != 0 {
 		warns = append(warns, fmt.Sprintf("%s: 未知版本 %d，按 %d 解析", path, body.Version, FileVersion))
 	}
+	skipped := 0
 	for i := range body.Tasks {
 		t := body.Tasks[i]
 		if err := ValidateTask(&t); err != nil {
+			skipped++
 			warns = append(warns, fmt.Sprintf("%s: 跳过任务 %q: %v", path, t.Name, err))
 			continue
 		}
-		out.Tasks = append(out.Tasks, t)
+		tasks = append(tasks, t)
 	}
-	return out, warns, nil
+	return tasks, warns, skipped, nil
 }
 
-// SaveFile 校验并原子写 cron.json（0600，目录 0700）。
+// SaveFile 校验并原子写任务文件（0600，目录 0700）。
 func SaveFile(path string, tasks []Task) error {
 	if strings.TrimSpace(path) == "" {
 		return errors.New("cronstore: 需要文件路径")
@@ -229,7 +251,7 @@ func SaveFile(path string, tasks []Task) error {
 	return nil
 }
 
-// Update 在跨进程文件锁内做一次读改写：锁 → 读 → fn → 原子写 → 解锁。
+// Update 在跨进程文件锁内做一次读改写：锁 → 读 → 改 → 原子写 → 解锁。
 // fn 里的修改要么落盘要么整体不发生；并发写（插件 CRUD 与 cron 二进制回写）
 // 在这里串行化。wait 是最长等锁时间（本包不把 context 暴露进公开 API）。
 func Update(path string, lockPath string, wait time.Duration, fn func(tasks *[]Task) error) error {
@@ -251,15 +273,73 @@ func Update(path string, lockPath string, wait time.Duration, fn func(tasks *[]T
 	}
 	defer func() { _ = fl.Unlock() }()
 
-	cur, _, err := LoadFile(path)
+	cur, _, skipped, err := loadFile(path)
 	if err != nil {
 		return err
 	}
-	tasks := cur.Tasks
+	if skipped > 0 {
+		// 本次加载跳过了非法任务：先备份原文件再让 fn 落盘，避免被跳过的
+		// 任务随这次写入无声消失；备份失败则放弃本次修改（fn 要么落盘要么
+		// 整体不发生）。备份是内容寻址的，同一份原文件不会反复堆积。
+		if err := backupTasksFile(path); err != nil {
+			return fmt.Errorf("cronstore: 备份含被跳过任务的原文件失败: %w", err)
+		}
+	}
+	tasks := cur
 	if err := fn(&tasks); err != nil {
 		return err
 	}
 	return SaveFile(path, tasks)
+}
+
+// backupTasksFile 把当前任务文件复制为内容寻址的备份
+// （cron.json.backup-<sha256 前 12 位>）：同一份内容重复备份只覆盖同一文件，
+// 不会随手改频率堆积；随后把旧备份裁剪到最新 maxTaskBackups 份。
+// 损坏备份（corrupt-*）带时间戳、按损坏事件发生，不在裁剪范围。
+func backupTasksFile(path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	sum := sha256.Sum256(raw)
+	name := fmt.Sprintf("%s.backup-%s", path, hex.EncodeToString(sum[:])[:12])
+	if err := os.WriteFile(name, raw, 0o600); err != nil {
+		return err
+	}
+	return pruneTaskBackups(path)
+}
+
+// pruneTaskBackups 把任务文件的 backup-* 备份按修改时间裁剪到最新 maxTaskBackups 份。
+func pruneTaskBackups(path string) error {
+	matches, err := filepath.Glob(path + ".backup-*")
+	if err != nil {
+		return err
+	}
+	if len(matches) <= maxTaskBackups {
+		return nil
+	}
+	type entry struct {
+		name string
+		mod  time.Time
+	}
+	entries := make([]entry, 0, len(matches))
+	for _, m := range matches {
+		info, err := os.Stat(m)
+		if err != nil {
+			continue
+		}
+		entries = append(entries, entry{name: m, mod: info.ModTime()})
+	}
+	sort.Slice(entries, func(a, b int) bool { return entries[a].mod.After(entries[b].mod) })
+	for _, e := range entries[maxTaskBackups:] {
+		if err := os.Remove(e.name); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
 }
 
 // AppendRun 把一条运行历史追加到任务（保留最新 MaxRunsPerTask 条）。
@@ -317,13 +397,4 @@ func validateAction(a *Action) error {
 	default:
 		return fmt.Errorf("动作类型只能是 agent（收到 %q）", a.Type)
 	}
-}
-
-// NextAfter 返回任务在 after 之后的下一个触发时刻（供管理页预览 nextRunAt）。
-func NextAfter(t *Task, after time.Time) (time.Time, error) {
-	s, err := ParseCron(t.Cron)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return s.Next(after), nil
 }

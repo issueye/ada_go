@@ -94,16 +94,16 @@ func addCronAdminContextMember(st *capsState, hc Context, put func(string, moejs
 		if err != nil {
 			return moejs.Undefined(), throwCoded(rr, codeOutOfRange, "ctx.cron.list: "+err.Error(), nil)
 		}
-		f, warns, err := cronstore.LoadFile(path)
+		tasks, warns, err := cronstore.LoadFile(path)
 		if err != nil {
 			return moejs.Undefined(), throwCoded(rr, codeOutOfRange, "ctx.cron.list: "+err.Error(), nil)
 		}
 		now := time.Now()
-		views := make([]cronTaskView, 0, len(f.Tasks))
-		for i := range f.Tasks {
-			view := cronTaskView{Task: f.Tasks[i]}
-			if f.Tasks[i].Enabled {
-				if next, err := cronstore.NextAfter(&f.Tasks[i], now); err == nil && !next.IsZero() {
+		views := make([]cronTaskView, 0, len(tasks))
+		for i := range tasks {
+			view := cronTaskView{Task: tasks[i]}
+			if tasks[i].Enabled {
+				if next, err := cronNextAfter(&tasks[i], now); err == nil && !next.IsZero() {
 					view.NextRunAt = next.Format(time.RFC3339)
 				}
 			}
@@ -257,6 +257,9 @@ func addCronAdminContextMember(st *capsState, hc Context, put func(string, moejs
 		if err := decodeArg(rr, "trigger", moejs.Arg(args, 0), &body); err != nil {
 			return moejs.Undefined(), throwCoded(rr, codeInvalidArgType, err.Error(), nil)
 		}
+		// 「立即运行」是显式用户动作，不受 enabled 约束（管理页对停用任务同样
+		// 提供按钮）：停用只停周期调度，cron 二进制消费标记时同样放行
+		// （runner.claim 的 manual 分支）。
 		marked := false
 		if _, err := updateGlobal(rr, func(tasks *[]cronstore.Task) error {
 			for i := range *tasks {
@@ -287,19 +290,28 @@ func addCronAdminContextMember(st *capsState, hc Context, put func(string, moejs
 		if err != nil {
 			return moejs.Undefined(), throwCoded(rr, codeOutOfRange, "ctx.cron.runs: "+err.Error(), nil)
 		}
-		f, _, err := cronstore.LoadFile(path)
+		tasks, _, err := cronstore.LoadFile(path)
 		if err != nil {
 			return moejs.Undefined(), throwCoded(rr, codeOutOfRange, "ctx.cron.runs: "+err.Error(), nil)
 		}
 		runs := []cronstore.Run{}
-		for i := range f.Tasks {
-			if f.Tasks[i].ID != body.ID {
+		for i := range tasks {
+			if tasks[i].ID != body.ID {
 				continue
 			}
-			runs = append(runs, f.Tasks[i].Runs...)
+			runs = append(runs, tasks[i].Runs...)
 			break
 		}
-		sort.SliceStable(runs, func(a, b int) bool { return runs[a].At > runs[b].At })
+		// 最新在前。At 现为 UTC RFC3339，但按解析后的时刻排序，混入带偏移量的
+		// 时间也不会错序；解析失败退回字符串序。
+		sort.SliceStable(runs, func(a, b int) bool {
+			ta, ea := time.Parse(time.RFC3339, runs[a].At)
+			tb, eb := time.Parse(time.RFC3339, runs[b].At)
+			if ea == nil && eb == nil {
+				return ta.After(tb)
+			}
+			return runs[a].At > runs[b].At
+		})
 		if body.Limit > 0 && len(runs) > body.Limit {
 			runs = runs[:body.Limit]
 		}
@@ -307,4 +319,15 @@ func addCronAdminContextMember(st *capsState, hc Context, put func(string, moejs
 	})
 
 	return put("cron", engine.ObjectValue(obj))
+}
+
+// cronNextAfter 返回任务在 after 之后的下一个触发时刻（管理页 nextRunAt 预览）。
+// 展示逻辑留在宿主侧：保持两侧 store 镜像逐字节一致（verify 的 cron-sync 检查），
+// 不在 cronstore 里为主模块单独长函数。
+func cronNextAfter(t *cronstore.Task, after time.Time) (time.Time, error) {
+	s, err := cronstore.ParseCron(t.Cron)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return s.Next(after), nil
 }

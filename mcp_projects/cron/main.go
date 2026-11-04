@@ -1,6 +1,7 @@
 // 命令 cron 是 ada-go 的独立调度器：只做定时任务，把消息送达 Core。
 //
-// 由 adag gateway 拉起守护（传入网关地址与 Bearer 令牌），也可手动启动：
+// 由 adag gateway 拉起守护（传入网关地址，令牌经环境变量 ADAG_CRON_TOKEN 注入），
+// 也可手动启动：
 //
 //	cron.exe --gateway-url http://127.0.0.1:8080 --token XXX
 //
@@ -9,7 +10,8 @@
 // thread.create 与 turn.start。HTTP 动作已移除，只保留 AI 任务。
 //
 // 本程序刻意不 import 主模块（mcp_projects 各模块自包含的惯例）；任务文件
-// 的 JSON 契约与主模块 internal/cronstore 同构，两侧注释互指。
+// 与 cron 表达式与主模块 internal/cronstore 逐字节镜像（verify 的 cron-sync
+// 检查拦截漂移）。
 package main
 
 import (
@@ -20,6 +22,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,7 +32,7 @@ import (
 func main() {
 	var (
 		gatewayURL  = flag.String("gateway-url", "", "网关地址（AI 任务必需，如 http://127.0.0.1:8080）")
-		token       = flag.String("token", "", "网关 Bearer 令牌（AI 任务必需）")
+		token       = flag.String("token", "", "网关 Bearer 令牌（AI 任务必需；也可用环境变量 ADAG_CRON_TOKEN）")
 		parentPID   = flag.Int("parent-pid", 0, "父进程 PID：非 0 时父进程退出则本进程退出")
 		intervalSec = flag.Int("interval", 5, "tick 周期（秒）")
 		file        = flag.String("file", "", "任务文件路径（默认 ~/.adago/cron.json）")
@@ -37,6 +40,12 @@ func main() {
 	)
 	flag.Parse()
 	log.SetFlags(log.LstdFlags | log.LUTC)
+
+	// 令牌优先取环境变量：守护拉起时经环境注入，不进进程命令行（同用户进程
+	// 可读到别的进程的 argv）；--token 保留给手动调试。
+	if strings.TrimSpace(*token) == "" {
+		*token = strings.TrimSpace(os.Getenv("ADAG_CRON_TOKEN"))
+	}
 
 	if *parentPID > 0 && !parentAlive(*parentPID) {
 		log.Fatalf("父进程 %d 已不存在，退出", *parentPID)

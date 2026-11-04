@@ -317,6 +317,7 @@
     var trigger = el("button", "ada-btn ada-btn--secondary ada-btn--sm", "立即运行");
     trigger.type = "button";
     trigger.setAttribute("data-cm-trigger", task.id);
+    trigger.title = "立即运行一次（不受启停影响；由 cron 二进制下个 tick 消费）";
     td.appendChild(trigger);
     var edit = el("button", "ada-btn ada-btn--ghost ada-btn--sm", "编辑");
     edit.type = "button";

@@ -26,8 +26,11 @@ import (
 	"adagcron/internal/store"
 )
 
-// fireTimeout 是 agent 动作调网关 /api/cron/fire 的超时。
-const fireTimeout = 30 * time.Second
+// fireTimeout 是 agent 动作调网关 /api/cron/fire 的超时。网关侧的整体预算是
+// cronFireTimeout（2 分钟，见 handlers_cron.go）：这里对齐并留 30 秒余量——
+// 首跑冷启动拉起 Core 可能贴近网关预算，客户端超时太短会出现「网关那边成功
+// 建线程并启动轮次，这边却记失败」，既丢 threadId 又留一条误导性的 error 历史。
+const fireTimeout = 2*time.Minute + 30*time.Second
 
 // claimWindow 是「认领」的等待上限：跨进程锁只覆盖毫秒级读写，足够宽裕。
 const claimWindow = 10 * time.Second
@@ -116,7 +119,7 @@ func (r *Runner) lockPath() string {
 // dueInfo 是一个到期任务在本轮的执行计划。
 type dueInfo struct {
 	id     string
-	due    time.Time // 到期的调度时刻
+	due    time.Time // 到期的调度时刻（missed 是错过的那次历史调度点）
 	missed bool      // 应用关闭期间错过的历史：只记一条 missed，不执行
 	manual bool      // triggerRequested：立即运行，清标记并执行
 }
@@ -127,7 +130,7 @@ func (r *Runner) tick(ctx context.Context) {
 	path, lock := r.path(), r.lockPath()
 	now := time.Now()
 
-	tasks, warns, err := store.Load(path)
+	tasks, warns, err := store.LoadFile(path)
 	if err != nil {
 		logf.Printf("读取任务失败: %v", err)
 		return
@@ -146,7 +149,7 @@ func (r *Runner) tick(ctx context.Context) {
 		if !t.Enabled {
 			continue
 		}
-		sched, perr := cronexpr.Parse(t.Cron)
+		sched, perr := cronexpr.ParseCron(t.Cron)
 		if perr != nil {
 			logf.Printf("任务 %q 的表达式 %q 非法: %v", t.Name, t.Cron, perr)
 			continue
@@ -172,7 +175,7 @@ func (r *Runner) tick(ctx context.Context) {
 		}
 		// due ≤ now 且从未跑过：应用关闭期间错过的历史，只记一条。
 		if t.LastFiredAt == "" {
-			dueTasks = append(dueTasks, dueInfo{id: t.ID, missed: true})
+			dueTasks = append(dueTasks, dueInfo{id: t.ID, due: due, missed: true})
 			continue
 		}
 		dueTasks = append(dueTasks, dueInfo{id: t.ID, due: due})
@@ -188,9 +191,10 @@ func (r *Runner) tick(ctx context.Context) {
 			continue
 		}
 		if d.missed {
-			// 错过的调度：只记历史，不执行动作。
+			// 错过的调度：只记历史，不执行动作。At 记错过的那次调度时刻
+			// （Run.At 的语义），而不是发现它的时刻。
 			r.record(path, lock, snapshot.ID, store.Run{
-				At:     now.UTC().Format(time.RFC3339),
+				At:     d.due.UTC().Format(time.RFC3339),
 				Status: store.RunMissed,
 				Detail: "应用未运行，错过该次调度（不补跑）",
 			}, "", false)
@@ -219,7 +223,9 @@ func (r *Runner) claim(path, lock string, d dueInfo, now time.Time) (bool, store
 				if !cur.TriggerRequested {
 					return nil // 标记已被消费过
 				}
-				// 立即运行：清标记，lastFiredAt 用 now（本次的真实触发时刻）。
+				// 立即运行是显式用户动作，不受 enabled 约束（管理页对停用任务
+				// 同样提供按钮）：停用只停周期调度。清标记，lastFiredAt 用 now
+				// （本次的真实触发时刻）。
 				cur.TriggerRequested = false
 				cur.LastFiredAt = now.UTC().Format(time.RFC3339)
 				cur.UpdatedAt = cur.LastFiredAt
@@ -292,7 +298,7 @@ func (r *Runner) execute(ctx context.Context, t *store.Task, due time.Time) (sto
 	var clearThread bool
 	switch t.Action.Type {
 	case store.ActionAgent:
-		status, threadID, detail, agentClear := r.fireAgent(ctx, t)
+		status, threadID, detail, agentClear := r.fireAgent(ctx, t, due)
 		run.Status, run.ThreadID, run.Detail = status, threadID, detail
 		clearThread = agentClear
 	default:
@@ -310,11 +316,13 @@ func (r *Runner) execute(ctx context.Context, t *store.Task, due time.Time) (sto
 
 // fireRequest 是 POST /api/cron/fire 的请求体（与网关 handlers_cron.go 同构）。
 type fireRequest struct {
-	TaskID         string `json:"taskId"`
-	TaskName       string `json:"taskName"`
-	Text           string `json:"text"`
-	Workspace      string `json:"workspace,omitempty"`
-	ThreadID       string `json:"threadId,omitempty"`
+	TaskID    string `json:"taskId"`
+	TaskName  string `json:"taskName"`
+	Text      string `json:"text"`
+	Workspace string `json:"workspace,omitempty"`
+	ThreadID  string `json:"threadId,omitempty"`
+	// IdempotencyKey 以「任务 id + 到期调度时刻」构造：同一逻辑触发唯一，
+	// 与执行时的真实时钟无关（改用重试也不会生成新键）。
 	IdempotencyKey string `json:"idempotencyKey"`
 }
 
@@ -330,7 +338,7 @@ type fireResponse struct {
 
 // fireAgent 把 agent 动作经网关转发给 Core；返回 (status, threadID, detail, clearThread)。
 // clearThread 表示任务专用线程已不存在，调用方应清掉 task.threadId 让下次运行重建。
-func (r *Runner) fireAgent(ctx context.Context, t *store.Task) (string, string, string, bool) {
+func (r *Runner) fireAgent(ctx context.Context, t *store.Task, due time.Time) (string, string, string, bool) {
 	if r.GatewayURL == "" || r.Token == "" {
 		return store.RunError, "", "缺少网关地址或令牌（--gateway-url/--token）", false
 	}
@@ -340,7 +348,7 @@ func (r *Runner) fireAgent(ctx context.Context, t *store.Task) (string, string, 
 		Text:           t.Action.Text,
 		Workspace:      t.Workspace,
 		ThreadID:       t.ThreadID,
-		IdempotencyKey: fmt.Sprintf("cron-%s-%d", t.ID, time.Now().Unix()),
+		IdempotencyKey: fmt.Sprintf("cron-%s-%d", t.ID, due.Unix()),
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {

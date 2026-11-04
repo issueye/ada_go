@@ -49,4 +49,5 @@
 - 插件平台 API 规范：`plugins/official/plugin-helper/SPEC.md`；
   插件手册技能：`plugins/official/plugin-helper/skills/plugin-manual/SKILL.md`
   （创建/检查/启停 + `adag-ui` 动态块用法）。
-- 验证门禁：`go test ./...`、`go vet ./...`、staticcheck、`adag verify`（13 项）。
+- 验证门禁：`go test ./...`、`go vet ./...`、staticcheck、`adag verify`（14 项，
+  含定时任务双写镜像的 cron-sync）。

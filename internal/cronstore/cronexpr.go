@@ -1,12 +1,16 @@
 // cronexpr.go 是 5 段标准 cron 表达式解析（定时任务模块）。
 //
+// 本文件是双写镜像：主模块 internal/cronstore/cronexpr.go（package cronstore）与
+// 独立 cron 二进制 mcp_projects/cron/internal/cronexpr/cronexpr.go（package cronexpr）
+// 除 package 行外逐字节一致；verify 的 cron-sync 检查会拦截漂移，改动必须双侧同步。
+// 任务文件契约的镜像规则见同目录 store 文件顶部。
+//
 // 语法：分 时 日 月 周（minute hour dom month dow），支持 `*`、列表 `,`、
 // 范围 `a-b`、步进 `*/n` 与 `a-b/n`（`a/n` 视作 `a-max/n`）；周字段 0 与 7 都是周日。
 // 语义沿用 Vixie cron：dom 与 dow 都受限（非 `*`）时取「或」，否则取「且」。
-// 时间按表达式的本地时间解释；`Next` 逐分钟前进，上限 4 年（覆盖闰年）。
-//
-// 该实现与独立二进制 mcp_projects/cron 的 internal/cronexpr 保持同一份语义：
-// 两侧注释互指，改动必须同步（契约见 internal/cronstore/cronstore.go 顶部）。
+// 时间按表达式的本地时间解释；`Next` 逐分钟前进，月份不命中时整月跳过，
+// 总搜索上限 4 年（覆盖闰年）。DST：时钟回拨产生的重复墙上时刻会各触发一次
+// （与常见 cron 实现一致），时钟前拨跳过的墙上时刻自然跳过。
 package cronstore
 
 import (
@@ -68,9 +72,17 @@ func ParseCron(expr string) (*Schedule, error) {
 }
 
 // Next 返回 after 之后（不含 after 所在分钟）的下一个触发时刻；找不到返回零值。
+// 逐分钟前进；月份不命中时整月跳过——把「2 月 30 日」这类永不命中的表达式的
+// 扫描量从「4 年逐分钟」压到「每月一次跳转 + 命中月份内逐分钟」。
 func (s *Schedule) Next(after time.Time) time.Time {
 	t := after.Truncate(time.Minute).Add(time.Minute)
 	for i := 0; i < maxLookaheadMinutes; i++ {
+		if !s.months[int(t.Month())] {
+			// 本月不可能命中：跳到下月 1 日 0 点（该瞬间是否命中交给 matches 判定）。
+			y, m, _ := t.Date()
+			t = time.Date(y, m+1, 1, 0, 0, 0, 0, t.Location())
+			continue
+		}
 		if s.matches(t) {
 			return t
 		}
