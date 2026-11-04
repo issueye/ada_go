@@ -6,13 +6,17 @@
 {{if .CSRF}}<meta name="csrf-token" content="{{.CSRF}}">{{end}}
 {{if .RefreshSeconds}}<meta http-equiv="refresh" content="{{.RefreshSeconds}}">{{end}}
 <title>{{.Title}} · {{.BrandName}}</title>
-<link rel="icon" type="image/png" href="{{asset "logo.png"}}">
+<link rel="icon" type="image/png" sizes="32x32" href="{{asset "favicon.png"}}">
+<link rel="apple-touch-icon" sizes="180x180" href="{{asset "apple-touch-icon.png"}}">
 <script src="{{asset "theme.js"}}"></script>
+<script src="{{asset "themes.js"}}"></script>
 <!--
-  样式加载顺序固定为：设计令牌 → a_da 产物 → a_da 组件层 → ada-go 本地覆盖。
-  app-local.css 最后加载，承接无 JS 表单与实时流的本地细节。
+  样式加载顺序固定为：设计令牌 → 衍生主题色板 → a_da 产物 → a_da 组件层 → ada-go 本地覆盖。
+  themes.js/themes.css 是本地新增的主题扩展（明暗 × 调色板，docs/19-ued.md §19.2.2），
+  不属于上游镜像；app-local.css 最后加载，承接无 JS 表单与实时流的本地细节。
 -->
 <link rel="stylesheet" href="{{asset "tokens.css"}}">
+<link rel="stylesheet" href="{{asset "ui/themes.css"}}">
 <link rel="stylesheet" href="{{asset "app.css"}}">
 <link rel="stylesheet" href="{{asset "ui/components.css"}}">
 <link rel="stylesheet" href="{{asset "ui/layout.css"}}">
@@ -22,8 +26,7 @@
 <link rel="stylesheet" href="{{asset "app-local.css"}}">
 {{if .NeedsUI}}<link rel="stylesheet" href="{{asset "ada-ui.css"}}">
 {{end}}{{range .PluginStyles}}<link rel="stylesheet" href="{{.}}">
-{{end}}<script src="{{asset "htmx.min.js"}}" defer></script>
-<script src="{{asset "ada-select.js"}}" defer></script>
+{{end}}<script src="{{asset "ada-select.js"}}" defer></script>
 <script src="{{asset "ada-modal.js"}}" defer></script>
 <script src="{{asset "file-picker.js"}}" defer></script>
 <script src="{{asset "app.js"}}" defer></script>
@@ -52,7 +55,7 @@
       </button>
       <div class="ada-topbar__title">
         <h1 title="{{.Title}}">{{.Title}}</h1>
-        {{if eq .Page "chat"}}<div id="topbar-status">{{.TopbarStatus}}</div>{{else if .ProductBadge}}<span class="ada-chip">{{.ProductBadge}}</span>{{else}}<span class="ada-chip">{{.ProductName}}</span>{{end}}
+        {{if .ProductBadge}}<span class="ada-chip">{{.ProductBadge}}</span>{{else}}<span class="ada-chip">{{.ProductName}}</span>{{end}}
       </div>
       <div class="ada-topbar__actions">
         {{slot "topbar.right" .Slots.TopbarRight .SlotCounts.TopbarRight ""}}

@@ -87,7 +87,8 @@
         "title": { "type": "string" },
         "headEntryId": { "type": "string" },
         "updatedAt": { "type": "string", "format": "date-time" },
-        "archived": { "type": "boolean" }
+        "archived": { "type": "boolean" },
+        "running": { "type": "boolean", "description": "该线程是否有未终态的轮次（Core 内存态，非存储字段，缺省 false）；列表 UI 据此显示运行点并禁止删除。" }
       },
       "required": ["id", "title", "updatedAt", "archived"]
     },

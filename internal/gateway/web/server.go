@@ -375,6 +375,7 @@ func (s *Server) sidebarGroups(workspace string, threads []threadSummaryDTO) []s
 			ID:        t.ID,
 			Title:     t.Title,
 			UpdatedMS: parseTimeMS(t.UpdatedAt),
+			Running:   t.Running,
 		})
 	}
 	name := filepath.Base(workspace)

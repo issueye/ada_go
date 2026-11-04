@@ -2,13 +2,13 @@
   <div class="ada-scroll">
     <div class="ada-wrap ada-wrap--page">
       {{template "flash" .}}
-      <div class="section-head">
+      <div class="ada-section-head">
         <div>
-          <h1 class="page-title">{{if .Plugin.Name}}{{.Plugin.Name}}{{else}}{{.Plugin.ID}}{{end}}</h1>
-          <p class="page-sub">{{.Plugin.ID}}{{if .Plugin.Version}} · v{{.Plugin.Version}}{{end}}</p>
+          <h1 class="ada-page-title">{{if .Plugin.Name}}{{.Plugin.Name}}{{else}}{{.Plugin.ID}}{{end}}</h1>
+          <p class="ada-page-sub">{{.Plugin.ID}}{{if .Plugin.Version}} · v{{.Plugin.Version}}{{end}}</p>
         </div>
         {{/* 插件级动作放在页头：与「返回插件列表」同排，不随文件/信息面板滚动。 */}}
-        <div class="section-head__actions">
+        <div class="ada-section-head__actions">
           {{if .Plugin.Enabled}}
           <form method="post" action="/extensions/{{.Plugin.ID}}/disable">
             {{template "csrf" .}}
@@ -32,7 +32,7 @@
       <div id="plugin-detail-island" data-ada-island="plugin-detail" data-ada-state="{{.StateJSON}}">
       <div class="ada-plugin-detail">
         <aside class="ada-plugin-detail__side">
-          <section class="card ada-plugin-tree-card" aria-label="插件目录">
+          <section class="ada-panel ada-plugin-tree-card" aria-label="插件目录">
             <div class="ada-plugin-tree-card__head">
               <h2 class="ada-plugin-section__title">插件目录 <span class="ada-plugin-section__meta">{{len .Plugin.Files}} 个文件</span></h2>
             </div>
@@ -67,7 +67,7 @@
         </aside>
 
         <div class="ada-plugin-detail__main">
-          <section class="card ada-plugin-viewer" aria-label="文件内容">
+          <section class="ada-panel ada-plugin-viewer" aria-label="文件内容">
             {{if .File}}
             <header class="ada-plugin-viewer__head">
               <code class="ada-plugin-viewer__path">{{.File.Path}}</code>
@@ -95,12 +95,12 @@
             {{end}}
           </section>
 
-          <section id="plugin-info" class="card p-4 ada-plugin-panel" data-plugin-panel="info">
+          <section id="plugin-info" class="ada-panel p-4 ada-plugin-panel" data-plugin-panel="info">
             <div class="flex flex-wrap items-center gap-2">
-              {{if .Plugin.Frontend}}<span class="badge badge-brand">前端插件</span>{{end}}
-              {{if .Plugin.Backend}}<span class="badge badge-neutral">后端插件</span>{{end}}
-              <span class="badge badge-{{.Plugin.StatusTone}}">{{.Plugin.StatusLabel}}</span>
-              {{if .Plugin.Status}}<span class="badge badge-neutral badge-mono">{{.Plugin.Status}}</span>{{end}}
+              {{if .Plugin.Frontend}}<span class="ada-chip ada-chip--brand">前端插件</span>{{end}}
+              {{if .Plugin.Backend}}<span class="ada-chip">后端插件</span>{{end}}
+              <span class="ada-chip ada-chip--{{.Plugin.StatusTone}}">{{.Plugin.StatusLabel}}</span>
+              {{if .Plugin.Status}}<span class="ada-chip ada-chip--mono">{{.Plugin.Status}}</span>{{end}}
             </div>
 
             {{if eq .Plugin.Status "unused"}}<p class="mt-2 text-xs text-muted">当前产品没有默认启用这个插件；可在插件列表或本页手动启用。</p>{{end}}

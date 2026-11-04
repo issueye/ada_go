@@ -2,14 +2,14 @@
   <div class="ada-scroll">
     <div class="ada-wrap ada-wrap--narrow">
       {{template "flash" .}}
-      <div class="card p-6 mt-4">
+      <div class="ada-panel p-6 mt-4">
         <div class="flex items-center gap-2 mb-4">
           <img src="{{asset "logo.png"}}" alt="" width="32" height="32" decoding="async">
           <span class="ada-brand__name">{{.BrandName}}</span>
           {{if .ProductBadge}}<span class="ada-brand__badge">{{.ProductBadge}}</span>{{end}}
         </div>
-        <h1 class="page-title">登录</h1>
-        <p class="page-sub mt-2">认证由 Gateway 的安全中间件负责。若你看到这一页，说明当前请求还没有通过鉴权。</p>
+        <h1 class="ada-page-title">登录</h1>
+        <p class="ada-page-sub mt-2">认证由 Gateway 的安全中间件负责。若你看到这一页，说明当前请求还没有通过鉴权。</p>
         <form method="post" action="{{.LoginPath}}" class="mt-4">
           {{template "csrf" .}}
           <button class="ada-btn ada-btn--primary ada-btn--md" type="submit">继续</button>

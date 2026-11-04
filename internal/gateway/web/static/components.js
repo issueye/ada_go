@@ -9,6 +9,10 @@
  *
  * 刻意不做的事：不接管业务动作（发送/审批/重试都走原生表单提交），
  * 不做虚拟 DOM，不引入框架。
+ *
+ * 本地补丁（相对 a_da 原文，先例见 app.js）：远程模型弹窗的 htmx 按需加载
+ * 已随 htmx.min.js 一起移除（目标元素无任何渲染方）；新增弹层互斥裁决。
+ * 详见 docs/07-ssr-frontend.md §7.7.1 与 docs/ui-optimization-plan.md 批次 C。
  */
 (function () {
   'use strict';
@@ -254,6 +258,29 @@
   /* ── 「＋」菜单：点外面或按 Esc 收起 ────────────────────────────────── */
   /* details 自己只管开合：不处理"点别处"，菜单会一直挂在输入框上方。 */
   var plusBound = false;
+  /* ── 弹层互斥（19-ued §19.5.1）：＋菜单与行菜单同屏只开一个 ────────────
+     toggle 事件不冒泡，但捕获阶段仍会路过 document，在这里统一裁决。 */
+  var popoverExclusionBound = false;
+  function bindPopoverExclusion() {
+    if (popoverExclusionBound) return;
+    popoverExclusionBound = true;
+    document.addEventListener(
+      'toggle',
+      function (event) {
+        var target = event.target;
+        if (!target || !target.open || !target.matches) return;
+        if (target.matches('details.ada-row-menu')) closePlusMenus();
+        else if (target.matches('details.ada-plus')) closeRowMenus();
+      },
+      true
+    );
+  }
+
+  function closePlusMenus() {
+    var menus = document.querySelectorAll('details.ada-plus[open]');
+    for (var i = 0; i < menus.length; i += 1) menus[i].open = false;
+  }
+
   function bindPlusMenu() {
     if (plusBound) return;
     plusBound = true;
@@ -270,17 +297,11 @@
     });
   }
 
-  /* ── 远程模型弹窗：按需加载 + 就地过滤 ───────────────────────────────── */
-  /* 弹窗内容不走首屏：远端可能返回上百个模型，只有真的点开才值得去要。
-     `ada:modal-open` 由 <ada-modal> 派发，这里把它转成 loader 的 htmx 事件。 */
-  function bindModalSources() {
-    document.addEventListener('ada:modal-open', function (event) {
-      var id = event.detail && event.detail.id;
-      if (!id || !window.htmx) return;
-      var source = document.querySelector('[data-modal-src="' + id + '"]');
-      if (source) window.htmx.trigger(source, 'ada-modal-load');
-    });
-  }
+  /* ── 远程模型弹窗（已随 htmx 移除，批次 C #8）────────────────────────
+     本地补丁：bindModalSources / applyRemoteFilter / syncRemoteCount /
+     bindRemoteFilter 连同 htmx 依赖一起删掉——它们的目标 [data-modal-src] 与
+     .ada-remote 在模板和 Go 渲染层都没有任何产出方，htmx.min.js 也不再见
+     （07 §7.7.1 已同步）。 */
 
   /* `?dialog=<id>`：从弹窗里提交表单后回跳，弹窗要自己站起来。 */
   function openDialogFromQuery() {
@@ -323,25 +344,6 @@
     var rows = root.querySelectorAll('[data-remote-row]');
     var count = root.querySelector('[data-remote-count]');
     if (count && rows.length) count.textContent = rows.length + ' 个模型';
-  }
-
-  var remoteFilterBound = false;
-  function bindRemoteFilter() {
-    if (remoteFilterBound) return;
-    remoteFilterBound = true;
-    document.addEventListener('input', function (event) {
-      var input = event.target;
-      if (!input || !input.matches || !input.matches('[data-remote-search]')) return;
-      applyRemoteFilter(input);
-    });
-    // htmx 换完列表：搜索框里已经有词就重新套一次，否则只更新计数。
-    document.body.addEventListener('htmx:afterSwap', function (event) {
-      var target = event.target;
-      if (!target || target.id !== 'remote-models-body') return;
-      var input = document.querySelector('[data-remote-search]');
-      if (input && input.value.trim()) applyRemoteFilter(input);
-      else syncRemoteCount();
-    });
   }
 
   /* ── 8. live 轮询后的重建 ────────────────────────────────────────────── */
@@ -532,8 +534,7 @@
     bindRowMenuDocument();
     bindToolOutputs();
     bindPlusMenu();
-    bindModalSources();
-    bindRemoteFilter();
+    bindPopoverExclusion();
     openDialogFromQuery();
     // 运行中的工具每秒刷新一次耗时：1s 粒度足够，也能让"它还在跑"看得见。
     window.setInterval(tickRunningElapsed, 1000);

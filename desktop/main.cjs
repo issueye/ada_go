@@ -605,7 +605,9 @@ async function createMainWindow() {
     frame: false, // 无边框；preload 在 .ada-topbar 注入拖拽区与窗口控制（同 a_da）。
     // 表单 POST → 303 的导航间隙里 Chromium 会先画窗口底色；写死深色会让
     // 浅色主题看起来像“黑屏”。跟随系统主题，至少不会与页面主题相反。
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#18181b' : '#F6F3EC',
+    // 取值 = tokens.css 黑天鹅画布（暗 #121110 / 亮 #F6F3EC），逐字一致不闪错色；
+    // 衍生色板见 ui/themes.css，改画布基线时同步这里（19-ued §19.3.3）。
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#121110' : '#F6F3EC',
     webPreferences: {
       preload: preloadPath ?? undefined,
       contextIsolation: true,

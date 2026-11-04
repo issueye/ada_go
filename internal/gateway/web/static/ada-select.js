@@ -12,6 +12,9 @@
 (() => {
   'use strict';
 
+  // 选项 id 序列：aria-activedescendant 需要文档内唯一的选项 id。
+  let optionIdSeq = 0;
+
   class AdaSelect extends HTMLElement {
     connectedCallback() {
       if (this._wired) return;
@@ -31,6 +34,8 @@
         for (const option of this.options) {
           option.setAttribute('role', 'option');
           option.setAttribute('aria-selected', option.classList.contains('is-selected') ? 'true' : 'false');
+          // aria-activedescendant 指向的选项必须有 id（方向键高亮才对读屏可感知）。
+          if (!option.id) option.id = 'ada-select-opt-' + String(++optionIdSeq);
         }
       }
       this._handleClick = (event) => this.onClick(event);
@@ -95,11 +100,19 @@
     closeMenu() {
       this.classList.remove('is-open');
       if (this.menu) this.menu.hidden = true;
-      if (this.trigger) this.trigger.setAttribute('aria-expanded', 'false');
+      if (this.trigger) {
+        this.trigger.setAttribute('aria-expanded', 'false');
+        this.trigger.removeAttribute('aria-activedescendant');
+      }
     }
 
     highlight(option) {
       this.options.forEach((item) => item.classList.toggle('is-active', item === option));
+      // 方向键高亮对读屏可感知：焦点停在触发按钮上，activedescendant 指向当前项。
+      if (this.trigger) {
+        if (option && option.id) this.trigger.setAttribute('aria-activedescendant', option.id);
+        else this.trigger.removeAttribute('aria-activedescendant');
+      }
     }
 
     select(option, focusTrigger = true) {

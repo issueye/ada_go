@@ -2,13 +2,13 @@
   <div class="ada-scroll">
     <div class="ada-wrap ada-wrap--page">
       {{template "flash" .}}
-      <div class="section-head">
+      <div class="ada-section-head">
         <div>
           <div class="flex flex-wrap items-center gap-2">
-            <h1 class="page-title">插件</h1>
-            <span class="badge badge-neutral">{{.PluginCount}} 个</span>
+            <h1 class="ada-page-title">插件</h1>
+            <span class="ada-chip">{{.PluginCount}} 个</span>
           </div>
-          <p class="page-sub">已安装的插件与能力状态。点开插件查看详情。</p>
+          <p class="ada-page-sub">已安装的插件与能力状态。点开插件查看详情。</p>
         </div>
         <form method="post" action="/agent-plugins/reload">
           {{template "csrf" .}}
@@ -27,9 +27,9 @@
 
 {{define "extensions_partial"}}
 {{if .Plugins}}
-<div class="card overflow-hidden">
+<div class="ada-panel overflow-hidden">
   <div class="ada-table-wrap overflow-x-auto">
-    <table class="table">
+    <table class="ada-table">
       <thead><tr><th>插件</th><th>版本</th><th>状态</th><th>能力</th><th>操作</th></tr></thead>
       <tbody>
         {{range .Plugins}}
@@ -39,15 +39,15 @@
             <p class="mt-1 font-mono text-xs text-faint">{{.ID}}</p>
             {{if .Error}}<p class="mt-1 text-xs text-danger-ink">{{.Error}}</p>{{end}}
           </td>
-          <td>{{if .Version}}<span class="badge badge-neutral badge-mono">v{{.Version}}</span>{{else}}<span class="text-xs text-faint">—</span>{{end}}</td>
+          <td>{{if .Version}}<span class="ada-chip ada-chip--mono">v{{.Version}}</span>{{else}}<span class="text-xs text-faint">—</span>{{end}}</td>
           <td>
-            <span class="badge badge-{{.StatusTone}}" title="{{.Status}}">{{.StatusLabel}}</span>
+            <span class="ada-chip ada-chip--{{.StatusTone}}" title="{{.Status}}">{{.StatusLabel}}</span>
           </td>
           <td class="text-xs text-muted">
             {{if .Tools}}<span class="mr-3">{{.Tools}} 工具</span>{{end}}
             {{if .Pages}}<span class="mr-3">{{.Pages}} 页面</span>{{end}}
             {{if .Slots}}<span class="mr-3">{{.Slots}} 插槽</span>{{end}}
-            {{if .HasDashboard}}<span class="badge badge-neutral">dashboard</span>{{end}}
+            {{if .HasDashboard}}<span class="ada-chip">dashboard</span>{{end}}
             {{if and (not .Tools) (not .Pages) (not .Slots) (not .HasDashboard)}}<span class="text-faint">—</span>{{end}}
           </td>
           <td>
@@ -65,7 +65,7 @@
                 <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit">启用</button>
               </form>
               {{end}}
-              <a class="link text-xs" href="/extensions/{{.ID}}">详情</a>
+              <a class="ada-link text-xs" href="/extensions/{{.ID}}">详情</a>
             </div>
           </td>
         </tr>
@@ -75,7 +75,7 @@
   </div>
 </div>
 {{else}}
-<div class="empty-state">
+<div class="ada-empty-card">
   <p class="text-sm font-medium text-ink">没有插件</p>
   <p class="mt-1 text-xs text-faint">插件可能尚未装配，或网关暂时不可用。查看服务端日志确认。</p>
 </div>

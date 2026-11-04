@@ -1,100 +1,24 @@
 /*
- * ada-go SSR 外壳的最小样式表（M2）。
+ * ada-go SSR 外壳的本地样式层。
  *
- * 只服务无 JS 主流程：颜色走 CSS 变量，浅色/深色各一套；
- * 不引入 Tailwind 构建链，也不使用内联 style。
+ * 颜色令牌的唯一真源是 tokens.css（Black Swan 默认主题）与 ui/themes.css
+ * （衍生色板，规则见 docs/19-ued.md §19.3）。本文件**禁止重定义**任何既有
+ * `--ph-*` / `--ada-*` 令牌——M2 时期曾在此覆写一套绿色品牌，与 tokens.css
+ * 的 Black Swan 叠加成「浅色黑天鹅 / 暗色苔绿」两套品牌割裂，2026-11 清理。
+ * 本地**新增**令牌（上游标尺没有的，如动效时长）集中在本文件 :root 定义
+ * 并登记进 19-ued §19.3.2。只服务无 JS 主流程与本地细节：不引入 Tailwind
+ * 构建链，也不使用内联 style。
  */
 
+/* 历史别名：仅本文件体内引用（.ada-newtask 等）；新代码用 components.css 的标尺。 */
 :root {
-  --ph-canvas: #f6f3ec;
-  --ph-surface: #fffdf8;
-  --ph-elevated: #ffffff;
-  --ph-line: #ded8ca;
-  --ph-line-strong: #c6beab;
-  --ph-ink: #16171a;
-  --ph-muted: #5c5a52;
-  --ph-faint: #767268;
-  --ph-brand: #2f5d50;
-  --ph-brand-strong: #23483e;
-  --ph-brand-soft: #e3ede8;
-  --ph-on-brand: #ffffff;
-  --ph-danger-soft: #f7e5e2;
-  --ph-danger-ink: #8c2f22;
-  --ph-warn-soft: #f6edd8;
-  --ph-warn-ink: #72551a;
-  --ph-success-soft: #e3ede8;
-  --ph-success-ink: #2f5d50;
-  --ph-syn-keyword: #8a3b6b;
-  --ph-syn-string: #2f6b4a;
-  --ph-syn-number: #8a5a12;
-  --ph-syn-comment: #6e6a60;
-  --ph-syn-function: #2f5d8a;
-  --ph-syn-type: #6b4a8a;
-  --ph-code-bg: #efebe0;
-  --ph-shadow: 0 10px 30px rgba(22, 23, 26, 0.08);
   --ada-radius: 10px;
-  --ada-radius-sm: 6px;
   --ada-gap: 16px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ph-canvas: #141413;
-    --ph-surface: #1c1c1a;
-    --ph-elevated: #242422;
-    --ph-line: #33332f;
-    --ph-line-strong: #474741;
-    --ph-ink: #f2efe6;
-    --ph-muted: #b8b3a6;
-    --ph-faint: #999488;
-    --ph-brand: #9ec9b7;
-    --ph-brand-strong: #b9ddce;
-    --ph-brand-soft: #23352f;
-    --ph-on-brand: #10201b;
-    --ph-danger-soft: #3a2420;
-    --ph-danger-ink: #f2b9ad;
-    --ph-warn-soft: #3a3320;
-    --ph-warn-ink: #ead39a;
-    --ph-success-soft: #23352f;
-    --ph-success-ink: #b9ddce;
-    --ph-syn-keyword: #e6a6c8;
-    --ph-syn-string: #8fd3b0;
-    --ph-syn-number: #e8c583;
-    --ph-syn-comment: #928b7e;
-    --ph-syn-function: #9dc4e8;
-    --ph-syn-type: #c9aee6;
-    --ph-code-bg: #262622;
-    --ph-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
-  }
-}
-
-html.dark {
-  --ph-canvas: #141413;
-  --ph-surface: #1c1c1a;
-  --ph-elevated: #242422;
-  --ph-line: #33332f;
-  --ph-line-strong: #474741;
-  --ph-ink: #f2efe6;
-  --ph-muted: #b8b3a6;
-  --ph-faint: #999488;
-  --ph-brand: #9ec9b7;
-  --ph-brand-strong: #b9ddce;
-  --ph-brand-soft: #23352f;
-  --ph-on-brand: #10201b;
-  --ph-danger-soft: #3a2420;
-  --ph-danger-ink: #f2b9ad;
-  --ph-warn-soft: #3a3320;
-  --ph-warn-ink: #ead39a;
-  --ph-success-soft: #23352f;
-  --ph-success-ink: #b9ddce;
-  --ph-syn-keyword: #e6a6c8;
-  --ph-syn-string: #8fd3b0;
-  --ph-syn-number: #e8c583;
-  --ph-syn-comment: #928b7e;
-  --ph-syn-function: #9dc4e8;
-  --ph-syn-type: #c9aee6;
-  --ph-code-bg: #262622;
-  --ph-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  /* 动效时长令牌（19-ued §19.2.4，2026-11 批次 C 新增）：
+     fast = 面层级出入（flash、菜单），slow = 抽屉/遮罩；
+     交互反馈一律用 components.css 的 --ada-transition（120ms）。 */
+  --ada-duration-fast: 160ms;
+  --ada-duration-slow: 240ms;
 }
 
 *,
@@ -111,6 +35,8 @@ body {
 
 body {
   min-height: 100vh;
+  /* dvh 覆盖：移动端动态地址栏不再多出一截（批次 B #17）。 */
+  min-height: 100dvh;
   background: var(--ph-canvas);
   color: var(--ph-ink);
   font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
@@ -136,6 +62,7 @@ pre,
 
 .shell {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -1461,6 +1388,7 @@ html:not(.js) .ada-select [data-select-menu] {
   margin: 0;
   padding: 6px 0 0;
   max-height: calc(100vh - 300px);
+  max-height: calc(100dvh - 300px);
   overflow: auto;
 }
 .ada-plugin-tree__row {
@@ -1593,6 +1521,7 @@ html:not(.js) .ada-select [data-select-menu] {
 /* Markdown 预览：与源码视图共享滚动边界，切换时页面不跳。 */
 .ada-plugin-file-preview {
   max-height: calc(100vh - 260px);
+  max-height: calc(100dvh - 260px);
   overflow: auto;
   padding: 14px 18px;
   background: var(--ph-surface);
@@ -1601,6 +1530,7 @@ html:not(.js) .ada-select [data-select-menu] {
   margin: 0;
   padding: 14px 16px;
   max-height: calc(100vh - 260px);
+  max-height: calc(100dvh - 260px);
   overflow: auto;
   background: var(--ph-surface);
   color: var(--ph-ink);
@@ -1747,6 +1677,7 @@ html:not(.js) .ada-select [data-select-menu] {
 .ada-newtask {
   display: grid;
   min-height: calc(100vh - 140px);
+  min-height: calc(100dvh - 140px);
   padding: 24px 0 40px;
   place-items: center;
 }
@@ -1869,6 +1800,7 @@ html.js .ada-newtask__ws-native {
 @media (max-width: 560px) {
   .ada-newtask {
     min-height: calc(100vh - 120px);
+    min-height: calc(100dvh - 120px);
   }
   .ada-file-picker .wp-picker__list {
     height: 260px;
@@ -2194,5 +2126,311 @@ html.js .ada-newtask__ws-native {
   font-size: var(--ada-text-sm);
   letter-spacing: 1px;
   line-height: 1;
+}
+
+/* ── 主题面板（19-ued §19.2.2；DOM 来自 ui.go renderThemePanel）───────────
+   面板挂在 .ada-theme-wrap 内绝对定位、向上展开；侧栏 overflow:hidden 裁剪
+   不到（面板在侧栏盒内），超矮窗口时内部滚动兜底。样式只引用令牌。 */
+.ada-theme-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+.ada-theme-pop {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: -6px;
+  z-index: 60;
+  width: 208px;
+  max-height: min(60vh, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+  background: var(--ph-elevated);
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-lg);
+  box-shadow: var(--ph-shadow);
+}
+.ada-theme-pop[hidden] {
+  display: none;
+}
+.ada-theme-pop__group {
+  display: grid;
+  gap: 2px;
+  padding: 2px;
+}
+.ada-theme-pop__group + .ada-theme-pop__group {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--ph-line);
+}
+.ada-theme-pop__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--ada-radius-sm);
+  background: transparent;
+  color: var(--ph-ink);
+  font: inherit;
+  font-size: var(--ada-text-base);
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--ada-transition);
+}
+.ada-theme-pop__item:hover {
+  background: var(--ph-subtle);
+  color: var(--ph-ink);
+}
+.ada-theme-pop__item.is-selected {
+  background: var(--ph-brand-soft);
+  color: var(--ph-brand-ink);
+}
+.ada-theme-pop__item:focus-visible {
+  outline: 2px solid var(--ph-brand);
+  outline-offset: 1px;
+}
+/* 色卡三段条：canvas / brand / ink 取值在 ui/themes.css 的 .ada-swatch--<id>。 */
+.ada-swatch {
+  display: flex;
+  flex: 0 0 auto;
+  width: 21px;
+  height: 14px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--ph-line-strong);
+}
+.ada-swatch::before {
+  content: "";
+  flex: 1;
+  background: var(--sw-canvas);
+}
+.ada-swatch i {
+  flex: 1;
+  background: var(--sw-brand);
+}
+.ada-swatch::after {
+  content: "";
+  flex: 1;
+  background: var(--sw-ink);
+}
+
+/* ── 键盘焦点兜底（优化方案批次 A #4；19-ued §19.4）─────────────────────
+   components.css（上游镜像）的焦点清单只含 .ada-btn/.ada-icon-btn 等元素选择器，
+   下列 <summary> 触发器（＋菜单/重命名/工作区组头/行菜单/编辑重发）不是 button/a，
+   兜底规则命不中——统一在本地层补上 2px 品牌描边焦点环。 */
+summary:focus-visible {
+  outline: 2px solid var(--ph-brand);
+  outline-offset: 2px;
+  border-radius: var(--ada-radius-sm);
+}
+
+/* ── 历史分页（优化方案批次 A #1）：对话流顶部的「加载更早消息」。
+   普通链接（?before=<cursor>），无 JS 也能翻历史；样式守令牌纪律。 */
+.ada-history-more {
+  display: block;
+  width: fit-content;
+  margin: 0 auto 12px;
+  padding: 4px 12px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-pill);
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
+  text-decoration: none;
+  transition: background var(--ada-transition), color var(--ada-transition);
+}
+.ada-history-more:hover {
+  background: var(--ph-subtle);
+  color: var(--ph-ink);
+}
+.ada-history-more:focus-visible {
+  outline: 2px solid var(--ph-brand);
+  outline-offset: 2px;
+}
+
+/* ── flash 在场避让（批次 B #18）──────────────────────────────────────
+   app.js 在有提示条时给 body 挂 ada-flash-open：右上角 corner-dock（todo 卡）
+   临时下移，不再被窄屏 flash 压住 6-9 秒且不可穿透；flash 消失即回位。 */
+body.ada-flash-open .ada-corner-dock {
+  top: 132px;
+  transition: top var(--ada-transition);
+}
+
+/* ── SSE 重连按钮（批次 B #9）：挂在 #live-status 的错误态里。 ──────── */
+.ada-live-retry {
+  margin-left: 8px;
+  padding: 2px 10px;
+  border: 1px solid currentColor;
+  border-radius: var(--ada-radius-pill);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--ada-text-sm);
+  cursor: pointer;
+  transition: background var(--ada-transition), color var(--ada-transition);
+}
+.ada-live-retry:hover {
+  background: var(--ph-subtle);
+  color: var(--ph-ink);
+}
+.ada-live-retry:focus-visible {
+  outline: 2px solid var(--ph-brand);
+  outline-offset: 2px;
+}
+
+/* ── 动效令牌归位（批次 C #16）────────────────────────────────────────
+   镜像文件里的裸值时长（140/150/180/200ms，easing 四种混用）在本地层覆盖：
+   交互反馈统一 --ada-transition（120ms + 统一曲线），面层级出入用时长令牌。
+   只覆盖 duration/easing，不碰属性清单。 */
+.ada-row-menu__trigger {
+  transition: background-color var(--ada-transition), border-color var(--ada-transition),
+    color var(--ada-transition);
+}
+.ada-composer__card {
+  transition: border-color var(--ada-transition), box-shadow var(--ada-transition),
+    background-color var(--ada-transition);
+}
+.skip-link {
+  transition: top var(--ada-transition);
+}
+.ada-flash {
+  animation-duration: var(--ada-duration-fast);
+}
+@media (max-width: 760px) {
+  .ada-sidebar {
+    transition: transform var(--ada-duration-slow) cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .ada-backdrop {
+    transition: opacity var(--ada-duration-slow) cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
+
+/* ── 状态态补齐（批次 C #19）───────────────────────────────────────────
+   禁用=not-allowed、按压有反馈；覆盖镜像里的偏弱默认。 */
+.ada-send:disabled {
+  cursor: not-allowed;
+}
+.ada-select__option:active {
+  background: var(--ph-brand-soft);
+  color: var(--ph-brand-ink);
+}
+.ada-flash__close:active {
+  opacity: 1;
+  background: color-mix(in srgb, var(--ph-ink) 14%, transparent);
+}
+
+/* ── 二级页组件方言（批次 D #15；19-ued §19.4）────────────────────────
+   workspaces / extensions / overview 的页面骨架从 app.css 基线类
+   （page-title/section-*/badge/card/input/table/empty-state/link）统一到
+   ada-* 语义；这里只补 ada 层缺的「页面级」组件，全部只引用令牌。
+   app.css 保留为 preflight + 冻结工具类基线（结论见 ui-optimization-plan P5）。 */
+.ada-page-title {
+  font-size: var(--ada-text-lg);
+  line-height: 1.3;
+  font-weight: 600;
+  color: var(--ph-ink);
+}
+.ada-page-sub {
+  margin-top: var(--ada-space-1);
+  font-size: var(--ada-text-sm);
+  line-height: 1.4;
+  color: var(--ph-muted);
+}
+.ada-section-head {
+  margin-bottom: var(--ada-space-3);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--ada-space-3);
+}
+.ada-section-head__actions {
+  flex-shrink: 0;
+}
+.ada-section-title {
+  font-size: var(--ada-text-base);
+  font-weight: 600;
+  color: var(--ph-ink);
+}
+.ada-section-sub {
+  font-size: var(--ada-text-sm);
+  line-height: 1.3;
+  color: var(--ph-muted);
+}
+.ada-chip--mono {
+  font-family: var(--mono-font);
+}
+.ada-chip--brand {
+  border-color: color-mix(in srgb, var(--ph-brand) 25%, transparent);
+  background: var(--ph-brand-soft);
+  color: var(--ph-brand-ink);
+}
+.ada-chip--success {
+  border-color: color-mix(in srgb, var(--ph-success-ink) 25%, transparent);
+  background: var(--ph-success-soft);
+  color: var(--ph-success-ink);
+}
+.ada-chip--danger {
+  border-color: color-mix(in srgb, var(--ph-danger-ink) 25%, transparent);
+  background: var(--ph-danger-soft);
+  color: var(--ph-danger-ink);
+}
+.ada-chip--warn {
+  border-color: color-mix(in srgb, var(--ph-warn-ink) 25%, transparent);
+  background: var(--ph-warn-soft);
+  color: var(--ph-warn-ink);
+}
+.ada-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ada-space-1);
+  color: var(--ph-brand-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color var(--ada-transition);
+}
+.ada-link:hover {
+  color: var(--ph-brand-strong);
+}
+.ada-link:focus-visible {
+  outline: 2px solid var(--ph-brand);
+  outline-offset: 2px;
+}
+.ada-empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ada-space-1);
+  padding: var(--ada-space-6) var(--ada-space-4);
+  border: 1px dashed var(--ph-line-strong);
+  border-radius: var(--ada-radius-md);
+  text-align: center;
+}
+.ada-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: var(--ada-text-sm);
+  line-height: 1.4;
+}
+.ada-table thead th {
+  padding: var(--ada-space-2) var(--ada-space-3);
+  font-size: var(--ada-text-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+  color: var(--ph-faint);
+  border-bottom: 1px solid var(--ph-line);
+}
+.ada-table tbody td {
+  padding: var(--ada-space-2) var(--ada-space-3);
+  vertical-align: top;
+  color: var(--ph-muted);
+  border-bottom: 1px solid var(--ph-line);
+}
+.ada-table tbody tr:last-child td {
+  border-bottom: 0;
 }
 

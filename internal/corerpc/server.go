@@ -362,7 +362,9 @@ func (s *Server) handleThreadList(ctx context.Context, raw json.RawMessage) (any
 		if th.Archived != p.Archived {
 			continue
 		}
-		items = append(items, threadJSON(th))
+		item := threadJSON(th)
+		item["running"] = s.threadRunning(th.ID)
+		items = append(items, item)
 	}
 	return map[string]any{"threads": items, "nextCursor": page.NextCursor, "hasMore": page.NextCursor != ""}, nil
 }
@@ -1647,6 +1649,15 @@ func (s *Server) runStateLocked(threadID string) map[string]any {
 		return map[string]any{"runId": "", "status": "terminal", "terminal": domain.TerminalCancelled, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)}
 	}
 	return runStateJSON(cur)
+}
+
+// threadRunning 报告某线程是否有未终态的轮次。runs 是进程内 map，查询零 IO，
+// thread.list 逐线程调用没有成本（协议 ThreadSummary.running，08 §8.2）。
+func (s *Server) threadRunning(threadID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur := s.runs[threadID]
+	return cur != nil && cur.status == "running"
 }
 
 func runStateJSON(r *runInfo) map[string]any {

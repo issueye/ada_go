@@ -70,6 +70,17 @@
     statusBox.removeAttribute("data-level");
   }
 
+  // 局部刷新失败不静默（19-ued §19.5.4），但也不打断流：只提示一次，
+  // 后续事件仍会触发重试。showStatus 每次失败都会重画一条通知太吵。
+  var partialWarned = false;
+  function warnPartialRefresh() {
+    if (partialWarned) return;
+    partialWarned = true;
+    if (window.AdaApp && typeof window.AdaApp.notify === "function") {
+      window.AdaApp.notify("部分内容刷新失败，将在下次更新时自动重试。");
+    }
+  }
+
   function reloadOnce() {
     if (reloading) return;
     reloading = true;
@@ -272,7 +283,7 @@
         todoState.apply(next);
       })
       .catch(function () {
-        /* 取不到就等下一次工具事件，不打断流 */
+        warnPartialRefresh();
       })
       .then(function () {
         slotRefreshing = false;
@@ -404,7 +415,7 @@
         afterRender();
       })
       .catch(function () {
-        /* 取不到就等下一次 item.updated，不打断流 */
+        warnPartialRefresh();
       })
       .then(function () {
         refreshing = false;
@@ -448,7 +459,7 @@
         }
       })
       .catch(function () {
-        /* 取不到就等下一次 item.updated，不打断流 */
+        warnPartialRefresh();
       })
       .then(function () {
         refreshing = false;
@@ -767,7 +778,19 @@
     if (failures <= MAX_SILENT_RETRIES) {
       showStatus("连接断开，正在重试…", "warn");
     } else {
-      showStatus("连接断开，已多次重试失败。请刷新页面。", "error");
+      // 连接类提示必须带动作按钮（19-ued §19.5.3），不能只说「请刷新页面」。
+      showStatus("连接断开，已多次重试失败。", "error");
+      if (statusBox && !statusBox.querySelector("[data-live-retry]")) {
+        var retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "ada-live-retry";
+        retry.setAttribute("data-live-retry", "");
+        retry.textContent = "重新连接";
+        retry.addEventListener("click", function () {
+          reloadOnce();
+        });
+        statusBox.appendChild(retry);
+      }
     }
   });
 })();

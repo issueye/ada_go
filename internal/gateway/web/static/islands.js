@@ -24,11 +24,19 @@
     }
   }
 
+  // :hover 的安全探测：个别老引擎在 matches(':hover') 上抛错。
+  function hoverMatch(element) {
+    try {
+      return element.matches(':hover');
+    } catch (err) {
+      return false;
+    }
+  }
+
   function mountOverview(element) {
     if (element.getAttribute('data-ada-mounted') === '1') return;
     element.setAttribute('data-ada-mounted', '1');
     var initial = parseState(element);
-
     var app = AdaUI.createApp({
       data: function () {
         return {
@@ -62,6 +70,9 @@
         refresh: function () {
           if (this.loading) return;
           if (typeof document !== 'undefined' && document.hidden) return;
+          // 用户焦点或指针落在岛内时跳过本轮：整岛重渲染会打断选区与悬停
+          // （19-ued §19.5.4）。下一轮 5s 间隔会再试。
+          if (element && (element.contains(document.activeElement) || hoverMatch(element))) return;
           if (typeof window.fetch !== 'function') return;
           var self = this;
           this.loading = true;
@@ -301,9 +312,14 @@
     if (!rows.length) return;
     element.setAttribute('data-ada-mounted', '1');
 
+    // 「加载更早消息」是 SSR 输出的普通链接（?before= 游标翻历史）；岛屿重建
+    // 行时把它捡回来放到顶部，否则水合一次链接就没了。
+    var olderLink = fallback.querySelector('.ada-history-more');
+    var olderHref = olderLink ? olderLink.getAttribute('href') : '';
+
     var app = AdaUI.createApp({
       data: function () {
-        return { rows: rows, threadId: threadId, runStatus: runStatus };
+        return { rows: rows, threadId: threadId, runStatus: runStatus, olderHref: olderHref };
       },
       methods: {
         setRows: function (next, status) {
@@ -315,6 +331,13 @@
         var nodes = this.rows.map(function (row) {
           return transcriptRow(h, row);
         }).filter(Boolean);
+        if (this.olderHref) {
+          nodes.unshift(h('a', {
+            class: 'ada-history-more',
+            href: this.olderHref,
+            key: 'history-more'
+          }, '加载更早消息'));
+        }
         nodes.push(h('div', {
           id: 'live-stream',
           class: 'live-stream',

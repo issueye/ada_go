@@ -96,6 +96,29 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 			err.Error(), threadPath(id), "重试")
 		return
 	}
+	// 历史分页（协议 8.2 的游标严格排他：NextCursor = 本窗首条 seq-1）：
+	// 默认只渲染最近 100 条；?before=<cursor> 再取更早的一窗拼在前面，
+	// 两窗首尾相接无重复。是否还有更早的由页面顶部「加载更早消息」链接
+	// 继续（普通链接，无 JS 也能翻历史）。仅在用 before 翻页时才有取不到
+	// 中段的可能（两窗之间新落了超过一整窗的新消息），此场景极罕见且
+	// 顶部链接仍可继续向前翻。
+	olderCursor, olderHasMore := page.NextCursor, page.HasMore
+	if before := strings.TrimSpace(r.URL.Query().Get("before")); before != "" {
+		rawOlder, err := s.call(r, "thread.entries", map[string]any{"threadId": id, "cursor": before, "limit": 100})
+		if err != nil {
+			s.renderCoreError(w, r, err, threadPath(id))
+			return
+		}
+		var older entryPage
+		if err := json.Unmarshal(rawOlder, &older); err != nil {
+			s.renderError(w, r, http.StatusBadGateway, "无法解析会话历史",
+				"Core 返回了无法识别的历史数据。请重试；若出现持续错误，请检查 Core 日志。",
+				err.Error(), threadPath(id), "重试")
+			return
+		}
+		page.Entries = append(older.Entries, page.Entries...)
+		olderCursor, olderHasMore = older.NextCursor, older.HasMore
+	}
 
 	transcript := buildTranscript(page.Entries)
 	entriesUsable := len(transcript) > 0
@@ -123,6 +146,13 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		stateJSON = []byte(`{"threadId":"","runStatus":"","rows":[]}`)
 	}
+	// 历史分页链接：仅 entries 路径可用（item 回退路径的 key 不是 entry id，
+	// 没有可靠游标）且更早还有历史时才出现。
+	hasOlder, olderHref := false, ""
+	if entriesUsable && olderHasMore && olderCursor != "" {
+		hasOlder = true
+		olderHref = fmt.Sprintf("%s?before=%s", threadPath(id), url.QueryEscape(olderCursor))
+	}
 	data := threadData{
 		baseData:            base,
 		Thread:              buildThreadInfo(get.Thread),
@@ -136,6 +166,8 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 		CurrentModelValue:   modelValue,
 		CurrentModelLevels:  picker.Levels,
 		CurrentModelLevel:   picker.Level,
+		HasOlder:            hasOlder,
+		OlderHref:           olderHref,
 	}
 	if run.Active && !jsClient(r) {
 		// 无 JS 轮询：运行中每 2 秒刷新一次，完成即停止（7.8）。
@@ -1103,6 +1135,13 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 		redirect(w, flashRedirect(next, "error", "缺少会话 id"))
 		return
 	}
+	// 删除前经 Core 校验运行态（turnStatus 读不到时按空闲处理，见其注释）：
+	// 侧栏对运行中的会话已隐藏删除按钮，这里是纵深防御——拿到旧列表的页面
+	// 仍然可能把删除请求打过来。
+	if status := s.turnStatus(r, id); status == "running" {
+		redirect(w, flashRedirect(next, "error", "会话正在运行，请先停止当前轮次再删除。"))
+		return
+	}
 	if _, err := s.call(r, "thread.delete", map[string]any{"threadId": id}); err != nil {
 		redirect(w, flashRedirect(next, "error", cleanRPCError(err)))
 		return
@@ -1671,7 +1710,7 @@ func (s *Server) handleOverviewPartial(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		_, _ = w.Write([]byte(`<div class="empty-state"><p class="text-sm font-medium text-ink">未连接</p><p class="mt-1 text-xs text-faint">` + esc(publicReason(err)) + `</p></div>`))
+		_, _ = w.Write([]byte(`<div class="ada-empty-card"><p class="text-sm font-medium text-ink">未连接</p><p class="mt-1 text-xs text-faint">` + esc(publicReason(err)) + `</p></div>`))
 		return
 	}
 	s.render(w, http.StatusOK, "overview_partial", s.overviewData(r, threads))

@@ -1,7 +1,7 @@
 /*
  * ada-ui.js 的补充样式层
  * ---------------------------------------------------------------------------
- * 只补项目基线里还没有视觉定义的控件（滑块、进度、开关、选择项、Toast、
+ * 只补项目基线里还没有视觉定义的控件（滑块、进度、开关、选择项、
  * 下拉面板修正、表格修饰），其余全部复用 app.css / ui/components.css /
  * ui/widgets.css / ui/layout.css / ui/shell.css。颜色只来自 --ph-*，
  * 尺寸只来自 --ada-*；不写内联 style，不使用 dark: 变体。
@@ -273,50 +273,8 @@
   vertical-align: -2px;
 }
 
-/* ── Toast：浮动在右上角，复用 .alert 的颜色与 .alert-dismiss 的关闭键 ── */
-.ada-toast-stack {
-  position: fixed;
-  top: 66px;
-  right: 16px;
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  gap: var(--ada-space-2);
-  width: min(360px, calc(100vw - 32px));
-  pointer-events: none;
-}
-.ada-toast {
-  pointer-events: auto;
-  box-shadow: var(--ph-shadow);
-  animation: ada-toast-in var(--ada-transition);
-}
-.ada-toast--closing {
-  opacity: 0;
-  transform: translateX(8px);
-  transition: opacity var(--ada-transition), transform var(--ada-transition);
-}
-@keyframes ada-toast-in {
-  from {
-    opacity: 0;
-    transform: translateX(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-@media (max-width: 640px) {
-  .ada-toast-stack {
-    top: 60px;
-    right: 12px;
-    left: 12px;
-    width: auto;
-  }
-}
+/* Toast 样式已随 AdaUI.toast 移除（19-ued §19.5.3：全局通知走 app.js notify + flash）。 */
 @media (prefers-reduced-motion: reduce) {
-  .ada-toast {
-    animation: none;
-  }
   .ada-switch__track,
   .ada-switch__thumb {
     transition: none;

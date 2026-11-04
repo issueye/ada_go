@@ -31,12 +31,14 @@ a_da UI 基线资产来源与许可
   crates/agent-web/static/ada-select.js  → ada-select.js
   crates/agent-web/static/ada-modal.js   → ada-modal.js
   crates/agent-web/static/htmx.min.js    → htmx.min.js
+    （htmx.min.js 已于 2026-11 移除：全仓唯一调用点针对的元素无任何
+      渲染方，见 docs/ui-optimization-plan.md 批次 C；保留本行以存溯源。）
 
   品牌：
   assets/logo.png                        → logo.png
 
 上游 NOTICE 中声明的第三方前端资产（沿用上游声明）：
-  - htmx 2.0.4 — MIT — https://htmx.org/
+  - htmx 2.0.4 — MIT — https://htmx.org/（副本已移除，见上）
   - Tailwind CSS 3.4.19（生成的 app.css）— MIT — https://tailwindcss.com/
 
 说明：

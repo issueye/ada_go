@@ -66,6 +66,8 @@ var iconDefs = []iconDef{
 	{"i-search", `<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>`},
 	{"i-moon", `<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>`},
 	{"i-sun", `<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>`},
+	// 本地新增（非 a_da icons.rs 集合）：主题面板「跟随系统」三态用（19-ued §19.2.2）。
+	{"i-monitor", `<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>`},
 	{"i-cloud", `<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>`},
 	{"i-cloud-fog", `<path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M16 17H7"/><path d="M17 21H9"/>`},
 	{"i-cloud-rain", `<path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M16 14v6"/><path d="M8 14v6"/><path d="M12 16v6"/>`},
@@ -301,14 +303,61 @@ type sidebarData struct {
 	PluginNav []pluginNavLink
 }
 
+// 主题色板表（docs/19-ued.md §19.2.2）：id 与显示名驱动侧栏主题面板的色卡。
+// 三色预览不放 Go 侧——CSP style-src 'self' 禁内联 style，色值在 ui/themes.css
+// 的 .ada-swatch--<id> 类里；改名/增删色板必须两边同步（见 themes.css 头注释）。
+type themePalette struct {
+	ID    string
+	Label string
+}
+
+var themePalettes = []themePalette{
+	{"black-swan", "黑天鹅"},
+	{"moss", "苔绿"},
+	{"ocean", "深海"},
+	{"dusk", "暮色"},
+}
+
+var themeModes = []struct {
+	ID    string
+	Label string
+	Icon  string
+}{
+	{"light", "亮色", "i-sun"},
+	{"dark", "暗色", "i-moon"},
+	{"system", "跟随系统", "i-monitor"},
+}
+
+// renderThemePanel 输出侧栏底部的主题面板（默认 hidden，themes.js 开合）。
+// 弹层四要素（19-ued §19.5.1）：点外与 Esc 关闭、开合同步 aria-expanded 在
+// themes.js 的委托里；色卡/三态用 role=radio + aria-checked 表达选中态。
+func renderThemePanel() template.HTML {
+	var b strings.Builder
+	b.WriteString(`<div class="ada-theme-pop" id="ada-theme-panel" data-theme-panel aria-label="主题设置" hidden>`)
+	b.WriteString(`<div class="ada-theme-pop__group" role="radiogroup" aria-label="明暗模式">`)
+	for _, m := range themeModes {
+		fmt.Fprintf(&b,
+			`<button type="button" class="ada-theme-pop__item" role="radio" aria-checked="false" data-theme-mode="%s" title="%s">%s<span>%s</span></button>`,
+			m.ID, m.Label, iconHTML(m.Icon, 14), m.Label,
+		)
+	}
+	b.WriteString(`</div><div class="ada-theme-pop__group" role="radiogroup" aria-label="主题色板">`)
+	for _, p := range themePalettes {
+		fmt.Fprintf(&b,
+			`<button type="button" class="ada-theme-pop__item" role="radio" aria-checked="false" data-theme-pick="%s" title="%s"><span class="ada-swatch ada-swatch--%s" aria-hidden="true"><i></i></span><span>%s</span></button>`,
+			p.ID, p.Label, p.ID, p.Label,
+		)
+	}
+	b.WriteString(`</div></div>`)
+	return template.HTML(b.String())
+}
+
 // renderSidebar 复刻 a_da 的侧栏 DOM（展开态 + 56px 窄轨）。
 func renderSidebar(d sidebarData) template.HTML {
 	var rail strings.Builder
 	rail.WriteString(`<div class="ada-rail">`)
-	railTitle := "返回对话"
-	if d.Active != "chat" {
-		railTitle = "返回会话"
-	}
+	// 术语收敛（19-ued §19.2.3）：thread 统一「会话」，不再用「对话」。
+	railTitle := "返回会话"
 	rail.WriteString(fmt.Sprintf(
 		`<a class="ada-rail__mark" href="/" title="%s" aria-label="%s"><img class="ada-rail__logo" src="%s" alt="" width="24" height="24" decoding="async"></a>`,
 		railTitle, railTitle, assetURL("logo.png"),
@@ -350,10 +399,7 @@ func renderSidebar(d sidebarData) template.HTML {
 	var b strings.Builder
 	b.WriteString(`<aside class="ada-sidebar" id="chat-sidebar" aria-label="侧栏"><div class="ada-side">`)
 	// 品牌位：始终显示 logo + 品牌名 + 产品徽标；二级页链接回对话。
-	brandLabel := "返回对话"
-	if d.Active != "chat" {
-		brandLabel = "返回会话"
-	}
+	brandLabel := "返回会话"
 	badge := ""
 	if d.ProductBadge != "" {
 		badge = fmt.Sprintf(`<span class="ada-brand__badge">%s</span>`, esc(d.ProductBadge))
@@ -421,9 +467,11 @@ func renderSidebar(d sidebarData) template.HTML {
 	if status != "" {
 		title = status + " · " + d.Gateway
 	}
+	// 底部：主题面板 + 网关地址。主题按钮升级为面板触发器（19-ued §19.2.2）：
+	// 面板内含明暗三态与色板选择；rail 上的 data-theme-toggle 仍是快速明暗翻转。
 	b.WriteString(fmt.Sprintf(
-		`<div class="ada-sidebar__foot"><button class="ada-icon-btn ada-theme" type="button" data-theme-toggle title="切换深浅色" aria-label="切换深浅色"><span class="ada-theme__moon">%s</span><span class="ada-theme__sun">%s</span></button><span class="ada-gateway"%s>%s<span class="ada-gateway__addr">%s</span></span></div>`,
-		iconHTML("i-moon", 14), iconHTML("i-sun", 14), attr("title", title), dot, esc(displayAddress(d.Gateway)),
+		`<div class="ada-sidebar__foot"><div class="ada-theme-wrap"><button class="ada-icon-btn ada-theme" type="button" data-theme-panel-toggle aria-haspopup="true" aria-expanded="false" aria-controls="ada-theme-panel" title="主题设置" aria-label="主题设置"><span class="ada-theme__moon">%s</span><span class="ada-theme__sun">%s</span></button>%s</div><span class="ada-gateway"%s>%s<span class="ada-gateway__addr">%s</span></span></div>`,
+		iconHTML("i-moon", 14), iconHTML("i-sun", 14), renderThemePanel(), attr("title", title), dot, esc(displayAddress(d.Gateway)),
 	))
 	b.WriteString(`</div>`)
 	b.WriteString(rail.String())
@@ -488,11 +536,14 @@ func railLink(active, key, icon, label, href string) string {
 	return fmt.Sprintf(`<a class="%s" href="%s"%s>%s</a>`, cls, esc(href), attr("title", label), iconHTML(icon, 18))
 }
 
+// renderThreadTree 渲染会话树。历史上这里支持「其它工作区」分组折叠，
+// 但 sidebarGroups 只产出当前工作区一组（跨工作区列表需要各自的 Core 查询，
+// 见 server.go 的注释），折叠分支从未被走到——2026-11 死路径清理（批次 C），
+// 多工作区切换走 /workspaces 页。
 func renderThreadTree(groups []sidebarGroup, activeThreadID, csrf, currentPath string) string {
 	if len(groups) == 0 {
 		return `<p class="ada-list-empty">还没有会话</p>`
 	}
-	var b strings.Builder
 	head := groups[0]
 	for _, g := range groups {
 		if g.Active {
@@ -500,40 +551,13 @@ func renderThreadTree(groups []sidebarGroup, activeThreadID, csrf, currentPath s
 			break
 		}
 	}
+	var b strings.Builder
 	if len(head.Threads) == 0 {
-		b.WriteString(`<p class="ada-ws__empty">暂无会话</p>`)
+		b.WriteString(`<p class="ada-ws__empty">还没有会话</p>`)
 	} else {
 		for _, t := range head.Threads {
 			b.WriteString(renderThreadRow(t, activeThreadID, csrf, currentPath))
 		}
-	}
-	var others []sidebarGroup
-	for _, g := range groups {
-		if !g.Active {
-			others = append(others, g)
-		}
-	}
-	if len(others) > 0 {
-		b.WriteString(fmt.Sprintf(`<p class="ada-ws__section" data-ws-section><span class="ada-ws__section-label">其它工作区</span><span class="ada-ws__section-count">%d</span></p>`, len(others)))
-	}
-	for _, g := range others {
-		var rows strings.Builder
-		if len(g.Threads) == 0 {
-			rows.WriteString(`<p class="ada-ws__empty">暂无会话</p>`)
-		} else {
-			for _, t := range g.Threads {
-				rows.WriteString(renderThreadRow(t, activeThreadID, csrf, currentPath))
-			}
-		}
-		running := ""
-		if g.Running {
-			running = `<span class="ada-ws__running" title="该工作区有会话正在运行"><span class="ada-dot ada-dot--warn"></span></span>`
-		}
-		b.WriteString(fmt.Sprintf(
-			`<div class="ada-ws" data-ws-key="%s" data-ws-path="%s"><details class="ada-ws__details" id="%s"><summary class="ada-ws__summary"%s>%s%s<span class="ada-ws__name">%s</span>%s<span class="ada-ws__count">%d</span></summary><div class="ada-ws__threads">%s</div></details></div>`,
-			esc(g.Key), esc(g.Path), wsDOMID(g.Key), attr("title", g.Path),
-			iconHTML("i-chevron", 12), iconHTML("i-folder", 14), esc(g.Name), running, g.Count, rows.String(),
-		))
 	}
 	return b.String()
 }
@@ -565,14 +589,6 @@ func renderThreadRow(t sidebarThread, activeThreadID, csrf, currentPath string) 
 	)
 }
 
-func wsDOMID(key string) string {
-	var hash uint32 = 0x811c9dc5
-	for _, b := range []byte(key) {
-		hash ^= uint32(b)
-		hash *= 0x01000193
-	}
-	return fmt.Sprintf("ws-%08x", hash)
-}
 
 func relativeTime(atMS int64) string {
 	if atMS == 0 {

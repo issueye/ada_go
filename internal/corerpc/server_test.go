@@ -491,6 +491,57 @@ func runTurn(t *testing.T, c *rpcClient, threadID, idem, text string) {
 	c.waitEvent(t, "evt.run.status", `"terminal":"completed"`)
 }
 
+// TestThreadListRunningFlag 钉 thread.list 的 running 投影：有未终态轮次的
+// 线程 running=true，轮次结束后回到 false（侧栏运行点与禁删的依据）。
+func TestThreadListRunningFlag(t *testing.T) {
+	model := testkit.NewFakeProvider(testkit.NewScriptedModel([]testkit.ScriptStep{
+		testkit.Idle(30 * time.Second),
+		testkit.Finish("stop", "[DONE]"),
+	}))
+	sess := newSession(t, model)
+	url, _ := startServer(t, sess, "")
+	c := dial(t, url, "")
+
+	threadID := createThread(t, c, "running-flag")
+	var list struct {
+		Threads []struct {
+			ID      string `json:"id"`
+			Running bool   `json:"running"`
+		} `json:"threads"`
+	}
+	runningOf := func(raw []byte, id string) (bool, bool) {
+		if err := json.Unmarshal(raw, &list); err != nil {
+			t.Fatalf("thread.list = %s (%v)", raw, err)
+		}
+		found, running := false, false
+		for _, th := range list.Threads {
+			if th.ID == id {
+				found, running = true, th.Running
+			}
+		}
+		return found, running
+	}
+
+	raw := c.call(t, "thread.list", map[string]any{"archived": false})
+	if found, running := runningOf(raw, threadID); !found || running {
+		t.Fatalf("空闲线程应在列表且 running=false：found=%v running=%v %s", found, running, raw)
+	}
+
+	c.call(t, "turn.start", map[string]any{"threadId": threadID, "idempotencyKey": "running-01", "text": "wait"})
+	time.Sleep(100 * time.Millisecond)
+	raw = c.call(t, "thread.list", map[string]any{"archived": false})
+	if found, running := runningOf(raw, threadID); !found || !running {
+		t.Fatalf("运行中线程 running 应为 true：found=%v running=%v %s", found, running, raw)
+	}
+
+	c.call(t, "turn.cancel", map[string]any{"threadId": threadID})
+	c.waitEvent(t, "evt.run.status", `"terminal":"cancelled"`)
+	raw = c.call(t, "thread.list", map[string]any{"archived": false})
+	if found, running := runningOf(raw, threadID); !found || running {
+		t.Fatalf("终态后 running 应回到 false：found=%v running=%v %s", found, running, raw)
+	}
+}
+
 type threadResult struct {
 	Thread struct {
 		ID          string `json:"id"`

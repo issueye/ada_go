@@ -78,6 +78,13 @@
 
     input.addEventListener("change", render);
     if (textarea) {
+      // 拖拽悬停高亮：.is-drop-target 样式在组件层早就有，这里把类打上。
+      // dragenter/leave 在子元素间穿梭会成对触发，用深度计数防闪烁。
+      var card = textarea.closest(".ada-composer__card");
+      var dragDepth = 0;
+      var setDropTarget = function (on) {
+        if (card) card.classList.toggle("is-drop-target", on);
+      };
       textarea.addEventListener("paste", function (event) {
         var files = event.clipboardData && event.clipboardData.files;
         if (files && files.length) {
@@ -85,10 +92,23 @@
           addFiles(files);
         }
       });
+      textarea.addEventListener("dragenter", function () {
+        dragDepth += 1;
+        setDropTarget(true);
+      });
       textarea.addEventListener("dragover", function (event) {
         event.preventDefault();
       });
+      textarea.addEventListener("dragleave", function () {
+        dragDepth -= 1;
+        if (dragDepth <= 0) {
+          dragDepth = 0;
+          setDropTarget(false);
+        }
+      });
       textarea.addEventListener("drop", function (event) {
+        dragDepth = 0;
+        setDropTarget(false);
         var files = event.dataTransfer && event.dataTransfer.files;
         if (files && files.length) {
           event.preventDefault();
@@ -159,6 +179,28 @@
     if (event.key === "Escape" && activeViewer) {
       event.preventDefault();
       closeViewer();
+      return;
+    }
+    // Tab 陷阱（19-ued §19.5.1）：查看器有 aria-modal 就必须圈住焦点，
+    // 不能和 <ada-modal> 的行为分叉。查看器内可聚焦元素只有关闭按钮。
+    if (event.key === "Tab" && activeViewer) {
+      var focusables = activeViewer.querySelectorAll("button, [href]");
+      if (!focusables.length) {
+        event.preventDefault();
+        return;
+      }
+      var first = focusables[0];
+      var last = focusables[focusables.length - 1];
+      if (!activeViewer.contains(document.activeElement)) {
+        event.preventDefault();
+        first.focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     }
   });
 })();

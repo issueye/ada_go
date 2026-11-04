@@ -18,16 +18,25 @@
   /* ── 1. 提示条 ───────────────────────────────────────────────────────── */
   function dismiss(target) {
     if (!target) return;
-    target.style.transition = 'opacity 160ms ease, transform 160ms ease';
+    // 160ms = --ada-duration-fast（app-local.css :root）；JS 里读令牌不值当，字面量跟令牌同步。
+    target.style.transition = 'opacity 160ms cubic-bezier(0.4, 0, 0.2, 1), transform 160ms cubic-bezier(0.4, 0, 0.2, 1)';
     target.style.opacity = '0';
     target.style.transform = 'translateY(-2px)';
     window.setTimeout(function () {
       target.remove();
+      syncFlashClass();
     }, 180);
+  }
+
+  // flash 在场标记：右上角 corner-dock 等浮层据此临时避让（19-ued §19.5.3），
+  // 免得窄屏提示条压住 todo 卡 6-9 秒且不可穿透。
+  function syncFlashClass() {
+    document.body.classList.toggle('ada-flash-open', !!document.querySelector('.ada-flash'));
   }
 
   function autoDismissFlashes() {
     var flashes = document.querySelectorAll('[data-flash]');
+    syncFlashClass();
     for (var i = 0; i < flashes.length; i += 1) {
       (function (flash) {
         var delay = flash.getAttribute('data-flash') === 'error' ? 9000 : 6000;
@@ -63,10 +72,15 @@
     box.appendChild(text);
     box.appendChild(close);
     host.insertBefore(box, host.firstChild);
+    syncFlashClass();
     window.setTimeout(function () {
       if (box.isConnected) dismiss(box);
     }, kind === 'error' ? 9000 : 6000);
   }
+
+  // 全局通知唯一入口（19-ued §19.5.3）：chat-live 等模块复用它出提示，
+  // 不再各造一套 toast；AdaUI.toast 已随通知收敛移除。
+  window.AdaApp = { notify: notify };
 
   /* ── 2. 共享确认弹窗 ─────────────────────────────────────────────────
      弹窗本体是组件库的 `ui::ConfirmDialog`（`data-modal="confirm"`）；开合、焦点圈、
@@ -174,15 +188,6 @@
     if (url.origin === window.location.origin) return;
     event.preventDefault();
     window.open(url.href, '_blank', 'noopener,noreferrer');
-  });
-
-  /* 排序下拉框等：改选即提交 */
-  document.addEventListener('change', function (event) {
-    var field = event.target;
-    if (!field || !field.matches || !field.matches('[data-auto-submit]')) {
-      return;
-    }
-    if (field.form) field.form.submit();
   });
 
   /* 输入框旁的模型选择器：改选即切换（线程级；没有会话上下文时工作区级）。
@@ -304,6 +309,7 @@
       var button = document.createElement("button");
       button.type = "button";
       button.className = "ada-select__option ada-model-cascade__option" + (level === current ? " is-selected" : "");
+      button.setAttribute("role", "menuitem");
       button.setAttribute("data-cascade-level", level);
       button.textContent = level;
       cascade.appendChild(button);
@@ -477,11 +483,23 @@
     var side = sidebar();
     var veil = backdrop();
     if (!side || !veil) return;
+    var wasOpen = side.classList.contains('is-open');
     side.classList.toggle('is-open', open);
     veil.classList.toggle('is-open', open);
+    // 抽屉开着时把主区置 inert：Tab 不再穿透遮罩落到被盖住的正文上
+    // （19-ued §19.5.1；inert 覆盖 Electron/现代浏览器）。
+    var main = document.getElementById('main');
+    if (main) {
+      if (open) main.setAttribute('inert', '');
+      else main.removeAttribute('inert');
+    }
     if (open) {
       var search = side.querySelector('.ada-search__input');
       if (search) search.focus();
+    } else if (wasOpen) {
+      // 焦点归还触发按钮（19-ued §19.5.1 弹层四要素）。
+      var toggle = document.querySelector('[data-sidebar-toggle]');
+      if (toggle) toggle.focus();
     }
     syncToggle();
   }
@@ -598,10 +616,21 @@
     var counter = form.querySelector('[data-ask-current]');
     var index = 0;
 
+    // 未到达步骤的字段一律 disabled（19-ued §19.5.5）：文本框里按 Enter 或
+    // 任何路径触发的提前提交，都不能把 select/confirm 的默认值（第一项/「是」）
+    // 替用户作答交上去。无 JS 时没有这段代码，全部步骤照常展开提交。
+    function setStepEnabled(step, enabled) {
+      var fields = step.querySelectorAll('input, select, textarea');
+      for (var i = 0; i < fields.length; i += 1) {
+        fields[i].disabled = !enabled;
+      }
+    }
+
     function render() {
       var last = steps.length - 1;
       for (var i = 0; i < steps.length; i += 1) {
         steps[i].hidden = i !== index;
+        setStepEnabled(steps[i], i === index);
       }
       if (prev) prev.disabled = index === 0;
       if (next) next.hidden = index === last;
@@ -616,6 +645,16 @@
         }
       }
     }
+
+    // 非末步的提交一律转成「下一题」；取消（decision=cancel）随时放行。
+    // 走到末步后，Enter 经表单默认提交按钮（提交）正常交出。
+    form.addEventListener('submit', function (event) {
+      var submitter = event.submitter;
+      if (submitter && submitter.name === 'decision' && submitter.value === 'cancel') return;
+      if (index >= steps.length - 1) return;
+      event.preventDefault();
+      if (next) next.click();
+    });
 
     if (next) {
       next.addEventListener('click', function () {
@@ -689,6 +728,9 @@
 
     document.addEventListener('keydown', function (event) {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'k') return;
+      // 弹窗打开时不抢焦点（19-ued §19.5.2）：把焦点甩到 modal 背后的侧栏
+      // 等于把用户困在弹窗里。让路后不 preventDefault，交给浏览器默认行为。
+      if (window.AdaComponents && typeof AdaComponents.modalOpen === 'function' && AdaComponents.modalOpen()) return;
       event.preventDefault();
       focusSearch();
     });
@@ -772,6 +814,13 @@
   function bindNewTaskShortcut() {
     document.addEventListener('keydown', function (event) {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'n') return;
+      // 输入中不拦截（19-ued §19.5.2）：整页跳转会丢掉正在写的消息。
+      // 浏览器保留键（Ctrl+N/T/W）在普通浏览器上本就不可靠拦截，
+      // 这里的提示只在 Electron 壳内稳定生效。
+      var el = document.activeElement;
+      if (el && (el.tagName === 'TEXTAREA' || el.isContentEditable ||
+        (el.tagName === 'INPUT' && el.type !== 'checkbox' && el.type !== 'radio' &&
+          el.type !== 'submit' && el.type !== 'button'))) return;
       event.preventDefault();
       window.location.href = '/';
     });

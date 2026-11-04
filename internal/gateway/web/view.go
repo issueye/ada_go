@@ -40,6 +40,9 @@ type threadSummaryDTO struct {
 	HeadEntryID string `json:"headEntryId"`
 	UpdatedAt   string `json:"updatedAt"`
 	Archived    bool   `json:"archived"`
+	// Running 是该会话是否有未终态的轮次（thread.list 的 Core 内存态投影）：
+	// 侧栏据此显示运行点并隐藏删除按钮（renderThreadRow）。
+	Running bool `json:"running"`
 }
 
 type threadListResult struct {
@@ -165,7 +168,6 @@ type baseData struct {
 	Gateway             string
 	ActiveThreadID      string
 	Connected           bool
-	TopbarStatus        template.HTML
 	TopbarActions       template.HTML
 	// PluginNav 是前端插件声明的侧栏导航（供应商 / Token 用量等）。
 	PluginNav []pluginNavLink
@@ -270,6 +272,10 @@ type threadData struct {
 	// CurrentModelLevels/Level 是当前模型可选的推理档位与已选档位。
 	CurrentModelLevels []string
 	CurrentModelLevel  string
+	// HasOlder/OlderHref 是对话流顶部的「加载更早消息」链接（8.2 游标分页）：
+	// Core 的 thread.entries 默认只回最近 100 条，更早的历史靠它继续翻。
+	HasOlder  bool
+	OlderHref string
 }
 
 type modelOption struct {

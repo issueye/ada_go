@@ -1978,7 +1978,7 @@ func TestPluginDetailShowsReadmeAndFiles(t *testing.T) {
 	}
 	head := body[:islandAt]
 	for _, want := range []string{
-		`class="section-head__actions"`,
+		`class="ada-section-head__actions"`,
 		`action="/extensions/tools-fs/disable"`,
 		`href="/extensions"`,
 	} {

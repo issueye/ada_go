@@ -35,7 +35,9 @@ ada-go 是本地优先、单二进制、插件优先的 Agent 系统：Gateway �
 | [16-markdown-dynamic-blocks.md](16-markdown-dynamic-blocks.md) | 扩展 | Markdown 动态块：`adag-ui` fence、插件数据 Schema/TSX 渲染器、VNode block profile 与安全限额 |
 | [17-markdown-dynamic-blocks-plan.md](17-markdown-dynamic-blocks-plan.md) | 开发计划 | Markdown 动态块 MVP 任务分解、依赖、验收门禁、工作量与风险 |
 | [18-mcp-plugin.md](18-mcp-plugin.md) | 扩展 | MCP 插件化接入：装配期上下文、HTTP/stdio、工具映射、安全边界与分阶段交付 |
+| [19-ued.md](19-ued.md) | 扩展 | UED 规范：设计原则、品牌（命名/主题/文案/动效/资产）、令牌体系与主题准入、组件与 DOM、交互模式、可访问性、治理门禁 |
 | [development-plan.md](development-plan.md) | 实施计划 | M0–M5 任务分解、依赖与关键路径、工作量、质量门禁、发布节奏、交付状态盘点 |
+| [ui-optimization-plan.md](ui-optimization-plan.md) | 专项计划 | UI 优化：品牌设计语言（含多主题重构）、交互审计与修复批次、UED 规范落地路线图 |
 | [performance.md](performance.md) | §12 附件 | 性能基线：实测数字、采样方法、排查阈值（M5） |
 | [release-m5.md](release-m5.md) | §10 附件 | M5 发布清单：三平台产物、升级/备份/恢复步骤、审计接线、已知限制 |
 | [desktop-shell.md](desktop-shell.md) | 桌面壳 | Electron 壳（迁移自 a_da）：拉起网关、`?token=` 登录、无边框窗口控制、打包与已知限制 |
@@ -47,6 +49,7 @@ ada-go 是本地优先、单二进制、插件优先的 Agent 系统：Gateway �
 - **制定与跟踪开发**：[development-plan.md](development-plan.md) → 11（里程碑/风险）→ 10（测试与性能）。
 - **实现内核**：01 → 02 → 03 → 04 → 05 → 06 → 12 → 08 → 10。
 - **写插件**：05 → 06 → 12（Node 兼容子集）→ 07 → 08 → 13（附录 A 是最小完整示例）。
+- **做 UI**：[19-ued.md](19-ued.md)（什么算对）→ 07 §7.7（复用与令牌细则）→ [15-ui-components.md](15-ui-components.md)（组件用法）；优化项见 [ui-optimization-plan.md](ui-optimization-plan.md)。
 - **运维与排障**：09 → 04（SQLite 并发与备份）→ 08（错误码）→ 10（门禁）。
 
 ## 文档约定

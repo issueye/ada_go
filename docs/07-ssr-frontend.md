@@ -291,10 +291,10 @@ ada-go 的界面不是“参考 a_da 风格”，而是**直接使用 a_da 的 U
 |---|---|---|
 | `design/tokens.css` | `internal/gateway/web/static/tokens.css` | 原样复制；所有 `--ph-*` 颜色的唯一真源 |
 | `crates/agent-web/static/app.css` | `internal/gateway/web/static/app.css` | 直接使用 a_da 的**预编译产物**（含 token 段与工具类）；ada-go 不运行 Tailwind，只固定并校验该产物 |
-| `components.css` / `layout.css` / `widgets.css` / `shell.css` / `pages.css` | `internal/gateway/web/static/ui/` | 原样复制；引用顺序保持 components → layout → widgets → shell → pages |
+| `components.css` / `layout.css` / `widgets.css` / `shell.css` / `pages.css` | `internal/gateway/web/static/ui/` | 原样复制；引用顺序保持 components → layout → widgets → shell → pages。widgets.css 的 `.ada-remote*` 远程模型弹窗段已本地移除（无任何渲染方，2026-11 批次 C） |
 | `ada-select.js` / `ada-modal.js` | `internal/gateway/web/static/` | 原样复制；`<ada-select>` / `<ada-modal>` 的 Web Components 行为不变 |
-| `components.js` / `app.js` / `chat-live.js` / `theme.js` | `internal/gateway/web/static/` | `components.js`（组件行为）、`theme.js` 原样复制；`app.js`（外壳：提示条/确认弹窗/侧栏）以 a_da 为基线，含「窄屏初始关闭抽屉」的本地补丁；`chat-live.js` 由 ada-go 维护，消费 `/events/{id}` 的 SSE 增量 |
-| `htmx.min.js` / `logo.png` | `internal/gateway/web/static/` | 原样复制；htmx 保留给后续局部片段，概览页已改为 AdaUI 岛轮询 `/partials/dashboard.json`。不引入 Alpine：仓库不再加载/分发 `alpine.min.js` |
+| `components.js` / `app.js` / `chat-live.js` / `theme.js` | `internal/gateway/web/static/` | `theme.js` 原样复制；`components.js` 含本地补丁：移除 htmx 按需加载死逻辑、新增＋菜单/行菜单弹层互斥；`app.js`（外壳：提示条/确认弹窗/侧栏）以 a_da 为基线，含「窄屏初始关闭抽屉」等本地补丁；`chat-live.js` 由 ada-go 维护，消费 `/events/{id}` 的 SSE 增量 |
+| `htmx.min.js` / `logo.png` | `internal/gateway/web/static/` | htmx.min.js **已移除**（2026-11 批次 C）：全仓唯一调用点针对的元素无渲染方，概览页走 AdaUI 岛轮询 `/partials/dashboard.json`；logo.png 原样复制。不引入 Alpine：仓库不加载/分发 `alpine.min.js` |
 | `ui/icons.rs` | `internal/gateway/web/ui.go` | 同一组线性 SVG path、同一 stroke 1.75 与尺寸档位；模板经 `{{icon "…"}}` 或 sprite `<use>` 引用 |
 | `ui/components.rs` / `rows.rs` | `internal/gateway/web/ui.go` + `templates/` | Go 组件函数与模板输出 a_da **相同的 `ada-*` 标签、class 与 `data-*` 状态** |
 | `templates/*.html`、`partials/transcript.html` | `internal/gateway/web/templates/` | 手写 Go 模板，DOM 层级与 class 不变；Askama 语法换成 `html/template` |
@@ -308,7 +308,8 @@ ada-go 的界面不是“参考 a_da 风格”，而是**直接使用 a_da 的 U
 - **Black Swan 主题**：宣纸暖白画布 `#F6F3EC` + 墨黑 `#16171A`；暗色反转为暖黑画布 + 暖白文字，品牌色随之反转。主按钮、选中、焦点都用品牌色，但不大面积铺底；单色品牌下链接必须带下划线。
 - **品牌底上的文字一律用 `--ph-on-brand`**，不写死 `#fff`。状态色成对使用“浅底 + 深字”，不能只换文字色。
 - **对比度**：正文 ≥ 4.5:1，大字/图标 ≥ 3:1；当前色板最低组合 4.87:1（faint/canvas）。浅色与深色都要逐项验收，不能只看浅色。
-- **主题只切 `html.dark`**：`theme.js` 原样复用，`localStorage` 键沿用 `a_da_theme`，无存储时跟随系统；业务 CSS 禁止 `dark:` 变体。
+- **主题 = 明暗 × 调色板，两维正交**（2026-11 扩展，细则与准入清单见 [19-ued.md](19-ued.md) §19.2.2/§19.3.3）：
+  明暗维维持上游机制——`theme.js` 原样复用，`localStorage` 键 `a_da_theme`，无存储时跟随系统，类名只切 `html.dark`/`html.light`；调色板维是本地叠加——`themes.js`（阻塞式，紧跟 theme.js 之后）读 `a_da_theme_mode`（light/dark/system，兼容迁移旧键）与 `a_da_theme_palette`，把 `html[data-theme="<id>"]` 设到根元素；`themes.css` 用 `html.light/dark[data-theme="<id>"]`（特异性 0,2,1）覆盖 `--ph-*`，**不设属性 = 默认 Black Swan**，`tokens.css` 原样生效。本地层与镜像文件（`theme.js`/`tokens.css`/`ui/*.css`）零改动，主题面板 DOM 由 `ui.go renderThemePanel` 输出（色板表 `themePalettes` 与 `themes.css` 色卡人工同步，`i-monitor` 图标为本地新增）。业务 CSS 禁止 `dark:` 变体，也禁止引用未在色板中全量定义的 `--ph-*` 令牌。
 - `--ph-glass` 只出现在 a_da 已经使用它的位置（如 `.app-header` 顶栏），不作为装饰性玻璃效果；不使用渐变、发光边框、彩虹标签。
 - 尺寸走 `components.css` 的 `--ada-*` 标尺：字号 10/12/14/16/20/24，圆角 6/10/14/20 + 胶囊，图标 12/14/18，间距 4/8/12/16/20/24。所有值都是 2 的倍数，不写 9px、11.5px 这类即兴值。
 

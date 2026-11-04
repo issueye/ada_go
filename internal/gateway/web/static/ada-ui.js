@@ -1056,99 +1056,9 @@
     }
   });
 
-  /* ═══════════════════════════════════════════════════════════════════
-   * Toast（命令式，挂到 document.body）
-   * ═══════════════════════════════════════════════════════════════════ */
-
-  var toastStack = null;
-
-  function ensureToastStack() {
-    if (typeof document === 'undefined' || !document.body) return null;
-    if (toastStack && toastStack.parentNode) return toastStack;
-    toastStack = document.createElement('div');
-    toastStack.className = 'ada-toast-stack';
-    toastStack.setAttribute('aria-live', 'polite');
-    document.body.appendChild(toastStack);
-    return toastStack;
-  }
-
-  function svgIcon(name, size) {
-    if (typeof document === 'undefined') return null;
-    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('class', 'ada-icon');
-    svg.setAttribute('width', String(size));
-    svg.setAttribute('height', String(size));
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('fill', 'none');
-    svg.setAttribute('stroke', 'currentColor');
-    svg.setAttribute('stroke-width', '1.75');
-    svg.setAttribute('stroke-linecap', 'round');
-    svg.setAttribute('stroke-linejoin', 'round');
-    svg.setAttribute('aria-hidden', 'true');
-    var use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
-    use.setAttribute('href', '#' + name);
-    svg.appendChild(use);
-    return svg;
-  }
-
-  function toast(message, options) {
-    var opts = typeof options === 'string' ? { tone: options } : (options || {});
-    var stack = ensureToastStack();
-    if (!stack) return null;
-    var tone = opts.tone || 'info';
-    var element = document.createElement('div');
-    element.className = 'ada-toast alert alert-' + toneOf(tone);
-    element.setAttribute('role', tone === 'error' ? 'alert' : 'status');
-    var icon = svgIcon(iconForTone(tone), 14);
-    if (icon) element.appendChild(icon);
-    var body = document.createElement('div');
-    body.className = 'alert-message';
-    if (opts.title) {
-      var title = document.createElement('strong');
-      title.className = 'alert-title';
-      title.textContent = String(opts.title);
-      body.appendChild(title);
-    }
-    var text = document.createElement('div');
-    text.textContent = String(message === null || message === undefined ? '' : message);
-    body.appendChild(text);
-    element.appendChild(body);
-    var timer = null;
-    var closed = false;
-    function remove() {
-      if (closed) return;
-      closed = true;
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-      }
-      element.className += ' ada-toast--closing';
-      setTimeout(function () {
-        if (element.parentNode) element.parentNode.removeChild(element);
-      }, 140);
-    }
-    var close = document.createElement('button');
-    close.className = 'alert-dismiss';
-    close.setAttribute('type', 'button');
-    close.setAttribute('aria-label', '关闭');
-    close.textContent = '×';
-    close.addEventListener('click', remove);
-    element.appendChild(close);
-    stack.appendChild(element);
-    var duration = opts.duration === undefined
-      ? (tone === 'error' ? 9000 : 6000)
-      : Number(opts.duration);
-    if (duration > 0) timer = setTimeout(remove, duration);
-    return { element: element, close: remove };
-  }
-
-  ['info', 'success', 'warn', 'error'].forEach(function (tone) {
-    toast[tone] = function (message, options) {
-      var opts = options || {};
-      opts.tone = tone;
-      return toast(message, opts);
-    };
-  });
+  /* Toast（命令式 API）已随通知收敛移除（19-ued §19.5.3）：全局通知唯一
+     路径是 app.js 的 notify() + 服务端 flash（window.AdaApp.notify）。
+     组件层的 ui-message 仍负责「组件树内」的提示呈现。 */
 
   /* ═══════════════════════════════════════════════════════════════════
    * 安装与导出
@@ -1205,7 +1115,6 @@
     components: components,
     install: install,
     createApp: createApp,
-    toast: toast,
     nextTick: nextTick
   };
 });
