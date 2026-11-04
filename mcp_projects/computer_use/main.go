@@ -70,7 +70,7 @@ func usage() {
 
 用法:
   computer-use [run] [flags]    启动程序：蒙板、HTTP API、托盘图标
-  computer-use mcp [flags]      MCP 服务器（stdin/stdout 上的 JSON-RPC）
+  computer-use mcp [--http]      MCP 服务器（stdio，或 --http 的 Streamable HTTP）
   computer-use script FILE.js   在运行中的程序里执行 JS（cu.click/type/mask/record...）
   computer-use macro ...        列出、查看、导出、回放、删除宏；macro record start/stop
   computer-use shot [flags]     截取一张截图并保存
@@ -94,6 +94,8 @@ mcp 的参数:
   --url URL          API 地址（默认 http://`+defaultListen+`）
   --token TOKEN      API 令牌
   --spawn            未运行则启动 computer-use run
+  --http             使用 Streamable HTTP（/mcp），默认 stdio
+  --port PORT        HTTP 端口（默认 8767，仅 --http）
 
 shot 的参数:
   --out PATH         输出文件（默认 screenshot.png）
@@ -164,3 +166,4 @@ func flagBool(args []string, name string) bool {
 	}
 	return false
 }
+

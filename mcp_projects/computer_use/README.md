@@ -219,8 +219,29 @@ Invoke-RestMethod -Method Post "http://127.0.0.1:7331/v1/mask" -ContentType appl
 
 ## MCP
 
-`computer-use mcp` 在 stdin/stdout 上说 MCP（JSON-RPC 2.0，按行分隔），
-把工具调用转发给本机运行中的程序。没运行时加 `--spawn` 会自动拉起 `run`。
+`computer-use mcp` 基于 [github.com/mark3labs/mcp-go](https://github.com/mark3labs/mcp-go)
+（v0.52.0）提供 MCP：initialize/协议协商/tools 列表/取消由库负责，
+本程序只把工具调用转发给本机运行中的 HTTP API。没运行时加 `--spawn` 会自动拉起 `run`。
+
+两种传输：
+
+- `computer-use mcp`：stdio（Claude Desktop、IDE 等按进程启动的客户端）；
+- `computer-use mcp --http [--port 8767]`：无状态 Streamable HTTP，端点为
+  `http://127.0.0.1:<port>/mcp`（另有 `/healthz`）；每个请求独立，不需要会话 ID。
+
+HTTP 模式适合常驻客户端（如 ada-go 的 mcp-client）：
+
+```json
+{
+  "id": "computer_use",
+  "transport": "http",
+  "url": "http://127.0.0.1:8767/mcp",
+  "enabled": true
+}
+```
+
+把这段写进工作区 `.adago/mcp.json` 后重载插件即可；HTTP 服务本身需先启动
+（`computer-use mcp --http --port 8767 --spawn` 会顺带拉起 app）。
 
 ```json
 {
@@ -492,3 +513,5 @@ mygo.NewWindow(mygo.WindowOptions{
 - 高 DPI 多屏混合缩放的换算已按显示器实现，但只在 100% 缩放下实测。
 - 没有操作录制/回放、多会话隔离与远程访问；这些都不在 v1 范围。
 - 代理若要「看」动画过程，需要自己多次截图；蒙板动画只给人看。
+
+

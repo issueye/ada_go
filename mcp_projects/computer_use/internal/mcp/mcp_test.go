@@ -3,6 +3,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -18,7 +19,7 @@ func TestEveryToolIsDispatched(t *testing.T) {
 		w.Write([]byte(`{"ok":true,"content":[]}`))
 	}))
 	defer srv.Close()
-	s := New(srv.URL, "", "test", nil, nil)
+	s := New(srv.URL, "", "test")
 
 	// Required arguments, so that a tool fails for its own reasons rather
 	// than for a missing argument.
@@ -55,7 +56,7 @@ func TestEveryToolIsDispatched(t *testing.T) {
 			args = map[string]any{}
 		}
 		encoded, _ := json.Marshal(args)
-		if _, err := s.callTool(name, encoded); err != nil && strings.Contains(err.Error(), "unknown tool") {
+		if _, err := s.callTool(context.Background(), name, encoded); err != nil && strings.Contains(err.Error(), "unknown tool") {
 			t.Errorf("tool %q is listed but not dispatched: %v", name, err)
 		}
 	}
@@ -72,8 +73,8 @@ func TestHandshake(t *testing.T) {
 {"jsonrpc":"2.0","id":2,"method":"tools/list"}
 `)
 	out := &strings.Builder{}
-	s := New(srv.URL, "", "test", in, out)
-	if err := s.Serve(); err != nil {
+	s := New(srv.URL, "", "test")
+	if err := s.Serve(in, out); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")

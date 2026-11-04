@@ -14,9 +14,9 @@ import (
 	"computeruse/internal/mcp"
 )
 
-// runMCP serves the Model Context Protocol on stdin and stdout, in front of
-// the running app. It starts the app when asked to, or when it is not
-// running and --spawn is given.
+// runMCP serves the Model Context Protocol on stdio, or as stateless
+// Streamable HTTP with --http, in front of the running app. It starts the app
+// when asked to, or when it is not running and --spawn is given.
 func runMCP(args []string) error {
 	base := "http://" + defaultListen
 	if v, ok := flagValue(args, "url"); ok && v != "" {
@@ -35,8 +35,16 @@ func runMCP(args []string) error {
 			return fmt.Errorf("the app is not running at %s: start `computer-use run`, or pass --spawn", base)
 		}
 	}
-	srv := mcp.New(base, token, version, os.Stdin, os.Stdout)
-	return srv.Serve()
+	if flagBool(args, "http") {
+		port := 8767
+		if v, ok := flagValue(args, "port"); ok && v != "" {
+			if n := atoi(v); n > 0 {
+				port = n
+			}
+		}
+		return mcp.New(base, token, version).ServeHTTP(fmt.Sprintf("127.0.0.1:%d", port))
+	}
+	return mcp.New(base, token, version).Serve(os.Stdin, os.Stdout)
 }
 
 // healthy asks the app whether it is there.

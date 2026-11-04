@@ -31,7 +31,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-mcp.ps1 [-Regi
 | 模块 | 产物 | ada-go 怎么用 |
 |---|---|---|
 | `browser_use` | `mcp_projects/browser_use/bin/browser-use.exe` | 官方插件 `browser-use` 自动按这个路径查找可执行文件；也可用 `BROWSER_USE_EXE` 覆盖。无需 MCP 配置 |
-| `computer_use` | `mcp_projects/computer_use/bin/computer-use.exe` | 走 `mcp-client` 插件：`computer-use mcp --spawn`（stdio）。`-Register` 会写入 `.adago/mcp.json` 或 `~/.adago/mcp.json` |
+| `computer_use` | `mcp_projects/computer_use/bin/computer-use.exe` | 走 `mcp-client` 插件：`computer-use mcp --spawn`（stdio），或 `computer-use mcp --http --port 8767`（Streamable HTTP）。`-Register` 会写入 `.adago/mcp.json` 或 `~/.adago/mcp.json` |
 | `cron` | `mcp_projects/cron/bin/cron.exe` | 网关按「可执行文件同目录」启动；桌面构建由 `desktop/main.cjs` 自动编译，单独构建用 `make cron` |
 
 `computer_use` 的 `.adago/mcp.json` 条目：
@@ -63,3 +63,4 @@ GOWORK=off go build -o bin/browser-use.exe .
 cd ../computer_use
 GOWORK=off go build -o bin/computer-use.exe .
 ```
+

@@ -6,8 +6,8 @@
 package mcp
 
 import (
-	"bufio"
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -16,6 +16,9 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	mcpgo "github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 )
 
 // Server is an MCP server for one HTTP endpoint.
@@ -23,130 +26,60 @@ type Server struct {
 	base    string
 	token   string
 	version string
-	in      io.Reader
-	out     io.Writer
 	client  *http.Client
 }
 
 // New returns a server that asks the app at base for everything it does.
-func New(base, token, version string, in io.Reader, out io.Writer) *Server {
+func New(base, token, version string) *Server {
 	return &Server{
 		base: strings.TrimSuffix(base, "/"), token: token, version: version,
-		in: in, out: out,
 		client: &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
-type request struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
+const instructions = "Controls a Windows desktop and draws a mask over it: screenshots return physical-pixel coordinates; actions take them. Call screen_info first, then screenshot with a grid, then click/type."
+
+// Serve runs the MCP server over the given streams until the input ends.
+func (s *Server) Serve(in io.Reader, out io.Writer) error {
+	return server.NewStdioServer(newMCPServer(s)).Listen(context.Background(), in, out)
 }
 
-type response struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id"`
-	Result  any             `json:"result,omitempty"`
-	Error   *rpcError       `json:"error,omitempty"`
-}
-
-type rpcError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-// Serve reads and answers messages until the input ends.
-func (s *Server) Serve() error {
-	sc := bufio.NewScanner(s.in)
-	sc.Buffer(make([]byte, 0, 64*1024), 16<<20)
-	for sc.Scan() {
-		line := bytes.TrimSpace(sc.Bytes())
-		if len(line) == 0 {
+// newMCPServer registers every tool of toolList with the mcp-go server.
+func newMCPServer(s *Server) *server.MCPServer {
+	srv := server.NewMCPServer("computer-use", s.version,
+		server.WithInstructions(instructions),
+		server.WithRecovery(),
+	)
+	for _, raw := range toolList() {
+		name, _ := raw["name"].(string)
+		desc, _ := raw["description"].(string)
+		if name == "" {
 			continue
 		}
-		var req request
-		if err := json.Unmarshal(line, &req); err != nil {
-			s.write(response{JSONRPC: "2.0", Error: &rpcError{Code: -32700, Message: "parse error: " + err.Error()}})
-			continue
-		}
-		if len(req.ID) == 0 {
-			// A notification: nothing to answer.
-			continue
-		}
-		result, rerr := s.handle(req)
-		resp := response{JSONRPC: "2.0", ID: req.ID}
-		if rerr != nil {
-			resp.Error = rerr
-		} else {
-			resp.Result = result
-		}
-		s.write(resp)
-	}
-	return sc.Err()
-}
-
-func (s *Server) write(v any) {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return
-	}
-	s.out.Write(append(b, '\n'))
-}
-
-func (s *Server) handle(req request) (any, *rpcError) {
-	switch req.Method {
-	case "initialize":
-		var p struct {
-			ProtocolVersion string `json:"protocolVersion"`
-		}
-		json.Unmarshal(req.Params, &p)
-		version := p.ProtocolVersion
-		if version == "" {
-			version = "2024-11-05"
-		}
-		return map[string]any{
-			"protocolVersion": version,
-			"capabilities": map[string]any{
-				"tools": map[string]any{"listChanged": false},
-			},
-			"serverInfo": map[string]any{
-				"name":    "computer-use",
-				"version": s.version,
-			},
-			"instructions": "Controls a Windows desktop and draws a mask over it: screenshots return physical-pixel coordinates; actions take them. Call screen_info first, then screenshot with a grid, then click/type.",
-		}, nil
-	case "ping":
-		return map[string]any{}, nil
-	case "tools/list":
-		return map[string]any{"tools": toolList()}, nil
-	case "tools/call":
-		var p struct {
-			Name      string          `json:"name"`
-			Arguments json.RawMessage `json:"arguments"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, &rpcError{Code: -32602, Message: "invalid params: " + err.Error()}
-		}
-		res, err := s.callTool(p.Name, p.Arguments)
+		schema, err := json.Marshal(raw["inputSchema"])
 		if err != nil {
-			return map[string]any{
-				"content": []map[string]any{{"type": "text", "text": err.Error()}},
-				"isError": true,
-			}, nil
+			continue
 		}
-		return res, nil
-	case "resources/list":
-		return map[string]any{"resources": []any{}}, nil
-	case "prompts/list":
-		return map[string]any{"prompts": []any{}}, nil
-	default:
-		return nil, &rpcError{Code: -32601, Message: "method not found: " + req.Method}
+		toolName := name
+		srv.AddTool(mcpgo.NewToolWithRawSchema(toolName, desc, schema),
+			func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+				args, err := json.Marshal(req.Params.Arguments)
+				if err != nil || len(args) == 0 || string(args) == "null" {
+					args = []byte(`{}`)
+				}
+				res, err := s.callTool(ctx, toolName, args)
+				if err != nil {
+					// 工具失败走 isError 内容，让模型看到并自纠。
+					return mcpgo.NewToolResultError(err.Error()), nil
+				}
+				return res, nil
+			})
 	}
+	return srv
 }
 
 // callTool runs a tool through the HTTP API and shapes the MCP result.
-func (s *Server) callTool(name string, args json.RawMessage) (map[string]any, error) {
+func (s *Server) callTool(ctx context.Context, name string, args json.RawMessage) (*mcpgo.CallToolResult, error) {
 	a := map[string]any{}
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &a); err != nil {
@@ -214,41 +147,37 @@ func (s *Server) callTool(name string, args json.RawMessage) (map[string]any, er
 			Meta      json.RawMessage `json:"meta"`
 			Error     string          `json:"error"`
 		}
-		if err := s.doJSON("GET", "/v1/screenshot?"+q.Encode(), nil, &out); err != nil {
+		if err := s.doJSON(ctx, "GET", "/v1/screenshot?"+q.Encode(), nil, &out); err != nil {
 			return nil, err
 		}
 		meta := strings.TrimSpace(string(out.Meta))
 		if meta == "null" || meta == "" {
 			meta = "{}"
 		}
-		return map[string]any{
-			"content": []map[string]any{
-				{"type": "image", "data": out.Image, "mimeType": out.MediaType},
-				{"type": "text", "text": "The image is " + mediaWord(out.MediaType) + ". Coordinates are physical pixels of the desktop:\n" + meta},
-			},
-		}, nil
+		return mcpgo.NewToolResultImage(
+			"The image is "+mediaWord(out.MediaType)+". Coordinates are physical pixels of the desktop:\n"+meta,
+			out.Image, out.MediaType,
+		), nil
 
 	case "mask_preview":
-		png, err := s.doBytes("GET", "/v1/mask.png", nil)
+		png, err := s.doBytes(ctx, "GET", "/v1/mask.png", nil)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{
-			"content": []map[string]any{
-				{"type": "image", "data": base64.StdEncoding.EncodeToString(png), "mimeType": "image/png"},
-				{"type": "text", "text": "The mask as the user sees it on the first display."},
-			},
-		}, nil
+		return mcpgo.NewToolResultImage(
+			"The mask as the user sees it on the first display.",
+			base64.StdEncoding.EncodeToString(png), "image/png",
+		), nil
 
 	case "screen_info":
-		raw, err := s.doBytes("GET", "/v1/state", nil)
+		raw, err := s.doBytes(ctx, "GET", "/v1/state", nil)
 		if err != nil {
 			return nil, err
 		}
 		return textResult(raw), nil
 
 	case "list_windows":
-		raw, err := s.doBytes("GET", "/v1/windows", nil)
+		raw, err := s.doBytes(ctx, "GET", "/v1/windows", nil)
 		if err != nil {
 			return nil, err
 		}
@@ -258,13 +187,13 @@ func (s *Server) callTool(name string, args json.RawMessage) (map[string]any, er
 		switch getStr("op") {
 		case "set", "write":
 			body := map[string]any{"text": getStr("text")}
-			raw, err := s.doBytes("POST", "/v1/clipboard", body)
+			raw, err := s.doBytes(ctx, "POST", "/v1/clipboard", body)
 			if err != nil {
 				return nil, err
 			}
 			return textResult(raw), nil
 		default:
-			raw, err := s.doBytes("GET", "/v1/clipboard", nil)
+			raw, err := s.doBytes(ctx, "GET", "/v1/clipboard", nil)
 			if err != nil {
 				return nil, err
 			}
@@ -272,21 +201,21 @@ func (s *Server) callTool(name string, args json.RawMessage) (map[string]any, er
 		}
 
 	case "pause", "resume":
-		raw, err := s.doBytes("POST", "/v1/"+name, nil)
+		raw, err := s.doBytes(ctx, "POST", "/v1/"+name, nil)
 		if err != nil {
 			return nil, err
 		}
 		return textResult(raw), nil
 
 	case "mask":
-		raw, err := s.doBytes("POST", "/v1/mask", a)
+		raw, err := s.doBytes(ctx, "POST", "/v1/mask", a)
 		if err != nil {
 			return nil, err
 		}
 		return textResult(raw), nil
 
 	case "clear_mask":
-		raw, err := s.doBytes("POST", "/v1/mask/clear", nil)
+		raw, err := s.doBytes(ctx, "POST", "/v1/mask/clear", nil)
 		if err != nil {
 			return nil, err
 		}
@@ -299,7 +228,7 @@ func (s *Server) callTool(name string, args json.RawMessage) (map[string]any, er
 				action[k] = v
 			}
 		}
-		raw, err := s.doBytes("POST", "/v1/actions", action)
+		raw, err := s.doBytes(ctx, "POST", "/v1/actions", action)
 		if err != nil {
 			return nil, err
 		}
@@ -316,14 +245,14 @@ func (s *Server) callTool(name string, args json.RawMessage) (map[string]any, er
 				return nil, fmt.Errorf("each action needs a type")
 			}
 		}
-		raw, err := s.doBytes("POST", "/v1/actions", map[string]any{"actions": acts})
+		raw, err := s.doBytes(ctx, "POST", "/v1/actions", map[string]any{"actions": acts})
 		if err != nil {
 			return nil, err
 		}
 		return textResult(raw), nil
 
 	case "run_script":
-		raw, err := s.doBytes("POST", "/v1/script", a)
+		raw, err := s.doBytes(ctx, "POST", "/v1/script", a)
 		if err != nil {
 			return nil, err
 		}
@@ -334,21 +263,21 @@ func (s *Server) callTool(name string, args json.RawMessage) (map[string]any, er
 		if v := getStr("name"); v != "" {
 			body["name"] = v
 		}
-		raw, err := s.doBytes("POST", "/v1/record/start", body)
+		raw, err := s.doBytes(ctx, "POST", "/v1/record/start", body)
 		if err != nil {
 			return nil, err
 		}
 		return textResult(raw), nil
 
 	case "record_stop":
-		raw, err := s.doBytes("POST", "/v1/record/stop", nil)
+		raw, err := s.doBytes(ctx, "POST", "/v1/record/stop", nil)
 		if err != nil {
 			return nil, err
 		}
 		return textResult(raw), nil
 
 	case "list_macros":
-		raw, err := s.doBytes("GET", "/v1/macros", nil)
+		raw, err := s.doBytes(ctx, "GET", "/v1/macros", nil)
 		if err != nil {
 			return nil, err
 		}
@@ -363,7 +292,7 @@ func (s *Server) callTool(name string, args json.RawMessage) (map[string]any, er
 		if v, ok := a["speed"].(float64); ok && v > 0 {
 			body["speed"] = v
 		}
-		raw, err := s.doBytes("POST", "/v1/macros/"+url.PathEscape(macroName)+"/run", body)
+		raw, err := s.doBytes(ctx, "POST", "/v1/macros/"+url.PathEscape(macroName)+"/run", body)
 		if err != nil {
 			return nil, err
 		}
@@ -374,7 +303,7 @@ func (s *Server) callTool(name string, args json.RawMessage) (map[string]any, er
 		if macroName == "" {
 			return nil, fmt.Errorf("macro_script needs a name")
 		}
-		raw, err := s.doBytes("GET", "/v1/macros/"+url.PathEscape(macroName)+"/script", nil)
+		raw, err := s.doBytes(ctx, "GET", "/v1/macros/"+url.PathEscape(macroName)+"/script", nil)
 		if err != nil {
 			return nil, err
 		}
@@ -385,7 +314,7 @@ func (s *Server) callTool(name string, args json.RawMessage) (map[string]any, er
 		if macroName == "" {
 			return nil, fmt.Errorf("delete_macro needs a name")
 		}
-		raw, err := s.doBytes("DELETE", "/v1/macros/"+url.PathEscape(macroName), nil)
+		raw, err := s.doBytes(ctx, "DELETE", "/v1/macros/"+url.PathEscape(macroName), nil)
 		if err != nil {
 			return nil, err
 		}
@@ -402,7 +331,7 @@ func (s *Server) callTool(name string, args json.RawMessage) (map[string]any, er
 		for k, v := range a {
 			action[k] = v
 		}
-		raw, err := s.doBytes("POST", "/v1/actions", action)
+		raw, err := s.doBytes(ctx, "POST", "/v1/actions", action)
 		if err != nil {
 			return nil, err
 		}
@@ -418,13 +347,11 @@ func mediaWord(mt string) string {
 	return "a PNG"
 }
 
-func textResult(raw []byte) map[string]any {
-	return map[string]any{
-		"content": []map[string]any{{"type": "text", "text": string(raw)}},
-	}
+func textResult(raw []byte) *mcpgo.CallToolResult {
+	return mcpgo.NewToolResultText(string(raw))
 }
 
-func (s *Server) request(method, path string, body any) (*http.Response, error) {
+func (s *Server) request(ctx context.Context, method, path string, body any) (*http.Response, error) {
 	var rdr io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -433,7 +360,7 @@ func (s *Server) request(method, path string, body any) (*http.Response, error) 
 		}
 		rdr = bytes.NewReader(b)
 	}
-	req, err := http.NewRequest(method, s.base+path, rdr)
+	req, err := http.NewRequestWithContext(ctx, method, s.base+path, rdr)
 	if err != nil {
 		return nil, err
 	}
@@ -446,8 +373,8 @@ func (s *Server) request(method, path string, body any) (*http.Response, error) 
 	return s.client.Do(req)
 }
 
-func (s *Server) doBytes(method, path string, body any) ([]byte, error) {
-	resp, err := s.request(method, path, body)
+func (s *Server) doBytes(ctx context.Context, method, path string, body any) ([]byte, error) {
+	resp, err := s.request(ctx, method, path, body)
 	if err != nil {
 		return nil, fmt.Errorf("cannot reach the computer-use app at %s: %w", s.base, err)
 	}
@@ -468,8 +395,8 @@ func (s *Server) doBytes(method, path string, body any) ([]byte, error) {
 	return raw, nil
 }
 
-func (s *Server) doJSON(method, path string, body, out any) error {
-	raw, err := s.doBytes(method, path, body)
+func (s *Server) doJSON(ctx context.Context, method, path string, body, out any) error {
+	raw, err := s.doBytes(ctx, method, path, body)
 	if err != nil {
 		return err
 	}
