@@ -1,7 +1,7 @@
 {
   "id": "headless",
   "name": "ada-go Headless",
-  "description": "M1 无头内核的可运行产品：OpenAI Chat provider + 文件/命令/计划/提问工具（计划与提问的卡片随各自的工具插件一起提供）+ 默认审批策略 + 随包技能（提示注入绝对路径，模型用 read_file 读取），以及供应商管理/Token 用量/插件助手三个独立前端插件。",
+  "description": "M1 无头内核的可运行产品：OpenAI Chat provider + 文件/命令/计划/提问工具（计划与提问的卡片随各自的工具插件一起提供）+ 默认审批策略 + 随包技能（提示注入绝对路径，模型用 read_file 读取），以及供应商管理/Token 用量两个独立前端插件；插件创建走插件助手的对话工具，不再提供前端向导页。",
   "plugins": [
     "provider-openai-chat",
     "tools-fs",

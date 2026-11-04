@@ -30,7 +30,7 @@ RELEASE_VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || git 
 RELEASE_DIR     := $(BIN)/release
 RELEASE_LDFLAGS := $(LDFLAGS) -X $(VERSION_PKG).Version=$(RELEASE_VERSION)
 
-.PHONY: help setup build test test-js race vet lint gen verify doctor gate tidy cross release
+.PHONY: help setup build test test-js race vet lint gen verify doctor gate tidy cross release cron mcp mcp-register
 
 help:
 	@echo "setup     准备相邻 moejs 检出（校验 tag）+ 下载依赖"
@@ -46,6 +46,9 @@ help:
 	@echo "gate      运行与 CI 完全相同的门禁 scripts/ci-gate.sh"
 	@echo "tidy      GOWORK=off go mod tidy（发布口径，11 §13.1）"
 	@echo "cross     GOWORK=off CGO_ENABLED=0 三平台二进制到 $(BIN)/（无 cgo，可交叉编译）"
+	@echo "cron      构建独立 cron 调度器到 mcp_projects/cron/bin/（定时任务执行器）"
+	@echo "mcp       构建 browser-use / computer-use 到各自 bin/（MCP 侧程序）"
+	@echo "mcp-register  同上，并把 computer-use 注册进工作区 .adago/mcp.json"
 	@echo "release   三平台二进制到 $(RELEASE_DIR)/ + sha256sum 清单（注入 Version，git tag 优先）"
 
 setup:
@@ -141,6 +144,24 @@ DESKTOP_DIR  := desktop
 DESKTOP_BIN  := $(DESKTOP_DIR)/bin
 DESKTOP_PROD := $(DESKTOP_DIR)/products
 DESKTOP_EXE  := $(DESKTOP_BIN)/adag$(shell go env GOEXE 2>/dev/null || echo .exe)
+DESKTOP_CRON := $(DESKTOP_BIN)/cron$(shell go env GOEXE 2>/dev/null || echo .exe)
+CRON_DIR     := mcp_projects/cron
+
+# 独立 cron 调度器：网关按「可执行文件同目录」定位 cron.exe，所以桌面构建要把它
+# 和 adag 放在同一个 bin 目录；mcp_projects/cron 是独立 module，用 cd 后构建。
+$(DESKTOP_CRON): FORCE
+	@mkdir -p $(DESKTOP_BIN)
+	cd $(CRON_DIR) && CGO_ENABLED=0 $(GO) build -trimpath -o "$(CURDIR)/$(DESKTOP_CRON)" .
+
+cron:
+	cd $(CRON_DIR) && CGO_ENABLED=0 $(GO) build -trimpath -o bin/cron$(shell go env GOEXE 2>/dev/null || echo .exe) .
+
+# MCP 侧程序（Windows）：统一脚本负责 GOWORK=off、GUI ldflags 与 .adago/mcp.json 注册。
+mcp:
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-mcp.ps1
+
+mcp-register:
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-mcp.ps1 -Register
 
 $(DESKTOP_EXE): FORCE
 	@mkdir -p $(DESKTOP_BIN)
@@ -151,13 +172,13 @@ $(DESKTOP_PROD)/headless.agent.json: FORCE
 	cp products/headless.agent.json $(DESKTOP_PROD)/headless.agent.json
 
 .PHONY: desktop desktop-dev desktop-pack
-desktop: $(DESKTOP_EXE) $(DESKTOP_PROD)/headless.agent.json
+desktop: $(DESKTOP_EXE) $(DESKTOP_CRON) $(DESKTOP_PROD)/headless.agent.json
 	cd $(DESKTOP_DIR) && ADAGO_DESKTOP_SMOKE=1 npx --yes electron@33.2.1 . || echo "(smoke run finished; see %USERPROFILE%/.adago/launcher.log)"
 
-desktop-dev: $(DESKTOP_EXE) $(DESKTOP_PROD)/headless.agent.json
+desktop-dev: $(DESKTOP_EXE) $(DESKTOP_CRON) $(DESKTOP_PROD)/headless.agent.json
 	cd $(DESKTOP_DIR) && npx --yes electron@33.2.1 .
 
-desktop-pack: $(DESKTOP_EXE) $(DESKTOP_PROD)/headless.agent.json
+desktop-pack: $(DESKTOP_EXE) $(DESKTOP_CRON) $(DESKTOP_PROD)/headless.agent.json
 	$(NODE) plugins/official/build.mjs
 	cd $(DESKTOP_DIR) && npm install --no-fund --no-audit && npx electron-builder --win dir
 

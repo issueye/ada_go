@@ -68,8 +68,9 @@ func codingProductIn(t *testing.T, ws string) *app.Assembly {
 }
 
 // TestCodingProductAssembles 钉 coding 产品的装配：15 个声明插件全部就位
-// （13 个后端实例 + 6 个前端声明；provider-admin / plugin-helper 同时有 route 后端与页面），
-// tools-skill 贡献 skill_search，persona-coding 的提示词片段已结算。
+// （14 个后端实例 + 7 个前端声明；provider-admin 同时有 route 后端与页面，
+// plugin-helper 只有后端（对话创建）），tools-skill 贡献 skill_search，
+// persona-coding 的提示词片段已结算。
 func TestCodingProductAssembles(t *testing.T) {
 	asm := codingProduct(t)
 
@@ -77,7 +78,7 @@ func TestCodingProductAssembles(t *testing.T) {
 		t.Fatalf("后端插件数 = %d，期望 14（provider-admin/env-manager/cron-manager 的 route 后端也装配；前端插件走 Gateway）: %v",
 			len(asm.Plugins), pluginIDsOf(asm))
 	}
-	wantFrontend := []string{"tools-plan", "tools-ask", "provider-admin", "token-usage", "ui-charts", "plugin-helper", "env-manager", "cron-manager"}
+	wantFrontend := []string{"tools-plan", "tools-ask", "provider-admin", "token-usage", "ui-charts", "env-manager", "cron-manager"}
 	if len(asm.FrontendDecls) != len(wantFrontend) {
 		t.Fatalf("前端声明 = %v，期望 %v", asm.FrontendDecls, wantFrontend)
 	}

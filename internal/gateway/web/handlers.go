@@ -49,6 +49,7 @@ type pluginListResult struct {
 
 // handleChatHome 渲染新建任务页：侧栏列已有会话，主区是居中的任务输入。
 func (s *Server) handleChatHome(w http.ResponseWriter, r *http.Request) {
+	s.pinWorkspaceQuery(w, r)
 	threads, err := s.listThreads(r, 50)
 	picker := s.modelOptions(r, "")
 	data := threadData{
@@ -65,6 +66,7 @@ func (s *Server) handleChatHome(w http.ResponseWriter, r *http.Request) {
 
 // handleThread 渲染会话页：thread.get + thread.entries（最近 100 条）。
 func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
+	s.pinWorkspaceQuery(w, r)
 	id := r.PathValue("id")
 	if strings.TrimSpace(id) == "" {
 		s.renderError(w, r, http.StatusNotFound, "没有找到这个会话",
@@ -337,6 +339,32 @@ func (s *Server) handleSlotPartial(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = w.Write([]byte(RenderSlot(name, body, contributors, "")))
+}
+
+// handleWorkspaceThreadsPartial 返回某个工作区的会话行 HTML 片段，供侧栏
+// 工作区组展开时懒加载（跨工作区查询要各自拉起 Core，不能全量预取）。
+func (s *Server) handleWorkspaceThreadsPartial(w http.ResponseWriter, r *http.Request) {
+	requested := strings.TrimSpace(r.URL.Query().Get("path"))
+	list := s.workspaceList()
+	index := workspaceIndexFolded(list, requested)
+	if index < 0 {
+		http.Error(w, "未知工作区", http.StatusNotFound)
+		return
+	}
+	raw, err := s.callWorkspace(r, list[index], "thread.list", map[string]any{"limit": 50, "archived": false})
+	if err != nil {
+		http.Error(w, "读取会话失败", http.StatusBadGateway)
+		return
+	}
+	var res threadListResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		http.Error(w, "读取会话失败", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write([]byte(renderWorkspaceThreadRows(res.Threads, index, s.csrf(r), r.URL.Path)))
 }
 
 func writeJSONError(w http.ResponseWriter, status int, message string) {
@@ -1417,6 +1445,32 @@ func (s *Server) handleWorkspaceOpen(w http.ResponseWriter, r *http.Request) {
 	}
 	s.setWorkspaceCookie(w, index)
 	writeJSON(w, http.StatusOK, map[string]any{"workspace": list[index], "index": index})
+}
+
+// ---- 工作区列表 API ---------------------------------------------------------
+
+// workspaceAPIItem 是 /api/workspaces 里的一项。
+type workspaceAPIItem struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// workspaceAPIResponse 供插件页读取工作区列表（定时任务选择目标工作区）。
+// Default 是没选工作区时实际使用的工作区（列表第一个，即“综合工作区”）。
+type workspaceAPIResponse struct {
+	Default    string             `json:"default"`
+	Workspaces []workspaceAPIItem `json:"workspaces"`
+}
+
+// handleWorkspacesAPI 返回当前网关的工作区列表（与页面上的工作区选择器同源，
+// 包含 FilePicker 本次会话新登记的工作区）。
+func (s *Server) handleWorkspacesAPI(w http.ResponseWriter, r *http.Request) {
+	options := s.workspaceOptions()
+	items := make([]workspaceAPIItem, 0, len(options))
+	for _, opt := range options {
+		items = append(items, workspaceAPIItem{Name: opt.Name, Path: opt.Path})
+	}
+	writeJSON(w, http.StatusOK, workspaceAPIResponse{Default: s.primaryWorkspace(), Workspaces: items})
 }
 
 // ---- 文件系统 API（FilePicker） -------------------------------------------

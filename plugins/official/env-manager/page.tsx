@@ -10,6 +10,8 @@
  * 服务程序目录（工作区 .adago/bin、用户级 ~/.adago/bin）由宿主前置到子进程的 PATH；
  * 页面只展示目录与扫描到的可执行文件，不负责上传/安装。
  */
+import { Select } from "ssr:components";
+
 export default function Page(_props: any) {
   return (
     <div class="em-page" data-em-page>
@@ -35,10 +37,10 @@ export default function Page(_props: any) {
       <form class="em-add" data-em-add>
         <label class="em-field">
           <span class="em-field__label">范围</span>
-          <select class="em-input" data-em-scope>
-            <option value="workspace">工作区</option>
-            <option value="global">全局</option>
-          </select>
+          <Select class="em-input" data-em-scope value="workspace" aria-label="范围" options={[
+            { value: "workspace", label: "工作区" },
+            { value: "global", label: "全局" },
+          ]} />
         </label>
         <label class="em-field em-field--grow">
           <span class="em-field__label">变量名</span>

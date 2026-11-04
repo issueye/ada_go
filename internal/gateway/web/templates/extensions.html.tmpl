@@ -1,27 +1,25 @@
 {{define "extensions"}}{{template "doc_head" .}}{{template "shell_start" .}}
-  <div class="ada-scroll">
-    <div class="ada-wrap ada-wrap--page">
-      {{template "flash" .}}
-      <div class="ada-section-head">
-        <div>
-          <div class="flex flex-wrap items-center gap-2">
-            <h1 class="ada-page-title">插件</h1>
-            <span class="ada-chip">{{.PluginCount}} 个</span>
-          </div>
-          <p class="ada-page-sub">已安装的插件与能力状态。点开插件查看详情。</p>
+  <div class="ada-wrap ada-wrap--page">
+    {{template "flash" .}}
+    <div class="ada-section-head">
+      <div>
+        <div class="flex flex-wrap items-center gap-2">
+          <h1 class="ada-page-title">插件</h1>
+          <span class="ada-chip">{{.PluginCount}} 个</span>
         </div>
-        <form method="post" action="/agent-plugins/reload">
-          {{template "csrf" .}}
-          <input type="hidden" name="next" value="/extensions">
-          <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit">{{icon "i-refresh" 13}}重载插件</button>
-        </form>
+        <p class="ada-page-sub">已安装的插件与能力状态。点开插件查看详情。</p>
       </div>
-
-      <div id="extensions-island" class="ada-extensions" data-ada-island="extensions" data-ada-state="{{.StateJSON}}">
-        {{template "extensions_partial" .}}
-      </div>
-      {{slot "extensions.list" .Slots.ExtensionsList .SlotCounts.ExtensionsList ""}}
+      <form method="post" action="/agent-plugins/reload">
+        {{template "csrf" .}}
+        <input type="hidden" name="next" value="/extensions">
+        <button class="ada-btn ada-btn--primary ada-btn--sm" type="submit">{{icon "i-refresh" 13}}重载插件</button>
+      </form>
     </div>
+
+    <div id="extensions-island" class="ada-extensions" data-ada-island="extensions" data-ada-state="{{.StateJSON}}">
+      {{template "extensions_partial" .}}
+    </div>
+    {{slot "extensions.list" .Slots.ExtensionsList .SlotCounts.ExtensionsList ""}}
   </div>
 {{template "shell_end" .}}{{end}}
 

@@ -52,10 +52,14 @@
 要求：Windows 10 1809+、Go **1.27.3+**（`mygo` 的版本要求），无需 cgo、无需 Bun。
 
 ```powershell
-cd E:\codes\go_projects\computer_use
+# 在 ada-go 仓库根目录：统一构建 browser-use / computer-use 到各自 bin/，
+# 并可 -Register 写入 .adago/mcp.json 供 mcp-client 直接启动
+.\scripts\build-mcp.cmd -Register
 
-# 依赖同机上的 mygo 仓库（go.mod 里用 replace 指向 ..\mygo）
-go build -o bin\computer-use.exe .
+# 或者只构建本模块
+cd mcp_projects\computer_use
+$env:GOWORK = "off"
+go build -trimpath -o bin\computer-use.exe .
 
 # 1. 体检：显示器、截图、指针、组合键、剪贴板
 .\bin\computer-use.exe doctor
@@ -222,12 +226,28 @@ Invoke-RestMethod -Method Post "http://127.0.0.1:7331/v1/mask" -ContentType appl
 {
   "mcpServers": {
     "computer-use": {
-      "command": "E:\\codes\\go_projects\\computer_use\\bin\\computer-use.exe",
+      "command": "E:\\codes\\go_projects\\ada_go\\mcp_projects\\computer_use\\bin\\computer-use.exe",
       "args": ["mcp", "--spawn"]
     }
   }
 }
 ```
+
+ada-go 走自己的 `mcp-client` 配置（工作区 `.adago/mcp.json` 或用户级
+`~/.adago/mcp.json`），条目形状不同：
+
+```json
+{
+  "id": "computer_use",
+  "transport": "stdio",
+  "command": "E:\\codes\\go_projects\\ada_go\\mcp_projects\\computer_use\\bin\\computer-use.exe",
+  "args": ["mcp", "--spawn"],
+  "enabled": true
+}
+```
+
+在仓库根目录执行 `.\scripts\build-mcp.cmd -Register` 会自动写入这条配置；
+写入后到 `/ext/mcp-client/servers` 重载插件即可看到工具。
 
 工具（26 个）：
 

@@ -91,6 +91,52 @@ func TestGoldenComponents(t *testing.T) {
 	}
 }
 
+// Select 组件输出宿主 <ada-select>（触发器 + listbox + 隐藏 input），
+// 插件页因此不需要、也不允许使用原生 <select>。
+func TestGoldenSelectComponent(t *testing.T) {
+	got := mustRenderHTML(t, `{"t":"$C","n":"Select","p":{
+		"class":"cm-input",
+		"data-cm-preset":true,
+		"name":"preset",
+		"value":"b",
+		"aria-label":"调度预设",
+		"options":[{"value":"a","label":"甲"},{"value":"b","label":"乙 & <x>"}]
+	},"c":[]}`)
+	want := `<ada-select class="ada-select" data-cm-preset="true">` +
+		`<button class="ada-select__trigger cm-input" type="button" data-select-trigger aria-expanded="false" aria-label="调度预设">` +
+		`<span class="ada-select__label" data-select-label>乙 &amp; &lt;x&gt;</span>` +
+		`<span class="ada-select__caret" aria-hidden="true">▾</span></button>` +
+		`<div class="ada-select__menu" data-select-menu hidden>` +
+		`<button class="ada-select__option" type="button" data-value="a" aria-selected="false">甲</button>` +
+		`<button class="ada-select__option is-selected" type="button" data-value="b" aria-selected="true">乙 &amp; &lt;x&gt;</button>` +
+		`</div><input type="hidden" data-select-input name="preset" value="b"></ada-select>`
+	if got != want {
+		t.Fatalf("Select golden 不符：\n got %s\nwant %s", got, want)
+	}
+
+	// 空 options（前端动态填充的工作区下拉）：用 placeholder 作为初始标签。
+	empty := mustRenderHTML(t, `{"t":"$C","n":"Select","p":{
+		"value":"","placeholder":"综合工作区（默认）","options":[]
+	},"c":[]}`)
+	for _, s := range []string{
+		`<span class="ada-select__label" data-select-label>综合工作区（默认）</span>`,
+		`<div class="ada-select__menu" data-select-menu hidden></div>`,
+		`<input type="hidden" data-select-input value="">`,
+	} {
+		if !strings.Contains(empty, s) {
+			t.Fatalf("空 Select 缺少 %s\n got %s", s, empty)
+		}
+	}
+
+	// options 形状错误必须 fail-closed，而不是猜一个 DOM。
+	if _, err := RenderHTML(json.RawMessage(`{"t":"$C","n":"Select","p":{"options":[{"label":"缺 value"}]},"c":[]}`)); err == nil {
+		t.Fatal("Select options 缺 value 应报错")
+	}
+	if _, err := RenderHTML(json.RawMessage(`{"t":"$C","n":"Select","p":{"options":"a,b"},"c":[]}`)); err == nil {
+		t.Fatal("Select options 非数组应报错")
+	}
+}
+
 // 空插槽语义：null 与空串渲染为空，不报错。
 func TestRenderHTMLNull(t *testing.T) {
 	for _, raw := range []string{"null", "", "  "} {

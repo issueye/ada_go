@@ -45,11 +45,12 @@
   height: 100dvh;
 }
 
-/* 侧栏：展开 264，折叠成 56px 窄轨。
+/* 侧栏：默认 264（可用 --ada-sidebar-width 覆盖），折叠成 56px 窄轨。
    折叠**不再**是 display:none —— 收起之后品牌、新建、最近会话、系统页都还在，
    用户不必为了跳一条会话把侧栏重新拉开。宽度过渡让展开/收起有方向感。 */
 .ada-sidebar {
-  width: 264px;
+  position: relative;
+  width: var(--ada-sidebar-width, 264px);
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
@@ -59,9 +60,52 @@
   transition: width var(--ada-transition) ease;
 }
 
+/* 侧栏右缘的拖拽条：只在宽屏展开态出现（折叠/窄屏抽屉由下面的规则隐藏）。
+   默认透明，悬停/聚焦/拖动时显示一条品牌色细线，避免常驻一条装饰线。 */
+.ada-sidebar__resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+.ada-sidebar__resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 2px;
+  bottom: 0;
+  width: 2px;
+  border-radius: var(--ada-radius-pill);
+  background: transparent;
+  transition: background var(--ada-transition);
+}
+.ada-sidebar__resizer:hover::after,
+.ada-sidebar__resizer:focus-visible::after,
+.ada-sidebar__resizer.is-dragging::after {
+  background: var(--ph-brand);
+}
+.ada-sidebar__resizer:focus-visible {
+  outline: none;
+}
+.ada-shell.is-sidebar-collapsed .ada-sidebar__resizer {
+  display: none;
+}
+body.ada-sidebar-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+body.ada-sidebar-resizing .ada-sidebar {
+  transition: none;
+}
+
 /* 展开态：一条纵向列。只有会话列表伸缩与滚动，其余分区保持自身高度。 */
 .ada-side {
-  width: 264px;
+  width: 100%;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
@@ -167,45 +211,42 @@
   gap: 6px;
 }
 
-/* ── 工作区切换器 ───────────────────────────────────────────────────────── */
-/* 一行代替原先的"分区标题 + 全路径药丸 + 组头当前徽标"三处表达；
-   完整路径进 title，显示的目录名不再被 ellipsis 从尾部切掉。 */
-.ada-ws-switch {
+/* ── 工作区列表头 ───────────────────────────────────────────────────────── */
+/* 工作区与各自的会话直接列在侧栏；这一行只做分区标题 + 「打开工作区」入口，
+   不再承担切换（切换点在工作区组的折叠头上）。 */
+.ada-ws-head {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-  height: 32px;
+  height: 30px;
   padding: 0 8px;
-  border-radius: var(--ada-radius-md);
-  color: var(--ph-ink);
-  font-size: var(--ada-text-base);
+  color: var(--ph-muted);
+  font-size: var(--ada-text-sm);
   font-weight: 600;
-  text-decoration: none;
-  transition: background var(--ada-transition), color var(--ada-transition);
 }
-.ada-ws-switch:hover {
-  background: var(--ph-line);
-}
-.ada-ws-switch > .ada-icon:first-child {
-  color: var(--ph-brand);
-}
-.ada-ws-switch > .ada-icon:last-child {
-  color: var(--ph-faint);
-}
-.ada-ws-switch__name {
+.ada-ws-head__label {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ada-ws-switch__count {
-  flex: 0 0 auto;
+.ada-ws-head__add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--ada-radius-sm);
   color: var(--ph-faint);
-  font-family: var(--mono-font, Consolas, monospace);
-  font-size: var(--ada-text-xs);
-  font-weight: 400;
+  text-decoration: none;
+  transition: background var(--ada-transition), color var(--ada-transition);
+}
+.ada-ws-head__add:hover {
+  background: var(--ph-line);
+  color: var(--ph-ink);
 }
 
 /* ── 搜索 ───────────────────────────────────────────────────────────────── */
@@ -272,17 +313,47 @@
 }
 
 /* ── 会话列表 ───────────────────────────────────────────────────────────── */
-/* 侧栏唯一的伸缩 + 滚动区。行高 32：一屏能看见的会话从 9 条涨到 15 条左右。 */
+/* 侧栏的伸缩区；滚动下放到两个子块：
+   - 当前工作区固定在上方（过长时才自己滚，且不显示第二条滚动条）；
+   - 其它工作区单独滚动，滚轮只影响这一块，当前工作区不会滚出视口。
+   行高 32：一屏能看见的会话从 9 条涨到 15 条左右。 */
 .ada-thread-list {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
-  /* 会话增删会跨越滚动阈值，预留位置避免标题串位 */
-  overscroll-behavior: contain;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 1px;
   padding: 2px 0 6px;
+}
+.ada-ws-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+}
+.ada-ws-scroll--active {
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+/* 分块态：当前工作区最多占 60%、不参与收缩（短列表不被压扁），其它工作区
+   至少留 40%。当前区的滚动条隐藏，视觉上只有「其它工作区」一块有滚动条。 */
+.ada-thread-list--split .ada-ws-scroll--active {
+  flex: 0 0 auto;
+  max-height: 60%;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.ada-thread-list--split .ada-ws-scroll--active::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+.ada-ws-scroll--workArea {
+  overflow-y: auto;
+}
+.ada-ws-scroll--others {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .ada-thread {
   position: relative;
@@ -1579,8 +1650,8 @@
 }
 
 /* ── 工作区树（侧栏） ─────────────────────────────────────────────────────
-   当前工作区的会话直接铺开——切换器就是它的表头，所以组头不再重复"当前"；
-   其它工作区各是一个 <details>。操作按钮放在 details 外，折叠时也能新建/切换。 */
+   每个工作区一组：当前工作区默认展开、会话由服务端渲染；其它工作区折叠，
+   展开时懒加载会话。切换点就在组头上，不再跳到单独的工作区管理页。 */
 .ada-ws {
   position: relative;
   flex-shrink: 0;

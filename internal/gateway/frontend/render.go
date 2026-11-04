@@ -11,8 +11,8 @@ package frontend
 //     唯一把校验通过的 VNode 提升为 template.HTML 的出口；
 //   - 禁止 on* / style / dangerouslySetInnerHTML / javascript: URL（vnode.go 拒绝）；
 //   - 深度/节点数/单字符串/总输出上限沿用 vnode.go 的常量；
-//   - 宿主组件只实现白名单内的通用组件：Icon 与 TodoList（M4 示例所需，DOM 与
-//     class 照 a_da crates/agent-web/ui）；其余组件 fail-closed 报错，绝不猜测 DOM。
+//   - 宿主组件只实现白名单内的通用组件：Icon、TodoList、Select（M4 示例所需，
+//     DOM 与 class 照 a_da crates/agent-web/ui）；其余组件 fail-closed 报错，绝不猜测 DOM。
 //
 // 校验不通过或渲染失败：调用方（插槽桥）把该插槽留空并记录错误，不影响页面其余部分。
 
@@ -191,10 +191,12 @@ func renderComponent(b *strings.Builder, n Node) error {
 		return renderIcon(b, n.P)
 	case "TodoList":
 		return renderTodoList(b, n.P)
+	case "Select":
+		return renderSelect(b, n.P)
 	default:
 		// 组件清单里的其余组件属于基座页面（7.7.3），插件侧 M4 还没有用例；
 		// 没有对照 DOM 就不允许输出，避免发明第二套结构。
-		return fmt.Errorf("frontend: 组件 %q 的插件侧渲染尚未实现（M4 只开放 Icon/TodoList）", canonical)
+		return fmt.Errorf("frontend: 组件 %q 的插件侧渲染尚未实现（M4 只开放 Icon/TodoList/Select）", canonical)
 	}
 }
 
@@ -307,4 +309,159 @@ func numberProp(v any) (int, bool) {
 		return x, true
 	}
 	return 0, false
+}
+
+// renderSelect 输出 a_da 的 Select 组件：<ada-select> + 触发按钮 + listbox +
+// 隐藏 input（crates/agent-web/src/ui 的 Select / static/ada-select.js 的 Web Component）。
+// 插件只能通过本组件拿到这层 DOM，不能直接写 <ada-select>（spec/vnode.schema.json）。
+//
+// props：
+//   - options: string[] 或 {value,label}[]（必填，可为空数组供前端动态填充）
+//   - value:   当前值（缺省取第一项）
+//   - name:    隐藏 input 的 name（表单提交用）
+//   - class:   追加到触发器上的类名（沿用插件页的输入框样式）
+//   - placeholder: options 为空或当前值不在选项里时的触发器文案
+//   - disabled: 透传到触发器与隐藏 input
+//   - aria-label / data-*: aria 给触发器，data-* 给 <ada-select> 容器（插件 JS 钩子）
+func renderSelect(b *strings.Builder, props map[string]any) error {
+	triggerClass, _ := props["class"].(string)
+	ariaLabel, _ := props["aria-label"].(string)
+	name, _ := props["name"].(string)
+	placeholder, _ := props["placeholder"].(string)
+	disabled, _ := props["disabled"].(bool)
+	value := scalarText(props["value"])
+
+	type selectOption struct {
+		value string
+		label string
+	}
+	var options []selectOption
+	if raw, exists := props["options"]; exists && raw != nil {
+		items, ok := raw.([]any)
+		if !ok {
+			return fmt.Errorf("frontend: Select options 必须是数组（得到 %T）", raw)
+		}
+		for i, item := range items {
+			switch v := item.(type) {
+			case string:
+				options = append(options, selectOption{value: v, label: v})
+			case map[string]any:
+				optValue := scalarText(v["value"])
+				optLabel := scalarText(v["label"])
+				if optValue == "" {
+					return fmt.Errorf("frontend: Select options[%d] 缺少 value", i)
+				}
+				if optLabel == "" {
+					optLabel = optValue
+				}
+				options = append(options, selectOption{value: optValue, label: optLabel})
+			default:
+				return fmt.Errorf("frontend: Select options[%d] 必须是 string 或 {value,label}（得到 %T）", i, item)
+			}
+		}
+	}
+	if value == "" && len(options) > 0 {
+		value = options[0].value
+	}
+	selectedLabel := placeholder
+	for _, opt := range options {
+		if opt.value == value {
+			selectedLabel = opt.label
+			break
+		}
+	}
+	if selectedLabel == "" {
+		selectedLabel = value
+	}
+
+	b.WriteString(`<ada-select class="ada-select"`)
+	writeDataAttrs(b, props)
+	b.WriteString(`><button class="ada-select__trigger`)
+	if strings.TrimSpace(triggerClass) != "" {
+		b.WriteString(" ")
+		b.WriteString(html.EscapeString(triggerClass))
+	}
+	b.WriteString(`" type="button" data-select-trigger aria-expanded="false"`)
+	if strings.TrimSpace(ariaLabel) != "" {
+		b.WriteString(` aria-label="`)
+		b.WriteString(html.EscapeString(ariaLabel))
+		b.WriteString(`"`)
+	}
+	if disabled {
+		b.WriteString(` disabled`)
+	}
+	b.WriteString(`><span class="ada-select__label" data-select-label>`)
+	b.WriteString(html.EscapeString(selectedLabel))
+	b.WriteString(`</span><span class="ada-select__caret" aria-hidden="true">▾</span></button>`)
+	b.WriteString(`<div class="ada-select__menu" data-select-menu hidden>`)
+	for _, opt := range options {
+		class := "ada-select__option"
+		selected := opt.value == value
+		if selected {
+			class += " is-selected"
+		}
+		b.WriteString(`<button class="`)
+		b.WriteString(class)
+		b.WriteString(`" type="button" data-value="`)
+		b.WriteString(html.EscapeString(opt.value))
+		b.WriteString(`" aria-selected="`)
+		b.WriteString(strconv.FormatBool(selected))
+		b.WriteString(`">`)
+		b.WriteString(html.EscapeString(opt.label))
+		b.WriteString(`</button>`)
+	}
+	b.WriteString(`</div><input type="hidden" data-select-input`)
+	if strings.TrimSpace(name) != "" {
+		b.WriteString(` name="`)
+		b.WriteString(html.EscapeString(name))
+		b.WriteString(`"`)
+	}
+	b.WriteString(` value="`)
+	b.WriteString(html.EscapeString(value))
+	b.WriteString(`"`)
+	if disabled {
+		b.WriteString(` disabled`)
+	}
+	b.WriteString(`></ada-select>`)
+	return nil
+}
+
+// writeDataAttrs 把 data-* 属性写到组件容器上（插件 JS 用它定位下拉）。
+// 键排序保证 golden 稳定；值按标量转义，非标量丢弃（Schema 已限制为标量）。
+func writeDataAttrs(b *strings.Builder, props map[string]any) {
+	keys := make([]string, 0, len(props))
+	for key, value := range props {
+		if !strings.HasPrefix(strings.ToLower(key), "data-") {
+			continue
+		}
+		switch value.(type) {
+		case string, bool, json.Number, float64, int:
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		b.WriteString(` `)
+		b.WriteString(html.EscapeString(key))
+		b.WriteString(`="`)
+		b.WriteString(html.EscapeString(scalarText(props[key])))
+		b.WriteString(`"`)
+	}
+}
+
+// scalarText 把 Schema 允许的标量属性读成字符串（string / 数字 / bool）。
+func scalarText(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case json.Number:
+		return x.String()
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(x)
+	case bool:
+		return strconv.FormatBool(x)
+	}
+	return ""
 }

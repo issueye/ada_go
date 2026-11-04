@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -42,17 +43,17 @@ func TestNextBasics(t *testing.T) {
 		return v
 	}
 	cases := []struct {
-		expr string
+		expr  string
 		after string
-		want string
+		want  string
 	}{
-		{"0 9 * * *", "2026-11-03T10:00:00Z", "2026-11-04T09:00:00Z"},   // 次日
-		{"0 9 * * *", "2026-11-03T08:30:00Z", "2026-11-03T09:00:00Z"},   // 当天
+		{"0 9 * * *", "2026-11-03T10:00:00Z", "2026-11-04T09:00:00Z"},    // 次日
+		{"0 9 * * *", "2026-11-03T08:30:00Z", "2026-11-03T09:00:00Z"},    // 当天
 		{"*/15 * * * *", "2026-11-03T08:47:00Z", "2026-11-03T09:00:00Z"}, // 步进跨小时
-		{"30 9 1 * *", "2026-11-03T08:00:00Z", "2026-12-01T09:30:00Z"},  // 每月 1 号
-		{"0 0 * * 1", "2026-11-03T00:00:00Z", "2026-11-09T00:00:00Z"},   // 每周一（11-03 是周二）
-		{"0 12 * * 7", "2026-11-03T00:00:00Z", "2026-11-08T12:00:00Z"},  // 7=周日
-		{"0 9 * * *", "2026-11-03T09:00:00Z", "2026-11-04T09:00:00Z"},   // 不含当前分钟
+		{"30 9 1 * *", "2026-11-03T08:00:00Z", "2026-12-01T09:30:00Z"},   // 每月 1 号
+		{"0 0 * * 1", "2026-11-03T00:00:00Z", "2026-11-09T00:00:00Z"},    // 每周一（11-03 是周二）
+		{"0 12 * * 7", "2026-11-03T00:00:00Z", "2026-11-08T12:00:00Z"},   // 7=周日
+		{"0 9 * * *", "2026-11-03T09:00:00Z", "2026-11-04T09:00:00Z"},    // 不含当前分钟
 	}
 	for _, tc := range cases {
 		got := mustSchedule(t, tc.expr).Next(at(tc.after))
@@ -101,7 +102,8 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	}
 	task := Task{
 		ID: id, Name: "每天早报", Enabled: true, Cron: "0 9 * * *",
-		Action: Action{Type: ActionHTTP, Method: "POST", URL: "https://example.com/hook", Body: "{}"},
+		Workspace: "/tmp/report-ws",
+		Action:    Action{Type: ActionAgent, Text: "总结昨天的工作"},
 	}
 	if err := SaveFile(path, []Task{task}); err != nil {
 		t.Fatalf("SaveFile: %v", err)
@@ -110,7 +112,8 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	if err != nil || len(warns) != 0 {
 		t.Fatalf("LoadFile: %v, warns=%v", err, warns)
 	}
-	if len(loaded.Tasks) != 1 || loaded.Tasks[0].ID != id || loaded.Tasks[0].Action.URL != "https://example.com/hook" {
+	if len(loaded.Tasks) != 1 || loaded.Tasks[0].ID != id ||
+		loaded.Tasks[0].Action.Text != "总结昨天的工作" || loaded.Tasks[0].Workspace != "/tmp/report-ws" {
 		t.Fatalf("往返不一致: %+v", loaded.Tasks)
 	}
 }
@@ -119,7 +122,7 @@ func TestLoadSkipsInvalidTasks(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, FileName)
 	raw := fmt.Sprintf(`{"version":1,"tasks":[
-		{"id":"crn_aaaa","name":"坏任务","enabled":true,"cron":"不合法","action":{"type":"http","method":"GET","url":"https://x.com"}},
+		{"id":"crn_aaaa","name":"旧 HTTP 任务","enabled":true,"cron":"0 9 * * *","action":{"type":"http","method":"GET","url":"https://x.com"}},
 		{"id":"crn_bbbb","name":"好任务","enabled":true,"cron":"0 9 * * *","action":{"type":"agent","text":"早报"}}]}`)
 	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 		t.Fatalf("写测试文件: %v", err)
@@ -129,7 +132,10 @@ func TestLoadSkipsInvalidTasks(t *testing.T) {
 		t.Fatalf("LoadFile: %v", err)
 	}
 	if len(warns) != 1 || len(loaded.Tasks) != 1 || loaded.Tasks[0].Name != "好任务" {
-		t.Fatalf("应跳过坏任务保留好任务: tasks=%+v warns=%v", loaded.Tasks, warns)
+		t.Fatalf("应跳过旧 HTTP 任务保留 AI 任务: tasks=%+v warns=%v", loaded.Tasks, warns)
+	}
+	if !strings.Contains(warns[0], "HTTP 动作已移除") {
+		t.Fatalf("跳过原因应说明 HTTP 动作已移除: %v", warns)
 	}
 }
 
@@ -140,14 +146,23 @@ func TestValidateTask(t *testing.T) {
 		mutate func(*Task)
 		wantOK bool
 	}{
-		{"合法 http", func(t *Task) { t.Action = Action{Type: ActionHTTP, Method: "get", URL: "http://a.com"} }, true},
-		{"method 越界", func(t *Task) { t.Action = Action{Type: ActionHTTP, Method: "DELETE", URL: "http://a.com"} }, false},
-		{"url 非法", func(t *Task) { t.Action = Action{Type: ActionHTTP, Method: "GET", URL: "ftp://a.com"} }, false},
-		{"url 带 userinfo", func(t *Task) { t.Action = Action{Type: ActionHTTP, Method: "GET", URL: "https://u:p@a.com"} }, false},
-		{"timeout 越界", func(t *Task) { t.Action = Action{Type: ActionHTTP, Method: "GET", URL: "http://a.com", TimeoutMs: 1} }, false},
+		{"旧 HTTP 动作被拒绝", func(t *Task) { t.Action = Action{Type: ActionHTTP} }, false},
 		{"合法 agent", func(t *Task) { t.Action = Action{Type: ActionAgent, Text: "总结昨天"} }, true},
 		{"agent 空 text", func(t *Task) { t.Action = Action{Type: ActionAgent, Text: "  "} }, false},
+		{"提示词超长", func(t *Task) { t.Action = Action{Type: ActionAgent, Text: strings.Repeat("x", MaxTextBytes+1)} }, false},
 		{"未知类型", func(t *Task) { t.Action = Action{Type: "shell"} }, false},
+		{"指定工作区", func(t *Task) {
+			t.Workspace = "/tmp/ws"
+			t.Action = Action{Type: ActionAgent, Text: "t"}
+		}, true},
+		{"工作区含控制字符", func(t *Task) {
+			t.Workspace = "/tmp/\x00ws"
+			t.Action = Action{Type: ActionAgent, Text: "t"}
+		}, false},
+		{"工作区超长", func(t *Task) {
+			t.Workspace = strings.Repeat("a", MaxWorkspaceBytes+1)
+			t.Action = Action{Type: ActionAgent, Text: "t"}
+		}, false},
 		{"空名", func(t *Task) { t.Name = " " }, false},
 		{"空 id", func(t *Task) { t.ID = "" }, false},
 		{"坏 cron", func(t *Task) { t.Cron = "0 9 * *" }, false},
@@ -179,7 +194,7 @@ func TestUpdateConcurrent(t *testing.T) {
 			err := Update(path, lock, 5*time.Second, func(tasks *[]Task) error {
 				for j := range *tasks {
 					if (*tasks)[j].ID == id {
-						AppendRun(&(*tasks)[j], Run{At: time.Now().UTC().Format(time.RFC3339), Status: RunOK})
+						AppendRun(&(*tasks)[j], Run{At: time.Now().UTC().Format(time.RFC3339), Status: RunStarted})
 					}
 				}
 				return nil
@@ -202,7 +217,7 @@ func TestUpdateConcurrent(t *testing.T) {
 func TestAppendRunCaps(t *testing.T) {
 	task := Task{ID: "crn_x", Name: "n", Cron: "* * * * *", Action: Action{Type: ActionAgent, Text: "t"}}
 	for i := 0; i < MaxRunsPerTask+10; i++ {
-		AppendRun(&task, Run{At: fmt.Sprintf("2026-01-01T00:%02d:00Z", i%60), Status: RunOK})
+		AppendRun(&task, Run{At: fmt.Sprintf("2026-01-01T00:%02d:00Z", i%60), Status: RunStarted})
 	}
 	if len(task.Runs) != MaxRunsPerTask {
 		t.Fatalf("runs = %d，期望上限 %d", len(task.Runs), MaxRunsPerTask)

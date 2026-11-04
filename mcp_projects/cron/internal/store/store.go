@@ -8,6 +8,7 @@
 //	lastFiredAt/runs/threadId、消费 triggerRequested）。
 //
 // cron 表达式语义见 internal/cronexpr/cronexpr.go 顶部；与主模块必须同步修改。
+// 动作只有 agent（AI 任务）：到期后 POST 网关 /api/cron/fire；HTTP 动作已移除。
 package store
 
 import (
@@ -17,7 +18,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,45 +41,32 @@ const (
 	MaxNameBytes = 128
 	// MaxTextBytes 是 agent 提示词长度上限。
 	MaxTextBytes = 64 << 10
-	// MaxBodyBytes 是 http 动作请求体长度上限。
-	MaxBodyBytes = 64 << 10
-	// MaxHeaderBytes 是单个 header 值长度上限。
-	MaxHeaderBytes = 4 << 10
-	// MaxHeaders 是 header 条数上限。
-	MaxHeaders = 32
+	// MaxWorkspaceBytes 是任务目标工作区路径长度上限。
+	MaxWorkspaceBytes = 1024
 	// MaxFileBytes 是 cron.json 的大小上限。
 	MaxFileBytes = 1 << 20
 	// MaxRunsPerTask 是每个任务保留的运行历史条数（保留最新）。
 	MaxRunsPerTask = 20
-	// DefaultTimeoutMs 是 http 动作的默认超时。
-	DefaultTimeoutMs = 15000
-	// MinTimeoutMs 与 MaxTimeoutMs 是 http 动作超时的取值范围。
-	MinTimeoutMs = 1000
-	MaxTimeoutMs = 120000
 )
 
 // 动作类型与运行状态常量（与主模块 internal/cronstore 同名同义）。
 const (
-	ActionHTTP  = "http"
+	// ActionAgent 是唯一支持的动作：到期后经网关把提示词交给 AI。
 	ActionAgent = "agent"
+	// ActionHTTP 是已移除的旧动作类型；保留常量只为给历史文件一条可读的
+	// 跳过原因，新建/更新一律拒绝。
+	ActionHTTP = "http"
 
-	RunOK      = "ok"      // http：2xx
-	RunError   = "error"   // http 非 2xx / 请求失败 / 网关返回失败
-	RunTimeout = "timeout" // http 超时
+	RunError   = "error"   // 网关返回失败 / 请求失败
 	RunBusy    = "busy"    // agent：线程已有运行中轮次（thread_busy）
 	RunStarted = "started" // agent：网关已受理 turn.start（完成与否在线程里看）
 	RunMissed  = "missed"  // 应用未运行期间错过的调度（不补跑，仅记录）
 )
 
-// Action 是任务触发时要执行的动作；type 决定哪些字段生效。
+// Action 是任务触发时要执行的动作；当前只有 AI 任务一种。
 type Action struct {
-	Type      string            `json:"type"`
-	Method    string            `json:"method,omitempty"`
-	URL       string            `json:"url,omitempty"`
-	Headers   map[string]string `json:"headers,omitempty"`
-	Body      string            `json:"body,omitempty"`
-	TimeoutMs int               `json:"timeoutMs,omitempty"`
-	Text      string            `json:"text,omitempty"`
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
 }
 
 // Run 是一条运行历史。At 是「到期的调度时刻」（RFC3339），不是执行完成时刻。
@@ -88,17 +75,19 @@ type Run struct {
 	Status     string `json:"status"`
 	DurationMs int64  `json:"durationMs,omitempty"`
 	Detail     string `json:"detail,omitempty"`
-	HTTPStatus int    `json:"httpStatus,omitempty"`
 	ThreadID   string `json:"threadId,omitempty"`
 }
 
 // Task 是一条定时任务定义与其运行历史。
 type Task struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	Enabled          bool   `json:"enabled"`
-	Cron             string `json:"cron"`
-	Action           Action `json:"action"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
+	Cron    string `json:"cron"`
+	Action  Action `json:"action"`
+	// Workspace 是任务触发的目标工作区（绝对路径）；空表示默认工作区
+	// （网关列表第一个，即“综合工作区”）。有效性由网关在触发时判定。
+	Workspace        string `json:"workspace,omitempty"`
 	ThreadID         string `json:"threadId,omitempty"`
 	TriggerRequested bool   `json:"triggerRequested,omitempty"`
 	LastFiredAt      string `json:"lastFiredAt,omitempty"`
@@ -291,49 +280,18 @@ func Validate(t *Task) error {
 	if _, err := cronexpr.Parse(t.Cron); err != nil {
 		return err
 	}
+	t.Workspace = strings.TrimSpace(t.Workspace)
+	if len(t.Workspace) > MaxWorkspaceBytes {
+		return fmt.Errorf("工作区路径超过 %d 字节", MaxWorkspaceBytes)
+	}
+	if strings.ContainsFunc(t.Workspace, func(r rune) bool { return r < ' ' || r == 0x7f }) {
+		return errors.New("工作区路径不能含控制字符")
+	}
 	return validateAction(&t.Action)
 }
 
 func validateAction(a *Action) error {
 	switch a.Type {
-	case ActionHTTP:
-		method := strings.ToUpper(strings.TrimSpace(a.Method))
-		if method != "GET" && method != "POST" {
-			return fmt.Errorf("http 动作的 method 只能是 GET 或 POST（收到 %q）", a.Method)
-		}
-		a.Method = method
-		u := strings.TrimSpace(a.URL)
-		if u == "" {
-			return errors.New("http 动作需要 url")
-		}
-		if len(u) > 2048 {
-			return errors.New("http 动作的 url 超过 2048 字节")
-		}
-		parsed, perr := url.Parse(u)
-		if perr != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-			return errors.New("http 动作的 url 必须是合法的 http(s) 地址")
-		}
-		if parsed.User != nil {
-			return errors.New("http 动作的 url 不能内嵌用户信息（user:pass@host）")
-		}
-		if len(a.Headers) > MaxHeaders {
-			return fmt.Errorf("http 动作的 headers 超过 %d 条", MaxHeaders)
-		}
-		for k, v := range a.Headers {
-			if strings.TrimSpace(k) == "" || strings.ContainsAny(k, ": \t\r\n") {
-				return fmt.Errorf("header 名 %q 非法", k)
-			}
-			if len(v) > MaxHeaderBytes {
-				return fmt.Errorf("header %q 的值超过 %d 字节", k, MaxHeaderBytes)
-			}
-		}
-		if len(a.Body) > MaxBodyBytes {
-			return fmt.Errorf("http 动作的 body 超过 %d 字节", MaxBodyBytes)
-		}
-		if a.TimeoutMs != 0 && (a.TimeoutMs < MinTimeoutMs || a.TimeoutMs > MaxTimeoutMs) {
-			return fmt.Errorf("http 动作的 timeoutMs 应在 %d-%d 之间", MinTimeoutMs, MaxTimeoutMs)
-		}
-		return nil
 	case ActionAgent:
 		if strings.TrimSpace(a.Text) == "" {
 			return errors.New("agent 动作需要提示词 text")
@@ -342,8 +300,10 @@ func validateAction(a *Action) error {
 			return fmt.Errorf("agent 动作的提示词超过 %d 字节", MaxTextBytes)
 		}
 		return nil
+	case ActionHTTP:
+		return errors.New("HTTP 动作已移除：定时任务只支持 AI 任务（agent）")
 	default:
-		return fmt.Errorf("动作类型只能是 http 或 agent（收到 %q）", a.Type)
+		return fmt.Errorf("动作类型只能是 agent（收到 %q）", a.Type)
 	}
 }
 

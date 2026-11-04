@@ -31,15 +31,7 @@
   var weeklyFields = root.querySelectorAll("[data-cm-weekly-field]");
   var weeklyDay = root.querySelector("[data-cm-weekly-day]");
   var weeklyTime = root.querySelector("[data-cm-weekly-time]");
-  var typeSelect = root.querySelector("[data-cm-type]");
-  var urlField = root.querySelector("[data-cm-http-url-field]");
-  var methodField = root.querySelector("[data-cm-http-method-field]");
-  var bodyField = root.querySelector("[data-cm-http-body-field]");
-  var urlInput = root.querySelector("[data-cm-url]");
-  var methodInput = root.querySelector("[data-cm-method]");
-  var bodyInput = root.querySelector("[data-cm-body]");
-  var timeoutInput = root.querySelector("[data-cm-timeout]");
-  var agentField = root.querySelector("[data-cm-agent-field]");
+  var workspaceSelect = root.querySelector("[data-cm-workspace]");
   var textInput = root.querySelector("[data-cm-text]");
   var submitBtn = root.querySelector("[data-cm-submit]");
   var cancelBtn = root.querySelector("[data-cm-cancel]");
@@ -52,6 +44,10 @@
   var state = null;
   var busy = false;
   var editingId = null;
+  // 工作区列表来自网关 GET /api/workspaces；空字符串代表默认工作区。
+  var workspaceList = [];
+  var workspaceDefault = "";
+  var DEFAULT_WORKSPACE_LABEL = "综合工作区（默认）";
 
   function status(message, tone) {
     if (!statusNode) return;
@@ -96,9 +92,7 @@
   }
 
   var RUN_LABELS = {
-    ok: "成功",
     error: "失败",
-    timeout: "超时",
     busy: "线程忙",
     started: "已启动",
     missed: "错过",
@@ -106,10 +100,6 @@
 
   function runLabel(status) {
     return RUN_LABELS[status] || String(status || "—");
-  }
-
-  function typeLabel(task) {
-    return task.action && task.action.type === "agent" ? "AI 任务" : "HTTP";
   }
 
   function lastRunText(task) {
@@ -123,15 +113,134 @@
     var runs = (task && task.runs) || [];
     if (!runs.length) return "";
     var s = runs[runs.length - 1].status;
-    if (s === "ok" || s === "started") return "ok";
+    if (s === "started") return "ok";
     if (s === "busy" || s === "missed") return "warn";
     return "bad";
+  }
+
+  // ---- 下拉组件（ada-select）----
+  // 页面上的下拉都是宿主的 <ada-select> 组件（触发器 + listbox + 隐藏 input），
+  // 不再用原生下拉控件。下面几个 helper 统一读写组件状态；即使组件尚未升级，
+  // 读隐藏 input 也能拿到值。
+
+  var optionSeq = 0;
+
+  function selectValue(node) {
+    if (!node || !node.querySelector) return "";
+    var input = node.querySelector("[data-select-input]");
+    return input ? String(input.value || "") : "";
+  }
+
+  function selectOptions(node) {
+    if (!node || !node.querySelectorAll) return [];
+    return Array.prototype.slice.call(node.querySelectorAll("[data-select-menu] [data-value]"));
+  }
+
+  function hasSelectValue(node, value) {
+    var target = String(value === undefined || value === null ? "" : value);
+    var options = selectOptions(node);
+    for (var i = 0; i < options.length; i++) {
+      if (options[i].getAttribute("data-value") === target) return true;
+    }
+    return false;
+  }
+
+  function appendSelectOption(node, value, text) {
+    if (!node) return null;
+    var menu = node.querySelector("[data-select-menu]");
+    if (!menu) return null;
+    var option = document.createElement("button");
+    option.type = "button";
+    option.className = "ada-select__option";
+    option.id = "cm-select-opt-" + String(++optionSeq);
+    option.setAttribute("data-value", value);
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", "false");
+    option.textContent = text;
+    option.title = text;
+    menu.appendChild(option);
+    return option;
+  }
+
+  function setSelectValue(node, value) {
+    if (!node) return;
+    var target = String(value === undefined || value === null ? "" : value);
+    var selected = null;
+    var options = selectOptions(node);
+    for (var i = 0; i < options.length; i++) {
+      var on = options[i].getAttribute("data-value") === target;
+      options[i].classList.toggle("is-selected", on);
+      options[i].setAttribute("aria-selected", on ? "true" : "false");
+      if (on) selected = options[i];
+    }
+    var input = node.querySelector("[data-select-input]");
+    if (input) input.value = target;
+    var label = node.querySelector("[data-select-label]");
+    if (label) label.textContent = selected ? String(selected.textContent || "").trim() : target;
+  }
+
+  // ---- 工作区 ----
+
+  function workspaceLabel(path) {
+    var raw = String(path || "").replace(/[\\/]+$/, "");
+    if (!raw) return DEFAULT_WORKSPACE_LABEL;
+    var parts = raw.split(/[\\/]/);
+    return parts[parts.length - 1] || raw;
+  }
+
+  function setWorkspaceValue(value) {
+    if (!workspaceSelect) return;
+    var target = String(value || "");
+    if (target && !hasSelectValue(workspaceSelect, target)) {
+      // 任务指向的工作区已不在列表里：保留原值可编辑/改回默认，而不是悄悄改掉。
+      appendSelectOption(workspaceSelect, target, workspaceLabel(target) + " — " + target + "（不在当前列表）");
+    }
+    setSelectValue(workspaceSelect, target);
+  }
+
+  function renderWorkspaceOptions(selected) {
+    if (!workspaceSelect) return;
+    var menu = workspaceSelect.querySelector("[data-select-menu]");
+    if (!menu) return;
+    menu.textContent = "";
+    appendSelectOption(workspaceSelect, "", DEFAULT_WORKSPACE_LABEL);
+    var seen = {};
+    for (var i = 0; i < workspaceList.length; i++) {
+      var ws = workspaceList[i] || {};
+      var path = String(ws.path || "");
+      if (!path || seen[path]) continue;
+      seen[path] = true;
+      appendSelectOption(
+        workspaceSelect,
+        path,
+        (ws.name ? String(ws.name) : workspaceLabel(path)) + " — " + path
+      );
+    }
+    setWorkspaceValue(selected || "");
+  }
+
+  async function loadWorkspaces() {
+    if (!workspaceSelect) return;
+    try {
+      var response = await fetch("/api/workspaces", {
+        headers: { Accept: "application/json" },
+        credentials: "same-origin",
+      });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      var data = await response.json();
+      workspaceDefault = data && data.default ? String(data.default) : "";
+      workspaceList = (data && data.workspaces) || [];
+      renderWorkspaceOptions(selectValue(workspaceSelect));
+    } catch (err) {
+      // 读不到列表不阻塞页面：保留「默认」一项，任务仍会在综合工作区运行。
+      console.warn("cron-manager: 读取工作区列表失败", err);
+    }
   }
 
   // ---- 调度预设 → cron 表达式 ----
 
   function presetValue() {
-    var kind = presetSelect ? String(presetSelect.value || "custom") : "custom";
+    var kind = String(selectValue(presetSelect) || "custom");
     if (kind === "daily") {
       var t = dailyTime && dailyTime.value ? dailyTime.value : "09:00";
       var parts = t.split(":");
@@ -140,7 +249,7 @@
     if (kind === "weekly") {
       var wt = weeklyTime && weeklyTime.value ? weeklyTime.value : "09:00";
       var wp = wt.split(":");
-      return (Number(wp[0]) || 0) + " " + (Number(wp[1]) || 0) + " * * " + (weeklyDay ? String(weeklyDay.value || "1") : "1");
+      return (Number(wp[0]) || 0) + " " + (Number(wp[1]) || 0) + " * * " + (selectValue(weeklyDay) || "1");
     }
     if (kind === "custom") {
       return cronInput ? String(cronInput.value || "").trim() : "";
@@ -149,7 +258,7 @@
   }
 
   function renderPresetFields() {
-    var kind = presetSelect ? String(presetSelect.value || "custom") : "custom";
+    var kind = String(selectValue(presetSelect) || "custom");
     if (dailyField) dailyField.classList.toggle("cm-hidden", kind !== "daily");
     if (weeklyFields && weeklyFields.length) {
       for (var i = 0; i < weeklyFields.length; i++) weeklyFields[i].classList.toggle("cm-hidden", kind !== "weekly");
@@ -162,7 +271,7 @@
   }
 
   function cronForSave() {
-    var kind = presetSelect ? String(presetSelect.value || "custom") : "custom";
+    var kind = String(selectValue(presetSelect) || "custom");
     if (kind === "custom") {
       var raw = cronInput ? String(cronInput.value || "").trim() : "";
       if (!raw) throw new Error("需要 cron 表达式");
@@ -175,48 +284,30 @@
 
   function syncCronPreviewFromTask(cron) {
     // 编辑回填：尽量把表达式映射回预设；映射不上就落到「自定义」。
-    var matched = false;
-    if (presetSelect) {
-      for (var i = 0; i < presetSelect.options.length; i++) {
-        var opt = presetSelect.options[i];
-        if (opt.value === cron) {
-          presetSelect.value = cron;
-          matched = true;
-          break;
-        }
-      }
-    }
-    if (!matched) {
+    var matched = hasSelectValue(presetSelect, cron);
+    if (matched) {
+      setSelectValue(presetSelect, cron);
+    } else {
       var m = /^(\d{1,2}) (\d{1,2}) \* \* (\d)$/.exec(cron || "");
       if (m) {
-        presetSelect.value = "weekly";
-        if (weeklyDay) weeklyDay.value = m[3];
+        setSelectValue(presetSelect, "weekly");
+        setSelectValue(weeklyDay, m[3]);
         if (weeklyTime) weeklyTime.value = (m[1].length < 2 ? "0" + m[1] : m[1]) + ":" + (m[2].length < 2 ? "0" + m[2] : m[2]);
         matched = true;
       } else {
         m = /^(\d{1,2}) (\d{1,2}) \* \* \*$/.exec(cron || "");
         if (m) {
-          presetSelect.value = "daily";
+          setSelectValue(presetSelect, "daily");
           if (dailyTime) dailyTime.value = (m[1].length < 2 ? "0" + m[1] : m[1]) + ":" + (m[2].length < 2 ? "0" + m[2] : m[2]);
           matched = true;
         }
       }
     }
     if (!matched) {
-      presetSelect.value = "custom";
+      setSelectValue(presetSelect, "custom");
       if (cronInput) cronInput.value = cron || "";
     }
     renderPresetFields();
-  }
-
-  // ---- 表单动作类型切换 ----
-
-  function renderActionFields() {
-    var isAgent = typeSelect && typeSelect.value === "agent";
-    if (agentField) agentField.classList.toggle("cm-hidden", !isAgent);
-    if (urlField) urlField.classList.toggle("cm-hidden", isAgent);
-    if (methodField) methodField.classList.toggle("cm-hidden", isAgent);
-    if (bodyField) bodyField.classList.toggle("cm-hidden", isAgent);
   }
 
   // ---- 任务列表渲染 ----
@@ -250,7 +341,7 @@
     }
     if (!tasks.length) {
       var tr = document.createElement("tr");
-      var td = el("td", "cm-empty", "还没有定时任务。用上面的表单创建第一个（HTTP 请求或 AI 任务）。");
+      var td = el("td", "cm-empty", "还没有定时任务。用上面的表单创建第一个 AI 任务。");
       td.setAttribute("colspan", "7");
       tr.appendChild(td);
       rowsNode.appendChild(tr);
@@ -273,7 +364,11 @@
       if (task.triggerRequested) nameTd.appendChild(el("span", "cm-chip", "待运行"));
       tr.appendChild(nameTd);
 
-      tr.appendChild(el("td", "cm-col-type", typeLabel(task)));
+      var workspacePath = String(task.workspace || "");
+      var workspaceTd = el("td", "cm-col-workspace", workspacePath ? workspaceLabel(workspacePath) : "综合");
+      workspaceTd.title = workspacePath || (workspaceDefault ? "综合工作区（默认：" + workspaceDefault + "）" : DEFAULT_WORKSPACE_LABEL);
+      tr.appendChild(workspaceTd);
+
       tr.appendChild(el("td", "cm-col-cron", task.cron || ""));
       tr.appendChild(el("td", "cm-col-time", task.nextRunAt ? formatTime(task.nextRunAt) : "—"));
 
@@ -301,15 +396,25 @@
 
   // ---- 运行历史 ----
 
-  async function showRuns(id) {
-    var task = null;
+  var runsTaskId = null;
+  var triggerPollToken = 0;
+
+  function taskByID(id) {
+    var found = null;
     ((state && state.tasks) || []).forEach(function (t) {
-      if (t.id === id) task = t;
+      if (t.id === id) found = t;
     });
-    if (!runsSection) return;
-    runsSection.classList.remove("cm-hidden");
-    if (runsName) runsName.textContent = task ? task.name : id;
-    if (runsRows) runsRows.textContent = "";
+    return found;
+  }
+
+  function runCountOf(id) {
+    var task = taskByID(id);
+    return task && task.runs ? task.runs.length : 0;
+  }
+
+  async function loadRuns(id) {
+    if (!runsRows) return;
+    runsRows.textContent = "";
     try {
       var data = await api("/runs?id=" + encodeURIComponent(id) + "&limit=20");
       var runs = (data && data.runs) || [];
@@ -325,11 +430,10 @@
         var tr = document.createElement("tr");
         tr.appendChild(el("td", "cm-col-time", formatTime(run.at)));
         var st = el("td", "cm-col-status");
-        st.appendChild(el("span", "cm-run cm-run--" + (run.status === "ok" || run.status === "started" ? "ok" : run.status === "busy" || run.status === "missed" ? "warn" : run.status ? "bad" : "none"), runLabel(run.status)));
+        st.appendChild(el("span", "cm-run cm-run--" + (run.status === "started" ? "ok" : run.status === "busy" || run.status === "missed" ? "warn" : run.status ? "bad" : "none"), runLabel(run.status)));
         tr.appendChild(st);
         tr.appendChild(el("td", "cm-col-size", duration(run.durationMs)));
         var detail = run.detail || "";
-        if (run.httpStatus) detail = "HTTP " + run.httpStatus + (detail ? " · " + detail : "");
         if (run.threadId) detail = (detail ? detail + " · " : "") + "线程 " + run.threadId;
         tr.appendChild(el("td", "cm-value", detail || "—"));
         runsRows.appendChild(tr);
@@ -339,8 +443,45 @@
     }
   }
 
+  async function showRuns(id) {
+    var task = taskByID(id);
+    if (!runsSection) return;
+    runsTaskId = id;
+    runsSection.classList.remove("cm-hidden");
+    if (runsName) runsName.textContent = task ? task.name : id;
+    await loadRuns(id);
+  }
+
   function hideRuns() {
+    runsTaskId = null;
     if (runsSection) runsSection.classList.add("cm-hidden");
+  }
+
+  // 「立即运行」是异步的（cron 二进制下个 tick 消费），触发后轮询表格与历史，
+  // 让用户看到「已启动/线程忙/失败」而不是一片安静。
+  function waitForTriggerResult(id, before) {
+    var token = ++triggerPollToken;
+    var deadline = Date.now() + 15000;
+    function tick() {
+      if (token !== triggerPollToken) return;
+      loadState(true).then(function () {
+        if (runsTaskId === id) loadRuns(id);
+        var task = taskByID(id);
+        var runs = (task && task.runs) || [];
+        if (runs.length > before) {
+          var last = runs[runs.length - 1];
+          var tone = last.status === "started" ? "ok" : last.status === "busy" || last.status === "missed" ? "warn" : "bad";
+          status("立即运行结果：" + runLabel(last.status) + (last.detail ? "（" + last.detail + "）" : ""), tone);
+          return;
+        }
+        if (Date.now() > deadline) {
+          status("已触发；结果还没写入，稍后点「历史」查看。若一直为空，请确认 cron 调度器已启动。", "warn");
+          return;
+        }
+        setTimeout(tick, 2000);
+      });
+    }
+    setTimeout(tick, 1500);
   }
 
   // ---- 表单 ----
@@ -349,14 +490,9 @@
     editingId = task.id;
     if (nameInput) nameInput.value = task.name || "";
     syncCronPreviewFromTask(task.cron || "");
+    setWorkspaceValue(task.workspace || "");
     var action = task.action || {};
-    if (typeSelect) typeSelect.value = action.type === "agent" ? "agent" : "http";
-    if (urlInput) urlInput.value = action.url || "";
-    if (methodInput) methodInput.value = action.method === "POST" ? "POST" : "GET";
-    if (bodyInput) bodyInput.value = action.body || "";
-    if (timeoutInput) timeoutInput.value = action.timeoutMs ? String(action.timeoutMs) : "15000";
     if (textInput) textInput.value = action.text || "";
-    renderActionFields();
     if (submitBtn) submitBtn.textContent = "保存修改";
     if (cancelBtn) cancelBtn.classList.remove("cm-hidden");
     if (editingHint) editingHint.classList.remove("cm-hidden");
@@ -366,10 +502,10 @@
   function resetForm() {
     editingId = null;
     if (form) form.reset();
-    if (presetSelect) presetSelect.value = "*/5 * * * *";
+    setSelectValue(presetSelect, "*/5 * * * *");
     if (cronInput) cronInput.value = "";
     renderPresetFields();
-    renderActionFields();
+    setWorkspaceValue("");
     if (submitBtn) submitBtn.textContent = "创建任务";
     if (cancelBtn) cancelBtn.classList.add("cm-hidden");
     if (editingHint) editingHint.classList.add("cm-hidden");
@@ -390,41 +526,21 @@
       status(errorText(err), "warn");
       return;
     }
-    var isAgent = typeSelect && typeSelect.value === "agent";
-    var action;
-    if (isAgent) {
-      var text = textInput ? String(textInput.value || "").trim() : "";
-      if (!text) {
-        status("AI 任务需要提示词。", "warn");
-        return;
-      }
-      action = { type: "agent", text: text };
-    } else {
-      var url = urlInput ? String(urlInput.value || "").trim() : "";
-      if (!url) {
-        status("HTTP 任务需要 URL。", "warn");
-        return;
-      }
-      action = {
-        type: "http",
-        method: methodInput ? String(methodInput.value || "GET") : "GET",
-        url: url,
-      };
-      if (methodInput && methodInput.value === "POST" && bodyInput && bodyInput.value) {
-        action.body = String(bodyInput.value);
-      }
-      var timeout = Number(timeoutInput && timeoutInput.value);
-      if (timeout > 0) action.timeoutMs = timeout;
+    var text = textInput ? String(textInput.value || "").trim() : "";
+    if (!text) {
+      status("AI 任务需要提示词。", "warn");
+      return;
     }
-    var payload = { name: name, cron: cron, action: action, enabled: true };
+    var workspace = selectValue(workspaceSelect);
+    var payload = { name: name, cron: cron, workspace: workspace, action: { type: "agent", text: text }, enabled: true };
     busy = true;
     try {
       if (editingId) {
         await api("/update", { method: "POST", body: { id: editingId, task: payload } });
-        status("已保存修改。cron 二进制最迟约 15 秒内生效。", "ok");
+        status("已保存修改。cron 二进制最迟约 5 秒内生效。", "ok");
       } else {
         await api("/create", { method: "POST", body: payload });
-        status("已创建任务。cron 二进制最迟约 15 秒内生效。", "ok");
+        status("已创建任务。cron 二进制最迟约 5 秒内生效。", "ok");
       }
       resetForm();
       await loadState(true);
@@ -459,9 +575,11 @@
     if (busy) return;
     busy = true;
     try {
+      var before = runCountOf(id);
       await api("/trigger", { method: "POST", body: { id: id } });
-      status("已标记立即运行，cron 二进制最迟约 15 秒内执行；可点「历史」查看结果。", "ok");
+      status("已标记立即运行，cron 二进制最迟约 5 秒内执行；正在等待结果…", "ok");
       await loadState(true);
+      waitForTriggerResult(id, before);
     } catch (err) {
       status("操作失败：" + errorText(err), "bad");
     } finally {
@@ -498,12 +616,11 @@
 
   // ---- 事件绑定 ----
 
-  if (refreshBtn) refreshBtn.addEventListener("click", function () { loadState(false); });
-  if (presetSelect) presetSelect.addEventListener("change", renderPresetFields);
+  if (refreshBtn) refreshBtn.addEventListener("click", function () { loadWorkspaces(); loadState(false); });
+  if (presetSelect) presetSelect.addEventListener("ada:select", renderPresetFields);
   if (dailyTime) dailyTime.addEventListener("change", renderPresetFields);
-  if (weeklyDay) weeklyDay.addEventListener("change", renderPresetFields);
+  if (weeklyDay) weeklyDay.addEventListener("ada:select", renderPresetFields);
   if (weeklyTime) weeklyTime.addEventListener("change", renderPresetFields);
-  if (typeSelect) typeSelect.addEventListener("change", renderActionFields);
   if (form) form.addEventListener("submit", submitForm);
   if (cancelBtn) cancelBtn.addEventListener("click", resetForm);
   if (runsClose) runsClose.addEventListener("click", hideRuns);
@@ -525,6 +642,6 @@
   }
 
   renderPresetFields();
-  renderActionFields();
+  loadWorkspaces();
   loadState(false);
 })();

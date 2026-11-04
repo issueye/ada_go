@@ -1295,7 +1295,7 @@ func TestWorkspacePickerOnlyWhenMultiple(t *testing.T) {
 
 	single, _ := newServer(t, core)
 	body := serve(t, single, "GET", "/", nil).Body.String()
-	// 单工作区也保留切换入口（/workspaces），但不再有内联 index 选择表单。
+	// 单工作区也保留「打开工作区」入口（/workspaces）；内联 index 选择表单已移除。
 	wantContains(t, body, `href="/workspaces"`)
 	wantNotContains(t, body, `action="/workspace"`)
 
@@ -1824,10 +1824,12 @@ func TestThreadPageUsesAdaShellAndComponentDOM(t *testing.T) {
 	for _, class := range []string{
 		`class="ada-shell"`,
 		`class="ada-sidebar"`,
+		`class="ada-sidebar__resizer"`,
 		`class="ada-side"`,
-		`class="ada-ws-switch"`,
+		`class="ada-ws"`,
+		`class="ada-ws__summary"`,
 		`class="ada-search"`,
-		`class="ada-thread-list"`,
+		`class="ada-thread-list ada-thread-list--split"`,
 		`class="ada-rail"`,
 		`class="ada-main"`,
 		`class="ada-topbar"`,

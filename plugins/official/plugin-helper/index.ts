@@ -1,6 +1,7 @@
 // plugin-helper 后端：插件助手——安装与健康检查。
 //
-//   - route POST /create：向导页面（表单），AI 不参与；
+//   - route POST /create：CLI/测试用（管理页已移除，创建插件走对话里的
+//     create_plugin 工具）；
 //   - 工具 create_plugin：模型在对话里被要求“创建一个 XXX 插件”时调用，
 //     入口源码由模型生成后作为参数传入；
 //   - 工具 check_plugin：检查任意插件的发现位置/启停/装配状态与错误详情，
@@ -306,7 +307,7 @@ async function createPlugin(ctx: CommonContext, raw: Record<string, unknown>) {
   const id = normalizeID(raw.id);
   const name = text(raw.name, 80) || id;
   const description = text(raw.description, 500) || `${name} 插件`;
-  // 工具参数用 tool_name（工具 schema 惯例）；向导 route 的表单用 toolName。
+  // 工具参数用 tool_name（工具 schema 惯例）；route 的表单用 toolName。
   const toolRaw = raw.tool_name !== undefined ? raw.tool_name : raw.toolName;
   const toolName = normalizeTool(toolRaw, id);
   const entry = normalizeEntry(raw.entry, toolName);
@@ -384,7 +385,7 @@ export default function (agent: AgentAPI): void {
     };
   });
 
-  // 健康检查 route：向导页/测试用；AI 侧等价能力是 check_plugin 工具。
+  // 健康检查 route：CLI/测试用；AI 侧等价能力是 check_plugin 工具。
   // 注意：无 body 的调用里 req 是 undefined（callArgs 只在有载荷时给第一参）。
   agent.route("POST", "/check-plugin", async (req, ctx) => {
     if (!ctx.pluginAdmin) fail("检查插件需要 plugin.admin 能力（宿主未授予诊断桥）");
@@ -395,7 +396,7 @@ export default function (agent: AgentAPI): void {
     return ctx.pluginAdmin.check(String(body.id || ""));
   });
 
-  // 移除 route：与 remove_plugin 工具同义（页面/测试用）。
+  // 移除 route：与 remove_plugin 工具同义（CLI/测试用）。
   agent.route("POST", "/remove-plugin", async (req, ctx) => {
     if (!ctx.pluginAdmin) fail("移除插件需要 plugin.admin 能力（宿主未授予安装桥）");
     const r = (req || {}) as { body?: unknown };

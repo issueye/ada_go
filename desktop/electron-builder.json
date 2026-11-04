@@ -13,7 +13,7 @@
     "package.json"
   ],
   "extraResources": [
-    { "from": "bin", "to": "bin", "filter": ["adag.exe", "adag"] },
+    { "from": "bin", "to": "bin", "filter": ["adag.exe", "adag", "cron.exe", "cron"] },
     { "from": "products", "to": "products" },
     { "from": "../plugins/official", "to": "plugins/official" },
     { "from": "build/app.ico", "to": "icon.ico" },

@@ -127,6 +127,23 @@
   font-size: var(--ada-text-sm);
 }
 
+/* 调度预设字段给足宽度：下拉菜单与触发器同宽收在卡片内，不再向右溢出/压住表格。 */
+.cm-field--preset {
+  flex: 0 0 220px;
+}
+.cm-field--preset .ada-select__menu {
+  right: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+/* 宿主 Select（ada-select）：触发器沿用 .cm-input；选项单行，超长省略。 */
+.cm-form .ada-select__option {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .cm-input:focus {
   outline: none;
   border-color: color-mix(in srgb, var(--ph-ink) 36%, transparent);
@@ -180,7 +197,14 @@
   min-width: 140px;
 }
 
-.cm-col-type,
+.cm-col-workspace {
+  min-width: 90px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .cm-col-size {
   width: 90px;
   white-space: nowrap;

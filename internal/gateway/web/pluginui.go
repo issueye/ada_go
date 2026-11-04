@@ -194,8 +194,10 @@ func (s *Server) handleExtPage(w http.ResponseWriter, r *http.Request) {
 			err.Error(), "/", "返回")
 		return
 	}
+	// 侧栏固定展示当前工作区的会话；插件页不能因为没传 threads 就变成空列表。
+	threads, _ := s.listThreads(r, 50)
 	data := extPageData{
-		baseData: s.base(r, "ext:"+id, title, nil, "", true),
+		baseData: s.base(r, "ext:"+id, title, threads, "", true),
 		PluginID: id,
 		Slug:     slug,
 		Content:  content,

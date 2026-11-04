@@ -899,7 +899,7 @@ details:not([open]) > :not(summary) {
 /* ── 输入框 ─────────────────────────────────────────────────────────────── */
 .ada-composer {
   flex-shrink: 0;
-  padding: 8px 24px 10px;
+  padding: 8px 24px 0px;
   background: var(--ph-surface);
 }
 .ada-composer__card {

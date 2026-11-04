@@ -4,6 +4,7 @@ go 1.27.3
 
 require (
 	github.com/MoeForge/moejs v0.1.0-alpha.11
+	github.com/egoist/mygo v0.7.4
 )
 
 require (

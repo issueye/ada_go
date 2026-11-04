@@ -3,9 +3,8 @@
     <div class="ada-wrap ada-wrap--page">
       {{template "flash" .}}
       <div class="ada-section-head">
-        <div>
-          <h1 class="ada-page-title">{{if .Plugin.Name}}{{.Plugin.Name}}{{else}}{{.Plugin.ID}}{{end}}</h1>
-          <p class="ada-page-sub">{{.Plugin.ID}}{{if .Plugin.Version}} · v{{.Plugin.Version}}{{end}}</p>
+        <div class="ada-page-title">
+          {{.Plugin.Name}} {{.Plugin.ID}}{{if .Plugin.Version}} · v{{.Plugin.Version}}{{end}}
         </div>
         {{/* 插件级动作放在页头：与「返回插件列表」同排，不随文件/信息面板滚动。 */}}
         <div class="ada-section-head__actions">

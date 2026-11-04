@@ -176,7 +176,7 @@ Render Runtime **不安装 Node 兼容层**：没有 `process`、`Buffer`、`fs`
 - `data.interactions`：`thread.get` 返回的当前线程待答交互（审批/选择/输入）；
 - `app.csrf`：写表单的双提交 token（与基座模板里的隐藏字段同源）。
 
-写操作仍走基座路由（如 `POST /model/select` 切换当前模型）或插件动作；投影只读，不改 Core 状态。当前渲染运行时的组件实现面是 `Icon` / `TodoList`，其它组件名虽在白名单里，执行会返回「尚未实现」——官方插件优先用原生标签 + `ada-*` class。
+写操作仍走基座路由（如 `POST /model/select` 切换当前模型）或插件动作；投影只读，不改 Core 状态。当前渲染运行时的组件实现面是 `Icon` / `TodoList` / `Select`，其它组件名虽在白名单里，执行会返回「尚未实现」——官方插件优先用原生标签 + `ada-*` class；下拉一律用 `Select` 组件（SSR 成 `<ada-select>`），不要写原生 `<select>`。
 
 **Props**：
 
@@ -321,7 +321,7 @@ Go 组件库按 a_da 的组件清单实现，名字与输出对齐：
 |---|---|---|
 | `Button` / `IconButton` / `SendButton` | 同名 | 变体、尺寸、`kind` 与焦点态一致；图标按钮强制 `aria-label` |
 | `Chip` | `Chip` | 模式、审批档位、模型；tone 与 caret 行为一致 |
-| `TextField` / `Select` | 同名 | `Select` 仍是组件化下拉，不是原生 `<select>` |
+| `TextField` / `Select` | 同名 | `Select` 仍是组件化下拉，不是原生 `<select>`；插件页通过 `ssr:components` 的 `Select` 使用同一套 `<ada-select>`（触发器 + listbox + 隐藏 input） |
 | `Tabs` / `TabItem` | `Tabs` | 导航条归组件库，面板归页面；无 JS 时是真实链接 `?tab=` |
 | `Modal` / `ConfirmDialog` | 同名 | 必须用 `<ada-modal>`；不用原生 `<dialog>`、`window.confirm` |
 | `Disclosure` / `Panel` | 同名 | 工具、思考、压缩的单行折叠与展开面板 |
@@ -379,7 +379,8 @@ Todo 卡片是插件的前端段，不是基座组件：`plugins/official/tools-
 | `GET /`、`GET /threads`、`GET /threads/{id}` | 对话页 / 会话页（持久化行可用 AdaUI keyed patch；流式仍走 SSE + live-stream） | `thread.list`、`thread.get`、`thread.entries` |
 | `POST /threads/{id}/send`、`POST /threads/{id}/resend` | 发送 / 编辑并重发。`resend` 把 head 移到目标用户消息的父节点（首条则清空 head），再用新文本 `turn.start`；该消息之后的当前分支被舍弃，旧分支只留在存储里 | `turn.start`、`turn.steer`、`thread.branch` |
 | `GET /overview`、`GET /partials/dashboard.json` | 概览（统计卡、最近会话、插件卡片；AdaUI 岛每 5 秒轮询 JSON） | `thread.list`、`plugin.list`、`dashboard.widgets` 插槽 |
-| `GET /workspaces` | 工作区选择（AdaUI 岛 + SSR 回退；目录浏览限制在当前工作区子树内） | Gateway 配置 + `os.ReadDir` |
+| `GET /workspaces` | 打开工作区（从磁盘选择新目录；AdaUI 岛 + SSR 回退；目录浏览限制在当前工作区子树内）。切换已打开的工作区在侧栏完成 | Gateway 配置 + `os.ReadDir` |
+| `GET /partials/workspace-threads?path=` | 侧栏其它工作区组展开时的会话片段（HTML，懒加载；只查目标工作区的 Core） | `thread.list` |
 | `GET /extensions` | 插件列表（AdaUI 岛 + SSR 回退；全部随包/已安装插件合并成一张表，不分区；产品未声明的随包插件显示为「未启用 / unused」，不误报 failed） | `PluginLister`、`plugin.list`、`extensions.list` 插槽 |
 | `GET /extensions/{id}` | 插件详情（AdaUI 岛 + SSR 回退；前端/后端归属、能力计数、启停、打开插件页面） | 同上 |
 | `GET/POST /ext/provider-admin/api/*` | 模型设置插件的 route：`/state` 读配置，`/save`、`/remove`、`/fetch-models`、`/select` 管理供应商与当前模型 | Core `plugin.http` → 插件 `ctx.providers` |

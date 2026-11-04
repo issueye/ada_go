@@ -205,7 +205,7 @@ html, err := frontend.RenderHTML(raw) // 校验 + 转义 + 长度上限
 - class 与 `data-*` 是键值，不靠手写；
 - 同一个 VNode 可以直接发给浏览器，不需要再写第二份 HTML。
 
-注意：`frontend.RenderHTML` 目前只实现了 `Icon` 与 `TodoList` 两个宿主组件
+注意：`frontend.RenderHTML` 目前只实现了 `Icon`、`TodoList` 与 `Select` 三个宿主组件
 （07 §7.3）。SSR 的组件要么落成原生标签 + `ada-*` class，要么先扩展
 `renderComponent` 的白名单；不要在服务端输出一个浏览器端才认识的组件名。
 

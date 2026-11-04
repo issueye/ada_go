@@ -13,15 +13,23 @@ mask with `Take over`, and `browser-use run flow.ts` on moejs.
 
 ## Build and run
 
-Requires Go 1.27.3+ and the mygo checkout at `../../../mygo` (the `go.mod`
-replace; in this repo layout that is `E:\codes\go_projects\mygo`). Inside the
-ada-go repo the parent `go.work` does not list this module, so build with
-`GOWORK=off`:
+Requires Go 1.27.3+ (`github.com/egoist/mygo v0.7.4` is a normal module
+dependency; no replace directive is needed). Inside the ada-go repo the parent
+`go.work` does not list this module, so build with `GOWORK=off`. From the repo
+root the unified MCP build script writes the binary to the path the ada-go
+`browser-use` plugin auto-discovers:
 
-```sh
-GOWORK=off go build -o bin/browser-use.exe .
+```powershell
+.\scripts\build-mcp.cmd          # also builds computer-use
+# or only this module:
+cd mcp_projects\browser_use
+$env:GOWORK = "off"
+go build -trimpath -ldflags "-H windowsgui" -o bin\browser-use.exe .
 .\bin\browser-use.exe --url https://example.com
 ```
+
+`mcp_projects/browser_use/bin/browser-use.exe` is what the official
+`browser-use` plugin uses when `BROWSER_USE_EXE` is not set.
 
 The fixture pages used in development live in `testdata/site`:
 `node testdata/site/server.mjs 8765`.

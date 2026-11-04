@@ -1119,6 +1119,7 @@ select:focus {
 /* ── 页面宽度：模板不再写内联 style（CSP style-src 'self' 会拦掉） ────── */
 .ada-wrap--page {
   max-width: 1040px;
+  height: 100%;
 }
 .ada-wrap--narrow {
   max-width: 520px;
@@ -1186,8 +1187,13 @@ html:not(.js) .ada-select [data-select-menu] {
   background: var(--ph-surface);
 }
 
+#plugin-detail-island {
+  height: 100%;
+}
+
 /* ── 插件详情：左侧文件树，右侧文件内容 ─────────────────────────────── */
 .ada-plugin-detail {
+  height: 100%;
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
   gap: 12px;
@@ -1199,10 +1205,12 @@ html:not(.js) .ada-select [data-select-menu] {
   min-width: 0;
 }
 .ada-plugin-detail__main {
+  height: calc(100% - 28px);
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+  overflow: auto;
 }
 .ada-plugin-nav {
   display: flex;
@@ -1314,6 +1322,9 @@ html:not(.js) .ada-select [data-select-menu] {
   font-weight: 600;
   color: var(--ph-ink);
 }
+.ada-plugin-panel {
+  overflow: auto;
+}
 .ada-plugin-section__meta {
   font-size: 12px;
   font-weight: 400;
@@ -1324,8 +1335,6 @@ html:not(.js) .ada-select [data-select-menu] {
   border: 1px solid var(--ph-line);
   border-radius: var(--ada-radius-sm);
   background: var(--ph-subtle);
-  max-height: 420px;
-  overflow: auto;
 }
 .ada-plugin-files {
   list-style: none;
@@ -1472,6 +1481,7 @@ html:not(.js) .ada-select [data-select-menu] {
 
 /* 右侧文件内容 */
 .ada-plugin-viewer {
+  height: 100%;
   overflow: hidden;
   padding: 0;
 }
@@ -1527,10 +1537,9 @@ html:not(.js) .ada-select [data-select-menu] {
   background: var(--ph-surface);
 }
 .ada-plugin-viewer__code {
+  height: calc(100% - 47px);
   margin: 0;
   padding: 14px 16px;
-  max-height: calc(100vh - 260px);
-  max-height: calc(100dvh - 260px);
   overflow: auto;
   background: var(--ph-surface);
   color: var(--ph-ink);
@@ -2323,12 +2332,12 @@ body.ada-flash-open .ada-corner-dock {
 
 /* ── 二级页组件方言（批次 D #15；19-ued §19.4）────────────────────────
    workspaces / extensions / overview 的页面骨架从 app.css 基线类
-   （page-title/section-*/badge/card/input/table/empty-state/link）统一到
+   （page-title/section-* /badge/card/input/table/empty-state/link）统一到
    ada-* 语义；这里只补 ada 层缺的「页面级」组件，全部只引用令牌。
    app.css 保留为 preflight + 冻结工具类基线（结论见 ui-optimization-plan P5）。 */
 .ada-page-title {
   font-size: var(--ada-text-lg);
-  line-height: 1.3;
+  line-height: 1.4;
   font-weight: 600;
   color: var(--ph-ink);
 }
@@ -2347,6 +2356,8 @@ body.ada-flash-open .ada-corner-dock {
 }
 .ada-section-head__actions {
   flex-shrink: 0;
+  display: flex;
+  gap: var(--ada-space-3);
 }
 .ada-section-title {
   font-size: var(--ada-text-base);

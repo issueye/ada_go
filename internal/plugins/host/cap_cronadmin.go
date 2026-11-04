@@ -16,7 +16,7 @@ package host
 //   - trigger(id)               打「立即运行」标记（cron 二进制下个 tick 消费）；
 //   - runs(id, limit?)          运行历史（最新在前）。
 //
-// 审计只记 id、名称与动作类型：提示词与 URL 不进审计日志。
+// 审计只记 id、名称与动作类型（固定为 agent）：提示词不进审计日志。
 
 import (
 	"encoding/json"
@@ -170,8 +170,15 @@ func addCronAdminContextMember(st *capsState, hc Context, put func(string, moejs
 				// 启停与运行态字段不通过 update 修改：enabled 归 setEnabled 专属
 				// （编辑停用中的任务不会把它意外重新启用），其余归 cron 二进制。
 				next.Enabled = prev.Enabled
-				next.Runs, next.ThreadID, next.LastFiredAt = prev.Runs, prev.ThreadID, prev.LastFiredAt
+				next.Workspace = strings.TrimSpace(next.Workspace)
+				next.Runs, next.LastFiredAt = prev.Runs, prev.LastFiredAt
 				next.TriggerRequested = prev.TriggerRequested
+				// 任务专用线程属于旧工作区：换工作区后线程 id 失效，清掉让下次
+				// 运行在新工作区重建（否则会连续失败一次再自愈）。
+				next.ThreadID = prev.ThreadID
+				if next.Workspace != prev.Workspace {
+					next.ThreadID = ""
+				}
 				if err := cronstore.ValidateTask(&next); err != nil {
 					return err
 				}

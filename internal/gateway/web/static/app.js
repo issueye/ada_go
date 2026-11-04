@@ -530,6 +530,118 @@
     syncToggle();
   }
 
+  /* ── 侧栏宽度：右缘拖拽（宽屏展开态） ───────────────────────────────
+     宽度写进 --ada-sidebar-width，首帧由 sidebar-boot.js 预置以免闪动；
+     拖拽只改 CSS 变量，松手才落 localStorage。窄屏抽屉与折叠窄轨不参与。 */
+  var SIDEBAR_WIDTH_KEY = 'a_da_sidebar_width';
+  var SIDEBAR_WIDTH_MIN = 200;
+  var SIDEBAR_WIDTH_MAX = 420;
+  var SIDEBAR_WIDTH_DEFAULT = 264;
+
+  function clampSidebarWidth(width) {
+    var max = Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, window.innerWidth - 360));
+    return Math.round(Math.min(Math.max(width, SIDEBAR_WIDTH_MIN), max));
+  }
+
+  function readSidebarWidth() {
+    try {
+      var stored = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
+      if (isFinite(stored) && stored >= SIDEBAR_WIDTH_MIN && stored <= SIDEBAR_WIDTH_MAX) return stored;
+    } catch (error) {
+      /* 存储不可用：用默认宽度 */
+    }
+    return SIDEBAR_WIDTH_DEFAULT;
+  }
+
+  function applySidebarWidth(width, persist) {
+    var value = clampSidebarWidth(width);
+    document.documentElement.style.setProperty('--ada-sidebar-width', value + 'px');
+    var handle = document.querySelector('[data-sidebar-resizer]');
+    if (handle) handle.setAttribute('aria-valuenow', String(value));
+    if (persist) {
+      try {
+        window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(value));
+      } catch (error) {
+        /* 忽略 */
+      }
+    }
+    return value;
+  }
+
+  function bindSidebarResizer() {
+    var handle = document.querySelector('[data-sidebar-resizer]');
+    if (!handle) return;
+    applySidebarWidth(readSidebarWidth(), false);
+
+    var drag = null;
+    function onMove(event) {
+      if (!drag || event.pointerId !== drag.id) return;
+      applySidebarWidth(drag.startWidth + (event.clientX - drag.startX), false);
+    }
+    function onUp(event) {
+      if (!drag || event.pointerId !== drag.id) return;
+      applySidebarWidth(drag.startWidth + (event.clientX - drag.startX), true);
+      drag = null;
+      handle.classList.remove('is-dragging');
+      document.body.classList.remove('ada-sidebar-resizing');
+      try {
+        handle.releasePointerCapture(event.pointerId);
+      } catch (error) {
+        /* 没有捕获也无需处理 */
+      }
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    }
+
+    handle.addEventListener('pointerdown', function (event) {
+      if (event.button !== 0 || narrowQuery.matches || isCollapsed()) return;
+      event.preventDefault();
+      try {
+        handle.focus({ preventScroll: true });
+      } catch (error) {
+        handle.focus();
+      }
+      drag = {
+        id: event.pointerId,
+        startX: event.clientX,
+        startWidth: sidebar() ? sidebar().getBoundingClientRect().width : SIDEBAR_WIDTH_DEFAULT
+      };
+      handle.classList.add('is-dragging');
+      document.body.classList.add('ada-sidebar-resizing');
+      try {
+        handle.setPointerCapture(event.pointerId);
+      } catch (error) {
+        /* 指针捕获失败时 window 监听仍能收到移动 */
+      }
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+    });
+
+    // 键盘可达：左右 16px、Home/End 到边界、双击恢复默认。
+    handle.addEventListener('keydown', function (event) {
+      if (narrowQuery.matches || isCollapsed()) return;
+      var current = sidebar() ? sidebar().getBoundingClientRect().width : SIDEBAR_WIDTH_DEFAULT;
+      var next = null;
+      if (event.key === 'ArrowLeft') next = current - 16;
+      else if (event.key === 'ArrowRight') next = current + 16;
+      else if (event.key === 'Home') next = SIDEBAR_WIDTH_MIN;
+      else if (event.key === 'End') next = SIDEBAR_WIDTH_MAX;
+      if (next === null) return;
+      event.preventDefault();
+      applySidebarWidth(next, true);
+    });
+    handle.addEventListener('dblclick', function () {
+      if (narrowQuery.matches || isCollapsed()) return;
+      applySidebarWidth(SIDEBAR_WIDTH_DEFAULT, true);
+    });
+
+    window.addEventListener('resize', function () {
+      applySidebarWidth(readSidebarWidth(), false);
+    });
+  }
+
   document.addEventListener('click', function (event) {
     var target = event.target;
     if (!target || !target.closest) return;
@@ -687,10 +799,11 @@
     var input = document.getElementById('chat-thread-search');
     if (!input) return;
     var count = document.querySelector('.ada-search__count');
-    var rows = document.querySelectorAll('[data-thread-row]');
 
     function apply() {
       var needle = input.value.trim().toLowerCase();
+      // 每次重新取：其它工作区的会话是展开时懒加载进来的，绑定时的快照会漏。
+      var rows = document.querySelectorAll('#thread-list [data-thread-row]');
       var visible = 0;
       for (var i = 0; i < rows.length; i += 1) {
         var title = rows[i].querySelector('.ada-thread__title');
@@ -700,16 +813,17 @@
         if (hit) visible += 1;
       }
 
-      // 「其它工作区」的分组标题跟着可见行一起收起。
+      // 有搜索词时，没有命中行的分组（含尚未懒加载的其它工作区）一起收起；
+      // 清空后恢复全部分组，否则空分组会被永久隐藏。
       var groups = document.querySelectorAll('#thread-list .ada-ws');
       var anyGroup = false;
       for (var g = 0; g < groups.length; g += 1) {
         var hasRow = !!groups[g].querySelector('[data-thread-row]:not([hidden])');
-        groups[g].hidden = !hasRow;
+        groups[g].hidden = needle ? !hasRow : false;
         if (hasRow) anyGroup = true;
       }
       var section = document.querySelector('[data-ws-section]');
-      if (section) section.hidden = !anyGroup;
+      if (section) section.hidden = needle ? !anyGroup : false;
 
       if (count) {
         count.hidden = !needle;
@@ -745,6 +859,85 @@
     if (railSearch) railSearch.addEventListener('click', focusSearch);
   }
 
+  /* 选择/登记工作区：POST /api/workspace/select 记住 cookie，成功后调用方刷新页面。 */
+  function selectWorkspace(path) {
+    var csrf = document.querySelector('meta[name="csrf-token"]');
+    var body = new URLSearchParams();
+    body.set("path", path);
+    return fetch("/api/workspace/select", {
+      method: "POST",
+      credentials: "same-origin",
+      redirect: "manual",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-CSRF-Token": csrf ? csrf.getAttribute("content") : ""
+      },
+      body: body.toString()
+    }).then(function (res) {
+      if (res.type === "opaqueredirect" || res.ok) return true;
+      return res.text().then(function (text) {
+        throw new Error(text || ("HTTP " + res.status));
+      });
+    });
+  }
+
+  /* 侧栏工作区树：工作区头部「+」打开目录选择器；其它工作区组展开时懒加载会话。
+     会话片段由服务端渲染（同一套转义与行模板），客户端只做节点替换。 */
+  function bindWorkspaceTree() {
+    var opener = document.querySelector('[data-open-workspace]');
+    if (opener && window.AdaFilePicker) {
+      opener.addEventListener('click', function (event) {
+        event.preventDefault();
+        window.AdaFilePicker.open({
+          current: opener.getAttribute('data-current-workspace') || '',
+          onSelect: function (workspace) {
+            if (!workspace || !workspace.path) return;
+            selectWorkspace(workspace.path).then(function () {
+              window.location.reload();
+            }).catch(function (err) {
+              notify("打开工作区失败：" + (err && err.message ? err.message : err), "error");
+            });
+          }
+        });
+      });
+    }
+
+    var groups = document.querySelectorAll('#thread-list .ada-ws');
+    for (var i = 0; i < groups.length; i += 1) {
+      (function (group) {
+        var details = group.querySelector('.ada-ws__details');
+        if (!details || details.open) return; // 当前工作区已由服务端渲染
+        var path = group.getAttribute('data-ws-path');
+        var body = group.querySelector('[data-ws-threads]');
+        if (!path || !body) return;
+        var loaded = false;
+        details.addEventListener('toggle', function () {
+          if (!details.open || loaded) return;
+          loaded = true;
+          body.innerHTML = '<p class="ada-ws__empty">正在加载会话…</p>';
+          fetch('/partials/workspace-threads?path=' + encodeURIComponent(path), {
+            headers: { Accept: 'text/html' },
+            credentials: 'same-origin'
+          }).then(function (res) {
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return res.text();
+          }).then(function (html) {
+            body.innerHTML = html;
+            var count = group.querySelector('[data-ws-count]');
+            if (count) {
+              count.textContent = String(body.querySelectorAll('[data-thread-row]').length);
+              count.hidden = false;
+            }
+          }).catch(function (err) {
+            loaded = false; // 允许重新展开重试
+            body.innerHTML = '<p class="ada-ws__empty">读取会话失败，收起后重新展开重试</p>';
+            console.warn('workspace threads', err);
+          });
+        });
+      })(groups[i]);
+    }
+  }
+
   /* ── 新建任务：工作区选择 + 居中输入 ─────────────────────────────────
      有 JS 时把服务端渲染的原生 select 换成 FilePicker 弹窗；没有 JS 时
      原生 select 照常提交。hidden 字段只在增强成功后才有 name，避免两个
@@ -762,26 +955,8 @@
       if (!workspace || !hidden) return;
       // 选中即落 cookie：模型选择等操作会整页 reload，未提交的工作区选择
       // 不能因此丢回旧工作区（否则模型列表会突然换一套供应商）。
-      var csrf = document.querySelector('meta[name="csrf-token"]');
-      var body = new URLSearchParams();
-      body.set("path", workspace.path);
-      fetch("/api/workspace/select", {
-        method: "POST",
-        credentials: "same-origin",
-        redirect: "manual",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "X-CSRF-Token": csrf ? csrf.getAttribute("content") : ""
-        },
-        body: body.toString()
-      }).then(function (res) {
-        if (res.type === "opaqueredirect" || res.ok) {
-          window.location.reload();
-          return null;
-        }
-        return res.text().then(function (text) {
-          throw new Error(text || ("HTTP " + res.status));
-        });
+      selectWorkspace(workspace.path).then(function () {
+        window.location.reload();
       }).catch(function (err) {
         notify("切换工作区失败：" + (err && err.message ? err.message : err), "error");
       });
@@ -839,6 +1014,8 @@
     bindScrollBottom();
     bindAskWizards(document);
     bindThreadSearch();
+    bindWorkspaceTree();
+    bindSidebarResizer();
     bindNewTask();
     bindModelCascades();
     bindNewTaskShortcut();

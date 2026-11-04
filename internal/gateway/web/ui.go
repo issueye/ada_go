@@ -2,7 +2,7 @@ package web
 
 // 本文件是 a_da 组件库（crates/agent-web/src/ui）的 Go 移植：
 //   - 图标 sprite（唯一来源）；
-//   - 侧栏（品牌 / 新会话 / 工作区切换 / 搜索 / 会话树 / 系统导航 / 窄轨）；
+//   - 侧栏（品牌 / 新会话 / 工作区列表 / 搜索 / 会话树 / 系统导航 / 窄轨）；
 //   - 行渲染与面板所需的少量 HTML 片段；
 //   - Markdown 渲染（助手正文）。
 //
@@ -14,6 +14,7 @@ import (
 	"html"
 	"html/template"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -273,6 +274,7 @@ type sidebarGroup struct {
 	Key     string
 	Path    string
 	Name    string
+	Index   int // 在网关工作区列表中的下标；会话链接用 ?ws=<index> 显式切工作区
 	Threads []sidebarThread
 	Count   int
 	Running bool
@@ -281,8 +283,6 @@ type sidebarGroup struct {
 
 type sidebarData struct {
 	Active             string // chat | overview | extensions | ext:<id>
-	WorkspaceName      string
-	WorkspacePath      string
 	Gateway            string
 	Groups             []sidebarGroup
 	ActiveThreadID     string
@@ -413,13 +413,14 @@ func renderSidebar(d sidebarData) template.HTML {
 	b.WriteString(`<a class="ada-new ada-btn ada-btn--secondary ada-btn--sm" href="/" data-new-task-link title="新建任务（Ctrl N）">`)
 	b.WriteString(string(iconHTML("i-plus", 14)))
 	b.WriteString(`<span>新建任务</span><kbd class="ada-new__kbd">Ctrl N</kbd></a>`)
-	// 工作区切换器
+	// 工作区列表直接铺在侧栏：每个工作区一组会话，切换不再跳单独的管理页。
+	// 右侧「+」打开工作区目录（有 JS 走 FilePicker，无 JS 退回 /workspaces 目录页）。
+	b.WriteString(`<div class="ada-ws-head"><span class="ada-ws-head__label">工作区</span>`)
 	b.WriteString(fmt.Sprintf(
-		`<a class="ada-ws-switch" href="/workspaces"%s>%s<span class="ada-ws-switch__name">%s</span>%s%s</a>`,
-		attr("title", fmt.Sprintf("当前工作区：%s（点击切换）", d.WorkspacePath)),
-		iconHTML("i-folder", 14), esc(d.WorkspaceName),
-		countHTML(d.threadCount()), iconHTML("i-chevron-down", 12),
+		`<a class="ada-ws-head__add" href="/workspaces" data-open-workspace data-current-workspace="%s" title="打开工作区…" aria-label="打开工作区…">%s</a>`,
+		esc(head.Path), iconHTML("i-plus", 14),
 	))
+	b.WriteString(`</div>`)
 	if d.Search {
 		b.WriteString(fmt.Sprintf(
 			`<div class="ada-search">%s<input id="chat-thread-search" class="ada-search__input" type="search" placeholder="搜索会话…" autocomplete="off" aria-label="搜索会话"><kbd class="ada-search__kbd">Ctrl K</kbd><span class="ada-search__count" hidden></span></div>`,
@@ -427,7 +428,12 @@ func renderSidebar(d sidebarData) template.HTML {
 		))
 	}
 	// 会话树
-	b.WriteString(`<div class="ada-thread-list" id="thread-list">`)
+	threadListClass := "ada-thread-list"
+	if len(d.Groups) > 1 {
+		// 有其它工作区时拆成上下两块：当前工作区固定，其它工作区单独滚动。
+		threadListClass += " ada-thread-list--split"
+	}
+	b.WriteString(fmt.Sprintf(`<div class="%s" id="thread-list">`, threadListClass))
 	b.WriteString(renderThreadTree(d.Groups, d.ActiveThreadID, d.CSRF, d.CurrentPath))
 	b.WriteString(`</div>`)
 	// 系统导航
@@ -474,6 +480,8 @@ func renderSidebar(d sidebarData) template.HTML {
 		iconHTML("i-moon", 14), iconHTML("i-sun", 14), renderThemePanel(), attr("title", title), dot, esc(displayAddress(d.Gateway)),
 	))
 	b.WriteString(`</div>`)
+	// 右侧拖拽条：宽屏展开态可左右调整侧栏宽度（JS 接管；窄屏抽屉/窄轨下隐藏）。
+	b.WriteString(`<div class="ada-sidebar__resizer" data-sidebar-resizer role="separator" aria-orientation="vertical" aria-label="调整侧栏宽度" aria-valuemin="200" aria-valuemax="420" aria-valuenow="264" title="拖动调整侧栏宽度（双击恢复默认）" tabindex="0"></div>`)
 	b.WriteString(rail.String())
 	b.WriteString(`</aside>`)
 	return template.HTML(b.String())
@@ -491,14 +499,6 @@ func (d sidebarData) headGroup() sidebarGroup {
 	return sidebarGroup{}
 }
 
-func (d sidebarData) threadCount() int {
-	n := 0
-	for _, g := range d.Groups {
-		n += g.Count
-	}
-	return n
-}
-
 func boolClass(v bool, cls string) string {
 	if v {
 		return cls
@@ -512,13 +512,6 @@ func csrfInput(token string) string {
 		return ""
 	}
 	return `<input type="hidden" name="csrf_token" value="` + esc(token) + `">`
-}
-
-func countHTML(n int) string {
-	if n == 0 {
-		return ""
-	}
-	return fmt.Sprintf(`<span class="ada-ws-switch__count">%d</span>`, n)
 }
 
 func navItem(active, key, icon, label, href string) string {
@@ -536,33 +529,113 @@ func railLink(active, key, icon, label, href string) string {
 	return fmt.Sprintf(`<a class="%s" href="%s"%s>%s</a>`, cls, esc(href), attr("title", label), iconHTML(icon, 18))
 }
 
-// renderThreadTree 渲染会话树。历史上这里支持「其它工作区」分组折叠，
-// 但 sidebarGroups 只产出当前工作区一组（跨工作区列表需要各自的 Core 查询，
-// 见 server.go 的注释），折叠分支从未被走到——2026-11 死路径清理（批次 C），
-// 多工作区切换走 /workspaces 页。
+// renderThreadTree 渲染侧栏的工作区/会话树：当前工作区默认展开并直接列出会话；
+// 其它工作区各是一个折叠的 <details>，展开时由 app.js 调
+// GET /partials/workspace-threads 懒加载会话（跨工作区查询会各自拉起 Core，
+// 不适合在每次页面渲染时全量做）。
 func renderThreadTree(groups []sidebarGroup, activeThreadID, csrf, currentPath string) string {
 	if len(groups) == 0 {
 		return `<p class="ada-list-empty">还没有会话</p>`
 	}
-	head := groups[0]
-	for _, g := range groups {
-		if g.Active {
-			head = g
+	active := 0
+	for i := range groups {
+		if groups[i].Active {
+			active = i
 			break
 		}
 	}
 	var b strings.Builder
-	if len(head.Threads) == 0 {
-		b.WriteString(`<p class="ada-ws__empty">还没有会话</p>`)
-	} else {
-		for _, t := range head.Threads {
-			b.WriteString(renderThreadRow(t, activeThreadID, csrf, currentPath))
+	b.WriteString(`<div class="ada-ws-scroll ada-ws-scroll--active" data-ws-active>`)
+	b.WriteString(renderWorkspaceGroup(groups[active], activeThreadID, csrf, currentPath))
+	b.WriteString(`</div>`)
+	others := make([]sidebarGroup, 0, len(groups)-1)
+	for i, g := range groups {
+		if i != active {
+			others = append(others, g)
 		}
+	}
+	if len(others) > 0 {
+		// 其它工作区是独立滚动块：滚轮只在这里滚，当前工作区不会跟着滚出视口。
+		b.WriteString(`<div class="ada-ws-scroll ada-ws-scroll--others" data-ws-others>`)
+		b.WriteString(fmt.Sprintf(
+			`<p class="ada-ws__section" data-ws-section><span class="ada-ws__section-label">其它工作区</span><span class="ada-ws__section-count">%d</span></p>`,
+			len(others),
+		))
+		b.WriteString(`<div class="ada-ws-scroll--workArea">`)
+		for _, g := range others {
+			b.WriteString(renderWorkspaceGroup(g, activeThreadID, csrf, currentPath))
+		}
+		b.WriteString(`</div>`)
+		b.WriteString(`</div>`)
 	}
 	return b.String()
 }
 
-func renderThreadRow(t sidebarThread, activeThreadID, csrf, currentPath string) string {
+// renderWorkspaceGroup 渲染一个工作区组：当前组默认展开、会话已由服务端渲染；
+// 其它组默认折叠、会话由 app.js 在展开时懒加载。
+func renderWorkspaceGroup(g sidebarGroup, activeThreadID, csrf, currentPath string) string {
+	var rows strings.Builder
+	open := ""
+	count := fmt.Sprintf(`<span class="ada-ws__count">%d</span>`, g.Count)
+	if g.Active {
+		open = " open"
+		if len(g.Threads) == 0 {
+			rows.WriteString(`<p class="ada-ws__empty">还没有会话</p>`)
+		} else {
+			for _, t := range g.Threads {
+				rows.WriteString(renderThreadRow(t, activeThreadID, csrf, currentPath, ""))
+			}
+		}
+	} else {
+		count = `<span class="ada-ws__count" data-ws-count hidden></span>`
+		rows.WriteString(`<p class="ada-ws__empty" data-ws-loading>展开以加载会话…</p>`)
+	}
+	running := ""
+	if g.Running {
+		running = `<span class="ada-ws__running" title="该工作区有会话正在运行"><span class="ada-dot ada-dot--warn"></span></span>`
+	}
+	var actions string
+	if g.Active {
+		actions = fmt.Sprintf(
+			`<div class="ada-ws__actions"><a class="ada-ws__action" href="/?ws=%d" title="在此工作区新建任务" aria-label="在此工作区新建任务">%s</a></div>`,
+			g.Index, iconHTML("i-plus", 14),
+		)
+	} else {
+		actions = fmt.Sprintf(
+			`<div class="ada-ws__actions"><form method="post" action="/workspaces/select"><input type="hidden" name="path" value="%s">%s<button class="ada-ws__action" type="submit" title="切换到此工作区" aria-label="切换到此工作区">%s</button></form></div>`,
+			esc(g.Path), csrfInput(csrf), iconHTML("i-check", 14),
+		)
+	}
+	return fmt.Sprintf(
+		`<div class="ada-ws" data-ws-key="%s" data-ws-path="%s" data-ws-index="%d"><details class="ada-ws__details" id="%s"%s><summary class="ada-ws__summary"%s>%s%s<span class="ada-ws__name">%s</span>%s%s</summary><div class="ada-ws__threads" data-ws-threads>%s</div></details>%s</div>`,
+		esc(g.Key), esc(g.Path), g.Index, wsDOMID(g.Key), open, attr("title", g.Path),
+		iconHTML("i-chevron", 12), iconHTML("i-folder", 14), esc(g.Name), running, count, rows.String(), actions,
+	)
+}
+
+// renderWorkspaceThreadRows 渲染一个工作区的会话行（侧栏懒加载片段用）。
+// wsIndex >= 0 时行链接带 ?ws=<index>：点击后网关把工作区 cookie 切到该工作区。
+func renderWorkspaceThreadRows(threads []threadSummaryDTO, wsIndex int, csrf, currentPath string) string {
+	if len(threads) == 0 {
+		return `<p class="ada-ws__empty">还没有会话</p>`
+	}
+	query := ""
+	if wsIndex >= 0 {
+		query = "?ws=" + strconv.Itoa(wsIndex)
+	}
+	var b strings.Builder
+	for _, t := range threads {
+		b.WriteString(renderThreadRow(sidebarThread{
+			ID:        t.ID,
+			Title:     t.Title,
+			UpdatedMS: parseTimeMS(t.UpdatedAt),
+			Running:   t.Running,
+		}, "", csrf, currentPath, query))
+	}
+	return b.String()
+}
+
+func renderThreadRow(t sidebarThread, activeThreadID, csrf, currentPath, wsQuery string) string {
 	active := activeThreadID != "" && t.ID == activeThreadID
 	dot := ""
 	if t.Running {
@@ -578,17 +651,27 @@ func renderThreadRow(t sidebarThread, activeThreadID, csrf, currentPath string) 
 	actions := ""
 	if !t.Running {
 		actions = fmt.Sprintf(
-			`<div class="ada-thread__actions"><form method="post" action="/threads/%s/delete" data-confirm="删除会话「%s」？删除后无法恢复。"><input type="hidden" name="next" value="%s">%s<button class="ada-thread__action" type="submit" title="删除会话" aria-label="删除会话">%s</button></form></div>`,
-			esc(t.ID), esc(t.Title), esc(currentPath), csrfInput(csrf), iconHTML("i-trash", 14),
+			`<div class="ada-thread__actions"><form method="post" action="/threads/%s/delete%s" data-confirm="删除会话「%s」？删除后无法恢复。"><input type="hidden" name="next" value="%s">%s<button class="ada-thread__action" type="submit" title="删除会话" aria-label="删除会话">%s</button></form></div>`,
+			esc(t.ID), wsQuery, esc(t.Title), esc(currentPath), csrfInput(csrf), iconHTML("i-trash", 14),
 		)
 	}
 	return fmt.Sprintf(
-		`<div class="%s" data-thread-row="%s"><a class="ada-thread__link" href="/threads/%s"%s><span class="ada-thread__title">%s</span><span class="ada-thread__meta">%s%s</span></a>%s</div>`,
+		`<div class="%s" data-thread-row="%s"><a class="ada-thread__link" href="/threads/%s%s"%s><span class="ada-thread__title">%s</span><span class="ada-thread__meta">%s%s</span></a>%s</div>`,
 		classList("ada-thread", boolClass(active, "is-active")),
-		esc(t.ID), esc(t.ID), attr("title", t.Title), esc(t.Title), dot, timeHTML, actions,
+		esc(t.ID), esc(t.ID), wsQuery, attr("title", t.Title), esc(t.Title), dot, timeHTML, actions,
 	)
 }
 
+// wsDOMID 把工作区路径映射成稳定的 DOM id（FNV-1a），避免路径里的分隔符/空格
+// 进 id 属性；同一工作区在多次渲染里得到同一个 id。
+func wsDOMID(key string) string {
+	var hash uint32 = 0x811c9dc5
+	for _, b := range []byte(key) {
+		hash ^= uint32(b)
+		hash *= 0x01000193
+	}
+	return fmt.Sprintf("ws-%08x", hash)
+}
 
 func relativeTime(atMS int64) string {
 	if atMS == 0 {

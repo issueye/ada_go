@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,45 +53,6 @@ func setupTasks(t *testing.T, tasks ...store.Task) (path, lock string) {
 	return path, lock
 }
 
-func TestTickFiresHTTPDueTask(t *testing.T) {
-	hit := make(chan struct{}, 1)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hit <- struct{}{}
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(srv.Close)
-
-	// created=过去，cron 每分钟 → 当前时刻必然已有到期点（missed 语义不触发，
-	// 因为 LastFiredAt 为空 + created 早于到期点 → 走 missed？不：missed 只在
-	// LastFiredAt 为空时记一条并推进，之后下一轮正常跑。本用例先制造已跑过的状态。
-	path, lock := setupTasks(t, store.Task{
-		ID: "crn_http", Name: "ping", Enabled: true, Cron: "* * * * *",
-		CreatedAt: time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339),
-		Action:    store.Action{Type: store.ActionHTTP, Method: "GET", URL: srv.URL},
-	})
-	// 预推进 lastFiredAt 到 1 分钟前：本轮必有到期点。
-	_ = store.Update(path, lock, 5*time.Second, func(all *[]store.Task) error {
-		(*all)[0].LastFiredAt = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
-		return nil
-	})
-
-	r := New(path, lock, "", "")
-	r.tick(context.Background())
-
-	select {
-	case <-hit:
-	case <-time.After(3 * time.Second):
-		t.Fatalf("http 动作未被触发")
-	}
-	loaded, _, err := store.Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if len(loaded[0].Runs) != 1 || loaded[0].Runs[0].Status != store.RunOK {
-		t.Fatalf("运行历史不符: %+v", loaded[0].Runs)
-	}
-}
-
 func TestTickMissedRecordsOnce(t *testing.T) {
 	path, lock := setupTasks(t, store.Task{
 		ID: "crn_missed", Name: "m", Enabled: true, Cron: "* * * * *",
@@ -120,6 +82,7 @@ func TestTickAgentFireAndThreadReuse(t *testing.T) {
 	path, lock := setupTasks(t, store.Task{
 		ID: "crn_agent", Name: "ai", Enabled: true, Cron: "* * * * *",
 		CreatedAt: time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339),
+		Workspace: "/tmp/project-ws",
 		Action:    store.Action{Type: store.ActionAgent, Text: "早报"},
 	})
 	_ = store.Update(path, lock, 5*time.Second, func(all *[]store.Task) error {
@@ -138,6 +101,9 @@ func TestTickAgentFireAndThreadReuse(t *testing.T) {
 	}
 	if g.lastBody.TaskID != "crn_agent" || g.lastBody.Text != "早报" || g.lastBody.IdempotencyKey == "" {
 		t.Fatalf("请求体不符: %+v", g.lastBody)
+	}
+	if g.lastBody.Workspace != "/tmp/project-ws" {
+		t.Fatalf("任务工作区未透传: %+v", g.lastBody)
 	}
 	loaded, _, _ := store.Load(path)
 	if loaded[0].Runs[0].Status != store.RunStarted {
@@ -231,5 +197,35 @@ func TestTickAgentThreadMissingClearsThread(t *testing.T) {
 	}
 	if loaded[0].Runs[0].Status != store.RunError {
 		t.Fatalf("状态应为 error: %+v", loaded[0].Runs[0])
+	}
+}
+
+// 网关发现任务线程已被删除时，会在本次触发里重建线程并启动轮次；
+// runner 应记录「已启动」并把新 threadId 回写到任务（而不是丢掉这一轮）。
+func TestTickAgentDeletedThreadRebuiltInSameRun(t *testing.T) {
+	g := newFakeGateway(t, http.StatusOK, fireResponse{
+		Started: true, ThreadID: "thr_new", Recreated: true,
+	})
+	path, lock := setupTasks(t, store.Task{
+		ID: "crn_rebuild", Name: "r", Enabled: true, Cron: "* * * * *",
+		CreatedAt: time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339),
+		ThreadID:  "thr_deleted",
+		Action:    store.Action{Type: store.ActionAgent, Text: "x"},
+	})
+	_ = store.Update(path, lock, 5*time.Second, func(all *[]store.Task) error {
+		(*all)[0].LastFiredAt = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+		return nil
+	})
+
+	r := New(path, lock, g.server.URL, "tok")
+	r.tick(context.Background())
+
+	loaded, _, _ := store.Load(path)
+	if loaded[0].ThreadID != "thr_new" {
+		t.Fatalf("新线程 id 应回写到任务，得到 %q", loaded[0].ThreadID)
+	}
+	run := loaded[0].Runs[0]
+	if run.Status != store.RunStarted || !strings.Contains(run.Detail, "重建") {
+		t.Fatalf("应记录已启动并说明重建: %+v", run)
 	}
 }

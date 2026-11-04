@@ -174,7 +174,7 @@ agent.on("tool.beforeCall", async (event, ctx) => {
 | 提示词 | `persona-coding` | TS | `registerPrompt`：编码助手人格与领域规则 |
 | UI | `provider-admin` | TS + TSX + JS | 模型设置：Master-Detail 管理供应商/端点/API 格式/密钥/模型清单，拉取 `/models`，切换当前模型；页面经插件 route 调用，密钥只显示尾号；`composer.left` 插槽贡献模型设置入口（基座不写死插件 id/路由） |
 | UI | `token-usage` | TSX | 工作区/线程 Token 用量页面与概览卡片（`usage.get`） |
-| UI + 工具 | `plugin-helper` | TS + TSX + JS | 插件脚手架：向导表单或 AI 经 `create_plugin` 工具（`access: write`）传入生成的入口源码，经 `plugin.admin` 安装桥写入全局 `~/.adago/plugins`；随包技能 `plugin-manual`（插件手册：创建/检查/启停 + `adag-ui` 动态块用法）教模型完整流程；创建后需重载并启用 |
+| 工具 + route | `plugin-helper` | TS | 插件脚手架：AI 在**对话**里经 `create_plugin` 工具（`access: write`）传入生成的入口源码，经 `plugin.admin` 安装桥写入全局 `~/.adago/plugins`（前端向导页已移除；route 保留给 CLI/测试）；随包技能 `plugin-manual`（插件手册：创建/检查/启停 + `adag-ui` 动态块用法）教模型完整流程；创建后需重载并启用 |
 | UI | `ui-hello-tsx` | TSX | 示例：页面、仪表盘、API、插槽 |
 
 官方插件不是基座：它们与第三方插件使用同一个 moejs 宿主、同一份清单与同一套注册契约；审批规则由 `policy-default`（或其他 `tool-policy` 插件）提供。区别只有信任级别（可用控制面钩子与 `exec`/`ui.ask`/`net.sse`/`model.admin` 等受信能力）与随包发布。基座源码不出现这些 id；产品声明选择启用哪些，禁用后能力必须消失；禁用策略插件后写/执行工具立即被基座拒绝。

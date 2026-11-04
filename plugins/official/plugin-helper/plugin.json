@@ -1,20 +1,12 @@
 {
   "id": "plugin-helper",
   "name": "插件助手",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "apiVersion": 1,
-  "description": "插件的安装与健康检查助手：对话创建插件（create_plugin），检查任意插件的发现/启停/装配状态与错误详情（check_plugin）。",
+  "description": "插件的安装与健康检查助手（对话创建）：create_plugin 安装插件，check_plugin 检查发现/启停/装配状态与错误详情。",
   "trust": "builtin",
   "backend": {
     "entry": "index.ts",
     "capabilities": ["plugin.admin"]
-  },
-  "frontend": {
-    "capabilities": ["frontend.script"],
-    "nav": [{ "label": "插件助手", "slug": "helper" }],
-    "pages": [{ "slug": "helper", "title": "插件助手", "template": "page.tsx" }],
-    "scripts": ["plugin-helper.js"],
-    "styles": ["plugin-helper.css"],
-    "assets": "static"
   }
 }

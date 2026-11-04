@@ -570,7 +570,6 @@ func TestBridgeAssetsAndBindings(t *testing.T) {
 		"/ext/cron-manager/static/cron-manager.js?v=",
 		"/ext/env-manager/static/env-manager.js?v=",
 		"/ext/mcp-client/static/mcp-client.js?v=",
-		"/ext/plugin-helper/static/plugin-helper.js?v=",
 		"/ext/provider-admin/static/provider-admin.js?v=",
 	}
 	if len(scripts) != len(wantScripts) {

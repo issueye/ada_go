@@ -1,9 +1,8 @@
 // Package runner 是独立 cron 二进制的调度循环。
 //
-// 职责只有一个：读 ~/.adago/cron.json，把到期的任务按动作类型执行——
-//   - http：本进程直接发请求（GET/POST、超时、16MB 上限）；
-//   - agent：POST {gateway}/api/cron/fire（Bearer 令牌），由网关拉起 Core
-//     并 thread.create + turn.start；本进程不等轮次完成，记录「已启动」。
+// 职责只有一个：读 ~/.adago/cron.json，把到期的 AI 任务（agent 动作）经
+// POST {gateway}/api/cron/fire（Bearer 令牌）送达网关，由网关拉起 Core
+// 并 thread.create + turn.start；本进程不等轮次完成，记录「已启动」。
 //
 // 到期判定：due = Next(baseline)，baseline 优先取 lastFiredAt，未跑过的任务取
 // createdAt（错过应用关闭期间的历史点只记一条 missed，不逐个补跑）。
@@ -16,7 +15,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -27,9 +25,6 @@ import (
 	"adagcron/internal/cronexpr"
 	"adagcron/internal/store"
 )
-
-// maxHTTPResponseBytes 是 http 动作响应体读取上限（与宿主 HTTP 桥一致）。
-const maxHTTPResponseBytes = 16 << 20
 
 // fireTimeout 是 agent 动作调网关 /api/cron/fire 的超时。
 const fireTimeout = 30 * time.Second
@@ -48,7 +43,6 @@ type Runner struct {
 	// Log 是运行日志（nil 用标准 log）。
 	Log Logger
 
-	client     *http.Client
 	fireClient *http.Client
 }
 
@@ -68,7 +62,6 @@ func New(file, lock, gatewayURL, token string) *Runner {
 		Lock:       lock,
 		GatewayURL: strings.TrimRight(strings.TrimSpace(gatewayURL), "/"),
 		Token:      token,
-		client:     &http.Client{},
 		fireClient: &http.Client{Timeout: fireTimeout},
 	}
 }
@@ -290,16 +283,14 @@ func (r *Runner) record(path, lock, taskID string, run store.Run, threadID strin
 }
 
 // execute 执行一个任务的动作，返回运行历史条目与是否清除任务线程
-// （agent 动作的线程已不存在时为 true）。
+// （agent 动作的线程已不存在时为 true）。动作只有 AI 任务一种；文件里残留的
+// 旧 HTTP 动作在 store.Load 校验阶段就会被跳过，这里只兜底未知类型。
 func (r *Runner) execute(ctx context.Context, t *store.Task, due time.Time) (store.Run, bool) {
 	logf := r.logger()
 	run := store.Run{At: due.UTC().Format(time.RFC3339)}
 	start := time.Now()
 	var clearThread bool
 	switch t.Action.Type {
-	case store.ActionHTTP:
-		status, httpStatus, detail := r.fireHTTP(ctx, &t.Action)
-		run.Status, run.HTTPStatus, run.Detail = status, httpStatus, detail
 	case store.ActionAgent:
 		status, threadID, detail, agentClear := r.fireAgent(ctx, t)
 		run.Status, run.ThreadID, run.Detail = status, threadID, detail
@@ -309,47 +300,12 @@ func (r *Runner) execute(ctx context.Context, t *store.Task, due time.Time) (sto
 		run.Detail = "未知动作类型 " + t.Action.Type
 	}
 	run.DurationMs = time.Since(start).Milliseconds()
-	logf.Printf("任务 %q（%s）→ %s（%dms）%s", t.Name, t.Action.Type, run.Status, run.DurationMs, run.Detail)
+	workspace := strings.TrimSpace(t.Workspace)
+	if workspace == "" {
+		workspace = "默认（综合工作区）"
+	}
+	logf.Printf("任务 %q（%s，工作区 %s）→ %s（%dms）%s", t.Name, t.Action.Type, workspace, run.Status, run.DurationMs, run.Detail)
 	return run, clearThread
-}
-
-// fireHTTP 执行 http 动作；返回 (status, httpStatus, detail)。
-func (r *Runner) fireHTTP(ctx context.Context, a *store.Action) (string, int, string) {
-	method := strings.ToUpper(strings.TrimSpace(a.Method))
-	if method != "GET" && method != "POST" {
-		method = "GET"
-	}
-	timeout := time.Duration(a.TimeoutMs) * time.Millisecond
-	if timeout <= 0 {
-		timeout = time.Duration(store.DefaultTimeoutMs) * time.Millisecond
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	var body io.Reader
-	if method == "POST" && a.Body != "" {
-		body = strings.NewReader(a.Body)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, a.URL, body)
-	if err != nil {
-		return store.RunError, 0, "构造请求失败: " + err.Error()
-	}
-	for k, v := range a.Headers {
-		req.Header.Set(k, v)
-	}
-	resp, err := r.client.Do(req)
-	if err != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return store.RunTimeout, 0, "请求超时（" + timeout.String() + "）"
-		}
-		return store.RunError, 0, "请求失败: " + err.Error()
-	}
-	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxHTTPResponseBytes+1))
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return store.RunOK, resp.StatusCode, ""
-	}
-	return store.RunError, resp.StatusCode, "非 2xx 响应"
 }
 
 // fireRequest 是 POST /api/cron/fire 的请求体（与网关 handlers_cron.go 同构）。
@@ -357,6 +313,7 @@ type fireRequest struct {
 	TaskID         string `json:"taskId"`
 	TaskName       string `json:"taskName"`
 	Text           string `json:"text"`
+	Workspace      string `json:"workspace,omitempty"`
 	ThreadID       string `json:"threadId,omitempty"`
 	IdempotencyKey string `json:"idempotencyKey"`
 }
@@ -366,7 +323,9 @@ type fireResponse struct {
 	Started  bool   `json:"started"`
 	Reason   string `json:"reason,omitempty"`
 	ThreadID string `json:"threadId,omitempty"`
-	Error    string `json:"error,omitempty"`
+	// Recreated 表示网关发现原任务线程已被删除，本次已重建并在新线程里启动。
+	Recreated bool   `json:"recreated,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 // fireAgent 把 agent 动作经网关转发给 Core；返回 (status, threadID, detail, clearThread)。
@@ -379,6 +338,7 @@ func (r *Runner) fireAgent(ctx context.Context, t *store.Task) (string, string, 
 		TaskID:         t.ID,
 		TaskName:       t.Name,
 		Text:           t.Action.Text,
+		Workspace:      t.Workspace,
 		ThreadID:       t.ThreadID,
 		IdempotencyKey: fmt.Sprintf("cron-%s-%d", t.ID, time.Now().Unix()),
 	}
@@ -403,10 +363,15 @@ func (r *Runner) fireAgent(ctx context.Context, t *store.Task) (string, string, 
 	}
 	switch {
 	case resp.StatusCode == http.StatusOK && out.Started:
-		return store.RunStarted, out.ThreadID, "网关已受理，AI 轮次在线程里执行", false
+		detail := "网关已受理，AI 轮次在线程里执行"
+		if out.Recreated {
+			detail = "原任务线程已删除，已自动重建线程；网关已受理，AI 轮次在线程里执行"
+		}
+		return store.RunStarted, out.ThreadID, detail, false
 	case resp.StatusCode == http.StatusOK && out.Reason == "thread_busy":
 		return store.RunBusy, out.ThreadID, "线程已有运行中轮次，跳过本次", false
 	case resp.StatusCode == http.StatusOK && out.Reason == "thread_missing":
+		// 兼容旧网关：线程缺失时清掉任务线程，下次运行重建。
 		return store.RunError, "", "任务线程已不存在，已清除；下次运行将自动重建线程", true
 	case resp.StatusCode == http.StatusUnauthorized:
 		return store.RunError, out.ThreadID, "网关令牌无效（401）", false

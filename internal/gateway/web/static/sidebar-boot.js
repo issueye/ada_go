@@ -23,6 +23,18 @@
     /* cookie 不可用：退回服务端轮询 */
   }
   try {
+    // 侧栏宽度同样要在首帧前落地：等 app.js 恢复会先画 264 再跳变。
+    var rawWidth = window.localStorage.getItem("a_da_sidebar_width");
+    if (rawWidth) {
+      var width = Number(rawWidth);
+      if (isFinite(width) && width >= 200 && width <= 420) {
+        document.documentElement.style.setProperty("--ada-sidebar-width", width + "px");
+      }
+    }
+  } catch (err) {
+    /* 存储不可用：用默认宽度 */
+  }
+  try {
     if (!window.matchMedia("(min-width: 761px)").matches) return;
     if (window.localStorage.getItem("a_da_sidebar_collapsed") !== "1") return;
     var shell = document.querySelector(".ada-shell");

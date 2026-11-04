@@ -4,10 +4,9 @@
 //
 //	cron.exe --gateway-url http://127.0.0.1:8080 --token XXX
 //
-// 任务定义在 ~/.adago/cron.json（cron-manager 插件管理页读写）；到期后：
-//   - http 动作：本进程直接发请求；
-//   - agent 动作：POST {gateway}/api/cron/fire，由网关负责 Acquire Core、
-//     thread.create 与 turn.start。
+// 任务定义在 ~/.adago/cron.json（cron-manager 插件管理页读写）；到期后把
+// AI 任务经 POST {gateway}/api/cron/fire 送达网关，由网关负责 Acquire Core、
+// thread.create 与 turn.start。HTTP 动作已移除，只保留 AI 任务。
 //
 // 本程序刻意不 import 主模块（mcp_projects 各模块自包含的惯例）；任务文件
 // 的 JSON 契约与主模块 internal/cronstore 同构，两侧注释互指。
@@ -29,10 +28,10 @@ import (
 
 func main() {
 	var (
-		gatewayURL  = flag.String("gateway-url", "", "网关地址（agent 动作必需，如 http://127.0.0.1:8080）")
-		token       = flag.String("token", "", "网关 Bearer 令牌（agent 动作必需）")
+		gatewayURL  = flag.String("gateway-url", "", "网关地址（AI 任务必需，如 http://127.0.0.1:8080）")
+		token       = flag.String("token", "", "网关 Bearer 令牌（AI 任务必需）")
 		parentPID   = flag.Int("parent-pid", 0, "父进程 PID：非 0 时父进程退出则本进程退出")
-		intervalSec = flag.Int("interval", 15, "tick 周期（秒）")
+		intervalSec = flag.Int("interval", 5, "tick 周期（秒）")
 		file        = flag.String("file", "", "任务文件路径（默认 ~/.adago/cron.json）")
 		lock        = flag.String("lock", "", "锁文件路径（默认 ~/.adago/cron.lock）")
 	)

@@ -201,6 +201,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /partials/extensions.json", s.handleExtensionsJSON)
 	mux.HandleFunc("GET /partials/transcript/{id}", s.handleTranscriptJSON)
 	mux.HandleFunc("GET /partials/slot/{name}", s.handleSlotPartial)
+	mux.HandleFunc("GET /partials/workspace-threads", s.handleWorkspaceThreadsPartial)
 	mux.HandleFunc("GET /threads/{id}", s.handleThread)
 	mux.HandleFunc("POST /threads/{id}/send", s.handleTurn)
 	mux.HandleFunc("POST /threads/{id}/resend", s.handleTurnResend)
@@ -224,6 +225,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /workspaces/select", s.handleWorkspaceSelect)
 	mux.HandleFunc("POST /workspace", s.handleWorkspaceSelect)
 	mux.HandleFunc("POST /api/workspace/select", s.handleWorkspaceOpen)
+	mux.HandleFunc("GET /api/workspaces", s.handleWorkspacesAPI)
 	mux.HandleFunc("GET /api/fs/list", s.handleFSList)
 	// 定时任务机器端点：独立 cron 二进制把 agent 动作送达 core（Bearer 鉴权）。
 	mux.HandleFunc("POST /api/cron/fire", s.handleCronFire)
@@ -316,8 +318,6 @@ func (s *Server) base(r *http.Request, page, title string, threads []threadSumma
 	badge := productBadge(s.cfg.BrandName, s.cfg.ProductName)
 	sidebar := renderSidebar(sidebarData{
 		Active:             page,
-		WorkspaceName:      name,
-		WorkspacePath:      workspace,
 		Gateway:            gateway,
 		Groups:             s.sidebarGroups(workspace, threads),
 		ActiveThreadID:     activeThreadID,
@@ -366,27 +366,58 @@ func (s *Server) base(r *http.Request, page, title string, threads []threadSumma
 	}
 }
 
-// sidebarGroups 把当前工作区的会话铺成一组。其它工作区需要各自的 Core 查询，
-// 这里不猜、不显示假计数；切换入口在侧栏的 workspace switch（/workspaces）。
+// sidebarGroups 把全部工作区铺成侧栏分组：当前工作区带上已查到的会话，
+// 其它工作区只给组头（会话由 app.js 展开时经 /partials/workspace-threads
+// 懒加载——跨工作区查询要各自拉起 Core，不能每页全量做）。
 func (s *Server) sidebarGroups(workspace string, threads []threadSummaryDTO) []sidebarGroup {
-	rows := make([]sidebarThread, 0, len(threads))
-	for _, t := range threads {
-		rows = append(rows, sidebarThread{
-			ID:        t.ID,
-			Title:     t.Title,
-			UpdatedMS: parseTimeMS(t.UpdatedAt),
-			Running:   t.Running,
+	list := s.workspaceList()
+	if len(list) == 0 {
+		list = []string{workspace}
+	}
+	groups := make([]sidebarGroup, 0, len(list)+1)
+	active := -1
+	for i, ws := range list {
+		g := sidebarGroup{Key: ws, Path: ws, Name: workspaceName(ws), Index: i}
+		if strings.TrimSpace(workspace) != "" && samePath(ws, workspace) {
+			g.Active = true
+			active = len(groups)
+		}
+		groups = append(groups, g)
+	}
+	if active < 0 && strings.TrimSpace(workspace) != "" {
+		// 单工作区兼容：当前工作区不在列表里时补一组，侧栏始终能看到它。
+		groups = append(groups, sidebarGroup{
+			Key: workspace, Path: workspace, Name: workspaceName(workspace),
+			Index: len(groups), Active: true,
 		})
+		active = len(groups) - 1
 	}
-	name := filepath.Base(workspace)
+	if active >= 0 {
+		g := &groups[active]
+		g.Threads = make([]sidebarThread, 0, len(threads))
+		for _, t := range threads {
+			g.Threads = append(g.Threads, sidebarThread{
+				ID:        t.ID,
+				Title:     t.Title,
+				UpdatedMS: parseTimeMS(t.UpdatedAt),
+				Running:   t.Running,
+			})
+			if t.Running {
+				g.Running = true
+			}
+		}
+		g.Count = len(g.Threads)
+	}
+	return groups
+}
+
+// workspaceName 是工作区在侧栏/选择器里的显示名：目录名，根目录退回完整路径。
+func workspaceName(path string) string {
+	name := filepath.Base(path)
 	if name == "" || name == "." || name == string(filepath.Separator) {
-		name = workspace
+		return path
 	}
-	return []sidebarGroup{{
-		Key: workspace, Path: workspace, Name: name,
-		Threads: rows, Count: len(rows), Active: true,
-		Running: false,
-	}}
+	return name
 }
 
 // normalizeWorkspaceList 合并单/多工作区配置并去重，保持配置顺序。
@@ -414,13 +445,15 @@ func normalizeWorkspaceList(single string, many []string) []string {
 }
 
 // resolveWorkspace 返回当前请求的工作区及索引。
-// 优先使用 cookie 索引（工作区列表包含本次会话打开的工作区）；没有有效
-// cookie 时才回退 WorkspaceFor。WorkspaceFor 由 Gateway 注入，只认识启动
-// 时配置的工作区，不能让它盖掉 FilePicker 新登记的工作区。
+// 优先级：?ws=<index>（侧栏点进别的工作区的会话/「在此新建」）→ cookie →
+// WorkspaceFor。query 显式指定用于跨工作区导航，一次请求内即生效。
 func (s *Server) resolveWorkspace(r *http.Request) (string, int) {
 	list := s.workspaceList()
 	if len(list) == 0 {
 		return s.cfg.Workspace, 0
+	}
+	if workspace, index, ok := s.workspaceFromQuery(r); ok {
+		return workspace, index
 	}
 	if index, ok := workspaceIndexFromCookie(r, len(list)); ok {
 		return list[index], index
@@ -433,6 +466,28 @@ func (s *Server) resolveWorkspace(r *http.Request) (string, int) {
 		}
 	}
 	return list[0], 0
+}
+
+// workspaceFromQuery 解析侧栏会话链接携带的 ?ws=<index>（显式跨工作区导航）。
+func (s *Server) workspaceFromQuery(r *http.Request) (string, int, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get("ws"))
+	if raw == "" {
+		return "", 0, false
+	}
+	index, err := strconv.Atoi(raw)
+	list := s.workspaceList()
+	if err != nil || index < 0 || index >= len(list) {
+		return "", 0, false
+	}
+	return list[index], index, true
+}
+
+// pinWorkspaceQuery 把 ?ws=<index> 写进工作区 cookie：从侧栏点进别的工作区的
+// 会话后，页面里的表单（发消息 / 删除 / 中止）继续落在同一个工作区。
+func (s *Server) pinWorkspaceQuery(w http.ResponseWriter, r *http.Request) {
+	if _, index, ok := s.workspaceFromQuery(r); ok {
+		s.setWorkspaceCookie(w, index)
+	}
 }
 
 // WorkspaceForRequest 返回与页面渲染一致的工作区路径（含 FilePicker 动态登记）。

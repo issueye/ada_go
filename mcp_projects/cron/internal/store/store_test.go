@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,7 +19,8 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	}
 	task := Task{
 		ID: id, Name: "每天早报", Enabled: true, Cron: "0 9 * * *",
-		Action: Action{Type: ActionHTTP, Method: "POST", URL: "https://example.com/hook", Body: "{}"},
+		Workspace: "/tmp/report-ws",
+		Action:    Action{Type: ActionAgent, Text: "总结昨天的工作"},
 	}
 	if err := Save(path, []Task{task}); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -27,7 +29,8 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	if err != nil || len(warns) != 0 {
 		t.Fatalf("Load: %v warns=%v", err, warns)
 	}
-	if len(loaded) != 1 || loaded[0].ID != id || loaded[0].Action.URL != "https://example.com/hook" {
+	if len(loaded) != 1 || loaded[0].ID != id ||
+		loaded[0].Action.Text != "总结昨天的工作" || loaded[0].Workspace != "/tmp/report-ws" {
 		t.Fatalf("往返不一致: %+v", loaded)
 	}
 }
@@ -67,7 +70,7 @@ func TestUpdateConcurrent(t *testing.T) {
 			err := Update(path, lock, 5*time.Second, func(all *[]Task) error {
 				for j := range *all {
 					if (*all)[j].ID == id {
-						AppendRun(&(*all)[j], Run{At: time.Now().UTC().Format(time.RFC3339), Status: RunOK})
+						AppendRun(&(*all)[j], Run{At: time.Now().UTC().Format(time.RFC3339), Status: RunStarted})
 					}
 				}
 				return nil
@@ -94,12 +97,18 @@ func TestValidate(t *testing.T) {
 		mutate func(*Task)
 		wantOK bool
 	}{
-		{"合法 http", func(t *Task) { t.Action = Action{Type: ActionHTTP, Method: "get", URL: "http://a.com"} }, true},
-		{"method 越界", func(t *Task) { t.Action = Action{Type: ActionHTTP, Method: "DELETE", URL: "http://a.com"} }, false},
-		{"url 带 userinfo", func(t *Task) { t.Action = Action{Type: ActionHTTP, Method: "GET", URL: "https://u:p@a.com"} }, false},
+		{"旧 HTTP 动作被拒绝", func(t *Task) { t.Action = Action{Type: ActionHTTP} }, false},
 		{"合法 agent", func(t *Task) { t.Action = Action{Type: ActionAgent, Text: "总结昨天"} }, true},
 		{"agent 空 text", func(t *Task) { t.Action = Action{Type: ActionAgent, Text: " "} }, false},
 		{"未知类型", func(t *Task) { t.Action = Action{Type: "shell"} }, false},
+		{"指定工作区", func(t *Task) {
+			t.Workspace = "/tmp/ws"
+			t.Action = Action{Type: ActionAgent, Text: "t"}
+		}, true},
+		{"工作区超长", func(t *Task) {
+			t.Workspace = strings.Repeat("a", MaxWorkspaceBytes+1)
+			t.Action = Action{Type: ActionAgent, Text: "t"}
+		}, false},
 		{"坏 cron", func(t *Task) { t.Cron = "0 9 * *" }, false},
 	}
 	for _, tc := range cases {

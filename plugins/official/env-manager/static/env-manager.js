@@ -62,6 +62,14 @@
     return scope === "global" ? "全局" : "工作区";
   }
 
+  // 下拉是宿主 <ada-select>（触发器 + listbox + 隐藏 input）；值统一从隐藏 input 读，
+  // 组件尚未升级时也能拿到初始值。
+  function selectValue(node) {
+    if (!node || !node.querySelector) return "";
+    var input = node.querySelector("[data-select-input]");
+    return input ? String(input.value || "") : "";
+  }
+
   function rowKey(scope, key) {
     return scope + ":" + key;
   }
@@ -294,7 +302,7 @@
     form.addEventListener("submit", function (event) {
       event.preventDefault();
       if (busy) return;
-      var scope = scopeInput ? scopeInput.value : "workspace";
+      var scope = selectValue(scopeInput) || "workspace";
       var key = keyInput ? String(keyInput.value || "").trim() : "";
       var value = valueInput ? String(valueInput.value || "") : "";
       if (!key) {

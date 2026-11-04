@@ -1,12 +1,10 @@
 # 插件助手
 
-两种创建方式，共用同一套校验与落盘：
+只保留**对话创建**：在会话里说「创建一个 XXX 插件」。AI 编写入口源码后调用本插件的
+`create_plugin` 工具（`access: write`，会经过审批策略确认）落盘。前端管理页已移除，
+管理能力仍由 `create_plugin` / `check_plugin` / `remove_plugin` 工具和对应 route 提供。
 
-1. **对话创建**：在会话里说「创建一个 XXX 插件」。AI 编写入口源码后调用本插件的
-   `create_plugin` 工具（`access: write`，会经过审批策略确认）落盘。
-2. **向导创建**：在本页填写插件 ID、名称、描述与示例工具名，生成回显示例插件。
-
-两者都把插件安装到全局目录 `~/.adago/plugins/<id>/`（生产统一路径，跨工作区共享）。
+插件安装到全局目录 `~/.adago/plugins/<id>/`（生产统一路径，跨工作区共享）。
 
 ## 生成内容
 
@@ -36,7 +34,7 @@
 （`access: read`）：返回发现位置（随包/全局/工作区）、清单字段、启停决策来源
 （全局 plugins.json / 工作区 .adago/plugins.json / 产品声明；旧 .adag/plugins.json 只读兼容）、装配状态与
 last_error，并对未停用的落盘插件做入口预加载校验；`id` 留空返回全部插件摘要。
-向导页同款能力走 `POST /check-plugin` route。
+CLI/测试走 `POST /check-plugin` route（前端向导页已移除）。
 
 ## 随包技能
 

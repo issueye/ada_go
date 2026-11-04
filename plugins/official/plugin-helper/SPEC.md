@@ -149,9 +149,10 @@ agent.on("tool.beforeCall", fn, { priority?: 0, action?: "deny" });       // 策
 
 `cron.admin`（仅 builtin）提供 `ctx.cron`：全局定时任务（`~/.adago/cron.json`）的
 `list/create/update/remove/setEnabled/trigger/runs`。它只是**管理面**——任务的调度与
-执行在独立 cron 二进制（网关拉起守护），到期后 http 动作由二进制直接发送、agent 动作
+执行在独立 cron 二进制（网关拉起守护），任务只有 AI 任务一种（agent 动作），到期后
 经网关 `/api/cron/fire` 送达 core（`thread.create` + `turn.start`，每任务复用一个专用
-线程）；插件打不了执行动作，也拿不到执行结果之外的任何权限。
+线程）；HTTP 动作已移除。任务可带 `workspace`（目标工作区绝对路径），为空时落在默认
+工作区（列表第一个，即「综合工作区」）；插件打不了执行动作，也拿不到执行结果之外的任何权限。
 
 ### 运行时环境（全局对象与出网）
 
@@ -365,7 +366,7 @@ block**，不要在 Markdown 里手写 HTML（会被清洗）或伪造宿主组�
 
 ## 10. 本插件（plugin-helper）自身 API — 完整示例
 
-Route（向导页面用）：
+Route（CLI/测试用；前端向导页已移除）：
 
 - `GET /info` → `{ workspace, pluginRoot, files }`
 - `POST /create`，body `{ id, name?, description?, toolName? }` →

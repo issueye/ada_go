@@ -137,6 +137,10 @@ function executableName() {
   return process.platform === 'win32' ? 'adag.exe' : 'adag'
 }
 
+function cronExecutableName() {
+  return process.platform === 'win32' ? 'cron.exe' : 'cron'
+}
+
 function findRepoRoot() {
   const candidates = [
     path.resolve(app.getAppPath(), '..'),
@@ -204,6 +208,23 @@ async function runOfficialPluginBuild(repoRoot) {
   return ok
 }
 
+// 构建独立 cron 调度器到 desktop/bin/cron.exe：网关按「可执行文件同目录」定位它，
+// 定时任务的「立即运行」与到期调度都依赖这个进程。失败只降级定时任务，不影响网关。
+async function ensureCronBinary(repoRoot) {
+  const cronDir = path.join(repoRoot, 'mcp_projects', 'cron')
+  if (!fs.existsSync(path.join(cronDir, 'go.mod'))) return false
+  const outPath = path.join(__dirname, 'bin', cronExecutableName())
+  try { fs.mkdirSync(path.dirname(outPath), { recursive: true }) } catch { /* 目录已存在 */ }
+  appendLauncherLog(`[自动构建] 构建 cron 调度器 -> ${outPath}`)
+  const ok = await runLoggedCommand(cronDir, 'go', ['build', '-trimpath', '-o', outPath, '.'], '自动构建', BUILD_TIMEOUT_MS)
+  if (ok && fs.existsSync(outPath)) {
+    appendLauncherLog(`[自动构建] 完成: ${outPath}`)
+    return true
+  }
+  appendLauncherLog('[自动构建] cron 调度器构建失败；定时任务将不启用')
+  return false
+}
+
 // 返回可用的网关二进制路径；开发检出里每次启动都重新构建。
 async function ensureGatewayBinary(customBin) {
   const existing = findBinary(customBin)
@@ -220,6 +241,8 @@ async function ensureGatewayBinary(customBin) {
   appendLauncherLog(`[自动构建] 开发模式：每次启动重新构建网关（cwd=${repoRoot}）`)
   // 先刷新后端插件产物（index.ts → dist/index.js），go build 才能嵌入最新代码。
   await runOfficialPluginBuild(repoRoot)
+  // 定时任务执行器是独立 module，和网关一起构建，避免「点了立即运行但没人消费」。
+  await ensureCronBinary(repoRoot)
 
   let revision = ''
   try {
@@ -856,7 +879,7 @@ async function refreshToLatest(reason = '重复启动') {
 
 // ── 开发模式热更新（文件监听 → 重建 → 重启网关 → 原地刷新）──────────────
 const DEV_WATCH = !app.isPackaged && process.env.ADAGO_DEV_WATCH !== '0'
-const HOT_WATCH_DIRS = ['cmd', 'internal', 'app', 'plugins', 'products']
+const HOT_WATCH_DIRS = ['cmd', 'internal', 'app', 'plugins', 'products', 'mcp_projects/cron']
 const HOT_WATCH_EXTS = new Set(['.go', '.ts', '.tsx', '.js', '.json', '.css', '.tmpl'])
 const HOT_SKIP_PARTS = new Set(['node_modules', '.git', 'bin', 'out', 'dist-cache', '.adago', 'dist'])
 let devWatchers = []
