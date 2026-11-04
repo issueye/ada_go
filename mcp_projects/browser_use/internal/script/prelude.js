@@ -119,7 +119,14 @@
     }
 
     async screenshot(opts) { return call("screenshot", { tab: this.id, ...(opts || {}) }); }
-    async dialogs() { return (await call("dialogs", { tab: this.id })).dialogs; }
+    async dialogs(opts) {
+      const d = await call("dialogs", { tab: this.id, ...(opts || {}) });
+      return d.dialogs;
+    }
+    async acceptDialog(text) {
+      return call("dialogs", { tab: this.id, action: "accept", ...(text == null ? {} : { text: String(text) }) });
+    }
+    async dismissDialog() { return call("dialogs", { tab: this.id, action: "dismiss" }); }
     async cookies(opts) { return call("cookies", opts || {}); }
     async frames(opts) { return call("frames", { tab: this.id, ...(opts || {}) }); }
     async useFrame(id) { return call("frames", { action: "use", tab: this.id, frame: id }); }

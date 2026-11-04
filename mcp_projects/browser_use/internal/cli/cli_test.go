@@ -35,3 +35,11 @@ func TestClientFlag(t *testing.T) {
 		})
 	}
 }
+
+// TestCallWithoutToolIsUsageError 钉住 `browser-use cli call` 无工具名时不能 panic，
+// 也不能先拉起浏览器：用法错误应在 Ensure 之前返回 2。
+func TestCallWithoutToolIsUsageError(t *testing.T) {
+	if code := Run([]string{"call"}); code != 2 {
+		t.Fatalf("Run(call) = %d, want 2", code)
+	}
+}

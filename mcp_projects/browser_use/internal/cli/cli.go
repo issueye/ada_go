@@ -94,9 +94,10 @@ func (c *Client) call(ctx context.Context, name string, args any) (json.RawMessa
 }
 
 // Ensure finds a running app, or starts one in the background.
-// Ensure finds a running app, or starts one in the background (HTTP mode: --serve).
+// The auto-started instance uses --serve so CLI/MCP calls never restore or save
+// the user's window session (see README "Session restore").
 func Ensure(ctx context.Context) (*Client, error) {
-	return ensure(ctx, nil)
+	return EnsureServe(ctx, 0)
 }
 
 // EnsureServe starts the background HTTP instance if needed, optionally on a fixed port.
@@ -184,6 +185,11 @@ func Run(args []string) int {
 	defer cancel()
 	cmd := args[0]
 	rest := args[1:]
+	// 用法错误不要先拉起浏览器：缺工具名时直接返回。
+	if cmd == "call" && len(rest) == 0 {
+		fmt.Fprintln(os.Stderr, "browser-use: cli call needs a tool name")
+		return 2
+	}
 	// start 不需要先 Ensure：它本身就是「不存在就启动」。
 	if cmd == "start" {
 		return startCommand(ctx, rest)
@@ -556,6 +562,10 @@ func Run(args []string) int {
 		params = map[string]any{"action": action, "tab": *tab}
 
 	case "call":
+		if len(rest) == 0 {
+			fmt.Fprintln(os.Stderr, "browser-use: cli call needs a tool name")
+			return 2
+		}
 		name = rest[0]
 		fs := flag.NewFlagSet("call", flag.ContinueOnError)
 		argsJSON := fs.String("args", "{}", "JSON arguments")

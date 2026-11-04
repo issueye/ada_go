@@ -9,4 +9,4 @@ var source string
 func Source() string { return source }
 
 // Version is the runtime's public version.
-const Version = "0.1.0"
+const Version = "0.3.0"

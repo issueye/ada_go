@@ -134,3 +134,38 @@ jobs:
       - name: "gate: doctor"
         shell: bash
         run: bash scripts/ci-gate.sh doctor
+
+  # browser-use 是独立的 Go module（不在 go.work 里），必须有单独的测试/构建门禁；
+  # 否则页面运行时、控制面、MCP 与脚本引擎的改动不会被主 CI 覆盖。
+  browser-use:
+    name: browser-use / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      GOWORK: "off"
+      CGO_ENABLED: "0"
+      GOFLAGS: ""
+    defaults:
+      run:
+        working-directory: mcp_projects/browser_use
+    steps:
+      - name: Checkout ada-go
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: mcp_projects/browser_use/go.mod
+          cache-dependency-path: mcp_projects/browser_use/go.sum
+
+      - name: go test
+        run: go test ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...

@@ -27,9 +27,10 @@ type Download struct {
 
 // ControlState is the agent/human control state of the browser.
 type ControlState struct {
-	State      string     `json:"state"` // idle | agent | user
+	State      string     `json:"state"` // idle | agent | user | paused
 	TabID      string     `json:"tab,omitempty"`
 	Masked     bool       `json:"masked"`
+	Paused     bool       `json:"paused,omitempty"`
 	LeaseUntil *time.Time `json:"lease_until,omitempty"`
 	Client     string     `json:"client,omitempty"`
 }
@@ -49,6 +50,10 @@ type Manager struct {
 	nextID    int
 	downloads []Download
 	user      bool // human has taken over
+	paused    bool // agent writes paused; reads still work
+
+	// eventFields powers /v1/events and wait-for-tab/control.
+	eventFields
 
 	onChange func()
 	stop     chan struct{}
@@ -104,6 +109,7 @@ func (m *Manager) expireLoop() {
 				if tab.expire(now) {
 					changed = true
 					m.unlockTab(tab)
+					m.emit("control.released", tab.ID, "expired")
 				}
 			}
 			if changed {
@@ -180,6 +186,7 @@ func (m *Manager) NewTab(ctx context.Context, rawURL string, opts TabOptions) (*
 	t.attachHandlers(m)
 
 	m.notify()
+	m.emit("tab.created", t.ID, t.Title())
 	if activate {
 		_ = m.Activate(t.ID)
 	}
@@ -223,6 +230,7 @@ func (m *Manager) CloseTab(id string, force bool) error {
 
 	t.destroy()
 	m.notify()
+	m.emit("tab.closed", id, "")
 	return nil
 }
 
@@ -240,6 +248,7 @@ func (m *Manager) Activate(id string) error {
 		t.View.Focus()
 	}
 	m.notify()
+	m.emit("tab.activated", id, "")
 	return nil
 }
 
@@ -284,10 +293,19 @@ func (m *Manager) UserControlled() bool {
 	return m.user
 }
 
-// TakeOver gives the browser to the human and releases every lease.
-func (m *Manager) TakeOver() ControlState {
+// Paused reports whether agent writes are paused.
+func (m *Manager) Paused() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.paused
+}
+
+// Pause stops agent writes and releases the current leases so the human can
+// use the page. Reads still work; Resume gives control back to the agent.
+func (m *Manager) Pause() ControlState {
 	m.mu.Lock()
-	m.user = true
+	m.paused = true
+	m.user = false
 	tabs := make([]*Tab, 0, len(m.order))
 	for _, id := range m.order {
 		if t := m.tabs[id]; t != nil {
@@ -301,6 +319,29 @@ func (m *Manager) TakeOver() ControlState {
 		}
 	}
 	m.notify()
+	m.emit("control.paused", "", "")
+	return m.State()
+}
+
+// TakeOver gives the browser to the human and releases every lease.
+func (m *Manager) TakeOver() ControlState {
+	m.mu.Lock()
+	m.user = true
+	m.paused = false
+	tabs := make([]*Tab, 0, len(m.order))
+	for _, id := range m.order {
+		if t := m.tabs[id]; t != nil {
+			tabs = append(tabs, t)
+		}
+	}
+	m.mu.Unlock()
+	for _, t := range tabs {
+		if t.releaseLease("") {
+			m.unlockTab(t)
+		}
+	}
+	m.notify()
+	m.emit("control.takeover", "", "")
 	return m.State()
 }
 
@@ -308,8 +349,10 @@ func (m *Manager) TakeOver() ControlState {
 func (m *Manager) Resume() ControlState {
 	m.mu.Lock()
 	m.user = false
+	m.paused = false
 	m.mu.Unlock()
 	m.notify()
+	m.emit("control.resumed", "", "")
 	return m.State()
 }
 
@@ -328,6 +371,7 @@ func (m *Manager) Acquire(tabID, client string) (*Tab, error) {
 	}
 	t.acquire(client, d)
 	m.notify()
+	m.emit("control.locked", tabID, client)
 	return t, nil
 }
 
@@ -341,12 +385,17 @@ func (m *Manager) Release(tabID, client string) ControlState {
 	} else {
 		tabs = m.snapshotTabs()
 	}
+	released := 0
 	for _, t := range tabs {
 		if t.releaseLease(client) {
 			m.unlockTab(t)
+			released++
 		}
 	}
 	m.notify()
+	if released > 0 {
+		m.emit("control.released", tabID, client)
+	}
 	return m.State()
 }
 
@@ -354,12 +403,13 @@ func (m *Manager) Release(tabID, client string) ControlState {
 func (m *Manager) State() ControlState {
 	m.mu.RLock()
 	user := m.user
+	paused := m.paused
 	active := m.active
 	var t *Tab
 	if active != "" {
 		t = m.tabs[active]
 	}
-	if !user && t == nil {
+	if !user && !paused && t == nil {
 		for _, id := range m.order {
 			if x := m.tabs[id]; x != nil && x.HasLease() {
 				t = x
@@ -372,6 +422,11 @@ func (m *Manager) State() ControlState {
 	cs := ControlState{State: "idle"}
 	if user {
 		cs.State = "user"
+		return cs
+	}
+	if paused {
+		cs.State = "paused"
+		cs.Paused = true
 		return cs
 	}
 	if t != nil && t.HasLease() {
@@ -389,7 +444,7 @@ func (m *Manager) State() ControlState {
 
 // Masked reports whether the active tab shows the agent mask.
 func (m *Manager) Masked(tabID string) bool {
-	if !m.cfg.Control.Mask || m.UserControlled() {
+	if !m.cfg.Control.Mask || m.UserControlled() || m.Paused() {
 		return false
 	}
 	t := m.Tab(tabID)

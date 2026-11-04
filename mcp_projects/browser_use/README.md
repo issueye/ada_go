@@ -4,10 +4,12 @@ A desktop browser for AI agents, built on [mygo](https://github.com/egoist/mygo)
 native tabs, one embedded web view per tab, a token-guarded local API / CLI,
 and a moejs JavaScript/TypeScript script engine.
 
-**Status: M1 + M1.5** — tabs, snapshots with refs, click/type/press/select/
-scroll/hover/read/eval/navigate/wait, annotated screenshots, downloads,
-intercepted dialogs, console capture, audit log + activity panel, the agent
-mask with `Take over`, and `browser-use run flow.ts` on moejs.
+**Status: 0.3.0** — tabs, snapshots with refs (including `cursor:pointer` controls
+and diff mode), click/type/press/select/scroll/hover/read/eval/navigate/wait,
+annotated and element-clipped screenshots (PNG/JPEG), downloads, intercepted
+dialogs with accept/dismiss policy, console capture, network capture, `/v1/events`,
+audit log + activity panel, the agent mask with `Take over`/`Pause`, and
+`browser-use run flow.ts` on moejs.
 
 ![browser-use](docs/ui.png)
 
@@ -33,6 +35,14 @@ go build -trimpath -ldflags "-H windowsgui" -o bin\browser-use.exe .
 
 The fixture pages used in development live in `testdata/site`:
 `node testdata/site/server.mjs 8765`.
+
+A real-WebView smoke (navigate, snapshot, wait hidden, diff, pushState wait,
+screenshot) runs against an isolated `BROWSER_USE_APP_NAME` and cleans up its
+process/data afterwards:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-browser-use.ps1
+```
 
 The API listens on `127.0.0.1` on an ephemeral port and writes its token and
 port to `%APPDATA%\browser-use\runtime.json`. The CLI starts the app when it is
@@ -209,15 +219,52 @@ curl -s -X DELETE -H "Authorization: Bearer $TOKEN" http://127.0.0.1:$PORT/v1/ca
   point at the caller (not at `http`/`cli-<pid>`).
 - Limits: 4 concurrent tasks (429 beyond), 64 retained, finished tasks are
   cleaned up after 10 minutes.
+- A tool's own `timeout_ms` (wait/network/console/navigate/click/type/press/
+  select/eval) also extends the server deadline: the outer context gets 5 s of
+  slack so the tool can return its own `timeout` error instead of being killed
+  by the server. `script` keeps using `script.max_timeout_ms`.
 
 The CLI also accepts a global `--client <id>` (`--client=<id>` works too) for
 `cli ...` and `run ...`; without it the client id is `cli-<pid>`, and leases and
 audit entries cannot be attributed to the caller.
 
+## Events
+
+`GET /v1/events` is a JSON long poll over a 1000-entry ring buffer:
+
+```sh
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://127.0.0.1:$PORT/v1/events?after=0&timeout_ms=30000&kinds=tab.created,control.takeover"
+```
+
+Response: `{ok, cursor, events:[{seq,ts,kind,tab,message}]}`. A timeout returns
+`events:[]` with an advanced cursor (not an error). Kinds include
+`tab.created|closed|activated`, `nav.committed|finished|failed`,
+`download.finished`, `control.locked|released|takeover|resumed`. `wait` also
+accepts `for=tab|control|dialog` so an agent can wait for a popup, a human
+takeover or a page dialog without polling.
+
+## Dialogs
+
+`alert`/`confirm`/`prompt` are intercepted and never block the page. Because the
+page's dialog calls are synchronous, the agent sets a policy for the next round
+instead of answering a specific dialog after the fact:
+
+```sh
+browser-use cli call dialogs --args '{"action":"accept","text":"yes"}'
+browser-use cli call dialogs --args '{"action":"dismiss"}'
+browser-use cli call dialogs --args '{"action":"list"}'
+```
+
+`accept` makes `confirm()` return true; `prompt()` returns `text` (or its default
+when text is omitted). `dismiss` makes `confirm()` return false and `prompt()`
+return null. Records keep the returned `answer`.
+
 ## MCP
 
-The tray menu's **Copy MCP Config** copies this stdio entry for ada-go's
-`.adago/mcp.json` `servers` array (the command is the running executable):
+The tray menu has two copy actions. **Copy MCP Config (stdio)** copies this
+entry for ada-go's `.adago/mcp.json` `servers` array (the command is the
+running executable):
 
 ```json
 {
@@ -228,11 +275,21 @@ The tray menu's **Copy MCP Config** copies this stdio entry for ada-go's
 }
 ```
 
-`browser-use mcp` reuses the running app through `runtime.json` and speaks MCP
-on stdin/stdout. HTTP mode is a separate process
-(`browser-use mcp --http --port 8766`) serving `/mcp`; do not point the client
-at the app's control port — that API requires the runtime bearer token and is
-not MCP (a 401 "missing or wrong token" means the client hit the control API).
+**Copy MCP Config (HTTP)** copies the HTTP entry for the separate
+`browser-use mcp --http --port 8766` process:
+
+```json
+{
+  "id": "browser_use",
+  "transport": "http",
+  "url": "http://127.0.0.1:8766/mcp"
+}
+```
+
+`browser-use mcp` (stdio) reuses the running app through `runtime.json`. Do not
+point the client at the app's control port — that API requires the runtime
+bearer token and is not MCP (a 401 "missing or wrong token" means the client hit
+the control API).
 
 The MCP layer is built on [github.com/mark3labs/mcp-go](https://github.com/mark3labs/mcp-go)
 (v0.52.0): tool names/descriptions/schemas still come from `internal/control`
@@ -245,6 +302,9 @@ handled by the library.
   `/mcp` (plus `/healthz`); every request is independent, so no session header
   is needed. Clients that only POST (including ada-go's mcp-client) work as-is;
   GET SSE listening is not provided in stateless mode.
+- `--token <secret>` (or `BROWSER_USE_MCP_TOKEN`) makes `/mcp` require
+  `Authorization: Bearer <secret>`; `/healthz` stays open for supervisors.
+  Without it the transport is loopback-only and unauthenticated.
 - Tool failures stay `isError` results with the app's stable code/hint, and a
   single call is capped at 5 minutes (client cancellation still cancels it).
 
@@ -293,7 +353,10 @@ browser-use cli frames main
 - `cookies` reads/writes the agent session's cookies, HTTPOnly included; values
   are sensitive and are redacted in the audit log.
 - `files upload` reads local files into `input[type=file]` via a `File` +
-  `DataTransfer` and dispatches `input`/`change`. 20 MiB per request.
+  `DataTransfer` and dispatches `input`/`change`. 20 MiB per request. Paths must
+  be under `security.upload_dirs` (default: Desktop, Documents, Downloads;
+  `~` and `%VAR%` expand; symlinks are resolved). Set an empty list to disable
+  the check for compatibility.
 - `frames list` discovers direct iframes of **any origin** through the preload
   relay; `frames use` makes snapshot/read/click/type/scroll/upload/network run
   inside that frame; `frames main` returns to the top document. Nested iframes
@@ -323,11 +386,12 @@ appear.
 
 While the agent holds a tab, a mask covers the toolbar and page (not the
 title bar or status bar): pointer, wheel and keyboard input are blocked, and
-tabs, `Take over` and the status bar's `Activity` button stay usable. The page is dimmed; a floating card shows the last action and a
-`Take over` button. Taking over releases every lease, pauses agent writes
-(reads still work), and shows `Resume agent` in the status bar. An explicit
-`control release`, 120 seconds of inactivity, or closing the tab also ends
-the lease.
+tabs, `Take over`, `Pause` and the status bar's `Activity` button stay usable. The page is dimmed; a floating card shows the last action,
+`Take over` and `Pause`. Taking over releases every lease and pauses agent
+writes (reads still work). `Pause` releases the leases and marks the browser
+paused without marking it as user-controlled; the status bar then shows
+`Resume agent`. An explicit `control release`, 120 seconds of inactivity, or
+closing the tab also ends the lease.
 
 ![The agent mask over the toolbar and page](docs/mask.png)
 
@@ -355,8 +419,8 @@ go build -o bin/browser-use.exe .
 ## What works now
 
 - **Tray icon**: a notification-area (Windows) / menu-bar (macOS) icon with
-  Show Window, Hide Window, Copy MCP Config and Quit; hiding keeps the control
-  server and the agent's tabs running.
+  显示窗口 / 隐藏窗口 / 复制 MCP 配置（stdio / HTTP）/ 退出 browser-use；
+  hiding keeps the control server and the agent's tabs running.
 - **Frameless title bar**: app icon, tabs, `+` and the window controls in
   one native strip; drag the empty title bar to move the window. Tabs use a
   colored site initial as a favicon fallback.
@@ -371,7 +435,8 @@ go build -o bin/browser-use.exe .
 - Point clicks reveal `opacity: 0` hover-only wrappers (menu/card actions) for
   the click and restore them afterwards; `reveal: false` opts out.
 - Screenshots saved under `%APPDATA%\browser-use\screenshots\`, optionally
-  annotated with refs and downscaled for smaller images.
+  annotated with refs, downscaled, clipped to a ref/selector, and encoded as
+  JPEG (`format:"jpeg"`, `quality`) for smaller images.
 - Downloads recorded in a dedicated directory; `wait --for download` returns
   the file path.
 - `alert`/`confirm`/`prompt` are intercepted and non-blocking; `dialogs`
@@ -393,6 +458,8 @@ M2 remaining: popup windows with `window.opener`, approvals/policies, nested
 iframe traversal and command palette/favicons.
 
 See [DESIGN.md](DESIGN.md) for the full design.
+
+
 
 
 

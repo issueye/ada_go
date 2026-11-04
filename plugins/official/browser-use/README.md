@@ -91,6 +91,30 @@
 `browser_call` 故意只开放这五个工具：`eval` 与 `script` 必须走 `browser_eval` /
 `browser_script`，否则可以用 `write` 级的透传绕过 `exec` 级的审批。
 
+页面 dialog 是同步调用，不能事后逐条点；先用
+`browser_call {tool:"dialogs", args:{action:"accept", text:"yes"}}` 设策略，再触发会弹框的动作。
+`dismiss` 会让 `confirm()` 返回 false、`prompt()` 返回 null；记录里带实际 `answer`。
+
+### 快照与交互
+
+- 快照除了语义元素，也会收录 `cursor:pointer` 的 div/span 控件（role 显示为
+  `clickable`），所以 React/Vue 里没有 role/tabindex 的卡片、菜单项也能按 ref 或
+  `text=...` 定位；文本定位会优先精确匹配、可见、在视口内、层级更深的元素。
+- `click` / `type` / `select` 默认最多等 5 秒可操作性（出现、可见、可用、不被遮挡），
+  不再需要先 `wait` 再动作；`force:true` 仍会跳过遮挡检查。
+- `browser_act {action:"wait", for:"tab"|"control"|"dialog"}` 可以等新标签页/弹窗、
+  用户接管/释放、页面 dialog，而不是轮询 `browser_status`。
+- `browser_snapshot {diff:true}` 只返回相对上一次快照的 `+` 新增、`~` 变化、`-` 消失节点，
+  多步流程里能显著降低 token；第一次 diff 没有基线时会退化为全量。
+- SPA 的 `pushState/replaceState/hash` 变化会更新页面运行时的 nav 计数，
+  `wait {for:"url"}` 直接读页面 `location.href`，不再依赖 Go 侧缓存。
+
+### 截图
+
+`browser_screenshot` 支持 `ref` / `selector` 只截某个元素，以及 `format:"jpeg"` +
+`quality` 减小图片体积；`inline:false` 只返回文件路径。元素截图会被裁剪到当前视口，
+`details.clip` 给出实际区域；超出视口时会有 warning。
+
 ### 控制台（`browser_console`）
 
 页面运行时在 document start 注入，先于页面脚本包住 `console.log/info/warn/error/debug`，
@@ -114,6 +138,11 @@
 给模型的是文本（快照正文、回执摘要、接口列表），结构化数据只进 `details`（界面用）：
 每次都带当前 URL/标题，`browser_act` 的回执会说明点到了哪个 `role "name" [ref]`。
 `browser_screenshot` 在 `inline=true`（默认）时额外返回一个 `image/png` 部件。
+
+工具层对模型可见文本有 24000 字符的展示上限。超过时文本末尾会出现
+`…（工具层截断：原始 N 字符，展示上限 24000 字符…）`，同时 `details.truncated=true`；
+这时不要把结果当成完整内容，改用更小的 `filter`/`scope`/`limit` 或分批读取。
+注意它和工具自己的 `max_chars` 截断是两回事：后者会在正文里写“已按 max_chars 截断”。
 
 ## 审批与边界
 

@@ -130,6 +130,7 @@ func (s *Server) execute(ctx context.Context, client, name string, raw json.RawM
 			Scope    string `json:"scope"`
 			MaxChars int    `json:"max_chars"`
 			Filter   string `json:"filter"`
+			Diff     bool   `json:"diff"`
 		}
 		if err := decodeArgs(raw, &req); err != nil {
 			return nil, bad(err)
@@ -139,7 +140,7 @@ func (s *Server) execute(ctx context.Context, client, name string, raw json.RawM
 		}
 		id := s.tabID(req.Tab)
 		snap, err := s.mgr.Snapshot(ctx, id, client, browser.SnapshotOptions{
-			Scope: req.Scope, MaxChars: req.MaxChars, Filter: req.Filter,
+			Scope: req.Scope, MaxChars: req.MaxChars, Filter: req.Filter, Diff: req.Diff,
 		})
 		if err != nil {
 			return nil, err
@@ -342,6 +343,10 @@ func (s *Server) execute(ctx context.Context, client, name string, raw json.RawM
 			Annotate *bool  `json:"annotate"`
 			Inline   bool   `json:"inline"`
 			MaxWidth int    `json:"max_width"`
+			Ref      string `json:"ref"`
+			Selector string `json:"selector"`
+			Format   string `json:"format"`
+			Quality  int    `json:"quality"`
 		}
 		if err := decodeArgs(raw, &req); err != nil {
 			return nil, bad(err)
@@ -349,6 +354,7 @@ func (s *Server) execute(ctx context.Context, client, name string, raw json.RawM
 		id := s.tabID(req.Tab)
 		res, err := s.mgr.Screenshot(ctx, id, client, browser.ScreenshotOptions{
 			Annotate: boolDefault(req.Annotate, true), Inline: req.Inline, MaxWidth: req.MaxWidth,
+			Ref: req.Ref, Selector: req.Selector, Format: req.Format, Quality: req.Quality,
 		})
 		if err != nil {
 			return nil, err
@@ -430,17 +436,19 @@ func (s *Server) execute(ctx context.Context, client, name string, raw json.RawM
 
 	case "dialogs":
 		var req struct {
-			Tab string `json:"tab"`
+			Tab    string `json:"tab"`
+			Action string `json:"action"`
+			Text   string `json:"text"`
 		}
 		if err := decodeArgs(raw, &req); err != nil {
 			return nil, bad(err)
 		}
 		id := s.tabID(req.Tab)
-		list, err := s.mgr.Dialogs(ctx, id, client)
+		res, err := s.mgr.Dialogs(ctx, id, client, browser.DialogOptions{Action: req.Action, Text: req.Text})
 		if err != nil {
 			return nil, err
 		}
-		return &outcome{Data: map[string]any{"dialogs": list}, TabID: id}, nil
+		return &outcome{Data: res, TabID: id}, nil
 
 	case "click":
 		var req struct {

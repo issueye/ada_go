@@ -80,8 +80,13 @@ viewport 1280x800  scroll=(0,0)  page=1280x2400  dpr=1  refs=42  nodes=512
 ```
 
 - 一行 = 一个可交互元素：`[ref] role "可见名"`，可选 `value=` / `href=` / `checked` / `disabled` / `offscreen`。
+- `role=clickable` 是 `cursor:pointer` 的非语义控件（React/Vue 卡片、菜单项）；它和 button/link 一样可以按 ref 或 `text=` 点。
 - `offscreen` 表示在视口外；`browser_act` 会自己滚动到位，不用手动滚。
 - `truncated` 为真时说明被 `max_chars` 截断：用 `filter`（role/名字/标签）或 `scope:"viewport"` 收窄。
+- 文本末尾出现「工具层截断：原始 N 字符」是插件的 24000 字符展示上限到了，`details.truncated`
+  也会为 true；不要把它当成完整页面，改用更小的 `filter`/`scope`/`max_chars` 或分批读取。
+- 页面有局部刷新、或者只是想知道"刚才点击后变了什么"时用 `diff:true`：只返回
+  `+` 新增 / `~` 变化 / `-` 消失的节点；第一次 diff 没有基线，会先给全量。
 - 找不到目标时换定位方式：`selector:"#submit"`、`selector:"text=提交"`、`selector:"role=button[name=提交]"`，
   或 `click {text:"提交"}`（按可见文本）。
 
@@ -116,8 +121,14 @@ viewport 1280x800  scroll=(0,0)  page=1280x2400  dpr=1  refs=42  nodes=512
 { "action": "wait", "for": "url", "value": "/results" }
 { "action": "wait", "for": "selector", "value": "text=加载完成" }
 { "action": "wait", "for": "download" }        // 返回文件路径
+{ "action": "wait", "for": "tab" }             // 等新标签页/弹窗
+{ "action": "wait", "for": "control" }         // 等用户接管/释放
+{ "action": "wait", "for": "dialog" }          // 等页面 alert/confirm/prompt
 { "action": "wait", "for": "load", "timeout_ms": 15000 }
 ```
+
+`click` / `type` / `select` 默认最多等 5 秒元素可操作（出现、可见、可用、不被遮挡），
+所以普通异步渲染不需要先手写 `wait`；等不到再检查快照或加 `force`。
 
 **经验**：提交表单后先用 `wait {for:"url"}` 或 `wait {for:"selector"}`，再快照；
 SPA 的局部刷新经常不改 URL，要等文本或 `browser_network {action:"wait"}`。
@@ -212,6 +223,8 @@ fetch/XHR（不记录文档本身、WebSocket、SSE 体）；请求体 ≤16KB�
 
 - `browser_screenshot {}` 默认叠加 ref 标注并把图片直接返回给你；需要看清细节时加
   `max_width: 1600`，只要文件路径时 `inline: false`。
+- 只截某个元素用 `ref` 或 `selector`（图片会裁剪到视口内的部分）；图片太大时用
+  `format:"jpeg"` + `quality:80` 可明显减小体积。
 - 截图里的 ref 标签与 `browser_snapshot` 的 ref 一致，可以"看图找元素 → 按 ref 点击"。
 - 截图文件也保存在 `%APPDATA%\browser-use\screenshots\`（状态里能看到下载目录）。
 - 判断"布局是否错位/样式是否生效/给用户看结果"用截图；判断"功能是否可用"用动作 + 快照。
@@ -225,7 +238,7 @@ fetch/XHR（不记录文档本身、WebSocket、SSE 体）；请求体 ≤16KB�
 { "tool": "cookies", "args": { "action": "import", "cookies": [ … ] } }
 
 // 上传：目标可以是 file input 的 ref，也可以是旁边的上传按钮
-{ "tool": "files", "args": { "action": "upload", "ref": "e31", "paths": ["E:\\work\\report.pdf"] } }
+{ "tool": "files", "args": { "action": "upload", "ref": "e31", "paths": ["%USERPROFILE%\\Desktop\\report.pdf"] } }
 
 // iframe：先 list 再 use，动作作用在 frame 内；处理完回 main
 { "tool": "frames", "args": { "action": "list" } }
@@ -235,11 +248,16 @@ fetch/XHR（不记录文档本身、WebSocket、SSE 体）；请求体 ≤16KB�
 // 下载与弹框
 { "tool": "downloads", "args": {} }
 { "tool": "dialogs", "args": {} }
+{ "tool": "dialogs", "args": { "action": "accept", "text": "yes" } }
+{ "tool": "dialogs", "args": { "action": "dismiss" } }
 ```
 
-- 上传单次 ≤20MiB；`files` 只支持 `upload`。
-- 弹框（`alert`/`confirm`/`prompt`）由浏览器拦截、非阻塞，用 `dialogs` 回看；
-  需要"点确定"时通常页面上已有等效按钮，或用 `browser_script` 处理。
+- 上传单次 ≤20MiB；`files` 只支持 `upload`。默认只允许 `security.upload_dirs`
+  （Desktop/Documents/Downloads）下的路径，越界会报 `blocked_action`。
+- 弹框（`alert`/`confirm`/`prompt`）由浏览器拦截、非阻塞。页面里的 dialog 是同步调用，
+  不能事后逐条点：先在**触发动作之前**用 `dialogs {action:"accept"|"dismiss"}` 设策略
+  （`accept` 可带 `text` 作为 prompt 的返回值），再用 `dialogs {action:"list"}` 看
+  `answer`；`wait {for:"dialog"}` 可以等弹框发生。
 - 只支持**直接 iframe**（任意来源），嵌套 iframe 不遍历；`frames use` 之后记得 `main`。
 
 ## 10. 错误码 → 下一步

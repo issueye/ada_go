@@ -272,6 +272,7 @@ func (t *Tab) attachHandlers(m *Manager) {
 		t.navSeq.Add(1)
 		t.runtimeReady.Store(false)
 		m.notify()
+		m.emit("nav.committed", t.ID, url)
 	})
 	p.OnPageTitleUpdated(func(e *mygo.TitleEvent) {
 		t.setTitle(e.Title)
@@ -281,6 +282,7 @@ func (t *Tab) attachHandlers(m *Manager) {
 		t.setLoading(false)
 		t.setLoadErr("")
 		m.notify()
+		m.emit("nav.finished", t.ID, t.URL())
 	})
 	p.OnDidFailLoad(func(e *mygo.LoadError) {
 		t.setLoading(false)
@@ -288,6 +290,7 @@ func (t *Tab) attachHandlers(m *Manager) {
 			t.setLoadErr(e.Error())
 		}
 		m.notify()
+		m.emit("nav.failed", t.ID, t.loadErrValue())
 	})
 	p.OnWillDownload(func(e *mygo.DownloadEvent) {
 		name := safeDownloadName(e.SuggestedName)
@@ -304,6 +307,9 @@ func (t *Tab) attachHandlers(m *Manager) {
 	})
 	p.OnDownloadDone(func(d *mygo.Download) {
 		m.recordDownload(t.ID, d)
+		if d != nil && d.Err == nil {
+			m.emit("download.finished", t.ID, d.Path)
+		}
 	})
 	p.SetPermissionHandler(func(req mygo.PermissionRequest) bool { return false })
 	p.SetWindowOpenHandler(func(req mygo.WindowOpenRequest) *mygo.WindowOptions {

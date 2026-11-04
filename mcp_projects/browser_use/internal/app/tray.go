@@ -38,9 +38,23 @@ func mcpConfigSnippet() string {
 	return string(raw) + "\n"
 }
 
+// mcpHTTPConfigSnippet 返回 HTTP 模式的条目：先启动
+// `browser-use mcp --http --port 8766`，再让客户端连 /mcp。
+func mcpHTTPConfigSnippet() string {
+	cfg := map[string]any{
+		"id":        "browser_use",
+		"transport": "http",
+		"url":       "http://127.0.0.1:8766/mcp",
+	}
+	raw, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(raw) + "\n"
+}
+
 // copyMCPConfig 把配置写进剪贴板，并尽力弹一条系统通知确认。
-func copyMCPConfig() {
-	text := mcpConfigSnippet()
+func copyMCPConfig(transport, text, hint string) {
 	if text == "" {
 		return
 	}
@@ -50,7 +64,7 @@ func copyMCPConfig() {
 	}
 	note := mygo.NewNotification(mygo.NotificationOptions{
 		Title: "browser-use",
-		Body:  "MCP config copied. Paste it into .adago/mcp.json (servers).",
+		Body:  "已复制 MCP 配置（" + transport + "）。" + hint,
 	})
 	if err := note.Show(); err != nil {
 		log.Printf("browser-use: notification: %v", err)
@@ -72,12 +86,17 @@ func startTray(a *App) *mygo.Tray {
 		}
 	}
 	menu := mygo.NewMenu([]*mygo.MenuItem{
-		{Label: "Show Window", Click: show},
-		{Label: "Hide Window", Click: hide},
+		{Label: "显示窗口", Click: show},
+		{Label: "隐藏窗口", Click: hide},
 		mygo.Separator(),
-		{Label: "Copy MCP Config", Click: func(*mygo.MenuItem, *mygo.Window) { copyMCPConfig() }},
+		{Label: "复制 MCP 配置（stdio）", Click: func(*mygo.MenuItem, *mygo.Window) {
+			copyMCPConfig("stdio", mcpConfigSnippet(), "粘贴到 .adago/mcp.json 的 servers 数组。")
+		}},
+		{Label: "复制 MCP 配置（HTTP）", Click: func(*mygo.MenuItem, *mygo.Window) {
+			copyMCPConfig("HTTP", mcpHTTPConfigSnippet(), "请先启动 browser-use mcp --http --port 8766。")
+		}},
 		mygo.Separator(),
-		{Label: "Quit browser-use", Click: func(*mygo.MenuItem, *mygo.Window) { mygo.App.Quit() }},
+		{Label: "退出 browser-use", Click: func(*mygo.MenuItem, *mygo.Window) { mygo.App.Quit() }},
 	})
 	tray, err := mygo.NewTray(mygo.TrayOptions{
 		ID:      "browser-use",

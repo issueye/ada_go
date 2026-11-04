@@ -61,7 +61,7 @@ func (a *App) titleBar(c *ui.Context) {
 				}
 			})
 		})
-		if a.iconButton(c, iconPlus, "New tab", false) {
+		if a.iconButton(c, iconPlus, "新建标签页", false) {
 			a.openTab("about:blank")
 		}
 	})
@@ -93,8 +93,8 @@ func (a *App) tabItem(c *ui.Context, info browser.TabInfo, height float32) {
 			ui.Icon(c, iconLock).Size(12, 12).TextColor(th.Accent)
 		}
 		if info.Active || tab.Hovered() {
-			cb := ui.ButtonBase(c).Label("Close tab").Size(18, 18).Radius(5).
-				Cursor(ui.CursorPointer).Tooltip("Close tab")
+			cb := ui.ButtonBase(c).Label("关闭标签页").Size(18, 18).Radius(5).
+				Cursor(ui.CursorPointer).Tooltip("关闭标签页")
 			if cb.Hovered() {
 				cb.Background(th.SurfacePressed)
 			}
@@ -162,19 +162,19 @@ func (a *App) toolbar(c *ui.Context) {
 	}
 	ui.Row(c).Height(48).Padding(6, 10).Gap(2).AlignItems(ui.Center).
 		Background(th.Background).Children(func() {
-		if a.iconButton(c, iconBack, "Back", !canBack || masked) {
+		if a.iconButton(c, iconBack, "后退", !canBack || masked) {
 			a.history("back")
 		}
-		if a.iconButton(c, iconForward, "Forward", !canForward || masked) {
+		if a.iconButton(c, iconForward, "前进", !canForward || masked) {
 			a.history("forward")
 		}
 		if loading {
-			if a.iconButton(c, iconStop, "Stop", masked) {
+			if a.iconButton(c, iconStop, "停止", masked) {
 				go func() {
-					_, _ = a.mgr.Navigate(context.Background(), active.ID, "ui", "stop", "", browser.NavigateOptions{WaitUntil: "none"})
+					_, _ = a.mgr.Navigate(context.Background(), active.ID, "ui", "stop", "", browser.NavigateOptions{WaitUntil: "none", Human: true})
 				}()
 			}
-		} else if a.iconButton(c, iconReload, "Reload", masked) {
+		} else if a.iconButton(c, iconReload, "刷新", masked) {
 			a.history("reload")
 		}
 		a.addressBar(c, active, masked)
@@ -197,14 +197,14 @@ func (a *App) addressBar(c *ui.Context, active *browser.Tab, masked bool) {
 		}
 		ui.Icon(c, ic).Size(14, 14).TextColor(th.TextMuted)
 		input = ui.TextInputBase(c, &a.address).Grow(1).FontSize(13).
-			TextColor(th.Text).Placeholder("Enter a URL or search…").Disabled(masked)
+			TextColor(th.Text).Placeholder("输入网址或搜索…").Disabled(masked)
 		if input.Changed() {
 			a.addressAuto = false
 		}
 		if input.Submitted() {
 			a.navigate(a.address)
 		}
-		if a.iconButtonSized(c, iconArrowRight, "Go", masked, 24, 14) {
+		if a.iconButtonSized(c, iconArrowRight, "前往", masked, 24, 14) {
 			a.navigate(a.address)
 		}
 	})
@@ -215,12 +215,14 @@ func (a *App) addressBar(c *ui.Context, active *browser.Tab, masked bool) {
 
 func (a *App) agentChip(c *ui.Context, cs browser.ControlState) {
 	th := c.Theme()
-	label, dot := "Agent idle", th.TextMuted
+	label, dot := "代理空闲", th.TextMuted
 	switch cs.State {
 	case "agent":
-		label, dot = "Agent working", th.Accent
+		label, dot = "代理工作中", th.Accent
 	case "user":
-		label, dot = "You have control", th.Warning
+		label, dot = "你已接管", th.Warning
+	case "paused":
+		label, dot = "已暂停", th.Warning
 	}
 	ui.Row(c).Height(26).Padding(0, 10).Gap(6).Radius(13).
 		Background(th.Surface).Border(1, th.Border).AlignItems(ui.Center).Children(func() {
@@ -237,10 +239,10 @@ func (a *App) page(c *ui.Context) {
 	if active == nil {
 		ui.Column(c).Grow(1).Center().Gap(10).Children(func() {
 			ui.Icon(c, iconGlobe).Size(44, 44).TextColor(th.TextMuted)
-			ui.Text(c, "No tabs open").FontSize(18).Bold()
-			ui.Text(c, "Open a URL, or let an agent drive this browser.").
+			ui.Text(c, "没有打开的标签页").FontSize(18).Bold()
+			ui.Text(c, "打开一个网址，或让代理来操作这个浏览器。").
 				FontSize(12).TextColor(th.TextMuted)
-			if ui.PrimaryButton(c, "New Tab").Clicked() {
+			if ui.PrimaryButton(c, "新建标签页").Clicked() {
 				a.openTab("about:blank")
 			}
 		})
@@ -287,16 +289,19 @@ func (a *App) mask(c *ui.Context, tab *browser.Tab) {
 					ui.Icon(c, iconShield).Size(17, 17).TextColor(th.AccentText)
 				})
 				ui.Column(c).Gap(2).Children(func() {
-					ui.Text(c, "Agent is controlling").FontSize(13).Bold()
+					ui.Text(c, "代理正在操作").FontSize(13).Bold()
 					act := tab.LastAction()
 					if act == "" {
-						act = "getting ready"
+						act = "准备中"
 					}
-					ui.Text(c, "Page input is locked · "+clip(act, 48)).
+					ui.Text(c, "页面输入已锁定 · "+clip(act, 48)).
 						FontSize(11).TextColor(th.TextMuted)
 				})
-				if ui.PrimaryButton(c, "Take over").Clicked() {
+				if ui.PrimaryButton(c, "接管").Clicked() {
 					a.takeOver()
+				}
+				if ui.Button(c, "暂停").Clicked() {
+					a.pause()
 				}
 			})
 		})
@@ -304,7 +309,7 @@ func (a *App) mask(c *ui.Context, tab *browser.Tab) {
 			ui.Row(c).Padding(6, 12).Gap(6).Radius(14).Background(th.Surface).
 				Border(1, th.Border).AlignItems(ui.Center).Children(func() {
 				ui.Icon(c, iconLock).Size(12, 12).TextColor(th.TextMuted)
-				ui.Text(c, "Click Take over to interact with the page").
+				ui.Text(c, "点击「接管」后即可操作页面").
 					FontSize(11).TextColor(th.TextMuted)
 			})
 		})
@@ -318,19 +323,16 @@ func (a *App) statusBar(c *ui.Context) {
 	cs := a.mgr.State()
 	ui.Row(c).Height(27).Padding(4, 10).Gap(10).AlignItems(ui.Center).
 		Background(th.Surface).Children(func() {
-		n := len(a.mgr.Tabs())
-		word := "tabs"
-		if n == 1 {
-			word = "tab"
-		}
-		ui.Textf(c, "%d %s", n, word).TextColor(th.TextMuted).FontSize(11)
+		ui.Textf(c, "%d 个标签页", len(a.mgr.Tabs())).TextColor(th.TextMuted).FontSize(11)
 		ui.Text(c, "·").TextColor(th.Border).FontSize(11)
-		state, col := "Agent idle", th.TextMuted
+		state, col := "代理空闲", th.TextMuted
 		switch cs.State {
 		case "agent":
-			state, col = "Agent working", th.Accent
+			state, col = "代理工作中", th.Accent
 		case "user":
-			state, col = "You have control", th.Warning
+			state, col = "你已接管", th.Warning
+		case "paused":
+			state, col = "已暂停", th.Warning
 		}
 		ui.Text(c, state).TextColor(col).FontSize(11)
 		if a.srv != nil {
@@ -340,11 +342,11 @@ func (a *App) statusBar(c *ui.Context) {
 			ui.Text(c, clip(a.lastErr, 90)).TextColor(th.Danger).FontSize(11)
 		}
 		ui.Row(c).Grow(1)
-		if ui.Button(c, "Activity").Clicked() {
+		if ui.Button(c, "活动").Clicked() {
 			a.showActivity = !a.showActivity
 		}
-		if cs.State == "user" {
-			if ui.Button(c, "Resume agent").Clicked() {
+		if cs.State == "user" || cs.State == "paused" {
+			if ui.Button(c, "恢复代理").Clicked() {
 				a.resume()
 			}
 		}
@@ -366,17 +368,17 @@ func (a *App) activityPanel(c *ui.Context) {
 		ui.Row(c).Height(44).Padding(0, 12).Gap(8).AlignItems(ui.Center).
 			Background(th.Surface).Children(func() {
 			ui.Icon(c, iconActivity).Size(16, 16).TextColor(th.Accent)
-			ui.Text(c, "Activity").Bold()
+			ui.Text(c, "活动").Bold()
 			ui.Row(c).Grow(1)
 			ui.Textf(c, "%d", len(entries)).FontSize(10).TextColor(th.TextMuted)
-			if a.iconButton(c, iconClose, "Close", false) {
+			if a.iconButton(c, iconClose, "关闭", false) {
 				a.showActivity = false
 			}
 		})
 		if len(entries) == 0 {
 			ui.Column(c).Grow(1).Center().Gap(8).Children(func() {
 				ui.Icon(c, iconActivity).Size(28, 28).TextColor(th.TextMuted)
-				ui.Text(c, "No calls yet").FontSize(12).TextColor(th.TextMuted)
+				ui.Text(c, "暂无调用").FontSize(12).TextColor(th.TextMuted)
 			})
 			return
 		}

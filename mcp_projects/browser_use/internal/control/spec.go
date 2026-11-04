@@ -43,12 +43,13 @@ var Tools = []ToolSpec{
 	},
 	{
 		Name: "snapshot", Phase: "M0",
-		Description: "Semantic snapshot of the page with stable refs such as e12.",
+		Description: "Semantic snapshot of the page with stable refs such as e12. diff=true returns only nodes added, changed or removed since the previous snapshot.",
 		Schema: schema(`{"type":"object","properties":{
 			"tab":{"type":"string"},
 			"scope":{"type":"string","enum":["full","viewport"],"default":"full"},
 			"filter":{"type":"string"},
-			"max_chars":{"type":"integer","minimum":1000,"maximum":50000,"default":12000}
+			"max_chars":{"type":"integer","minimum":1000,"maximum":50000,"default":12000},
+			"diff":{"type":"boolean","default":false}
 		},"additionalProperties":false}`),
 	},
 	{
@@ -145,12 +146,16 @@ var Tools = []ToolSpec{
 	},
 	{
 		Name: "screenshot", Phase: "M1",
-		Description: "PNG screenshot of the page, optionally annotated with snapshot refs. Saved under the app data directory.",
+		Description: "PNG/JPEG screenshot of the page, optionally clipped to a ref/selector and annotated with snapshot refs. Saved under the app data directory.",
 		Schema: schema(`{"type":"object","properties":{
 			"tab":{"type":"string"},
 			"annotate":{"type":"boolean","default":true},
 			"inline":{"type":"boolean","default":false},
-			"max_width":{"type":"integer","minimum":320,"maximum":4096,"default":1600}
+			"max_width":{"type":"integer","minimum":320,"maximum":4096,"default":1600},
+			"ref":{"type":"string","description":"clip to this snapshot ref"},
+			"selector":{"type":"string","description":"clip to this CSS/text/role selector"},
+			"format":{"type":"string","enum":["png","jpeg"],"default":"png"},
+			"quality":{"type":"integer","minimum":1,"maximum":100,"default":82,"description":"JPEG quality"}
 		},"additionalProperties":false}`),
 	},
 	{
@@ -190,8 +195,12 @@ var Tools = []ToolSpec{
 	},
 	{
 		Name: "dialogs", Phase: "M1",
-		Description: "List alert/confirm/prompt calls the page made (they are intercepted and non-blocking).",
-		Schema:      schema(`{"type":"object","properties":{"tab":{"type":"string"}},"additionalProperties":false}`),
+		Description: "List alert/confirm/prompt calls the page made (they are intercepted and non-blocking), clear the list, or set the policy for the next confirm/prompt: accept (confirm=true, prompt returns text/default) or dismiss (confirm=false, prompt returns null).",
+		Schema: schema(`{"type":"object","properties":{
+			"tab":{"type":"string"},
+			"action":{"type":"string","enum":["list","clear","accept","dismiss"],"default":"list"},
+			"text":{"type":"string","description":"prompt answer for action=accept"}
+		},"additionalProperties":false}`),
 	},
 	{
 		Name: "click", Phase: "M0",
@@ -250,10 +259,10 @@ var Tools = []ToolSpec{
 	},
 	{
 		Name: "wait", Phase: "M0",
-		Description: "Wait for load, URL, selector, text, download or time.",
+		Description: "Wait for load, URL, selector, text, download, time, idle, a new tab, a control change or a page dialog.",
 		Schema: schema(`{"type":"object","properties":{
 			"tab":{"type":"string"},
-			"for":{"type":"string","enum":["load","url","selector","text","download","time","idle"]},
+			"for":{"type":"string","enum":["load","url","selector","text","download","time","idle","tab","control","dialog"]},
 			"value":{"type":"string"},
 			"state":{"type":"string","enum":["visible","attached","hidden"],"default":"visible"},
 			"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"default":30000}

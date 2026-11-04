@@ -92,6 +92,8 @@ type Snapshot struct {
 	Nodes      []SnapshotNode `json:"nodes,omitempty"`
 	Version    int            `json:"version"`
 	Truncated  bool           `json:"truncated"`
+	Diff       bool           `json:"diff,omitempty"`
+	Changes    int            `json:"changes,omitempty"`
 	URL        string         `json:"url"`
 	Title      string         `json:"title"`
 	Viewport   map[string]any `json:"viewport,omitempty"`
@@ -104,6 +106,7 @@ type SnapshotOptions struct {
 	Scope    string `json:"scope,omitempty"`
 	MaxChars int    `json:"max_chars,omitempty"`
 	Filter   string `json:"filter,omitempty"`
+	Diff     bool   `json:"diff,omitempty"`
 }
 
 type snapshotWire struct {
@@ -111,6 +114,8 @@ type snapshotWire struct {
 	Nodes      []SnapshotNode `json:"nodes"`
 	Version    int            `json:"version"`
 	Truncated  bool           `json:"truncated"`
+	Diff       bool           `json:"diff"`
+	Changes    int            `json:"changes"`
 	URL        string         `json:"url"`
 	Title      string         `json:"title"`
 	Viewport   map[string]any `json:"viewport"`
@@ -199,27 +204,59 @@ type Dialog struct {
 	Type         string  `json:"type"`
 	Message      string  `json:"message"`
 	DefaultValue *string `json:"defaultValue,omitempty"`
+	Answer       any     `json:"answer,omitempty"`
 	TS           int64   `json:"ts"`
 }
 
-// Dialogs lists the alert/confirm/prompt calls the page made.
-func (m *Manager) Dialogs(ctx context.Context, tabID, client string) ([]Dialog, error) {
+// DialogOptions select a dialogs action.
+type DialogOptions struct {
+	Action string
+	Text   string
+}
+
+// DialogResult is the dialogs list/clear/accept/dismiss result.
+type DialogResult struct {
+	Dialogs []Dialog       `json:"dialogs"`
+	Policy  map[string]any `json:"policy,omitempty"`
+	Cleared int            `json:"cleared,omitempty"`
+}
+
+// Dialogs lists the alert/confirm/prompt calls the page made, or sets the
+// policy used for the next confirm/prompt. Page dialogs are synchronous, so the
+// policy is applied immediately instead of blocking the page for a human.
+func (m *Manager) Dialogs(ctx context.Context, tabID, client string, opts DialogOptions) (*DialogResult, error) {
 	t, done, err := m.begin(ctx, tabID, client, "dialogs", false)
 	if err != nil {
 		return nil, err
 	}
 	defer done()
-	raw, err := t.invoke(ctx, "dialogs", map[string]any{})
+	raw, err := t.invoke(ctx, "dialogs", func() map[string]any {
+		args := map[string]any{"action": opts.Action}
+		if opts.Text != "" {
+			args["text"] = opts.Text
+		}
+		return args
+	}())
 	if err != nil {
 		return nil, err
 	}
-	var w struct {
-		Dialogs []Dialog `json:"dialogs"`
-	}
-	if err := json.Unmarshal(raw, &w); err != nil {
+	var out DialogResult
+	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, &Error{Code: CodeInternal, Message: err.Error()}
 	}
-	return w.Dialogs, nil
+	return &out, nil
+}
+
+func (t *Tab) dialogList(ctx context.Context) ([]Dialog, error) {
+	raw, err := t.invoke(ctx, "dialogs", map[string]any{"action": "list"})
+	if err != nil {
+		return nil, err
+	}
+	var out DialogResult
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, &Error{Code: CodeInternal, Message: err.Error()}
+	}
+	return out.Dialogs, nil
 }
 
 // ReadResult is the readable text of a page or element.
@@ -277,19 +314,27 @@ func (m *Manager) begin(ctx context.Context, tabID, client, action string, mutat
 	if tabID == "" {
 		return nil, nil, &Error{Code: CodeNoTab, Message: "no active tab", Hint: "navigate or create a tab first"}
 	}
-	if mutating && m.UserControlled() {
-		return nil, nil, &Error{Code: CodeControlLocked, Message: "the human has taken over", Hint: "ask the human to resume"}
+	if mutating {
+		if m.UserControlled() {
+			return nil, nil, &Error{Code: CodeControlLocked, Message: "the human has taken over", Hint: "ask the human to resume"}
+		}
+		if m.Paused() {
+			return nil, nil, &Error{Code: CodeControlLocked, Message: "the agent is paused", Hint: "ask the human to resume"}
+		}
 	}
 	t := m.Tab(tabID)
 	if t == nil {
 		return nil, nil, errorf(CodeInvalidTab, "no tab %q", tabID)
 	}
-	if !m.UserControlled() {
+	if !m.UserControlled() && !m.Paused() {
 		var err error
 		t, err = m.Acquire(tabID, client)
 		if err != nil {
 			return nil, nil, err
 		}
+	}
+	if m.cfg.Agent.FollowAgent && !m.Paused() && m.ActiveID() != t.ID {
+		_ = m.Activate(t.ID)
 	}
 	t.actionMu.Lock()
 	t.setAction(action)
@@ -297,7 +342,7 @@ func (m *Manager) begin(ctx context.Context, tabID, client, action string, mutat
 		t.actionMu.Unlock()
 		return nil, nil, err
 	}
-	if m.cfg.Control.Mask && !m.UserControlled() {
+	if m.cfg.Control.Mask && !m.UserControlled() && !m.Paused() {
 		t.setInputLock(true)
 	}
 	m.notify()
@@ -389,7 +434,7 @@ func (m *Manager) Snapshot(ctx context.Context, tabID, client string, opts Snaps
 		return nil, err
 	}
 	defer done()
-	args := map[string]any{"scope": opts.Scope, "max_chars": opts.MaxChars, "filter": opts.Filter}
+	args := map[string]any{"scope": opts.Scope, "max_chars": opts.MaxChars, "filter": opts.Filter, "diff": opts.Diff}
 	raw, err := t.invoke(ctx, "snapshot", args)
 	if err != nil {
 		return nil, err
@@ -400,6 +445,7 @@ func (m *Manager) Snapshot(ctx context.Context, tabID, client string, opts Snaps
 	}
 	return &Snapshot{
 		Snapshot: w.Text, Nodes: w.Nodes, Version: w.Version, Truncated: w.Truncated,
+		Diff: w.Diff, Changes: w.Changes,
 		URL: w.URL, Title: w.Title, Viewport: w.Viewport, Scroll: w.Scroll, NodesCount: w.NodesCount,
 	}, nil
 }
@@ -600,6 +646,11 @@ func (m *Manager) Hover(ctx context.Context, tabID, client string, target Target
 type NavigateOptions struct {
 	WaitUntil string
 	Timeout   time.Duration
+	// Human marks a navigation started by the browser UI (address bar, back,
+	// forward, reload). Human navigation must not acquire an agent lease or
+	// engage the input lock: otherwise typing a URL would make the browser look
+	// agent-controlled and lock the page for the idle-release period.
+	Human bool
 }
 
 // Navigate goes to a URL, or back/forward/reload/stop.
@@ -621,6 +672,9 @@ func (m *Manager) Navigate(ctx context.Context, tabID, client, action, rawURL st
 		}
 		rawURL = u
 	}
+	if o.Human {
+		return m.navigateHuman(ctx, tabID, action, rawURL, o)
+	}
 	if tabID == "" && action == "goto" {
 		t, err := m.NewTab(ctx, rawURL, TabOptions{Owner: OwnerAgent, Activate: true})
 		if err != nil {
@@ -637,6 +691,44 @@ func (m *Manager) Navigate(ctx context.Context, tabID, client, action, rawURL st
 		return nil, err
 	}
 	defer done()
+	return m.performNavigation(ctx, t, action, rawURL, o)
+}
+
+// navigateHuman runs a navigation started by the human. It deliberately skips
+// begin(): no lease, no input lock and no navigation action recorded as an agent
+// action. The tab is still serialized with agent actions so a human reload
+// cannot race an in-flight click on the same page.
+func (m *Manager) navigateHuman(ctx context.Context, tabID, action, rawURL string, o NavigateOptions) (*TabInfo, error) {
+	if tabID == "" {
+		if action != "goto" {
+			return nil, &Error{Code: CodeNoTab, Message: "no active tab", Hint: "open a tab first"}
+		}
+		t, err := m.NewTab(ctx, rawURL, TabOptions{Owner: OwnerUser, Activate: true})
+		if err != nil {
+			return nil, err
+		}
+		if o.WaitUntil != "none" {
+			_ = t.waitLoad(ctx, o.Timeout)
+		}
+		info := t.info(true)
+		return &info, nil
+	}
+	t := m.Tab(tabID)
+	if t == nil {
+		return nil, errorf(CodeInvalidTab, "no tab %q", tabID)
+	}
+	if t.Page == nil {
+		return nil, &Error{Code: CodeTabClosed, Message: "tab has no page"}
+	}
+	t.actionMu.Lock()
+	defer m.notify()
+	defer t.actionMu.Unlock()
+	return m.performNavigation(ctx, t, action, rawURL, o)
+}
+
+// performNavigation applies a navigation and waits for the resulting load. It
+// is shared by agent and human paths; callers own the tab action lock.
+func (m *Manager) performNavigation(ctx context.Context, t *Tab, action, rawURL string, o NavigateOptions) (*TabInfo, error) {
 	before := t.navSeq.Load()
 	switch action {
 	case "goto":
@@ -733,6 +825,55 @@ type UploadResult struct {
 	Title string `json:"title"`
 }
 
+// allowedUploadPath resolves a local path and enforces security.upload_dirs
+// (the write-side boundary; read_file is intentionally unrestricted).
+func (m *Manager) allowedUploadPath(raw string) (string, error) {
+	p := expandLocalPath(raw)
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		p = resolved
+	}
+	dirs := m.cfg.Security.UploadDirs
+	if len(dirs) == 0 {
+		return p, nil
+	}
+	for _, dir := range dirs {
+		root := expandLocalPath(dir)
+		if resolved, err := filepath.EvalSymlinks(root); err == nil {
+			root = resolved
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			continue
+		}
+		if rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))) {
+			return p, nil
+		}
+	}
+	return "", &Error{
+		Code:    CodeBlockedAction,
+		Message: "file is outside security.upload_dirs: " + raw,
+		Hint:    "add its directory to security.upload_dirs in config.json",
+	}
+}
+
+var pathEnvVar = regexp.MustCompile(`%([A-Za-z_][A-Za-z0-9_]*)%`)
+
+func expandLocalPath(p string) string {
+	p = pathEnvVar.ReplaceAllStringFunc(p, func(m string) string {
+		return os.Getenv(m[1 : len(m)-1])
+	})
+	p = os.ExpandEnv(p)
+	if p == "~" || strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {
+		if home, err := os.UserHomeDir(); err == nil {
+			p = filepath.Join(home, p[1:])
+		}
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	return p
+}
+
 // Upload reads local files and places them in a page file input.
 func (m *Manager) Upload(ctx context.Context, tabID, client string, target Target, paths []string) (*UploadResult, error) {
 	if err := target.Validate(); err != nil {
@@ -746,16 +887,20 @@ func (m *Manager) Upload(ctx context.Context, tabID, client string, target Targe
 	}
 	files := make([]UploadFile, 0, len(paths))
 	total := 0
-	for _, p := range paths {
+	for _, rawPath := range paths {
+		p, err := m.allowedUploadPath(rawPath)
+		if err != nil {
+			return nil, err
+		}
 		info, err := os.Stat(p)
 		if err != nil {
 			return nil, &Error{Code: CodeBadRequest, Message: "file: " + err.Error()}
 		}
 		if !info.Mode().IsRegular() {
-			return nil, &Error{Code: CodeBadRequest, Message: "not a regular file: " + p}
+			return nil, &Error{Code: CodeBadRequest, Message: "not a regular file: " + rawPath}
 		}
 		if info.Size() > 20<<20 {
-			return nil, &Error{Code: CodeBadRequest, Message: "file is larger than 20 MiB: " + p}
+			return nil, &Error{Code: CodeBadRequest, Message: "file is larger than 20 MiB: " + rawPath}
 		}
 		b, err := os.ReadFile(p)
 		if err != nil {
@@ -1156,6 +1301,22 @@ func (m *Manager) Wait(ctx context.Context, tabID, client string, o WaitOptions)
 	}
 	defer done()
 	deadline := time.Now().Add(o.Timeout)
+	// Event-based waits only consider events that happen after this call; the
+	// begin() control.locked event above must not satisfy wait for=control.
+	eventAfter := m.EventCursor()
+	dialogBaseline := 0
+	if o.For == "dialog" {
+		if list, err := t.dialogList(ctx); err == nil {
+			// A dialog triggered by the action just before wait should still
+			// count, mirroring the 5s grace used by wait for=download.
+			cutoff := time.Now().Add(-5 * time.Second).UnixMilli()
+			for _, d := range list {
+				if d.TS < cutoff {
+					dialogBaseline++
+				}
+			}
+		}
+	}
 	check := func() (bool, error) {
 		switch o.For {
 		case "load", "idle":
@@ -1166,8 +1327,39 @@ func (m *Manager) Wait(ctx context.Context, tabID, client string, o WaitOptions)
 				time.Sleep(300 * time.Millisecond)
 			}
 			return true, nil
+		case "tab", "control":
+			kinds := map[string]bool{
+				"tab.created": true, "tab.closed": true, "tab.activated": true,
+			}
+			if o.For == "control" {
+				kinds = map[string]bool{
+					"control.takeover": true, "control.released": true,
+					"control.resumed": true, "control.paused": true,
+				}
+			}
+			events, cursor := m.Events(ctx, eventAfter, 50*time.Millisecond, kinds)
+			eventAfter = cursor
+			return len(events) > 0, nil
+		case "dialog":
+			list, err := t.dialogList(ctx)
+			if err != nil {
+				return false, err
+			}
+			return len(list) > dialogBaseline, nil
 		case "url":
-			return matchURL(o.Value, t.Page.URL()), nil
+			// Read location.href from the page: Go's cached Page.URL() may lag
+			// behind pushState/hash changes in SPAs.
+			raw, err := t.invoke(ctx, "info", map[string]any{})
+			if err != nil {
+				return false, nil
+			}
+			var info struct {
+				URL string `json:"url"`
+			}
+			if json.Unmarshal(raw, &info) != nil {
+				return false, nil
+			}
+			return matchURL(o.Value, info.URL), nil
 		case "selector":
 			if strings.HasPrefix(o.Value, "text=") {
 				lit := strings.Trim(strings.TrimSpace(strings.TrimPrefix(o.Value, "text=")), `"'`)

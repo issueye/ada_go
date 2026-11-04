@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -108,6 +109,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok": true, "app": config.AppName, "version": version.Version,
 			"pid": os.Getpid(), "port": s.info.Port,
+			"features": []string{
+				"async_calls", "events", "dialogs", "snapshot_diff", "wait_events",
+				"screenshot_clip", "screenshot_jpeg", "upload_dirs", "mcp_http_token",
+			},
+		})
+		return
+	}
+	if r.URL.Path == "/mcp" {
+		// 常见误配：把 MCP 客户端指向 app 的控制端口。控制 API 不是 MCP，返回
+		// 可操作的提示，而不是让鉴权先回 401（并避免 404 触发客户端重连）。
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok": false,
+			"error": map[string]string{
+				"code":    "not_mcp",
+				"message": "this is the browser-use control API, not MCP; use `browser-use mcp --http --port 8766` with http://127.0.0.1:8766/mcp, or the stdio config (browser-use mcp)",
+			},
 		})
 		return
 	}
@@ -160,7 +177,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		s.handleScript(w, r)
 	case r.URL.Path == "/v1/events":
-		writeJSON(w, http.StatusNotImplemented, map[string]any{"ok": false, "error": map[string]string{"code": "unsupported", "message": "events are not implemented yet"}})
+		s.handleEvents(w, r)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": map[string]string{"code": "not_found", "message": "unknown path"}})
 	}
@@ -223,19 +240,90 @@ var toolNameSet = func() map[string]bool {
 	return m
 }()
 
-// callTimeoutFor 计算一次调用的期限：script 用 MaxTimeoutMS，其余用 timeout_ms 或默认。
-func (s *Server) callTimeoutFor(name string, reqMS int) time.Duration {
+const (
+	// callTimeoutSlack 给工具自己的 timeout_ms 留出收尾时间：如果没有这层余量，
+	// wait(timeout_ms=60000) 会在 60s 整被 context 取消，工具来不及返回自己的
+	// timeout 错误，调用方也分不清“等够了”还是“外层预算到了”。
+	callTimeoutSlack = 5 * time.Second
+	maxCallTimeout   = 10 * time.Minute
+)
+
+// callTimeoutFor 计算一次调用的期限：script 用 MaxTimeoutMS；其余工具取
+// 顶层 timeout_ms / 默认值与工具参数 timeout_ms（加余量）的较大者。
+func (s *Server) callTimeoutFor(name string, args json.RawMessage, reqMS int) time.Duration {
 	timeout := time.Duration(reqMS) * time.Millisecond
 	if timeout <= 0 {
 		timeout = time.Duration(s.cfg.Agent.DefaultTimeoutMS) * time.Millisecond
 	}
 	if name == "script" {
 		timeout = time.Duration(s.cfg.Script.MaxTimeoutMS) * time.Millisecond
+	} else if toolMS := timeoutFromArgs(args); toolMS > 0 {
+		// 工具参数里的 timeout_ms 是该工具自己的等待预算；外层 deadline 必须比它长，
+		// 否则 wait/click 还没到自己的超时就被 context 取消，错误归因也会变成 timeout。
+		if d := time.Duration(toolMS)*time.Millisecond + callTimeoutSlack; d > timeout {
+			timeout = d
+		}
 	}
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
+	if timeout > maxCallTimeout {
+		timeout = maxCallTimeout
+	}
 	return timeout
+}
+
+// timeoutFromArgs reads the tool-level timeout_ms. Tools without that field (or
+// with malformed args) fall back to the top-level/default budget.
+func timeoutFromArgs(raw json.RawMessage) int {
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0
+	}
+	var req struct {
+		TimeoutMS int `json:"timeout_ms"`
+	}
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return 0
+	}
+	if req.TimeoutMS < 0 {
+		return 0
+	}
+	return req.TimeoutMS
+}
+
+// handleEvents is a JSON long poll over the Manager event ring. Clients pass
+// after=<cursor> (0 for the oldest retained event), optional kinds=a,b and an
+// optional timeout_ms (default 30s, max 120s). A timeout is a normal empty
+// result with an advanced cursor, not an error.
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": map[string]string{"code": "method_not_allowed", "message": "use GET"}})
+		return
+	}
+	q := r.URL.Query()
+	after, _ := strconv.ParseUint(strings.TrimSpace(q.Get("after")), 10, 64)
+	timeoutMS, _ := strconv.Atoi(strings.TrimSpace(q.Get("timeout_ms")))
+	if timeoutMS <= 0 {
+		timeoutMS = 30000
+	}
+	if timeoutMS > 120000 {
+		timeoutMS = 120000
+	}
+	var kinds map[string]bool
+	if raw := strings.TrimSpace(q.Get("kinds")); raw != "" {
+		kinds = map[string]bool{}
+		for _, k := range strings.Split(raw, ",") {
+			if k = strings.TrimSpace(k); k != "" {
+				kinds[k] = true
+			}
+		}
+	}
+	events, cursor := s.mgr.Events(r.Context(), after, time.Duration(timeoutMS)*time.Millisecond, kinds)
+	if events == nil {
+		events = []browser.Event{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "cursor": cursor, "events": events})
 }
 
 // run 执行一次工具调用；测试可注入 runFn，生产路径是 runCall。
@@ -297,7 +385,7 @@ func (s *Server) runCall(ctx context.Context, name string, args json.RawMessage,
 }
 
 func (s *Server) serveCall(w http.ResponseWriter, r *http.Request, req callRequest) {
-	timeout := s.callTimeoutFor(req.Name, req.TimeoutMS)
+	timeout := s.callTimeoutFor(req.Name, req.Args, req.TimeoutMS)
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 	client := strings.TrimSpace(r.Header.Get("X-Client-Id"))
@@ -327,7 +415,7 @@ func (s *Server) handleStartCall(w http.ResponseWriter, r *http.Request) {
 	if client == "" {
 		client = "http"
 	}
-	timeout := s.callTimeoutFor(req.Name, req.TimeoutMS)
+	timeout := s.callTimeoutFor(req.Name, req.Args, req.TimeoutMS)
 	job, err := s.jobs.create(req.Name, client, timeout)
 	if err != nil {
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": map[string]string{"code": "busy", "message": err.Error()}})

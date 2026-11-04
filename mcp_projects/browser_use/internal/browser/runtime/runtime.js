@@ -2,7 +2,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "0.2.0";
+  const VERSION = "0.3.0";
   if (window.__browserUse && window.__browserUse.version === VERSION) return;
   const isTopFrame = window === window.top;
 
@@ -15,12 +15,15 @@
     version: VERSION,
     seq: 0,
     snapSeq: 0,
+    navCount: 0,
+    lastSnap: null,
     refs: new Map(),          // ref -> {ref, el: WeakRef, fp}
     byEl: new WeakMap(),      // element -> ref
     inputLocked: false,
     bypass: false,
     lockHandler: null,
     dialogs: [],
+    dialogPolicy: { confirm: false, prompt: null, promptMode: "default" },
     netSeq: 0,
     netEntries: [],
     netDropped: 0,
@@ -773,6 +776,66 @@
     return false;
   }
 
+  function actionText(el) {
+    return norm(el && (el.innerText || el.textContent) || "");
+  }
+
+  // isClickable extends the semantic roles with the very common "div/span with
+  // cursor:pointer and a click handler" pattern (React/Vue menus, cards, list
+  // rows). Without it those controls never enter a snapshot and text=... cannot
+  // target them.
+  function isClickable(el, role) {
+    if (!el || !el.tagName || isDisabled(el)) return false;
+    if (isInteractive(el, role)) return true;
+    const tag = el.tagName.toLowerCase();
+    if (SKIP_TAGS.has(tag) || tag === "html" || tag === "body") return false;
+    try {
+      const cs = getComputedStyle(el);
+      if (cs.cursor !== "pointer" || cs.pointerEvents === "none") return false;
+      return !!(actionText(el) || nameOf(el));
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function depthOf(el) {
+    let d = 0;
+    for (let n = el; n && n !== document.documentElement; n = n.parentElement) d++;
+    return d;
+  }
+
+  function scoreMatch(el) {
+    const r = el.getBoundingClientRect();
+    let score = 0;
+    if (isVisible(el)) score += 100;
+    if (r.right > 0 && r.bottom > 0 && r.left < window.innerWidth && r.top < window.innerHeight) score += 20;
+    score += Math.min(depthOf(el), 20);
+    const area = Math.max(1, r.width * r.height);
+    // Prefer the innermost of nested candidates (a clickable card containing a
+    // clickable title should not be ambiguous).
+    score += Math.max(0, 20 - Math.log2(area / 100));
+    return score;
+  }
+
+  function rankMatches(matches) {
+    if (!matches || matches.length === 0) return null;
+    if (matches.length === 1) return matches[0];
+    let best = null;
+    let bestScore = -Infinity;
+    let second = -Infinity;
+    for (const el of matches) {
+      const s = scoreMatch(el);
+      if (s > bestScore) {
+        second = bestScore;
+        bestScore = s;
+        best = el;
+      } else if (s > second) {
+        second = s;
+      }
+    }
+    return bestScore > second ? best : null;
+  }
+
   function fpOf(el) {
     return {
       tag: (el.tagName || "").toLowerCase(),
@@ -849,14 +912,19 @@
       s = s.slice(1, -1);
     }
     s = norm(s).toLowerCase();
-    const all = deepQueryAll(document, "a,button,input,select,textarea,summary,label,[role],[tabindex],[contenteditable]");
-    const matches = all.filter((el) => {
-      const role = roleOf(el);
-      if (!isInteractive(el, role)) return false;
+    const all = deepQueryAll(document, "*");
+    const hits = [];
+    let exactHits = [];
+    for (const el of all) {
+      if (!isClickable(el, roleOf(el))) continue;
       const text = norm(el.innerText || el.textContent || nameOf(el)).toLowerCase();
-      return exact ? text === s : text.includes(s);
-    });
-    return matches;
+      if (exact ? text === s : text.includes(s)) {
+        hits.push(el);
+        if (!exact && text === s) exactHits.push(el);
+      }
+    }
+    // "Submit" should win over "Submit all" even though both contain the query.
+    return exactHits.length > 0 ? exactHits : hits;
   }
 
   function resolveLocator(spec) {
@@ -866,7 +934,7 @@
       if (spec.selector) return resolveLocator(String(spec.selector));
       if (spec.text != null) {
         const matches = parseTextLocator(String(spec.text));
-        return unique(matches, "text=" + spec.text);
+        return unique(matches, "text=" + spec.text, true);
       }
       if (spec.point) {
         const el = elementAt(spec.point);
@@ -881,10 +949,10 @@
     if (s.startsWith("loc=css:")) return unique(deepQueryAll(document, s.slice(8)), s);
     if (s.startsWith("text=")) {
       const matches = parseTextLocator(s.slice(5));
-      return unique(matches, s);
+      return unique(matches, s, true);
     }
     if (s.startsWith("role=")) {
-      return unique(parseRoleLocator(s.slice(5)), s);
+      return unique(parseRoleLocator(s.slice(5)), s, true);
     }
     if (s.startsWith("xpath=")) {
       const out = [];
@@ -917,12 +985,16 @@
     return matches;
   }
 
-  function unique(matches, spec) {
+  function unique(matches, spec, allowRank) {
     if (!matches || matches.length === 0) throw err("not_found", "no element matches " + spec);
     if (matches.length > 1) {
+      if (allowRank) {
+        const best = rankMatches(matches);
+        if (best) return { el: best, ref: refFor(best) };
+      }
       const candidates = matches.slice(0, 5).map((el) => {
         const r = el.getBoundingClientRect();
-        return { ref: refFor(el), role: roleOf(el) || el.tagName.toLowerCase(), name: clip(nameOf(el), 80), rect: { x: r.left, y: r.top, w: r.width, h: r.height } };
+        return { ref: refFor(el), role: roleOf(el) || el.tagName.toLowerCase(), name: clip(nameOf(el) || actionText(el), 80), rect: { x: r.left, y: r.top, w: r.width, h: r.height } };
       });
       const e = err("ambiguous", matches.length + " elements match " + spec, "use a ref or a more specific selector");
       e.details = { candidates };
@@ -949,9 +1021,38 @@
   function frames(n) {
     return new Promise((resolve) => {
       let left = Math.max(1, n);
-      const step = () => (--left <= 0 ? resolve() : requestAnimationFrame(step));
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        resolve();
+      };
+      const step = () => (--left <= 0 ? finish() : requestAnimationFrame(step));
       requestAnimationFrame(step);
+      // Hidden/background tabs throttle or pause rAF; a layout wait must not
+      // stall an action forever just because the tab is not visible.
+      setTimeout(finish, 250);
     });
+  }
+
+  const ACTION_WAIT_MS = 5000;
+  const ACTION_RETRY_MS = 100;
+
+  function pause(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function actionWaitMs(opts) {
+    const n = Number(opts && opts.wait_ms);
+    return Number.isFinite(n) && n > 0 ? Math.min(n, 30000) : ACTION_WAIT_MS;
+  }
+
+  // Only transient actionability failures are worth retrying: the element may
+  // still be loading, animating, disabled or covered. A stale ref or an invalid
+  // selector needs the agent to change its input, not wait.
+  function retryableActionError(e) {
+    const code = e && e.code;
+    return code === "not_visible" || code === "not_enabled" || code === "covered" || code === "not_found";
   }
 
   function withBypass(fn) {
@@ -974,26 +1075,44 @@
 
   async function click(target, opts) {
     opts = opts || {};
-    const resolved = resolveLocator(target);
-    let el = resolved.el;
-    el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
-    await frames(2);
+    const deadline = Date.now() + actionWaitMs(opts);
+    let resolved = null;
+    let el = null;
+    let c = null;
     let restoreReveal = null;
-    if (!isVisible(el) && opts.reveal !== false && (resolved.point || opts.reveal)) {
-      restoreReveal = revealAncestors(el);
-      await frames(1);
-      if (resolved.point) {
-        const at = elementAt(resolved.point);
-        if (at) el = at;
-      }
-    }
-    if (!isVisible(el)) throw err("not_visible", "element is not visible", "scroll or wait for it to show");
-    if (isDisabled(el)) throw err("not_enabled", "element is disabled", "wait for it to become enabled");
-    const c = centerOf(el);
-    if (!opts.force) {
-      const hit = document.elementFromPoint(c.x, c.y);
-      if (hit && hit !== el && !el.contains(hit) && !hit.contains(el)) {
-        throw err("covered", "element is covered by <" + hit.tagName.toLowerCase() + ">", "remove the overlay or use force");
+    for (;;) {
+      try {
+        resolved = resolveLocator(target);
+        el = resolved.el;
+        el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+        await frames(1);
+        if (!isVisible(el) && opts.reveal !== false && (resolved.point || opts.reveal)) {
+          if (!restoreReveal) {
+            restoreReveal = revealAncestors(el);
+            await frames(1);
+          }
+          if (resolved.point) {
+            const at = elementAt(resolved.point);
+            if (at) el = at;
+          }
+        }
+        if (!isVisible(el)) throw err("not_visible", "element is not visible", "scroll or wait for it to show");
+        if (isDisabled(el)) throw err("not_enabled", "element is disabled", "wait for it to become enabled");
+        // A point click must land on the requested coordinates, not on the center
+        // of the element that happens to contain them (canvas, maps, video).
+        c = resolved.point
+          ? { x: Number(resolved.point.x), y: Number(resolved.point.y) }
+          : centerOf(el);
+        if (!opts.force) {
+          const hit = document.elementFromPoint(c.x, c.y);
+          if (hit && hit !== el && !el.contains(hit) && !hit.contains(el)) {
+            throw err("covered", "element is covered by <" + hit.tagName.toLowerCase() + ">", "remove the overlay or use force");
+          }
+        }
+        break;
+      } catch (e) {
+        if (!retryableActionError(e) || Date.now() >= deadline) throw e;
+        await pause(ACTION_RETRY_MS);
       }
     }
     const button = opts.button === "right" ? 2 : opts.button === "middle" ? 1 : 0;
@@ -1012,13 +1131,20 @@
       el.dispatchEvent(new MouseEvent("mousedown", base));
       el.dispatchEvent(new PE("pointerup", { ...base, buttons: 0, pointerId: 1, pointerType: "mouse", isPrimary: true }));
       el.dispatchEvent(new MouseEvent("mouseup", { ...base, buttons: 0 }));
+      // Dispatch the click ourselves instead of el.click(): only an explicit
+      // MouseEvent carries clientX/clientY, and point clicks (canvas/maps) need
+      // those coordinates in the click listener. Synthetic click still runs the
+      // element's activation behavior (link, checkbox, submit).
+      const clickBase = { ...base, buttons: 0 };
       if (button === 2) {
-        el.dispatchEvent(new MouseEvent("contextmenu", { ...base, buttons: 0 }));
+        el.dispatchEvent(new MouseEvent("contextmenu", { ...clickBase, detail: 1 }));
       } else if (opts.count === 2) {
-        el.click();
-        el.dispatchEvent(new MouseEvent("dblclick", { ...base, detail: 2 }));
+        // One activation like el.click() did before, plus a coordinate-carrying
+        // dblclick; two clicks would submit a form twice.
+        el.dispatchEvent(new MouseEvent("click", { ...clickBase, detail: 1 }));
+        el.dispatchEvent(new MouseEvent("dblclick", { ...clickBase, detail: 2 }));
       } else {
-        el.click();
+        el.dispatchEvent(new MouseEvent("click", { ...clickBase, detail: 1 }));
       }
     });
     if (restoreReveal) setTimeout(restoreReveal, 300);
@@ -1098,11 +1224,24 @@
 
   async function typeText(target, text, opts) {
     opts = opts || {};
-    const resolved = resolveLocator(target);
-    const el = resolved.el;
-    if (!isEditable(el)) throw err("not_editable", "element does not accept text", "use click/select for this element");
-    el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
-    await frames(1);
+    const deadline = Date.now() + actionWaitMs(opts);
+    let resolved = null;
+    let el = null;
+    for (;;) {
+      try {
+        resolved = resolveLocator(target);
+        el = resolved.el;
+        if (!isEditable(el)) throw err("not_editable", "element does not accept text", "use click/select for this element");
+        el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+        await frames(1);
+        if (!isVisible(el)) throw err("not_visible", "element is not visible", "scroll or wait for it to show");
+        if (isDisabled(el)) throw err("not_enabled", "element is disabled", "wait for it to become enabled");
+        break;
+      } catch (e) {
+        if (!retryableActionError(e) || Date.now() >= deadline) throw e;
+        await pause(ACTION_RETRY_MS);
+      }
+    }
     el.focus();
     const value = String(text == null ? "" : text);
     withBypass(() => {
@@ -1228,17 +1367,31 @@
   }
 
   async function selectOption(target, values) {
-    const resolved = resolveLocator(target);
-    const el = resolved.el;
-    const tag = (el.tagName || "").toLowerCase();
-    if (tag !== "select") throw err("not_select", "element is not a <select>");
+    const deadline = Date.now() + actionWaitMs({});
     const wanted = Array.isArray(values) ? values.map(String) : [String(values == null ? "" : values)];
-    const opts = [...el.options];
-    const chosen = [];
-    for (const want of wanted) {
-      const o = opts.find((o) => o.value === want) || opts.find((o) => norm(o.textContent) === norm(want));
-      if (!o) throw err("not_found", "no option matches " + want);
-      chosen.push(o);
+    let resolved = null;
+    let el = null;
+    let opts = [];
+    let chosen = [];
+    for (;;) {
+      try {
+        resolved = resolveLocator(target);
+        el = resolved.el;
+        const tag = (el.tagName || "").toLowerCase();
+        if (tag !== "select") throw err("not_select", "element is not a <select>");
+        if (!isVisible(el)) throw err("not_visible", "element is not visible", "scroll or wait for it to show");
+        opts = [...el.options];
+        chosen = [];
+        for (const want of wanted) {
+          const o = opts.find((o) => o.value === want) || opts.find((o) => norm(o.textContent) === norm(want));
+          if (!o) throw err("not_found", "no option matches " + want);
+          chosen.push(o);
+        }
+        break;
+      } catch (e) {
+        if (!retryableActionError(e) || Date.now() >= deadline) throw e;
+        await pause(ACTION_RETRY_MS);
+      }
     }
     withBypass(() => {
       if (!el.multiple) {
@@ -1298,8 +1451,8 @@
     const r = el.getBoundingClientRect();
     return {
       ref: ref || refFor(el),
-      role: roleOf(el) || (el.tagName || "").toLowerCase(),
-      name: clip(nameOf(el), 160),
+      role: roleOf(el) || (isClickable(el, roleOf(el)) ? "clickable" : (el.tagName || "").toLowerCase()),
+      name: clip(nameOf(el) || actionText(el), 160),
       rect: { x: r.left, y: r.top, w: r.width, h: r.height },
       tag: (el.tagName || "").toLowerCase(),
     };
@@ -1313,13 +1466,17 @@
     const viewport = { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight };
     const nodes = [];
     let visited = 0;
+    let hitCap = false;
 
     function intersects(r) {
       return r.left < viewport.w && r.top < viewport.h && r.right > 0 && r.bottom > 0;
     }
 
     function visit(el, depth) {
-      if (!el || depth > 120 || visited >= MAX_ELEMENTS || nodes.length >= MAX_NODES) return;
+      if (!el || depth > 120 || visited >= MAX_ELEMENTS || nodes.length >= MAX_NODES) {
+        hitCap = true;
+        return;
+      }
       visited++;
       if (el.nodeType === 1) {
         const tag = (el.tagName || "").toLowerCase();
@@ -1327,27 +1484,27 @@
         const cs = getComputedStyle(el);
         if (cs.display === "none") return;
         const role = roleOf(el);
-        const interactive = isInteractive(el, role);
+        const clickable = isClickable(el, role);
         const heading = /^h[1-6]$/.test(tag);
         const landmark = role && LANDMARK_ROLES.has(role);
         const img = tag === "img" && el.getAttribute("alt");
         const iframe = tag === "iframe";
         const dialog = role === "dialog" || role === "alertdialog";
         const texty = tag === "p" || tag === "li" || tag === "td" || tag === "th" || tag === "pre" || tag === "blockquote";
-        const want = interactive || heading || landmark || img || iframe || dialog || (texty && args.include_text);
+        const want = clickable || heading || landmark || img || iframe || dialog || (texty && args.include_text);
         if (want) {
           const visible = isVisible(el);
           if (visible) {
             const r = el.getBoundingClientRect();
             if (scope !== "viewport" || intersects(r)) {
-              const name = clip(nameOf(el), 160);
+              const name = clip(nameOf(el) || actionText(el), 160);
               const hay = (role || tag) + " " + name + " " + tag;
               if (!filter || hay.toLowerCase().includes(filter)) {
                 nodes.push({
-                  ref: refFor(el), role: role || tag, name, tag,
+                  ref: refFor(el), role: role || (clickable ? "clickable" : tag), name, tag,
                   value: valueOf(el), href: hrefOf(el), disabled: isDisabled(el),
                   checked: el.checked === true, rect: { x: r.left, y: r.top, w: r.width, h: r.height },
-                  inViewport: intersects(r), texty,
+                  inViewport: intersects(r), texty, clickable,
                 });
               }
             }
@@ -1363,15 +1520,13 @@
 
     visit(document.documentElement, 0);
     const snapVersion = ++state.snapSeq;
-    const header = "snapshot v" + snapVersion + "  url=" + location.href + "  title=" + clip(document.title, 120) +
-      "\nviewport " + window.innerWidth + "x" + window.innerHeight + "  scroll=(" + Math.round(window.scrollX) + "," + Math.round(window.scrollY) + ")" +
-      "  page=" + Math.round(document.documentElement.scrollWidth) + "x" + Math.round(document.documentElement.scrollHeight) +
-      "  dpr=" + (window.devicePixelRatio || 1) + "  refs=" + nodes.length + "  nodes=" + visited;
-    const lines = [header];
-    let used = header.length;
-    let truncated = false;
-    let shown = 0;
-    for (const n of nodes) {
+    const useDiff = !!args.diff;
+    const prev = state.lastSnap;
+    const diffBase = useDiff && prev && prev.nodes ? prev.nodes : null;
+    const prevMap = diffBase || new Map();
+    const currentMap = new Map();
+    const sigOf = (n) => JSON.stringify([n.role, n.name, n.value, n.href, !!n.checked, !!n.disabled]);
+    const lineOf = (n) => {
       let line = "[" + n.ref + "] " + n.role;
       if (n.name) line += ' "' + n.name.replace(/"/g, '\\"') + '"';
       if (n.value) line += " value=" + JSON.stringify(n.value);
@@ -1379,17 +1534,62 @@
       if (n.checked) line += " checked";
       if (n.disabled) line += " disabled";
       if (!n.inViewport) line += " offscreen";
+      return line;
+    };
+    let changes = 0;
+    for (const n of nodes) {
+      currentMap.set(n.ref, n);
+      const old = prevMap.get(n.ref);
+      if (useDiff && old && sigOf(old) === sigOf(n)) continue;
+      if (useDiff) changes++;
+    }
+    if (useDiff) {
+      for (const ref of prevMap.keys()) {
+        if (!currentMap.has(ref)) changes++;
+      }
+    }
+    const header = "snapshot v" + snapVersion + "  url=" + location.href + "  title=" + clip(document.title, 120) +
+      "\nviewport " + window.innerWidth + "x" + window.innerHeight + "  scroll=(" + Math.round(window.scrollX) + "," + Math.round(window.scrollY) + ")" +
+      "  page=" + Math.round(document.documentElement.scrollWidth) + "x" + Math.round(document.documentElement.scrollHeight) +
+      "  dpr=" + (window.devicePixelRatio || 1) + "  refs=" + nodes.length + "  nodes=" + visited + "  nav=" + state.navCount +
+      (useDiff ? "  diff=1  changes=" + changes + (prev ? "" : "  (no previous snapshot)") : "");
+    const lines = [header];
+    let used = header.length;
+    let truncated = hitCap;
+    let shown = 0;
+    for (const n of nodes) {
+      const old = prevMap.get(n.ref);
+      let prefix = "";
+      if (useDiff) {
+        if (old && sigOf(old) === sigOf(n)) continue;
+        prefix = old ? "~ " : "+ ";
+      }
+      const line = prefix + lineOf(n);
       if (used + line.length + 1 > maxChars) { truncated = true; break; }
       lines.push(line);
       used += line.length + 1;
       shown++;
     }
-    if (truncated && nodes.length > shown) lines.push("[truncated: " + (nodes.length - shown) + " more nodes; narrow with filter/scope]");
+    if (useDiff && prevMap.size > 0) {
+      for (const [ref, old] of prevMap) {
+        if (currentMap.has(ref)) continue;
+        const line = "- " + lineOf(old);
+        if (used + line.length + 1 > maxChars) { truncated = true; break; }
+        lines.push(line);
+        used += line.length + 1;
+        shown++;
+      }
+    }
+    if (truncated && nodes.length > shown) lines.push("[truncated: " + Math.max(0, nodes.length - shown) + " more nodes; narrow with filter/scope]");
+    // Keep the full node set: the next diff compares against it, and UIs use nodes.
+    state.lastSnap = { version: snapVersion, nodes: currentMap };
     return {
       text: lines.join("\n"),
       nodes: nodes.map((n) => ({ ref: n.ref, role: n.role, name: n.name, rect: n.rect })),
       version: snapVersion,
       truncated,
+      diff: useDiff,
+      changes,
       url: location.href,
       title: document.title,
       viewport: { w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio || 1 },
@@ -1401,16 +1601,21 @@
   function query(args) {
     args = args || {};
     const spec = args.target || args.selector || args.text;
+    const stateWant = args.state || "visible";
     let matches;
     try {
       if (args.text != null && !args.target && !args.selector) matches = parseTextLocator(String(args.text));
       else matches = [resolveLocator(spec).el];
     } catch (e) {
-      if (e.code === "not_found") return { count: 0, found: false };
+      if (e.code === "not_found") {
+        // hidden 的语义是“不存在或不可见”：元素根本不在 DOM 里时，wait hidden 应立即命中。
+        return { count: 0, found: stateWant === "hidden", visible: false };
+      }
       throw e;
     }
-    if (matches.length === 0) return { count: 0, found: false };
-    const stateWant = args.state || "visible";
+    if (matches.length === 0) {
+      return { count: 0, found: stateWant === "hidden", visible: false };
+    }
     if (stateWant === "hidden") {
       const anyVisible = matches.some((el) => isVisible(el));
       return { count: matches.length, found: !anyVisible, visible: anyVisible };
@@ -1478,26 +1683,91 @@
     return { locked: on };
   }
 
-  function recordDialog(type, message, defaultValue) {
-    state.dialogs.push({ type, message: clip(message, 500), defaultValue: defaultValue == null ? null : clip(defaultValue, 200), ts: Date.now() });
+  function recordDialog(type, message, defaultValue, answer) {
+    state.dialogs.push({
+      type, message: clip(message, 500), defaultValue: defaultValue == null ? null : clip(defaultValue, 200),
+      answer: answer === undefined ? null : answer, ts: Date.now(),
+    });
     if (state.dialogs.length > 50) state.dialogs.shift();
+  }
+
+  // Dialog calls are synchronous in the page, so the host cannot ask a human
+  // and wait. Instead the agent sets a policy for the next round of dialogs:
+  // accept makes confirm() true and prompt() return text/default; dismiss makes
+  // confirm() false and prompt() return null.
+  function dialogQuery(args) {
+    args = args || {};
+    const action = args.action || "list";
+    if (action === "clear") {
+      const n = state.dialogs.length;
+      state.dialogs = [];
+      return { cleared: n, dialogs: [], policy: { ...state.dialogPolicy } };
+    }
+    if (action === "accept") {
+      state.dialogPolicy.confirm = true;
+      if (args.text != null) {
+        state.dialogPolicy.prompt = String(args.text);
+        state.dialogPolicy.promptMode = "value";
+      } else {
+        state.dialogPolicy.prompt = null;
+        state.dialogPolicy.promptMode = "default";
+      }
+      return { dialogs: state.dialogs.slice(), policy: { ...state.dialogPolicy } };
+    }
+    if (action === "dismiss") {
+      state.dialogPolicy.confirm = false;
+      state.dialogPolicy.prompt = null;
+      state.dialogPolicy.promptMode = "dismiss";
+      return { dialogs: state.dialogs.slice(), policy: { ...state.dialogPolicy } };
+    }
+    if (action !== "list") throw err("bad_request", "unknown dialogs action: " + action);
+    return { dialogs: state.dialogs.slice(), policy: { ...state.dialogPolicy } };
   }
 
   function installDialogs() {
     try {
       Object.defineProperty(window, "alert", {
         configurable: true, writable: true,
-        value: (message) => { recordDialog("alert", message, null); },
+        value: (message) => { recordDialog("alert", message, null, null); },
       });
       Object.defineProperty(window, "confirm", {
         configurable: true, writable: true,
-        value: (message) => { recordDialog("confirm", message, null); return false; },
+        value: (message) => {
+          const answer = !!state.dialogPolicy.confirm;
+          recordDialog("confirm", message, null, answer);
+          return answer;
+        },
       });
       Object.defineProperty(window, "prompt", {
         configurable: true, writable: true,
-        value: (message, def) => { recordDialog("prompt", message, def); return def == null ? null : String(def); },
+        value: (message, def) => {
+          const mode = state.dialogPolicy.promptMode;
+          const answer = mode === "dismiss"
+            ? null
+            : mode === "value"
+              ? state.dialogPolicy.prompt
+              : (def == null ? null : String(def));
+          recordDialog("prompt", message, def, answer);
+          return answer;
+        },
       });
     } catch (e) { /* ignore */ }
+  }
+
+  function installNav() {
+    try {
+      for (const name of ["pushState", "replaceState"]) {
+        const orig = history[name];
+        if (typeof orig !== "function") continue;
+        history[name] = function () {
+          const out = orig.apply(this, arguments);
+          state.navCount++;
+          return out;
+        };
+      }
+    } catch (e) { /* frozen history */ }
+    window.addEventListener("popstate", () => { state.navCount++; });
+    window.addEventListener("hashchange", () => { state.navCount++; });
   }
 
   function postFrame(win, msg) {
@@ -1634,9 +1904,9 @@
         case "scroll": return JSON.stringify({ ok: true, ...(await scroll(args)) });
         case "hover": return JSON.stringify({ ok: true, ...(await hover(args.target)) });
         case "query": return JSON.stringify({ ok: true, ...query(args) });
-        case "info": return JSON.stringify({ ok: true, url: location.href, title: document.title, readyState: document.readyState, scroll: { x: window.scrollX, y: window.scrollY }, viewport: { w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio || 1 } });
+        case "info": return JSON.stringify({ ok: true, url: location.href, title: document.title, readyState: document.readyState, nav: state.navCount, scroll: { x: window.scrollX, y: window.scrollY }, viewport: { w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio || 1 } });
         case "setInputLock": return JSON.stringify({ ok: true, ...setInputLock(args.on) });
-        case "dialogs": return JSON.stringify({ ok: true, dialogs: state.dialogs.slice() });
+        case "dialogs": return JSON.stringify({ ok: true, ...dialogQuery(args) });
         case "network": return JSON.stringify({ ok: true, ...network(args) });
         case "console": return JSON.stringify({ ok: true, ...(await consoleQuery(args)) });
         case "upload": return JSON.stringify({ ok: true, ...(await upload(args)) });
@@ -1654,6 +1924,7 @@
   installNetwork();
   installConsole();
   installFrameRelay();
+  installNav();
 
   Object.defineProperty(window, "__browserUse", {
     configurable: true,
@@ -1662,7 +1933,7 @@
       invoke,
       snapshot: (args) => snapshot(args || {}),
       setInputLock,
-      dialogs: () => state.dialogs.slice(),
+      dialogs: (args) => dialogQuery(args || {}),
       network: (args) => network(args || {}),
       console: (args) => consoleQuery(args || {}),
       upload: (args) => upload(args || {}),

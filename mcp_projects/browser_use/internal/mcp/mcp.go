@@ -116,7 +116,7 @@ func (s *Service) Call(ctx context.Context, name string, args json.RawMessage) (
 	if name == "screenshot" {
 		return screenshotResult(env.Data)
 	}
-	return dataResult(env.Data), nil
+	return dataResult(name, env.Data), nil
 }
 
 func screenshotResult(raw json.RawMessage) (*mcpgo.CallToolResult, error) {
@@ -145,9 +145,9 @@ func screenshotResult(raw json.RawMessage) (*mcpgo.CallToolResult, error) {
 	return res, nil
 }
 
-func dataResult(raw json.RawMessage) *mcpgo.CallToolResult {
-	text := string(raw)
-	if len(raw) == 0 || text == "null" {
+func dataResult(name string, raw json.RawMessage) *mcpgo.CallToolResult {
+	text := formatToolText(name, raw)
+	if len(raw) == 0 || string(raw) == "null" || text == "" {
 		text = "ok"
 	}
 	var obj map[string]any
@@ -171,6 +171,12 @@ func errorResult(err error) *mcpgo.CallToolResult {
 		if be.Hint != "" {
 			b.WriteString("\nhint: ")
 			b.WriteString(be.Hint)
+		}
+		if be.Details != nil {
+			if raw, err := json.Marshal(be.Details); err == nil {
+				b.WriteString("\ndetails: ")
+				b.WriteString(clipText(string(raw), 2000))
+			}
 		}
 		return mcpgo.NewToolResultError(b.String())
 	}

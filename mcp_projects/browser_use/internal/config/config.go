@@ -23,12 +23,20 @@ func envOr(name, fallback string) string {
 // Config are the user settings of browser-use. The zero value is filled by
 // Default.
 type Config struct {
-	Server  ServerConfig  `json:"server"`
-	Agent   AgentConfig   `json:"agent"`
-	Control ControlConfig `json:"control"`
-	Script  ScriptConfig  `json:"script"`
-	Session SessionConfig `json:"session"`
-	UI      UIConfig      `json:"ui"`
+	Server   ServerConfig   `json:"server"`
+	Agent    AgentConfig    `json:"agent"`
+	Control  ControlConfig  `json:"control"`
+	Script   ScriptConfig   `json:"script"`
+	Session  SessionConfig  `json:"session"`
+	Security SecurityConfig `json:"security"`
+	UI       UIConfig       `json:"ui"`
+}
+
+// SecurityConfig configures local-file and page boundaries.
+type SecurityConfig struct {
+	// UploadDirs limits files upload into a page to these roots (absolute,
+	// ~ and %VAR% are expanded). Empty disables the check for compatibility.
+	UploadDirs []string `json:"upload_dirs"`
 }
 
 // SessionConfig configures tab/window restore.
@@ -48,11 +56,8 @@ type ScriptConfig struct {
 	MaxOutputBytes   int  `json:"max_output_bytes"`
 	MaxActions       int  `json:"max_actions"`
 	MaxResultBytes   int  `json:"max_result_bytes"`
-	Concurrent       int  `json:"concurrent"`
 	ReleaseOnFinish  bool `json:"release_on_finish"`
 	KeepSources      bool `json:"keep_sources"`
-	AllowFetch       bool `json:"allow_fetch"`
-	AllowFS          bool `json:"allow_fs"`
 	AllowDynamicCode bool `json:"allow_dynamic_code"`
 }
 
@@ -62,17 +67,13 @@ type ServerConfig struct {
 }
 
 type AgentConfig struct {
-	MaxTabs           int      `json:"max_tabs"`
-	DefaultTimeoutMS  int      `json:"default_timeout_ms"`
-	SnapshotMaxChars  int      `json:"snapshot_max_chars"`
-	FollowAgent       bool     `json:"follow_agent"`
-	AllowEval         bool     `json:"allow_eval"`
-	SuppressDialogs   bool     `json:"suppress_dialogs"`
-	TrustedOrigins    []string `json:"trusted_origins"`
-	DefaultURL        string   `json:"default_url"`
-	DownloadsSubdir   string   `json:"downloads_subdir"`
-	AutoActivateTabs  bool     `json:"auto_activate_tabs"`
-	MaskOnEveryAction bool     `json:"mask_on_every_action"`
+	MaxTabs          int    `json:"max_tabs"`
+	DefaultTimeoutMS int    `json:"default_timeout_ms"`
+	SnapshotMaxChars int    `json:"snapshot_max_chars"`
+	FollowAgent      bool   `json:"follow_agent"`
+	AllowEval        bool   `json:"allow_eval"`
+	DefaultURL       string `json:"default_url"`
+	DownloadsSubdir  string `json:"downloads_subdir"`
 }
 
 type ControlConfig struct {
@@ -95,8 +96,6 @@ func Default() Config {
 			SnapshotMaxChars: 12000,
 			FollowAgent:      true,
 			AllowEval:        true,
-			SuppressDialogs:  true,
-			AutoActivateTabs: true,
 			DefaultURL:       "about:blank",
 			DownloadsSubdir:  "downloads",
 		},
@@ -104,10 +103,25 @@ func Default() Config {
 		Script: ScriptConfig{
 			Enabled: true, MaxSourceBytes: 262144, TimeoutMS: 120000, MaxTimeoutMS: 300000,
 			MemoryLimitMB: 64, MaxOutputBytes: 32768, MaxActions: 200, MaxResultBytes: 65536,
-			Concurrent: 1, ReleaseOnFinish: true, KeepSources: true,
+			ReleaseOnFinish: true, KeepSources: true,
 		},
 		Session: SessionConfig{Restore: true, Save: true, MaxTabs: 20},
-		UI:      UIConfig{Width: 1280, Height: 860},
+		Security: SecurityConfig{
+			UploadDirs: defaultUploadDirs(),
+		},
+		UI: UIConfig{Width: 1280, Height: 860},
+	}
+}
+
+func defaultUploadDirs() []string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	return []string{
+		filepath.Join(home, "Desktop"),
+		filepath.Join(home, "Documents"),
+		filepath.Join(home, "Downloads"),
 	}
 }
 
@@ -156,9 +170,6 @@ func Load() Config {
 	}
 	if cfg.Script.MaxResultBytes <= 0 {
 		cfg.Script.MaxResultBytes = 65536
-	}
-	if cfg.Script.Concurrent <= 0 {
-		cfg.Script.Concurrent = 1
 	}
 	if cfg.Session.MaxTabs <= 0 {
 		cfg.Session.MaxTabs = 20

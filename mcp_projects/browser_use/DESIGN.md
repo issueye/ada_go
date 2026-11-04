@@ -2,7 +2,7 @@
 
 > 基于 [mygo](https://github.com/egoist/mygo) 的桌面浏览器 + AI Agent 控制层  
 > 状态：设计评审 v0.1 · 2026-11-03  
-> 实现状态：M0 / M1 / M1.5 / MCP stdio+HTTP / cookies / files / iframe relay / session restore 已落地（见 [README.md](README.md)）；popup opener、审批待做  
+> 实现状态：0.3.0；M0 / M1 / M1.5 / MCP stdio+HTTP / cookies / files / iframe relay / session restore 已落地；0.2–0.3 追加 events、dialog policy、snapshot diff、screenshot clip/JPEG、upload_dirs、MCP HTTP token（见 [README.md](README.md)）；popup opener、整页截图、嵌套 iframe、审批待做
 > 目标平台：Windows 10/11（WebView2 156 已安装）优先，macOS / Linux 保持可移植
 
 ---
@@ -920,7 +920,7 @@ POST /v1/control/release              # {"client":"...","tab":"t1"} 释放租约
 ```json
 {
   "app": "browser-use",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "pid": 12345,
   "port": 53211,
   "token": "…43 chars…",
@@ -1764,26 +1764,15 @@ go test ./...
 {
   "server": {"port": 0, "bind": "127.0.0.1"},
   "agent": {
-    "profile": "agent",
     "max_tabs": 8,
     "default_timeout_ms": 30000,
     "snapshot_max_chars": 12000,
-    "allow_eval": true,
     "follow_agent": true,
-    "dialogs": {"confirm": false, "prompt": ""},
-    "suppress_beforeunload": true,
-    "popups": "tab"
+    "allow_eval": true,
+    "default_url": "about:blank",
+    "downloads_subdir": "downloads"
   },
-  "control": {
-    "mask": "session",
-    "scope": "window",
-    "idle_release_ms": 120000,
-    "dim": 0.06,
-    "block_keys": true,
-    "block_wheel": true,
-    "block_drop": true,
-    "allow_tab_switch": true
-  },
+  "control": {"mask": true, "idle_release_ms": 120000, "dim": 20},
   "script": {
     "enabled": true,
     "max_source_bytes": 262144,
@@ -1793,25 +1782,19 @@ go test ./...
     "max_output_bytes": 32768,
     "max_actions": 200,
     "max_result_bytes": 65536,
-    "concurrent": 1,
     "release_on_finish": true,
     "keep_sources": true,
-    "allow_fetch": false,
-    "allow_fs": false,
     "allow_dynamic_code": false
   },
+  "session": {"restore": true, "save": true, "max_tabs": 20},
   "security": {
-    "allowed_schemes": ["http", "https", "about"],
-    "upload_dirs": ["%USERPROFILE%\\Desktop", "%USERPROFILE%\\Documents", "%USERPROFILE%\\Downloads"],
-    "approval": {"mode": "off", "patterns": ["checkout", "payment", "delete", "transfer"]},
-    "allow_private_networks": true
+    "upload_dirs": ["%USERPROFILE%\\Desktop", "%USERPROFILE%\\Documents", "%USERPROFILE%\\Downloads"]
   },
-  "ui": {"start_maximized": false, "activity_panel": true},
-  "audit": {"text": false, "keep_days": 14}
+  "ui": {"width": 1280, "height": 860}
 }
 ```
 
-路径：`PathUserData/config.json`；首次启动写默认值。
+路径：`PathUserData/config.json`；缺失或损坏时使用内置默认值（不会自动写回）。
 
 ### 16.3 mygo / moejs 能力对照
 

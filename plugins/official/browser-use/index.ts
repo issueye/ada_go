@@ -426,12 +426,12 @@ function utf8Len(text) {
 
 // preferAsync 判断这次调用是否天然可能超过 15s：
 //   - script 一定走异步（HTTP body 传输，不受命令行长度限制）；
-//   - wait / navigate / network(wait) 的预算超过 12s 时走异步。
+//   - wait / navigate / network(wait) / console(wait) 的预算超过 12s 时走异步。
 function preferAsync(tool, args) {
   const a = args || {};
   if (tool === "script") return true;
   const budget = typeof a.timeout_ms === "number" ? a.timeout_ms : 0;
-  if (budget > CLI_SLOW_THRESHOLD_MS && (tool === "wait" || tool === "navigate" || tool === "network")) {
+  if (budget > CLI_SLOW_THRESHOLD_MS && (tool === "wait" || tool === "navigate" || tool === "network" || tool === "console")) {
     return true;
   }
   return false;
@@ -458,6 +458,7 @@ const CLI_REPLAY_TOOLS = {
   read: true,
   screenshot: true,
   network: true,
+  console: true,
   wait: true,
   frames: true,
   downloads: true,
@@ -696,7 +697,9 @@ async function rpc(ctx, tool, args, timeoutMs) {
   const timeout = intIn(timeoutMs, 1000, MAX_CALL_TIMEOUT_MS, DEFAULT_CALL_TIMEOUT_MS);
   // 注定超过出网桥 15s 响应头上限的调用：异步接口优先，旧版本退回 CLI。
   if (preferAsync(tool, args)) return rpcSlow(ctx, tool, args, timeout);
-  const body = JSON.stringify({ name: tool, args: args || {} });
+  // 顶层 timeout_ms 让服务端 deadline 覆盖工具自己的预算（args.timeout_ms）；
+  // 只靠 args 时，wait(60000) 仍会撞服务端默认 30s。
+  const body = JSON.stringify({ name: tool, args: args || {}, timeout_ms: timeout });
   let lastErr = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const rt = await ensureRuntime(ctx);
@@ -801,7 +804,18 @@ function withMeta(lines, env) {
   if (env && typeof env.timing_ms === "number" && env.timing_ms >= 2000) {
     out.push("（浏览器耗时 " + env.timing_ms + "ms）");
   }
-  return clip(out.join("\n"), MAX_MODEL_TEXT);
+  const text = out.join("\n");
+  if (text.length <= MAX_MODEL_TEXT) {
+    return { text, clipped: false, originalChars: text.length };
+  }
+  const notice =
+    "\n…（工具层截断：原始 " + text.length + " 字符，展示上限 " + MAX_MODEL_TEXT +
+    " 字符；请缩小 filter/scope/limit 或分批读取）";
+  return {
+    text: text.slice(0, Math.max(0, MAX_MODEL_TEXT - notice.length)) + notice,
+    clipped: true,
+    originalChars: text.length,
+  };
 }
 
 function tabLabel(tab) {
@@ -821,7 +835,7 @@ function controlLine(control) {
   if (!control) return "浏览器控制：未知";
   const state = trimStr(control.state) || "idle";
   const label =
-    state === "agent" ? "agent 持有租约" : state === "user" ? "用户接管中" : "空闲";
+    state === "agent" ? "agent 持有租约" : state === "user" ? "用户接管中" : state === "paused" ? "已暂停" : "空闲";
   const extra = [];
   if (trimStr(control.tab)) extra.push("tab=" + trimStr(control.tab));
   if (control.masked) extra.push("遮罩已显示");
@@ -866,6 +880,9 @@ function statusText(env, rt, detection) {
   if (data.control && data.control.state === "user") {
     lines.push("用户已接管：写操作会被 control_locked 拒绝；请让用户点 Resume agent 再继续。");
   }
+  if (data.control && data.control.state === "paused") {
+    lines.push("代理已暂停：写操作会被 control_locked 拒绝；请让用户点「恢复代理」再继续。");
+  }
   return withMeta(lines, env);
 }
 
@@ -904,6 +921,7 @@ function snapshotText(env) {
   if (trimStr(data.url)) lines.push("URL：" + trimStr(data.url));
   if (trimStr(data.title)) lines.push("标题：" + trimStr(data.title));
   if (data.truncated) lines.push("（快照被 max_chars 截断：用 filter 或 scope=viewport 收窄）");
+  if (data.diff) lines.push("（diff 模式：+ 新增 / ~ 变化 / - 消失；changes=" + (data.changes || 0) + "）");
   if (typeof data.nodes_count === "number") lines.push("页面节点数：" + data.nodes_count);
   if (trimStr(data.snapshot)) {
     lines.push("");
@@ -996,7 +1014,7 @@ function scriptText(env) {
     }
     if (actions.length > 40) lines.push("  …（其余 " + (actions.length - 40) + " 条省略）");
   }
-  if (data.truncated) lines.push("（返回值已按 max_output_bytes 截断）");
+  if (data.truncated) lines.push("（脚本控制台输出已按上限截断）");
   return withMeta(lines, env);
 }
 
@@ -1073,6 +1091,13 @@ function screenshotText(env) {
     const count = Array.isArray(data.nodes) ? data.nodes.length : 0;
     lines.push("已叠加 ref 标注" + (count ? "（" + count + " 个）" : ""));
   }
+  if (data.clip && typeof data.clip === "object") {
+    lines.push(
+      "裁剪区域：(" + Math.round(data.clip.x || 0) + ", " + Math.round(data.clip.y || 0) + ") " +
+        Math.round(data.clip.w || 0) + "x" + Math.round(data.clip.h || 0),
+    );
+  }
+  if (trimStr(data.mime_type)) lines.push("格式：" + trimStr(data.mime_type));
   if (trimStr(data.warning)) lines.push("注意：" + trimStr(data.warning));
   if (data.data) lines.push("（图片已随结果返回，可直接查看）");
   return withMeta(lines, env);
@@ -1138,10 +1163,9 @@ export default function register(agent) {
       const processState = rt.pid ? await pidState(ctx, rt.pid) : { known: false, alive: false, name: "" };
       const env = await rpc(ctx, "status", { include_tabs: true });
       const data = env.data || {};
+      const view = statusText(env, rt, { mode: mode, pidState: processState });
       return {
-        content: [
-          { type: "text", text: statusText(env, rt, { mode: mode, pidState: processState }) },
-        ],
+        content: [{ type: "text", text: view.text }],
         details: {
           control: data.control || null,
           active_tab_id: trimStr(data.active_tab_id),
@@ -1151,6 +1175,7 @@ export default function register(agent) {
           port: rt.port,
           process: processState,
           exe: resolvedExe,
+          truncated: view.clipped,
         },
       };
     },
@@ -1292,9 +1317,10 @@ export default function register(agent) {
           throw err;
         }
       }
+      const view = navigateText(env, action);
       return {
-        content: [{ type: "text", text: navigateText(env, action) }],
-        details: { tab: env.tab || null, action },
+        content: [{ type: "text", text: view.text }],
+        details: { tab: env.tab || null, action, truncated: view.clipped },
       };
     },
   });
@@ -1348,9 +1374,10 @@ export default function register(agent) {
           }
         }
       }
+      const view = tabText(env, action);
       return {
-        content: [{ type: "text", text: tabText(env, action) }],
-        details: { action, tab: env.tab || null },
+        content: [{ type: "text", text: view.text }],
+        details: { action, tab: env.tab || null, truncated: view.clipped },
       };
     },
   });
@@ -1358,7 +1385,7 @@ export default function register(agent) {
   agent.registerTool({
     name: "browser_snapshot",
     description:
-      "给页面拍语义快照：每行一个可交互元素，带稳定 ref（如 [e12] button \"提交\"）。ref 是后续 click/type 的定位依据；导航、重绘或重新加载后 ref 可能失效（stale_ref），此时重新快照即可。页面很长时用 filter（按 role/name/tag 收窄）或 scope=viewport。",
+      "给页面拍语义快照：每行一个交互元素，带稳定 ref（如 [e12] button \"提交\"）。ref 是后续 click/type 的定位依据；导航、重绘或重新加载后 ref 可能失效（stale_ref），此时重新快照即可。页面很长时用 filter（按 role/name/tag 收窄）或 scope=viewport；diff=true 只返回相对上一次快照新增/变化/消失的节点（+ / ~ / -），可显著省 token。",
     access: "read",
     parameters: {
       type: "object",
@@ -1367,6 +1394,7 @@ export default function register(agent) {
         scope: { type: "string", enum: ["full", "viewport"], description: "缺省 full（含屏外元素）" },
         filter: { type: "string", description: "按 role / 可见名 / 标签过滤，如 button、搜索、input" },
         max_chars: { type: "integer", minimum: 1000, maximum: 50000, description: "缺省 12000" },
+        diff: { type: "boolean", description: "只返回相对上一次快照的变化，缺省 false" },
       },
       required: [],
     },
@@ -1377,15 +1405,19 @@ export default function register(agent) {
       const filter = trimStr(args.filter);
       if (filter) params.filter = filter;
       if (args.max_chars != null) params.max_chars = intIn(args.max_chars, 1000, 50000, 12000);
+      if (args.diff === true) params.diff = true;
       const env = await rpc(ctx, "snapshot", params, callTimeout(args));
       const data = env.data || {};
+      const view = snapshotText(env);
       return {
-        content: [{ type: "text", text: snapshotText(env) }],
+        content: [{ type: "text", text: view.text }],
         details: {
           url: trimStr(data.url),
           title: trimStr(data.title),
           nodes_count: data.nodes_count || 0,
-          truncated: data.truncated === true,
+          diff: data.diff === true,
+          changes: data.changes || 0,
+          truncated: data.truncated === true || view.clipped,
         },
       };
     },
@@ -1412,9 +1444,14 @@ export default function register(agent) {
       if (args.max_chars != null) params.max_chars = intIn(args.max_chars, 1000, 50000, 12000);
       const env = await rpc(ctx, "read", params, callTimeout(args));
       const data = env.data || {};
+      const view = readText(env);
       return {
-        content: [{ type: "text", text: readText(env) }],
-        details: { url: trimStr(data.url), chars: data.chars || 0, truncated: data.truncated === true },
+        content: [{ type: "text", text: view.text }],
+        details: {
+          url: trimStr(data.url),
+          chars: data.chars || 0,
+          truncated: data.truncated === true || view.clipped,
+        },
       };
     },
   });
@@ -1462,8 +1499,8 @@ export default function register(agent) {
         },
         for: {
           type: "string",
-          enum: ["load", "url", "selector", "text", "download", "time", "idle"],
-          description: "wait 的条件（load/url/selector/text/download/time/idle）",
+          enum: ["load", "url", "selector", "text", "download", "time", "idle", "tab", "control", "dialog"],
+          description: "wait 的条件（load/url/selector/text/download/time/idle/tab/control/dialog）",
         },
         state: {
           type: "string",
@@ -1536,7 +1573,7 @@ export default function register(agent) {
       } else {
         const condition = oneOf(
           args["for"],
-          ["load", "url", "selector", "text", "download", "time", "idle"],
+          ["load", "url", "selector", "text", "download", "time", "idle", "tab", "control", "dialog"],
           "load",
         );
         params = { ...tab, for: condition };
@@ -1549,9 +1586,10 @@ export default function register(agent) {
       }
 
       const env = await rpc(ctx, action, params, callTimeout(args));
+      const view = actText(env, action);
       return {
-        content: [{ type: "text", text: actText(env, action) }],
-        details: { action, url: trimStr((env.data || {}).url) },
+        content: [{ type: "text", text: view.text }],
+        details: { action, url: trimStr((env.data || {}).url), truncated: view.clipped },
       };
     },
   });
@@ -1559,7 +1597,7 @@ export default function register(agent) {
   agent.registerTool({
     name: "browser_screenshot",
     description:
-      "给页面截图（默认叠加 ref 标注并直接返回图片）。适合视觉确认、布局/样式检查、给用户看结果；图上的 ref 与 browser_snapshot 里的 ref 一致。只需要文件路径时把 inline 设为 false。",
+      "给页面截图（默认叠加 ref 标注并直接返回图片）。可用 ref/selector 只截某个元素；format=jpeg + quality 可显著减小图片。只需要文件路径时把 inline 设为 false。",
     access: "read",
     parameters: {
       type: "object",
@@ -1568,6 +1606,10 @@ export default function register(agent) {
         annotate: { type: "boolean", description: "是否叠加 ref 标注，缺省 true" },
         max_width: { type: "integer", minimum: 320, maximum: 4096, description: "最大宽度，缺省 1280" },
         inline: { type: "boolean", description: "是否把图片返回给模型，缺省 true" },
+        ref: { type: "string", description: "只截这个 ref 对应的元素" },
+        selector: { type: "string", description: "只截这个 CSS/text/role 选择器对应的元素" },
+        format: { type: "string", enum: ["png", "jpeg"], description: "缺省 png" },
+        quality: { type: "integer", minimum: 1, maximum: 100, description: "JPEG 质量，缺省 82" },
       },
       required: [],
     },
@@ -1577,9 +1619,18 @@ export default function register(agent) {
       params.max_width = intIn(args.max_width, 320, 4096, 1280);
       const inline = typeof args.inline === "boolean" ? args.inline : true;
       params.inline = inline;
+      const ref = trimStr(args.ref);
+      const selector = trimStr(args.selector);
+      if (ref && selector) throw new Error("screenshot 的 ref 与 selector 只能给一个");
+      if (ref) params.ref = ref;
+      if (selector) params.selector = selector;
+      const format = oneOf(args.format, ["png", "jpeg"], "");
+      if (format) params.format = format;
+      if (args.quality != null) params.quality = intIn(args.quality, 1, 100, 82);
       const env = await rpc(ctx, "screenshot", params, callTimeout(args));
       const data = env.data || {};
-      const content = [{ type: "text", text: screenshotText(env) }];
+      const view = screenshotText(env);
+      const content = [{ type: "text", text: view.text }];
       if (inline && typeof data.data === "string" && data.data !== "") {
         content.push({
           type: "image",
@@ -1594,6 +1645,9 @@ export default function register(agent) {
           width: data.width || 0,
           height: data.height || 0,
           inline,
+          format: trimStr(data.mime_type) || "image/png",
+          clip: data.clip || null,
+          truncated: view.clipped,
         },
       };
     },
@@ -1621,9 +1675,10 @@ export default function register(agent) {
         params.timeout_ms = intIn(args.timeout_ms, 100, MAX_CALL_TIMEOUT_MS, 30000);
       }
       const env = await rpc(ctx, "eval", params, callTimeout(args));
+      const view = evalText(env);
       return {
-        content: [{ type: "text", text: evalText(env) }],
-        details: { url: trimStr((env.data || {}).url) },
+        content: [{ type: "text", text: view.text }],
+        details: { url: trimStr((env.data || {}).url), truncated: view.clipped },
       };
     },
   });
@@ -1662,13 +1717,15 @@ export default function register(agent) {
       };
       if (args.args && typeof args.args === "object") params.args = args.args;
       if (typeof args.release_on_finish === "boolean") params.release_on_finish = args.release_on_finish;
-      // 脚本走 CLI 通道（browser-use run），可以用满 timeout_ms；rpcViaCli 会再加进程开销。
+      // 脚本走异步/CLI 通道，可以用满 timeout_ms；rpc 会选当前版本最快的一条。
       const env = await rpc(ctx, "script", params, timeout);
+      const view = scriptText(env);
       return {
-        content: [{ type: "text", text: scriptText(env) }],
+        content: [{ type: "text", text: view.text }],
         details: {
           script_id: trimStr((env.data || {}).script_id),
           actions: Array.isArray((env.data || {}).actions) ? (env.data || {}).actions.length : 0,
+          truncated: view.clipped,
         },
       };
     },
@@ -1725,11 +1782,13 @@ export default function register(agent) {
         params.include_body = true;
       }
       const env = await rpc(ctx, "network", params, callTimeout(args));
+      const view = networkText(env);
       return {
-        content: [{ type: "text", text: networkText(env) }],
+        content: [{ type: "text", text: view.text }],
         details: {
           action,
           count: Array.isArray((env.data || {}).entries) ? (env.data || {}).entries.length : 0,
+          truncated: view.clipped,
         },
       };
     },
@@ -1791,12 +1850,14 @@ export default function register(agent) {
       }
       const env = await rpc(ctx, "console", params, callTimeout(args));
       const data = (env && env.data) || {};
+      const view = consoleText(env);
       return {
-        content: [{ type: "text", text: consoleText(env) }],
+        content: [{ type: "text", text: view.text }],
         details: {
           action,
           count: Array.isArray(data.entries) ? data.entries.length : 0,
           matched: !!data.matched,
+          truncated: view.clipped,
         },
       };
     },
@@ -1819,9 +1880,10 @@ export default function register(agent) {
       const action = oneOf(args.action, ["release", "state"], "state");
       const params = { action, ...optionalTab(args) };
       const env = await rpc(ctx, "control", params, callTimeout(args));
+      const view = controlText(env);
       return {
-        content: [{ type: "text", text: controlText(env) }],
-        details: { control: (env.data || {}).control || null, action },
+        content: [{ type: "text", text: view.text }],
+        details: { control: (env.data || {}).control || null, action, truncated: view.clipped },
       };
     },
   });
@@ -1854,9 +1916,10 @@ export default function register(agent) {
       }
       const params = args.args && typeof args.args === "object" ? args.args : {};
       const env = await rpc(ctx, tool, params, callTimeout(args));
+      const view = genericText(env, tool);
       return {
-        content: [{ type: "text", text: genericText(env, tool) }],
-        details: { tool },
+        content: [{ type: "text", text: view.text }],
+        details: { tool, truncated: view.clipped },
       };
     },
   });

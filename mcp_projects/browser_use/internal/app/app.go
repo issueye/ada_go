@@ -202,6 +202,15 @@ func (a *App) takeOver() {
 	a.win.Invalidate()
 }
 
+func (a *App) pause() {
+	a.mgr.Pause()
+	a.maskFocus = false
+	if t := a.mgr.Active(); t != nil && t.View != nil {
+		t.View.Focus()
+	}
+	a.win.Invalidate()
+}
+
 func (a *App) resume() {
 	a.mgr.Resume()
 	a.win.Invalidate()
@@ -238,7 +247,7 @@ func (a *App) closeTab(id string) {
 
 func (a *App) navigate(rawURL string) {
 	go func() {
-		_, err := a.mgr.Navigate(context.Background(), a.mgr.ActiveID(), "ui", "goto", rawURL, browser.NavigateOptions{WaitUntil: "load", Timeout: 30 * time.Second})
+		_, err := a.mgr.Navigate(context.Background(), a.mgr.ActiveID(), "ui", "goto", rawURL, browser.NavigateOptions{WaitUntil: "load", Timeout: 30 * time.Second, Human: true})
 		mygo.RunOnMain(func() {
 			if err != nil {
 				a.lastErr = err.Error()
@@ -251,7 +260,7 @@ func (a *App) navigate(rawURL string) {
 
 func (a *App) history(action string) {
 	go func() {
-		_, err := a.mgr.Navigate(context.Background(), a.mgr.ActiveID(), "ui", action, "", browser.NavigateOptions{WaitUntil: "load", Timeout: 30 * time.Second})
+		_, err := a.mgr.Navigate(context.Background(), a.mgr.ActiveID(), "ui", action, "", browser.NavigateOptions{WaitUntil: "load", Timeout: 30 * time.Second, Human: true})
 		mygo.RunOnMain(func() {
 			if err != nil {
 				a.lastErr = err.Error()

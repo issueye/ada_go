@@ -268,6 +268,59 @@ func TestHTTPStreamableTransport(t *testing.T) {
 	}
 }
 
+// TestCallToolCompactTextAndErrorDetails 钉住模型可见文本的形态：
+// snapshot 只出现一次（不是整个 JSON 信封），ambiguous 的候选详情保留在错误里。
+func TestCallToolCompactTextAndErrorDetails(t *testing.T) {
+	t.Run("snapshot text is not raw json", func(t *testing.T) {
+		svc, _ := newTestService(`{"ok":true,"data":{
+			"snapshot":"[e1] button \"Go\"",
+			"url":"http://x/","title":"X","truncated":false,
+			"nodes":[{"ref":"e1","role":"button","name":"Go","rect":{"x":0,"y":0,"w":1,"h":1}}]
+		}}`)
+		c := newInProcessClient(t, svc)
+		req := mcpgo.CallToolRequest{}
+		req.Params.Name = "snapshot"
+		req.Params.Arguments = map[string]any{}
+		res, err := c.CallTool(t.Context(), req)
+		if err != nil {
+			t.Fatalf("CallTool: %v", err)
+		}
+		text := res.Content[0].(mcpgo.TextContent).Text
+		if !strings.Contains(text, `[e1] button "Go"`) {
+			t.Fatalf("text = %q", text)
+		}
+		if strings.Contains(text, `"nodes"`) {
+			t.Fatalf("text still contains the raw JSON envelope: %q", text)
+		}
+		obj, _ := res.StructuredContent.(map[string]any)
+		if obj["snapshot"] != `[e1] button "Go"` {
+			t.Fatalf("structuredContent = %#v", res.StructuredContent)
+		}
+	})
+
+	t.Run("error keeps details", func(t *testing.T) {
+		svc, _ := newTestService(`{"ok":false,"error":{
+			"code":"ambiguous","message":"2 elements match",
+			"details":{"candidates":[{"ref":"e1","name":"Go"}]}
+		}}`)
+		c := newInProcessClient(t, svc)
+		req := mcpgo.CallToolRequest{}
+		req.Params.Name = "click"
+		req.Params.Arguments = map[string]any{"selector": ".go"}
+		res, err := c.CallTool(t.Context(), req)
+		if err != nil {
+			t.Fatalf("CallTool: %v", err)
+		}
+		if !res.IsError {
+			t.Fatalf("expected tool error: %+v", res)
+		}
+		text := res.Content[0].(mcpgo.TextContent).Text
+		if !strings.Contains(text, "details:") || !strings.Contains(text, "candidates") {
+			t.Fatalf("error text lost details: %q", text)
+		}
+	})
+}
+
 // parseRPCBody 同时接受 application/json 与 SSE（data: 行）。
 func parseRPCBody(t *testing.T, raw []byte) map[string]any {
 	t.Helper()
