@@ -44,6 +44,12 @@ const (
 	MaxResultBytes = 1 << 20
 	// ConsecutiveFailureLimit 是自动禁用插件前的连续失败次数（06 §6.4）。
 	ConsecutiveFailureLimit = 3
+
+	// DisabledCooldownInit 是熔断禁用后的首次冷却时长：冷却结束后下一次调用
+	// 自动半开探测（重建运行时并放行该调用），成功即恢复，失败则指数退避。
+	DisabledCooldownInit = 5 * time.Minute
+	// DisabledCooldownMax 是半开探测反复失败时的退避上限。
+	DisabledCooldownMax = 10 * time.Minute
 )
 
 // ErrDirtyRuntime 表示这次调用把 Runtime 弄脏了（超时、超内存、引擎内部错误、panic）：

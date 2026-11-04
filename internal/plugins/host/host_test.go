@@ -9,6 +9,7 @@ package host
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -483,6 +484,122 @@ export default function (agent) {
 	}
 	if disabled {
 		t.Fatal("插件被误禁用")
+	}
+}
+
+// TestBreakerAutoRecoversAfterCooldown 钉熔断自动恢复（06 §6.4）：三连败禁用后
+// 冷却期内拒绝并提示自动恢复；冷却到点下一次调用半开放行——重建重跑工厂后本次
+// 调用成功即完全恢复（计数、冷却清零），不需要任何人工重载。
+func TestBreakerAutoRecoversAfterCooldown(t *testing.T) {
+	caps := testCaps(t, plugins.TrustThirdParty)
+	src := `
+export default function (agent) {
+  agent.registerTool({ name: "flaky", description: "flaky", parameters: { type: "object" }, access: "read",
+    execute(args) {
+      if (args && args.fail) { throw new Error("boom"); }
+      return { content: [{ type: "text", text: "recovered" }] };
+    } });
+}
+`
+	p, err := Load(context.Background(), testScript(t, caps, src), caps, Context{}, Options{Targets: Targets{Tools: &recordingTools{}}})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	defer func() { _ = p.Close(context.Background()) }()
+
+	handler := p.Contribution().Tools[0].Handler
+	// 三连败：熔断禁用。
+	for i := 0; i < 3; i++ {
+		if _, err := p.CallTool(context.Background(), handler, json.RawMessage(`{"fail":true}`), Context{}); err == nil {
+			t.Fatalf("第 %d 次调用应失败", i+1)
+		}
+	}
+	if failures, disabled := p.Status(); !disabled || failures != 3 {
+		t.Fatalf("三连败后应禁用：failures=%d disabled=%v", failures, disabled)
+	}
+
+	// 冷却期内：拒绝并提示自动恢复（不再是「需手动重载」）。
+	_, err = p.CallTool(context.Background(), handler, json.RawMessage(`{}`), Context{})
+	if err == nil || !strings.Contains(err.Error(), "自动恢复") {
+		t.Fatalf("冷却期内应拒绝并提示自动恢复: %v", err)
+	}
+	if !errors.Is(err, ErrDisabled) {
+		t.Fatalf("禁用错误应保持 ErrDisabled 哨兵: %v", err)
+	}
+
+	// 把禁用时刻拨回：冷却视为已过（不等真实 30s）。
+	p.mu.Lock()
+	p.disabledAt = p.disabledAt.Add(-DisabledCooldownInit - time.Second)
+	p.mu.Unlock()
+
+	// 半开探测：重建重跑工厂，本次调用（不带 fail）成功即恢复。
+	res, err := p.CallTool(context.Background(), handler, json.RawMessage(`{}`), Context{})
+	if err != nil {
+		t.Fatalf("冷却到点后半开调用应放行并成功: %v", err)
+	}
+	if len(res.Content) != 1 || res.Content[0].Text != "recovered" {
+		t.Fatalf("恢复后内容 = %+v", res.Content)
+	}
+	if failures, disabled := p.Status(); disabled || failures != 0 {
+		t.Fatalf("探测成功后应完全恢复：failures=%d disabled=%v", failures, disabled)
+	}
+	p.mu.Lock()
+	cd := p.cooldown
+	p.mu.Unlock()
+	if cd != 0 {
+		t.Fatalf("成功调用应清零冷却，实际 %s", cd)
+	}
+}
+
+// TestBreakerBacksOffWhenProbeKeepsFailing 钉指数退避：插件一直坏时，每次
+// 「冷却到点 → 半开探测 → 试探失败」把冷却翻倍（30s → 60s → 120s，上限 10min）。
+func TestBreakerBacksOffWhenProbeKeepsFailing(t *testing.T) {
+	caps := testCaps(t, plugins.TrustThirdParty)
+	src := `
+export default function (agent) {
+  agent.registerTool({ name: "broken", description: "broken", parameters: { type: "object" }, access: "read",
+    execute() { throw new Error("still broken"); } });
+}
+`
+	p, err := Load(context.Background(), testScript(t, caps, src), caps, Context{}, Options{Targets: Targets{Tools: &recordingTools{}}})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	defer func() { _ = p.Close(context.Background()) }()
+
+	handler := p.Contribution().Tools[0].Handler
+	for i := 0; i < 3; i++ {
+		if _, err := p.CallTool(context.Background(), handler, json.RawMessage(`{}`), Context{}); err == nil {
+			t.Fatalf("第 %d 次调用应失败", i+1)
+		}
+	}
+	assertCooldown := func(want time.Duration) {
+		t.Helper()
+		p.mu.Lock()
+		cd, disabled := p.cooldown, p.disabled
+		p.mu.Unlock()
+		if !disabled || cd != want {
+			t.Fatalf("冷却应翻倍至 %s：cooldown=%s disabled=%v", want, cd, disabled)
+		}
+	}
+	// 两轮「拨回冷却 → 半开探测 → 试探再失败」：翻倍推进，第二轮起触顶封在上限。
+	for _, want := range []time.Duration{DisabledCooldownInit * 2, min(DisabledCooldownInit*4, DisabledCooldownMax)} {
+		p.mu.Lock()
+		p.disabledAt = p.disabledAt.Add(-p.cooldown - time.Second)
+		p.mu.Unlock()
+		// 试探调用返回它自己的原始错误；重新熔断记进 lastError。
+		if _, err := p.CallTool(context.Background(), handler, json.RawMessage(`{}`), Context{}); err == nil {
+			t.Fatal("试探调用应失败")
+		}
+		assertCooldown(want)
+		// 紧接着的调用应处于新一轮冷却期，文案带上探测失败原因。
+		_, err := p.CallTool(context.Background(), handler, json.RawMessage(`{}`), Context{})
+		if err == nil || !strings.Contains(err.Error(), "恢复探测失败") {
+			t.Fatalf("试探失败后应重新进入冷却并说明原因: %v", err)
+		}
+	}
+	if failures, disabled := p.Status(); !disabled {
+		t.Fatalf("持续失败应保持禁用：failures=%d disabled=%v", failures, disabled)
 	}
 }
 
