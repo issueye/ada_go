@@ -234,20 +234,19 @@ on stdin/stdout. HTTP mode is a separate process
 at the app's control port — that API requires the runtime bearer token and is
 not MCP (a 401 "missing or wrong token" means the client hit the control API).
 
-`browser-use mcp` is a stdio MCP server. `initialize`, `tools/list` and
-`tools/call` are implemented; tool schemas come from the same
-`internal/control` registry as `/v1/tools`, so there is one source of truth.
+The MCP layer is built on [github.com/mark3labs/mcp-go](https://github.com/mark3labs/mcp-go)
+(v0.52.0): tool names/descriptions/schemas still come from `internal/control`
+(one source of truth with `/v1/tools`), while initialization, protocol
+negotiation, `tools/list`, `tools/call`, cancellation and JSON-RPC framing are
+handled by the library.
 
-```json
-{
-  "mcpServers": {
-    "browser-use": {
-      "command": "E:\\codes\\go_projects\\ada_go\\mcp_projects\\browser_use\\bin\\browser-use.exe",
-      "args": ["mcp"]
-    }
-  }
-}
-```
+- `browser-use mcp` serves stdio.
+- `browser-use mcp --http --port 8766` serves stateless Streamable HTTP at
+  `/mcp` (plus `/healthz`); every request is independent, so no session header
+  is needed. Clients that only POST (including ada-go's mcp-client) work as-is;
+  GET SSE listening is not provided in stateless mode.
+- Tool failures stay `isError` results with the app's stable code/hint, and a
+  single call is capped at 5 minutes (client cancellation still cancels it).
 
 - `tools/list` works without starting the GUI.
 - The first `tools/call` starts the app through the loopback API if needed.
@@ -394,5 +393,6 @@ M2 remaining: popup windows with `window.opener`, approvals/policies, nested
 iframe traversal and command palette/favicons.
 
 See [DESIGN.md](DESIGN.md) for the full design.
+
 
 
