@@ -651,7 +651,13 @@
     form.addEventListener('submit', function (event) {
       var submitter = event.submitter;
       if (submitter && submitter.name === 'decision' && submitter.value === 'cancel') return;
-      if (index >= steps.length - 1) return;
+      if (index >= steps.length - 1) {
+        // 提交前把所有步骤的字段重新启用：disabled 的控件不随表单提交，
+        // 只带末题会让服务端按 q0、q1… 拼出的 answers 缺项，插件会以
+        // 「回答数量与问题不一致」拒绝（ask_user 多题的固定报错）。
+        for (var s = 0; s < steps.length; s += 1) setStepEnabled(steps[s], true);
+        return;
+      }
       event.preventDefault();
       if (next) next.click();
     });

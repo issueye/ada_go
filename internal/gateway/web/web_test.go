@@ -808,6 +808,17 @@ func TestStaticAppJSServed(t *testing.T) {
 	wantNotContains(t, live, "live-thinking")
 }
 
+// TestAskWizardEnablesAllFieldsBeforeSubmit 钉多题分步表单的提交契约：非当前步的字段
+// 是 disabled（19-ued §19.5.5「未到达步骤的字段必须 disabled」），而 disabled 控件不参与
+// 表单提交；末步提交前必须重新启用全部步骤，否则只提交末题，服务端按 q0、q1… 拼出的
+// answers 缺项，ask_user 会以「回答数量与问题不一致」失败（ERR_ASK_DENIED）。
+func TestAskWizardEnablesAllFieldsBeforeSubmit(t *testing.T) {
+	srv, _ := newServer(t, newFakeCore())
+	js := serve(t, srv, "GET", "/static/app.js", nil).Body.String()
+	wantContains(t, js, "data-ask-form")
+	wantContains(t, js, "setStepEnabled(steps[s], true)")
+}
+
 func TestTurnStartUsesTextAndIdempotencyKey(t *testing.T) {
 	core := newFakeCore().on("turn.start", `{"runId":"run_1","duplicate":false,"seq":1}`)
 	srv, _ := newServer(t, core)
