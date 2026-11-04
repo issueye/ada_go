@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:ab970f7cb4c4202f) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:411fee04745d0791) by plugins/official/build.mjs — do not edit
 // env-manager 后端：环境变量管理页的数据面。
 //
 // 能力位 env.admin（仅 builtin）提供 ctx.env：
