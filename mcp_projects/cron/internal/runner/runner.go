@@ -200,13 +200,14 @@ func (r *Runner) tick(ctx context.Context) {
 				At:     now.UTC().Format(time.RFC3339),
 				Status: store.RunMissed,
 				Detail: "应用未运行，错过该次调度（不补跑）",
-			}, "")
+			}, "", false)
 			continue
 		}
 		// 2) 锁外执行动作。
-		run := r.execute(ctx, &snapshot, d.due)
-		// 3) 入锁记录结果；agent 动作顺带回写线程 id 供下次复用。
-		r.record(path, lock, snapshot.ID, run, run.ThreadID)
+		run, clearThread := r.execute(ctx, &snapshot, d.due)
+		// 3) 入锁记录结果；agent 动作顺带回写线程 id 供下次复用
+		//    （clearThread 表示线程已不存在，清掉让下次运行重建）。
+		r.record(path, lock, snapshot.ID, run, run.ThreadID, clearThread)
 	}
 }
 
@@ -264,8 +265,9 @@ func (r *Runner) claim(path, lock string, d dueInfo, now time.Time) (bool, store
 	return claimed, snapshot
 }
 
-// record 在文件锁内追加一条运行历史；threadID 非空时顺带回写任务的线程 id。
-func (r *Runner) record(path, lock, taskID string, run store.Run, threadID string) {
+// record 在文件锁内追加一条运行历史；threadID 非空时回写任务的线程 id，
+// clearThread 时清掉（线程已不存在，下次运行重建）。
+func (r *Runner) record(path, lock, taskID string, run store.Run, threadID string, clearThread bool) {
 	_ = store.Update(path, lock, claimWindow, func(all *[]store.Task) error {
 		for j := range *all {
 			if (*all)[j].ID != taskID {
@@ -273,7 +275,11 @@ func (r *Runner) record(path, lock, taskID string, run store.Run, threadID strin
 			}
 			cur := &(*all)[j]
 			store.AppendRun(cur, run)
-			if threadID != "" && cur.ThreadID != threadID {
+			switch {
+			case clearThread:
+				cur.ThreadID = ""
+				cur.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+			case threadID != "" && cur.ThreadID != threadID:
 				cur.ThreadID = threadID
 				cur.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 			}
@@ -283,25 +289,28 @@ func (r *Runner) record(path, lock, taskID string, run store.Run, threadID strin
 	})
 }
 
-// execute 执行一个任务的动作并返回运行历史条目。
-func (r *Runner) execute(ctx context.Context, t *store.Task, due time.Time) store.Run {
+// execute 执行一个任务的动作，返回运行历史条目与是否清除任务线程
+// （agent 动作的线程已不存在时为 true）。
+func (r *Runner) execute(ctx context.Context, t *store.Task, due time.Time) (store.Run, bool) {
 	logf := r.logger()
 	run := store.Run{At: due.UTC().Format(time.RFC3339)}
 	start := time.Now()
+	var clearThread bool
 	switch t.Action.Type {
 	case store.ActionHTTP:
 		status, httpStatus, detail := r.fireHTTP(ctx, &t.Action)
 		run.Status, run.HTTPStatus, run.Detail = status, httpStatus, detail
 	case store.ActionAgent:
-		status, threadID, detail := r.fireAgent(ctx, t)
+		status, threadID, detail, agentClear := r.fireAgent(ctx, t)
 		run.Status, run.ThreadID, run.Detail = status, threadID, detail
+		clearThread = agentClear
 	default:
 		run.Status = store.RunError
 		run.Detail = "未知动作类型 " + t.Action.Type
 	}
 	run.DurationMs = time.Since(start).Milliseconds()
 	logf.Printf("任务 %q（%s）→ %s（%dms）%s", t.Name, t.Action.Type, run.Status, run.DurationMs, run.Detail)
-	return run
+	return run, clearThread
 }
 
 // fireHTTP 执行 http 动作；返回 (status, httpStatus, detail)。
@@ -360,10 +369,11 @@ type fireResponse struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// fireAgent 把 agent 动作经网关转发给 Core；返回 (status, threadID, detail)。
-func (r *Runner) fireAgent(ctx context.Context, t *store.Task) (string, string, string) {
+// fireAgent 把 agent 动作经网关转发给 Core；返回 (status, threadID, detail, clearThread)。
+// clearThread 表示任务专用线程已不存在，调用方应清掉 task.threadId 让下次运行重建。
+func (r *Runner) fireAgent(ctx context.Context, t *store.Task) (string, string, string, bool) {
 	if r.GatewayURL == "" || r.Token == "" {
-		return store.RunError, "", "缺少网关地址或令牌（--gateway-url/--token）"
+		return store.RunError, "", "缺少网关地址或令牌（--gateway-url/--token）", false
 	}
 	payload := fireRequest{
 		TaskID:         t.ID,
@@ -374,31 +384,33 @@ func (r *Runner) fireAgent(ctx context.Context, t *store.Task) (string, string, 
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return store.RunError, "", "编码请求失败: " + err.Error()
+		return store.RunError, "", "编码请求失败: " + err.Error(), false
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.GatewayURL+"/api/cron/fire", bytes.NewReader(raw))
 	if err != nil {
-		return store.RunError, "", "构造请求失败: " + err.Error()
+		return store.RunError, "", "构造请求失败: " + err.Error(), false
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+r.Token)
 	resp, err := r.fireClient.Do(req)
 	if err != nil {
-		return store.RunError, "", "调网关失败: " + err.Error()
+		return store.RunError, "", "调网关失败: " + err.Error(), false
 	}
 	defer func() { _ = resp.Body.Close() }()
 	var out fireResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
-		return store.RunError, "", fmt.Sprintf("网关响应异常（HTTP %d）", resp.StatusCode)
+		return store.RunError, "", fmt.Sprintf("网关响应异常（HTTP %d）", resp.StatusCode), false
 	}
 	switch {
 	case resp.StatusCode == http.StatusOK && out.Started:
-		return store.RunStarted, out.ThreadID, "网关已受理，AI 轮次在线程里执行"
+		return store.RunStarted, out.ThreadID, "网关已受理，AI 轮次在线程里执行", false
 	case resp.StatusCode == http.StatusOK && out.Reason == "thread_busy":
-		return store.RunBusy, out.ThreadID, "线程已有运行中轮次，跳过本次"
+		return store.RunBusy, out.ThreadID, "线程已有运行中轮次，跳过本次", false
+	case resp.StatusCode == http.StatusOK && out.Reason == "thread_missing":
+		return store.RunError, "", "任务线程已不存在，已清除；下次运行将自动重建线程", true
 	case resp.StatusCode == http.StatusUnauthorized:
-		return store.RunError, out.ThreadID, "网关令牌无效（401）"
+		return store.RunError, out.ThreadID, "网关令牌无效（401）", false
 	default:
-		return store.RunError, out.ThreadID, fmt.Sprintf("网关返回 HTTP %d: %s", resp.StatusCode, out.Error)
+		return store.RunError, out.ThreadID, fmt.Sprintf("网关返回 HTTP %d: %s", resp.StatusCode, out.Error), false
 	}
 }

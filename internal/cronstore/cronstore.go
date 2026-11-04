@@ -241,7 +241,7 @@ func SaveFile(path string, tasks []Task) error {
 
 // Update 在跨进程文件锁内做一次读改写：锁 → 读 → fn → 原子写 → 解锁。
 // fn 里的修改要么落盘要么整体不发生；并发写（插件 CRUD 与 cron 二进制回写）
-// 在这里串行化。ctx 由调用方给取消（本包不引 context 类型，用 deadline 语义）。
+// 在这里串行化。wait 是最长等锁时间（本包不把 context 暴露进公开 API）。
 func Update(path string, lockPath string, wait time.Duration, fn func(tasks *[]Task) error) error {
 	if strings.TrimSpace(path) == "" || strings.TrimSpace(lockPath) == "" {
 		return errors.New("cronstore: Update 需要文件与锁路径")
@@ -249,8 +249,10 @@ func Update(path string, lockPath string, wait time.Duration, fn func(tasks *[]T
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
 		return fmt.Errorf("cronstore: 创建锁目录失败: %w", err)
 	}
+	lockCtx, cancel := context.WithTimeout(context.Background(), wait)
+	defer cancel()
 	fl := flock.New(lockPath)
-	ok, err := fl.TryLockContext(deadlineCtx(wait), 25*time.Millisecond)
+	ok, err := fl.TryLockContext(lockCtx, 25*time.Millisecond)
 	if err != nil {
 		return fmt.Errorf("cronstore: 获取任务文件锁失败: %w", err)
 	}
@@ -364,14 +366,4 @@ func NextAfter(t *Task, after time.Time) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return s.Next(after), nil
-}
-
-// deadlineCtx 把等待时长适配成 flock.TryLockContext 需要的 context。
-// 本包刻意不把 context 暴露进公开 API：调用方只需要「最多等多久」。
-func deadlineCtx(wait time.Duration) context.Context {
-	ctx, cancel := context.WithTimeout(context.Background(), wait)
-	// 立即释放 cancel：WithTimeout 的 vet 检查要求处理丢失的取消；
-	// 到期自动取消正是这里想要的语义。
-	_ = cancel
-	return ctx
 }

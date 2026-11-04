@@ -72,6 +72,14 @@ func (s *Server) handleCronFire(w http.ResponseWriter, r *http.Request) {
 	defer release()
 
 	threadID := strings.TrimSpace(req.ThreadID)
+	if threadID != "" {
+		// 复用线程前先确认它还在：用户可能删掉了任务专用线程。缺失时让
+		// 调用方清掉 threadId，下次运行自动重建（否则永久 turn.start 失败）。
+		if _, err := client.Call(ctx, "thread.get", map[string]any{"threadId": threadID}); err != nil {
+			writeCronFire(w, http.StatusOK, cronFireResponse{Started: false, Reason: "thread_missing"})
+			return
+		}
+	}
 	if threadID == "" {
 		title := "定时任务: " + strings.TrimSpace(req.TaskName)
 		if title == "定时任务: " {

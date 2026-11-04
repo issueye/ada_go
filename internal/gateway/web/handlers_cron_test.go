@@ -69,6 +69,7 @@ func TestCronFireCreatesThreadAndStartsTurn(t *testing.T) {
 func TestCronFireReusesProvidedThread(t *testing.T) {
 	core := newFakeCore()
 	core.responses = map[string]json.RawMessage{
+		"thread.get": json.RawMessage(`{"thread":{"id":"thr_kept"}}`),
 		"turn.start": json.RawMessage(`{"ok":true}`),
 	}
 	srv, _ := newServer(t, core)
@@ -135,6 +136,34 @@ func TestCronFireTurnFailurePropagates(t *testing.T) {
 	}
 	if out.ThreadID != "thr_x" || !strings.Contains(out.Error, "core 爆炸") {
 		t.Fatalf("错误信息不符: %+v", out)
+	}
+}
+
+func TestCronFireThreadMissingSignalsRebuild(t *testing.T) {
+	// 带来的 threadId 已不存在：网关应预检发现并返回 thread_missing，
+	// 让 cron 二进制清掉线程 id，下次运行自动重建。
+	core := newFakeCore()
+	core.errs = map[string]error{
+		"thread.get": errors.New("thread.get: 线程不存在"),
+	}
+	srv, _ := newServer(t, core)
+
+	rec := cronFirePost(t, srv, `{"taskId":"crn_6","taskName":"x","text":"hi","threadId":"thr_gone"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Started bool   `json:"started"`
+		Reason  string `json:"reason"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("响应不是 JSON: %v", err)
+	}
+	if out.Started || out.Reason != "thread_missing" {
+		t.Fatalf("应返回 started=false reason=thread_missing: %+v", out)
+	}
+	if core.countCalls("turn.start") != 0 {
+		t.Fatalf("线程缺失时不应尝试 turn.start")
 	}
 }
 

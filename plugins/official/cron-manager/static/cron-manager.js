@@ -286,9 +286,9 @@
     });
   }
 
+  // loadState 是只读刷新：不受 busy 守卫（否则写操作完成后的内部刷新会被
+  // 吞掉，表格停在旧数据）；写操作各自的 busy 守卫防的是重复提交。
   async function loadState(silent) {
-    if (busy) return;
-    busy = true;
     try {
       var data = await api("/state");
       state = data || {};
@@ -296,8 +296,6 @@
       if (!silent) status(state.tasks && state.tasks.length ? "已加载 " + state.tasks.length + " 个任务。" : "暂无任务。");
     } catch (err) {
       status("读取失败：" + errorText(err), "bad");
-    } finally {
-      busy = false;
     }
   }
 

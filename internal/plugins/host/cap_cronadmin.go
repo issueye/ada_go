@@ -167,7 +167,9 @@ func addCronAdminContextMember(st *capsState, hc Context, put func(string, moejs
 				next.ID = prev.ID
 				next.CreatedAt = prev.CreatedAt
 				next.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-				// 运行态字段不通过 update 修改：归 cron 二进制所有。
+				// 启停与运行态字段不通过 update 修改：enabled 归 setEnabled 专属
+				// （编辑停用中的任务不会把它意外重新启用），其余归 cron 二进制。
+				next.Enabled = prev.Enabled
 				next.Runs, next.ThreadID, next.LastFiredAt = prev.Runs, prev.ThreadID, prev.LastFiredAt
 				next.TriggerRequested = prev.TriggerRequested
 				if err := cronstore.ValidateTask(&next); err != nil {

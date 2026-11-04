@@ -35,11 +35,9 @@ func main() {
 		intervalSec = flag.Int("interval", 15, "tick 周期（秒）")
 		file        = flag.String("file", "", "任务文件路径（默认 ~/.adago/cron.json）")
 		lock        = flag.String("lock", "", "锁文件路径（默认 ~/.adago/cron.lock）")
-		debug       = flag.Bool("debug", false, "打印更多日志")
 	)
 	flag.Parse()
 	log.SetFlags(log.LstdFlags | log.LUTC)
-	_ = debug // 预留：当前日志粒度固定，后续细化时使用
 
 	if *parentPID > 0 && !parentAlive(*parentPID) {
 		log.Fatalf("父进程 %d 已不存在，退出", *parentPID)
