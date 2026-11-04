@@ -206,3 +206,30 @@ func TestTickDisabledTaskSkipped(t *testing.T) {
 		t.Fatalf("停用任务不应有历史: %+v", loaded[0].Runs)
 	}
 }
+
+func TestTickAgentThreadMissingClearsThread(t *testing.T) {
+	// 线程已被用户删除：网关返回 thread_missing，runner 应清掉 threadId
+	// 让下次运行重建，而不是带着死线程永远失败。
+	g := newFakeGateway(t, http.StatusOK, fireResponse{Started: false, Reason: "thread_missing"})
+	path, lock := setupTasks(t, store.Task{
+		ID: "crn_gone", Name: "g", Enabled: true, Cron: "* * * * *",
+		CreatedAt: time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339),
+		ThreadID:  "thr_deleted",
+		Action:    store.Action{Type: store.ActionAgent, Text: "x"},
+	})
+	_ = store.Update(path, lock, 5*time.Second, func(all *[]store.Task) error {
+		(*all)[0].LastFiredAt = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+		return nil
+	})
+
+	r := New(path, lock, g.server.URL, "tok")
+	r.tick(context.Background())
+
+	loaded, _, _ := store.Load(path)
+	if loaded[0].ThreadID != "" {
+		t.Fatalf("死线程 id 应被清除，得到 %q", loaded[0].ThreadID)
+	}
+	if loaded[0].Runs[0].Status != store.RunError {
+		t.Fatalf("状态应为 error: %+v", loaded[0].Runs[0])
+	}
+}
