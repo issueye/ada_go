@@ -3,9 +3,11 @@
     <div class="ada-wrap ada-wrap--page">
       {{template "flash" .}}
       <div class="ada-section-head">
-        <div class="ada-page-title">
+        {{/* 与其它二级页一致：顶栏 h1 是页面标识，正文标题用 h2（同 ada-page-title 字号），
+             避免一篇页面出现两个 h1 让读屏的标题跳读重复。 */}}
+        <h2 class="ada-page-title">
           {{.Plugin.Name}} {{.Plugin.ID}}{{if .Plugin.Version}} · v{{.Plugin.Version}}{{end}}
-        </div>
+        </h2>
         {{/* 插件级动作放在页头：与「返回插件列表」同排，不随文件/信息面板滚动。 */}}
         <div class="ada-section-head__actions">
           {{if .Plugin.Enabled}}

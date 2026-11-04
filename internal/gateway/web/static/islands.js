@@ -48,25 +48,30 @@
         };
       },
       computed: {
-        columns: function () {
-          var h = AdaRender.h;
-          return [
-            { key: 'updatedLabel', label: '更新时间', class: 'text-xs text-muted' },
-            {
-              key: 'title',
-              label: '会话',
-              render: function (row) {
-                return h('a', {
-                  class: 'link text-xs',
-                  href: '/threads/' + encodeURIComponent(row.id || '')
-                }, row.title || '新会话');
-              }
-            },
-            { key: 'workspace', label: '工作区', class: 'text-xs text-muted' }
-          ];
+        /* 行数据先规整成展示形态：与会话列表（ui.go 侧栏 / overview_partial）
+           同一套「标题兜底 + 相对链接」，模板里不再写表达式树。 */
+        recentRows: function () {
+          return (this.recent || []).map(function (row) {
+            return {
+              id: row.id || '',
+              title: row.title || '新会话',
+              workspace: row.workspace || '',
+              running: !!row.running,
+              href: '/threads/' + encodeURIComponent(row.id || '')
+            };
+          });
         }
       },
       methods: {
+        /* 概览的 DOM 形态以模板（overview_partial）为准，岛屿只刷新数据：
+           两套标记一旦分叉，挂载瞬间整块重排，空态还会同时出现
+           「暂无数据」与「还没有会话」两种说法，且 ada-* 方言被换回
+           app.css 的 .card/.badge 存量类（19-ued §19.4）。 */
+        chipClass: function (tone) {
+          if (tone === 'brand') return 'ada-chip ada-chip--brand';
+          if (tone === 'warn') return 'ada-chip ada-chip--warn';
+          return 'ada-chip';
+        },
         refresh: function () {
           if (this.loading) return;
           if (typeof document !== 'undefined' && document.hidden) return;
@@ -90,9 +95,16 @@
             })
             .then(function (data) {
               if (!data || typeof data !== 'object') return;
-              self.stats = Array.isArray(data.stats) ? data.stats : [];
-              self.recent = Array.isArray(data.recent) ? data.recent : [];
               self.error = '';
+              var next = {
+                stats: Array.isArray(data.stats) ? data.stats : [],
+                recent: Array.isArray(data.recent) ? data.recent : []
+              };
+              // 数据没变就不赋值：5s 一轮的整岛重渲染会把用户的选区/悬停打断，
+              // 也会白白重排一次（CLS）。比较用序列化结果，字段少、代价可忽略。
+              if (JSON.stringify(next) === JSON.stringify({ stats: self.stats, recent: self.recent })) return;
+              self.stats = next.stats;
+              self.recent = next.recent;
             })
             .catch(function (error) {
               self.error = error && error.message ? error.message : '无法刷新概览';
@@ -116,19 +128,36 @@
       template:
         '<div>' +
         '<ui-message v-if="error" tone="error" title="概览刷新失败">{{ error }}</ui-message>' +
-        '<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">' +
-        '<ui-card v-for="stat in stats" :key="stat.label">' +
-        '<ui-badge :tone="stat.tone || \'neutral\'" :label="stat.label"></ui-badge>' +
+        // 与 templates/overview.html.tmpl 的 overview_partial 逐类对齐：ada-panel /
+        // ada-chip / ada-section-head / 链接行列表 / 一句空态。改一处必须改另一处。
+        '<div class="ada-stat-grid">' +
+        '<div v-for="stat in stats" :key="stat.label" class="ada-panel p-4">' +
+        '<span :class="chipClass(stat.tone)">{{ stat.label }}</span>' +
         '<p class="mt-3 text-2xl font-semibold tracking-tight text-ink">{{ stat.value }}</p>' +
         '<p class="mt-1 text-xs leading-4 text-muted">{{ stat.hint }}</p>' +
-        '</ui-card>' +
         '</div>' +
-        '<ui-card class="mt-4" title="最近会话" subtitle="点击进入会话详情并发送消息">' +
-        '<template #header><ui-spinner v-if="loading" :size="14" label="刷新中"></ui-spinner>' +
-        '<ui-button href="/" variant="ghost" size="sm" label="全部会话"></ui-button></template>' +
-        '<ui-table v-if="recent.length" :columns="columns" :rows="recent" row-key="id"></ui-table>' +
-        '<ui-empty v-else icon="i-chat" title="还没有会话" description="去「对话」页新建一个。"></ui-empty>' +
-        '</ui-card>' +
+        '</div>' +
+        '<div class="ada-panel mt-4 overflow-hidden">' +
+        '<div class="ada-section-head border-b border-line px-4 py-3">' +
+        '<div>' +
+        '<h2 class="ada-section-title">最近会话</h2>' +
+        '<p class="ada-section-sub">点击进入会话详情并发送消息</p>' +
+        '</div>' +
+        '<a class="ada-link text-xs" href="/">全部会话</a>' +
+        '</div>' +
+        '<div v-if="recentRows.length" class="divide-y divide-line">' +
+        '<a v-for="row in recentRows" :key="row.id" class="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-subtle" :href="row.href">' +
+        '<div class="min-w-0 flex-1">' +
+        '<div class="flex items-center gap-2">' +
+        '<span class="truncate text-xs font-medium text-ink">{{ row.title }}</span>' +
+        '<span v-if="row.running" class="ada-chip ada-chip--warn">运行中</span>' +
+        '</div>' +
+        '<p class="mt-1 truncate text-xs text-muted">{{ row.workspace }}</p>' +
+        '</div>' +
+        '</a>' +
+        '</div>' +
+        '<div v-else class="px-4 py-8 text-center text-xs text-faint">还没有会话。去「对话」页新建一个。</div>' +
+        '</div>' +
         '</div>'
     });
 

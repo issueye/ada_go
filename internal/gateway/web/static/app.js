@@ -1007,6 +1007,58 @@
     });
   }
 
+  /* ── 表单提交态：防重复提交 + 让读屏知道「已提交、正在处理」 ──────────
+     二级页的启用/停用、重载插件、新建目录都是整页 POST：网慢时按钮毫无变化，
+     用户会以为没点上再点一次（重复启停、重复建目录）。这里在**冒泡阶段**给表单
+     打 data-submitting，晚于上方 data-confirm 的捕获处理——确认弹窗拦下的提交
+     （defaultPrevented）不进入提交态，等用户点「确认」后 requestSubmit 再来一次。
+     不把按钮设成 disabled：disabled 的 submitter 不参与表单数据，
+     `name="decision"` 这类按钮的值会丢；靠 CSS 的 pointer-events 挡住二次点击。 */
+  var SUBMITTING = 'data-submitting';
+
+  function markSubmitting(form, submitter) {
+    if (!form || form.hasAttribute(SUBMITTING)) return false;
+    form.setAttribute(SUBMITTING, '1');
+    form.setAttribute('aria-busy', 'true');
+    var button = submitter || form.querySelector('[type="submit"]');
+    if (button && button.setAttribute) {
+      button.setAttribute('aria-disabled', 'true');
+      button.setAttribute('data-submit-pending', '1');
+    }
+    return true;
+  }
+
+  function clearSubmitting() {
+    var forms = document.querySelectorAll('form[' + SUBMITTING + ']');
+    for (var i = 0; i < forms.length; i += 1) {
+      forms[i].removeAttribute(SUBMITTING);
+      forms[i].removeAttribute('aria-busy');
+      var buttons = forms[i].querySelectorAll('[data-submit-pending]');
+      for (var j = 0; j < buttons.length; j += 1) {
+        buttons[j].removeAttribute('aria-disabled');
+        buttons[j].removeAttribute('data-submit-pending');
+      }
+    }
+  }
+
+  document.addEventListener('submit', function (event) {
+    // 被确认弹窗拦下的提交：等用户答复，不能先锁死表单。
+    if (event.defaultPrevented) return;
+    var form = event.target;
+    if (!form || form.tagName !== 'FORM') return;
+    if (form.hasAttribute(SUBMITTING)) {
+      event.preventDefault();
+      return;
+    }
+    markSubmitting(form, event.submitter);
+  });
+
+  // 浏览器前进/后退恢复（bfcache）时，页面还带着上一轮的提交态，必须复位，
+  // 否则表单会永久不可提交。
+  window.addEventListener('pageshow', function (event) {
+    if (event.persisted) clearSubmitting();
+  });
+
   function boot() {
     wireDialog();
     autoDismissFlashes();

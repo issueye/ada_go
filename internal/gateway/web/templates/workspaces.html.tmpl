@@ -5,7 +5,7 @@
       <div class="ada-section-head">
         <div>
           <div class="flex flex-wrap items-center gap-2">
-            <h1 class="ada-page-title">打开工作区</h1>
+            <h2 class="ada-page-title">打开工作区</h2>
             <span class="ada-chip">{{len .Roots}} 个位置</span>
           </div>
           <p class="ada-page-sub">工作区与各自的会话已经直接列在左侧；这里用来从磁盘打开新的工作区目录。切换只需点侧栏里的工作区组。</p>
@@ -76,7 +76,7 @@
           <form method="post" action="/workspaces/mkdir" class="ada-picker__mkdir">
             {{template "csrf" .}}
             <input type="hidden" name="parent" value="{{.Current}}">
-            <input class="ada-input" name="name" placeholder="新建文件夹名称" required autocomplete="off">
+            <input class="ada-input" name="name" placeholder="新建文件夹名称" aria-label="新建文件夹名称" required autocomplete="off">
             <button class="ada-btn ada-btn--secondary ada-btn--sm" type="submit">新建目录</button>
           </form>
 

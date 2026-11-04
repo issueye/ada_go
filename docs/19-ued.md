@@ -112,10 +112,12 @@ ada 词根统一，四种写法各有边界，**不得混用**：
 ## 19.4 组件与 DOM 规范
 
 - 类名 `ada-` 前缀；状态用 `data-*` 属性或 `is-*` 类表达，不拼条件 class 串；Web Component 刻意不挂 shadow root（SSR 同树样式）。
+- **标题层级**：一篇页面只有顶栏一个 `<h1>`（页面标识）；正文页面标题用 `<h2 class="ada-page-title">`，节标题 `<h2 class="ada-section-title">`。二级页历史上有过「顶栏 h1 + 正文 h1」并列，读屏按标题跳读会听到两遍同一页名，已统一。
 - 二级页（overview/extensions/workspaces/login/plugin_detail）已统一到 `ada-*` 组件方言（批次 D 完成）：页面骨架用 `ada-page-title/ada-section-head/ada-panel/ada-chip/ada-table/ada-empty-card/ada-link`（app-local.css）。`app.css` 里的基线类与工具类是**冻结的存量**：不许新增使用；新页面一律走 ada-* 方言。
 - **焦点环**：2px 品牌描边 + 3px 半透明光环（`.ada-focusable` 语义）；`button/a/[tabindex]` 有兜底，但**每个新增可聚焦元素（尤其 `<summary>` 触发器）必须显式进入焦点清单**——键盘 Tab 可达且可见。
 - CSP `style-src 'self'`：模板与 JS 禁止内联 style 属性（`adag verify` 把守）；动态预览色一律走 CSS 变量类（如 `.ada-swatch--moss`）。
 - 表单：Enter 提交必须处理 IME（`isComposing` 必拦）；破坏性操作必须走 `data-confirm`，后果句见 19.2.3。
+- **提交态**：整页 POST 的表单在提交后必须有可见反馈与防重复——表单打 `data-submitting` + `aria-busy="true"`，提交按钮降透明度、`cursor:progress`、禁二次点击（`pointer-events:none`），**不用 `disabled`**（`disabled` 的 submitter 不参与表单数据，`name="decision"` 这类按钮的值会丢）。`data-confirm` 拦下的提交不进入提交态，等用户确认后 `requestSubmit()` 再来一次；bfcache 恢复时（`pageshow.persisted`）必须复位。
 
 ## 19.5 交互模式规范
 
@@ -182,3 +184,4 @@ ada 词根统一，四种写法各有边界，**不得混用**：
 ---
 
 *变更：v1（2026-11-03）——初版：原则、品牌（命名/主题/文案/动效/资产）、令牌体系与主题准入、组件与 DOM、交互模式、可访问性、治理。*
+*变更：v1.1（2026-11-04）——补「标题层级」（一篇页面一个 h1）与「提交态」（整页 POST 的 pending 与防重复）两条，来源见优化方案批次 E。*

@@ -4,7 +4,7 @@
       {{template "flash" .}}
       <div class="ada-section-head">
         <div>
-          <h1 class="ada-page-title">概览</h1>
+          <h2 class="ada-page-title">概览</h2>
           <p class="ada-page-sub">agent 状态、最近会话与插件贡献。</p>
         </div>
         <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/">去对话</a>
@@ -29,7 +29,7 @@
 {{template "shell_end" .}}{{end}}
 
 {{define "overview_partial"}}
-<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+<div class="ada-stat-grid">
   {{range .Stats}}
   <div class="ada-panel p-4">
     <span class="ada-chip {{if eq .Tone "warn"}}ada-chip--warn{{else if eq .Tone "brand"}}ada-chip--brand{{end}}">{{.Label}}</span>

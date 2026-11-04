@@ -1186,6 +1186,29 @@ html:not(.js) .ada-select [data-select-menu] {
   z-index: 2;
   background: var(--ph-surface);
 }
+/* 窄屏：五列在 390px 下会把「状态」挤成「启／用」两行、把操作列的按钮切掉
+   右半边（实测表宽 409 > 视口 390）。给表格兜一个下限宽度，改为整体横向
+   滚动（.ada-table-wrap 已 overflow:auto），列宽和信息都保住。
+   选择器不写 .ada-table：岛屿重建出来的表格是 `.table`（存量类），两种都要兜。 */
+@media (max-width: 760px) {
+  .ada-extensions .ada-table-wrap > table {
+    min-width: 560px;
+  }
+  /* 操作列贴右：横向滚动时「启用/停用」不必先滑到底才点得到。
+     nowrap 是必须的：吸右后单元格只剩内容宽度，不禁止断行会把「详情」拆成两行。 */
+  .ada-extensions .ada-table-wrap tr > :last-child {
+    position: sticky;
+    right: 0;
+    background: var(--ph-surface);
+    box-shadow: -1px 0 0 var(--ph-line);
+    white-space: nowrap;
+  }
+}
+/* 状态/能力标签是单词，不参与断行 */
+.ada-extensions .ada-table-wrap .ada-chip,
+.ada-extensions .ada-table-wrap .badge {
+  white-space: nowrap;
+}
 
 #plugin-detail-island {
   height: 100%;
@@ -2350,14 +2373,32 @@ body.ada-flash-open .ada-corner-dock {
 .ada-section-head {
   margin-bottom: var(--ada-space-3);
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
   gap: var(--ada-space-3);
 }
+/* 页头动作组：窄屏换行时贴右，不与标题挤在同一行（插件详情页三个按钮
+   在 390px 下曾把标题压成 2 个字一行、整块页头高 112px）。 */
 .ada-section-head__actions {
   flex-shrink: 0;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-left: auto;
   gap: var(--ada-space-3);
+}
+/* 概览统计卡：窄屏保持两列。原来的 grid-cols-1 在 <640px 把四张卡竖排，
+   单张 110px 高，首屏 440px 只剩统计、看不到「最近会话」。 */
+.ada-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ada-space-3);
+}
+@media (min-width: 1024px) {
+  .ada-stat-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 .ada-section-title {
   font-size: var(--ada-text-base);
@@ -2419,6 +2460,40 @@ body.ada-flash-open .ada-corner-dock {
   border-radius: var(--ada-radius-md);
   text-align: center;
 }
+/* ── 表单提交态（app.js：submit 冒泡阶段打 data-submitting）───────────
+   整页 POST 期间给按钮一个可见的「正在处理」：降透明度 + 进度光标 + 小转圈。
+   不用 disabled，避免 submitter 的值丢失（19-ued §19.4 表单条款）。 */
+form[data-submitting] [data-submit-pending],
+form[data-submitting] [type="submit"] {
+  pointer-events: none;
+  cursor: progress;
+  opacity: 0.6;
+}
+/* 只有带文字的 ada 按钮加转圈：纯图标按钮（发送/中止）加转圈会挤歪图标，
+   它们靠上面的降透明度 + 进度光标表达「已提交」。 */
+form[data-submitting] .ada-btn[type="submit"]::after {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: 6px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: ada-submit-spin 700ms linear infinite;
+}
+@keyframes ada-submit-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  form[data-submitting] .ada-btn[type="submit"]::after {
+    animation: none;
+  }
+}
+
 .ada-table {
   width: 100%;
   border-collapse: collapse;

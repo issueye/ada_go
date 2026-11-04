@@ -136,6 +136,7 @@
 | P3 批次 B | §2.3 批次 B 全部 | 各项自查 + `go test ./...` |
 | P4 批次 C | 清理与品牌小件；动效/术语收敛 | 死代码清零（grep 可验）；动效只剩令牌引用 |
 | P5 批次 D | 二级页方言统一（已完成） | 二级页全部走 `ada-*` 方言；结论：**app.css 保留**——Tailwind preflight 是全站布局基线，语义类/工具类为 token 引用的冻结存量（新增使用被 UED §19.4 禁止），替换 preflight 的回归风险大于 ~8KB gzip 收益 |
+| P6 批次 E | 二级页实测复核（§6，已完成） | 见 §6.3：无重复空态、窄屏表格可操作、单 h1、提交有 pending 态 |
 
 每阶段门禁：`go test ./...`、`go vet ./...`、staticcheck、`adag verify`；UI 变更按 19-ued.md 对应条款自查。
 
@@ -145,3 +146,48 @@
 - **暗色回归**：删除 `app-local.css` 暗色块后，暗色从苔绿切回黑天鹅墨纸反转——这是已确认决策，但需要 8 态走查确认无令牌漏网（特别是 `--ph-brand-ink`/`--ph-subtle` 系从未被绿色块覆盖的变量）。
 - **verify 基线**：`checkUI` 只扫 `tokens.css` 的硬编码色与模板内联 style；`themes.css` 中的色值属令牌定义、色卡走 CSS 变量类，均合规；若后续 verify 收紧扫描范围，按 19-ued §19.7「文档先行」更新基线。
 - **不做的事**：独立设置页、骨架屏、自定义 webfont、主题商店化——均与「克制」原则冲突，规范已明文。
+
+---
+
+## 6. 批次 E：二级页复核（2026-11-04）
+
+批次 A–D 完成后，对 SSR 二级页做了一轮**实测复核**：本地 `adag gateway --fake` 起真实网关，
+按 390 / 768 / 1024 / 1440 四档量 `scrollWidth`、`getBoundingClientRect`、`getComputedStyle`，
+并逐页截图比对。样本：`/`、`/overview`、`/extensions`、`/extensions/{id}`、`/workspaces`。
+
+### 6.1 发现（按严重度）
+
+| # | 级 | 问题 | 证据 | 影响 |
+|---|---|---|---|---|
+| E1 | **P1** | 概览岛与 SSR 片段**两套 DOM**：岛屿用 `ui-card/ui-table/ui-empty`（渲染成 `.card/.badge/.table` 存量类），模板用 `ada-panel` 列表。挂载即整块替换 | 挂载后 `#dashboard-live` 内 `.card` 出现、`.ada-panel` 为 0 | 首屏 CLS；批次 D 的方言统一每次访问被回滚；设计改动「改模板不生效」 |
+| E2 | **P1** | 概览「最近会话」空态**出现两遍**：表格内「暂无数据」+ 空态标题「还没有会话」同时渲染 | `td.ada-table__empty` 与 `h2.ada-empty__title` 并存 | 用户被告知两次「没有数据」，且面板被撑到 ~350px 空白 |
+| E3 | **P1** | 窄屏（≤760px）插件表五列挤压：状态 chip 断成「启/用」竖排、操作列按钮被切一半 | 390px 实测表宽 409 > 视口 390，`scrollWidth` 溢出 | 手机上「启用/停用」不可点全，状态不可读 |
+| E4 | P2 | 概览统计卡在 <640px 竖排 4 列，单卡 110px 高 | 390px 实测：首屏 440px 只有统计 | 「最近会话」被推到折叠线以下，首屏无有效信息 |
+| E5 | P2 | `.ada-section-head` 不换行：页头标题与右侧动作组互挤 | 插件详情 390px：页头高 112px、标题被压成 2 字一行 | 窄屏页头忽高忽低，标题读不全 |
+| E6 | P2 | 页面内出现**两个 `<h1>`**（顶栏 + 正文），插件详情页却用 `<div>` 冒充标题 | `document.querySelectorAll('h1').length === 2` | 读屏按标题跳读会重复同一页名；页面间语义不一致 |
+| E7 | P2 | 整页 POST 表单无提交态：按钮点击后毫无变化 | 启用/停用、重载插件、新建目录 | 慢网下重复点击 → 重复启停、重复建目录 |
+| E8 | P2 | 侧栏分组标签「插件」与同名导航项「插件」并列 | `/overview` 侧栏：`插件页面` 组内含 `插件` 项（修复前组名也是「插件」） | 分不清哪一行进插件清单 |
+| E9 | P3 | 「新建文件夹」输入框只有 placeholder，无标签 | `workspaces.html.tmpl` | 读屏读不出字段用途；placeholder 输入即消失 |
+
+### 6.2 修复与判据
+
+| # | 改动 | 范围 | 预期效果 |
+|---|---|---|---|
+| E1/E2 | `islands.js` 概览模板改为与 `overview_partial` 逐类同构（`ada-panel`/`ada-chip`/`ada-section-head`/链接行/一句空态）；纯展示逻辑下沉 `recentRows`、`chipClass` 两个 computed/method；`refresh()` 先比较序列化结果，**数据没变不赋值** | `static/islands.js` | 挂载不再换形态、空态只剩一句、5s 轮询不再整岛重排；改模板即改页面 |
+| E3 | 窄屏给表格兜 `min-width: 560px` 走整体横滚；状态/能力 chip `nowrap`；**操作列 `position: sticky; right: 0`** 常驻可视 | `static/app-local.css` | 390px 下状态单行、启用/停用始终可点，不必先横滑到底 |
+| E4 | 新增 `.ada-stat-grid`（<1024px 两列，≥1024px 四列）替换 `grid-cols-1 sm:grid-cols-2 lg:grid-cols-4` | `templates/overview.html.tmpl`、`islands.js`、`app-local.css` | 390px 下统计区 2×2，首屏即可见「最近会话」 |
+| E5 | `.ada-section-head` 加 `flex-wrap`，`__actions` 加 `flex-wrap` + `margin-left:auto` | `app-local.css` | 窄屏页头标题独占一行、按钮整齐换行（详情页 112px → 97px 且标题满宽） |
+| E6 | 二级页正文标题统一 `<h2 class="ada-page-title">`；插件详情从 `<div>` 改为 `<h2>` | 5 个模板 | 每页一个 h1（顶栏），标题跳读不再重复 |
+| E7 | `app.js` 提交态：`submit` 冒泡阶段打 `data-submitting`/`aria-busy`，按钮 `aria-disabled` + 禁二次点击；`data-confirm` 拦下的提交跳过；`pageshow.persisted` 复位。CSS 给 `.ada-btn` 加转圈（含 reduced-motion 降级） | `static/app.js`、`app-local.css` | 提交后有可见反馈、重复提交被挡；`name=decision` 等按钮值不丢 |
+| E8 | 侧栏分组标签「插件」→「插件页面」 | `ui.go` | 分组与条目不再同名 |
+| E9 | 输入框补 `aria-label` | `templates/workspaces.html.tmpl` | 读屏可读出字段用途 |
+
+### 6.3 验证方式
+
+- **门禁**：`go test ./...`（`internal/cronstore` 的 `TestUpdateConcurrent` 在 Windows 上因 `cron.lock` 被占用失败，已在基线提交 `976104f` 复现，与本批无关）、`go vet ./...`、`gofmt -l` 干净、`node --test`（`AdaUI.toast` 那条为批次 B 移除 API 后遗留的用例，同样先于本批存在）、`adag verify` 13/13 通过。
+- **实测**：修复前后各跑一遍四档宽度探针（`scrollWidth`、元素 `right`、`grid-template-columns`、`white-space`、`h1` 计数）+ 截图：
+  - 概览 390：`.ada-panel` 5 个、`.card` 0 个、空态文案 1 条、统计两列（170/170）；
+  - 插件表 390：表宽 560、横滚 210px、chip 单行（h=22）、操作列吸右；
+  - 插件详情 390：页头 97px、标题满宽 352、`h1` 计数 1；
+  - 提交态：合成 `submit` 后 `data-submitting=1`／`aria-busy=true`／按钮 `opacity .6`，第二次提交被 `preventDefault`。
+- **未做**：插件列表岛（`mountExtensions`）仍是 `ui-card/ui-table` 方言——它没有轮询也不做局部更新，属于「挂载即重绘同一份数据」的冗余路径，建议后续整段下线或改写成与 SSR 同构后再合并进 E1 的做法（单列一项，不夹带）。

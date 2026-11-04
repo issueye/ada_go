@@ -439,7 +439,9 @@ func renderSidebar(d sidebarData) template.HTML {
 	// 系统导航
 	b.WriteString(`<nav class="ada-nav ada-nav--util" aria-label="系统">`)
 	if len(d.PluginNav) > 0 {
-		b.WriteString(`<div class="ada-nav__label"><span>插件</span></div>`)
+		// 分组标签不能叫「插件」：下面紧跟的条目里就有一个「插件」（/extensions
+		// 管理页），同名分组 + 同名条目让人分不清哪一行才是插件清单入口。
+		b.WriteString(`<div class="ada-nav__label"><span>插件页面</span></div>`)
 		// 插件页多时用滚动条展示全部条目（固定高度内滚动），不再截断成「还有 N 个…」。
 		b.WriteString(`<div class="ada-nav__scroll" role="group" aria-label="插件页面" tabindex="0">`)
 		for _, link := range d.PluginNav {
