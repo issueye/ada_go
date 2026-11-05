@@ -193,6 +193,8 @@ func renderComponent(b *strings.Builder, n Node) error {
 		return renderTodoList(b, n.P)
 	case "Select":
 		return renderSelect(b, n.P)
+	case "Modal":
+		return renderModal(b, n.P)
 	default:
 		// 组件清单里的其余组件属于基座页面（7.7.3），插件侧 M4 还没有用例；
 		// 没有对照 DOM 就不允许输出，避免发明第二套结构。
@@ -423,6 +425,77 @@ func renderSelect(b *strings.Builder, props map[string]any) error {
 		b.WriteString(` disabled`)
 	}
 	b.WriteString(`></ada-select>`)
+	return nil
+}
+
+// renderModal 渲染 a_da 的 <ada-modal> 结构。插件侧用 Modal 组件，服务端只输出
+// 首屏骨架（默认 hidden）；开合/焦点/遮罩仍由 ada-modal.js 负责。
+// 同构版本用 body 文本而不是 slot（$C 节点不携带子节点）。
+func renderModal(b *strings.Builder, props map[string]any) error {
+	id := scalarText(props["id"])
+	if id == "" {
+		id = "ada-modal"
+	}
+	title := scalarText(props["title"])
+	body := scalarText(props["body"])
+	confirmText := scalarText(props["confirmText"])
+	if confirmText == "" {
+		confirmText = "确认"
+	}
+	cancelText := scalarText(props["cancelText"])
+	if cancelText == "" {
+		cancelText = "取消"
+	}
+	variant := scalarText(props["confirmVariant"])
+	if variant == "" {
+		variant = "primary"
+	}
+	wide, _ := props["wide"].(bool)
+	open, _ := props["open"].(bool)
+	if v, ok := props["modelValue"].(bool); ok {
+		open = v
+	}
+
+	b.WriteString(`<ada-modal class="ada-modal" data-modal="`)
+	b.WriteString(html.EscapeString(id))
+	b.WriteString(`"`)
+	if !open {
+		b.WriteString(` hidden`)
+	}
+	b.WriteString(`><div class="ada-modal__backdrop" data-modal-close></div><div class="ada-modal__panel`)
+	if wide {
+		b.WriteString(` ada-modal__panel--wide`)
+	}
+	b.WriteString(`" role="dialog" aria-modal="true"`)
+	if title != "" {
+		b.WriteString(` aria-labelledby="`)
+		b.WriteString(html.EscapeString(id + "-title"))
+		b.WriteString(`"`)
+	}
+	b.WriteString(`>`)
+	if title != "" {
+		b.WriteString(`<h2 class="ada-modal__title" id="`)
+		b.WriteString(html.EscapeString(id + "-title"))
+		b.WriteString(`">`)
+		b.WriteString(html.EscapeString(title))
+		b.WriteString(`</h2>`)
+	}
+	b.WriteString(`<div class="ada-modal__body">`)
+	b.WriteString(html.EscapeString(body))
+	b.WriteString(`</div><div class="ada-modal__actions">`)
+	if cancelText != "" {
+		b.WriteString(`<button class="ada-btn ada-btn--secondary ada-btn--sm" type="button" data-modal-close>`)
+		b.WriteString(html.EscapeString(cancelText))
+		b.WriteString(`</button>`)
+	}
+	if confirmText != "" {
+		b.WriteString(`<button class="ada-btn ada-btn--`)
+		b.WriteString(html.EscapeString(variant))
+		b.WriteString(` ada-btn--sm" type="button" data-modal-confirm>`)
+		b.WriteString(html.EscapeString(confirmText))
+		b.WriteString(`</button>`)
+	}
+	b.WriteString(`</div></div></ada-modal>`)
 	return nil
 }
 

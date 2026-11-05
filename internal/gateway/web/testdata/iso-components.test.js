@@ -232,3 +232,29 @@ test('ada-ui-iso：Tabs 输出 roving tabindex 与隐藏面板', () => {
   assert.equal(panels[1].getAttribute('role'), 'tabpanel');
 });
 
+test('ada-ui-iso：Modal 通过 ModalAdapter 输出 ada-modal 结构', () => {
+  const root = global.document.createElement('div');
+  global.document.body.appendChild(root);
+  const app = globalThis.AdaRender.createApp({
+    components: { Modal: UI.components.ModalAdapter },
+    render(h) {
+      return h(UI.components.Modal, {
+        id: 'demo-modal',
+        title: '确认',
+        body: '确定继续吗？',
+        confirmText: '继续',
+        cancelText: '取消',
+      });
+    },
+  });
+  app.mount(root);
+
+  const modal = root.querySelector('ada-modal[data-modal="demo-modal"]');
+  assert.ok(modal, '应输出 ada-modal');
+  assert.equal(modal.hidden, true, '默认隐藏');
+  assert.equal(modal.querySelector('.ada-modal__title').textContent, '确认');
+  assert.equal(modal.querySelector('.ada-modal__body').textContent, '确定继续吗？');
+  assert.ok(modal.querySelector('.ada-modal__backdrop[data-modal-close]'));
+  assert.equal(modal.querySelectorAll('.ada-modal__actions button').length, 2);
+});
+

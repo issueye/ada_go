@@ -255,6 +255,60 @@ func TestIsoTabsRenderThroughGo(t *testing.T) {
 	}
 }
 
+const isoModalSource = `import { h, defineComponent } from "ada:render";
+import { Modal } from "ada:ui";
+
+export default defineComponent({
+  render(h) {
+    return (
+      <Modal
+        id="demo-modal"
+        title="确认"
+        body="确定继续吗？"
+        confirmText="继续"
+        cancelText="取消"
+      />
+    );
+  },
+});
+`
+
+func TestIsoModalRenderThroughGo(t *testing.T) {
+	engine, err := os.ReadFile(filepath.Join("..", "web", "static", "ada-render.js"))
+	if err != nil {
+		t.Fatalf("读取 ada-render.js: %v", err)
+	}
+	iso, err := os.ReadFile(filepath.Join("..", "web", "static", "ada-ui-iso.js"))
+	if err != nil {
+		t.Fatalf("读取 ada-ui-iso.js: %v", err)
+	}
+	r := host.NewRenderer(
+		host.WithRenderEngineSource(string(engine)),
+		host.WithIsoComponentsSource(string(iso)),
+	)
+	vnode, err := r.RenderIsland(isoModalSource, nil)
+	if err != nil {
+		t.Fatalf("RenderIsland: %v", err)
+	}
+	html, err := RenderHTML(vnode)
+	if err != nil {
+		t.Fatalf("RenderHTML: %v", err)
+	}
+	text := string(html)
+	for _, want := range []string{
+		`<ada-modal class="ada-modal" data-modal="demo-modal" hidden>`,
+		`<div class="ada-modal__backdrop" data-modal-close></div>`,
+		`<h2 class="ada-modal__title" id="demo-modal-title">确认</h2>`,
+		`<div class="ada-modal__body">确定继续吗？</div>`,
+		`<button class="ada-btn ada-btn--secondary ada-btn--sm" type="button" data-modal-close>取消</button>`,
+		`<button class="ada-btn ada-btn--primary ada-btn--sm" type="button" data-modal-confirm>继续</button>`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("SSR HTML 缺少 %s\n%s", want, text)
+		}
+	}
+}
+
 func TestIsoIconTodoNoticeRenderThroughGo(t *testing.T) {
 	engine, err := os.ReadFile(filepath.Join("..", "web", "static", "ada-render.js"))
 	if err != nil {

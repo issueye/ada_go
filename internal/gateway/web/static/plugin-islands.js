@@ -93,6 +93,9 @@
       if (AdaUIIso && AdaUIIso.components && AdaUIIso.components.SelectAdapter) {
         app.component('Select', AdaUIIso.components.SelectAdapter);
       }
+      if (AdaUIIso && AdaUIIso.components && AdaUIIso.components.ModalAdapter) {
+        app.component('Modal', AdaUIIso.components.ModalAdapter);
+      }
       app.mount(element, { hydrate: true, rootElement: true });
       element.removeAttribute('data-ada-loading');
     }).catch(function (err) {

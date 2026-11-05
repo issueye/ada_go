@@ -415,6 +415,7 @@ export const Table = __UI.components.Table;
 export const DataTable = __UI.components.DataTable;
 export const Select = __UI.components.Select;
 export const Tabs = __UI.components.Tabs;
+export const Modal = __UI.components.Modal;
 `
 }
 

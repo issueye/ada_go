@@ -607,10 +607,152 @@
     },
   });
 
+  var ModalAdapter = defineComponent({
+    name: 'ModalAdapter',
+    props: {
+      modelValue: { default: null },
+      id: { default: '' },
+      title: { default: '' },
+      body: { default: '' },
+      wide: BOOL,
+      confirmText: { default: '确认' },
+      cancelText: { default: '取消' },
+      confirmVariant: { default: 'primary' },
+      closeOnConfirm: BOOL_TRUE,
+    },
+    data: function () {
+      return { innerOpen: false };
+    },
+    computed: {
+      modalId: function () { return this.id || 'ada-modal'; },
+      titleId: function () { return this.modalId + '-title'; },
+      isOpen: function () {
+        return this.modelValue === null || this.modelValue === undefined
+          ? this.innerOpen
+          : !!this.modelValue;
+      },
+    },
+    methods: {
+      open: function () {
+        if (this.modelValue === null || this.modelValue === undefined) this.innerOpen = true;
+        this.$emit('update:modelValue', true);
+        this.$emit('open');
+      },
+      close: function () {
+        if (this.modelValue === null || this.modelValue === undefined) this.innerOpen = false;
+        this.$emit('update:modelValue', false);
+        this.$emit('close');
+      },
+      cancel: function () {
+        this.$emit('cancel');
+        this.close();
+      },
+      confirm: function () {
+        this.$emit('confirm');
+        if (this.closeOnConfirm) this.close();
+      },
+      sync: function () {
+        var element = this.$refs.modal;
+        if (!element && typeof document !== 'undefined') {
+          element = document.querySelector('ada-modal[data-modal="' + this.modalId + '"]');
+        }
+        if (!element) return;
+        if (typeof element.open === 'function') {
+          if (this.isOpen && !element.isOpen) element.open();
+          else if (!this.isOpen && element.isOpen) element.close();
+          return;
+        }
+        if (this.isOpen) element.removeAttribute('hidden');
+        else element.setAttribute('hidden', '');
+      },
+      onDocumentOpen: function (event) {
+        if (!event || !event.detail || event.detail.id !== this.modalId) return;
+        this.innerOpen = true;
+      },
+      onDocumentClose: function (event) {
+        if (!event || !event.detail || event.detail.id !== this.modalId) return;
+        this.innerOpen = false;
+      },
+    },
+    mounted: function () {
+      if (typeof document !== 'undefined') {
+        document.addEventListener('ada:modal-open', this.onDocumentOpen);
+        document.addEventListener('ada:modal-close', this.onDocumentClose);
+      }
+      this.sync();
+    },
+    updated: function () { this.sync(); },
+    unmounted: function () {
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('ada:modal-open', this.onDocumentOpen);
+        document.removeEventListener('ada:modal-close', this.onDocumentClose);
+      }
+    },
+    render: function (h) {
+      var body = slot(this, 'default');
+      var children = [
+        h('div', { class: 'ada-modal__backdrop', 'data-modal-close': '' }),
+        h('div', {
+          class: ['ada-modal__panel', this.wide ? 'ada-modal__panel--wide' : ''],
+          role: 'dialog',
+          'aria-modal': 'true',
+          'aria-labelledby': this.title ? this.titleId : null,
+        }, [
+          this.title ? h('h2', { class: 'ada-modal__title', id: this.titleId }, this.title) : null,
+          h('div', { class: 'ada-modal__body' }, body || this.body || ''),
+          h('div', { class: 'ada-modal__actions' }, [
+            this.cancelText ? h('button', {
+              class: 'ada-btn ada-btn--secondary ada-btn--sm',
+              type: 'button',
+              onClick: this.cancel,
+            }, this.cancelText) : null,
+            this.confirmText ? h('button', {
+              class: ['ada-btn', 'ada-btn--' + (this.confirmVariant || 'primary'), 'ada-btn--sm'],
+              type: 'button',
+              onClick: this.confirm,
+            }, this.confirmText) : null,
+          ]),
+        ]),
+      ];
+      return h('ada-modal', {
+        class: 'ada-modal',
+        'data-modal': this.modalId,
+        hidden: !this.isOpen,
+        ref: 'modal',
+      }, children);
+    },
+  });
+  components.ModalAdapter = ModalAdapter;
+
+  var Modal = register('Modal', {
+    props: {
+      modelValue: { default: null },
+      id: { default: '' },
+      title: { default: '' },
+      body: { default: '' },
+      wide: BOOL,
+      confirmText: { default: '确认' },
+      cancelText: { default: '取消' },
+      confirmVariant: { default: 'primary' },
+      closeOnConfirm: BOOL_TRUE,
+    },
+    render: function () {
+      var p = {};
+      for (var key in this.$props) {
+        if (Object.prototype.hasOwnProperty.call(this.$props, key)) p[key] = this.$props[key];
+      }
+      var attrs = this.$attrs || {};
+      for (var attr in attrs) {
+        if (!Object.prototype.hasOwnProperty.call(attrs, attr)) continue;
+        if (attr.indexOf('data-') === 0 || attr === '$on') p[attr] = attrs[attr];
+      }
+      return host('Modal', p);
+    },
+  });
+
   var Input = register('Input', {
     props: {
-      modelValue: { default: '' },
-      type: { default: 'text' },
+      modelValue: { default: '' },      type: { default: 'text' },
       name: { default: '' },
       label: { default: '' },
       hint: { default: '' },
