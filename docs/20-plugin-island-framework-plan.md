@@ -368,4 +368,5 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - **P1-1 已完成**：`frontend.client`、`slots[].hydrate`、`pages[].hydrate` 进入清单 Schema 与 Go 结构；装配期校验 client 路径、`frontend.script` 能力、builtin/verified 信任与静态资源存在性（`newUnit`），旧插件缺省行为不变。测试：`manifest_islands_test.go`、`bridge_client_test.go`。
 - **P1-2 已完成**：`tools/pluginbuild` 用 Go esbuild 把 `client.tsx` 打成单文件 ESM；`ada:render`/`ada:ui` 由 shim 从 `globalThis` 取，产物带内容指纹、512KB 上限、CSP 扫描与 `--check`。测试：`tools/pluginbuild/build_test.go`。
 - **P1-3 已完成**：`host.Renderer.RenderIsland` 走正式 API：`ada:render` 虚拟模块 + 同一份 `ada-render.js` + `renderToJSON`，复用编译缓存与预算；引擎源由 `web.StaticAsset` 提供，Bridge 装配时注入。测试：`island_render_test.go`、`static_asset_test.go`。
-- **下一步**：P1-4 标记与首帧 props 注入（`data-ada-plugin-island` / `data-ada-module` / `data-ada-props`）。
+- **P1-4 已完成**：Bridge 对 `hydrate:true` 的插槽/页面在根 VNode 注入 `data-ada-plugin-island` / `data-ada-plugin` / `data-ada-module`（带内容哈希）/ `data-ada-props`；首帧 props 排除 CSRF，超 32KB 或根为 `$C`/文本时降级纯 SSR。非 hydrate 贡献完全保持原路径。测试：`bridge_island_test.go`。
+- **下一步**：P1-5 客户端引导（`plugin-islands.js`：动态加载、hydrate、单岛错误隔离）。

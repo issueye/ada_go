@@ -327,7 +327,13 @@ func (b *Bridge) Slot(name string, r *http.Request) (template.HTML, int, error) 
 		if !b.isEnabled(r, e.u.manifest.ID) {
 			continue
 		}
-		html, err := b.renderEntry(e.u, e.contrib.Template, "slot", name, r, b.renderer.RenderTemplate)
+		var html template.HTML
+		var err error
+		if e.contrib.Hydrate {
+			html, err = b.renderIslandEntry(e.u, e.contrib.Template, "slot", name, r)
+		} else {
+			html, err = b.renderEntry(e.u, e.contrib.Template, "slot", name, r, b.renderer.RenderTemplate)
+		}
 		if err != nil {
 			failures++
 			log.Printf("frontend: 插件 %s 的插槽 %s 渲染失败（跳过该贡献）: %v", e.u.manifest.ID, name, err)
@@ -355,7 +361,13 @@ func (b *Bridge) Page(pluginID, slug string, r *http.Request) (template.HTML, er
 		if pc.Slug != slug {
 			continue
 		}
-		html, err := b.renderEntry(u, pc.Template, "page", slug, r, b.renderer.RenderPage)
+		var html template.HTML
+		var err error
+		if pc.Hydrate {
+			html, err = b.renderIslandEntry(u, pc.Template, "page", slug, r)
+		} else {
+			html, err = b.renderEntry(u, pc.Template, "page", slug, r, b.renderer.RenderPage)
+		}
 		if err != nil {
 			return "", err
 		}
@@ -655,6 +667,102 @@ func (b *Bridge) renderEntry(u *unit, templateName, kind, name string, r *http.R
 		return "", err
 	}
 	return RenderHTML(vnode)
+}
+
+// renderIslandEntry 渲染一个 hydrate 贡献（docs/20 P1-4）：
+// 同一份 props 先交给 RenderIsland 得到 VNode，再在根节点注入岛屿标记与
+// 首帧 props。注入失败时退回纯 SSR，不让整页因为 hydration 元数据而消失。
+func (b *Bridge) renderIslandEntry(u *unit, templateName, kind, name string, r *http.Request) (template.HTML, error) {
+	src, ok := u.templates[templateName]
+	if !ok {
+		return "", fmt.Errorf("frontend: 插件 %s 缺少模板 %q", u.manifest.ID, templateName)
+	}
+	props, err := b.buildProps(u, r, kind, name)
+	if err != nil {
+		return "", err
+	}
+	vnode, err := b.renderer.RenderIsland(src, props)
+	if err != nil {
+		return "", err
+	}
+	return b.wrapIslandHTML(u, vnode, kind, name, props)
+}
+
+// wrapIslandHTML 给根元素加 data-ada-* 标记；根是 $C/文本/null 时不加标记，
+// 保持纯 SSR（没有可挂载的宿主元素，硬包一层会破坏插槽布局）。
+func (b *Bridge) wrapIslandHTML(u *unit, vnode json.RawMessage, kind, name string, props json.RawMessage) (template.HTML, error) {
+	trimmed := bytes.TrimSpace(vnode)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return "", nil
+	}
+	var root Node
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	dec.UseNumber()
+	if err := dec.Decode(&root); err != nil {
+		return "", fmt.Errorf("frontend: 插件 %s 的同构 VNode 非法: %w", u.manifest.ID, err)
+	}
+	if root.T == "" || root.T == ComponentTag || root.T == "#text" {
+		return RenderHTML(vnode)
+	}
+
+	public, err := publicIslandProps(props)
+	if err != nil {
+		return RenderHTML(vnode)
+	}
+	if len(public) > MaxStringBytes {
+		log.Printf("frontend: 插件 %s 的 %s:%s 首帧 props %d 字节超过 %d，降级为纯 SSR", u.manifest.ID, kind, name, len(public), MaxStringBytes)
+		return RenderHTML(vnode)
+	}
+	client := b.clientURL(u)
+	if client == "" {
+		return RenderHTML(vnode)
+	}
+	if root.P == nil {
+		root.P = map[string]any{}
+	}
+	root.P["data-ada-plugin-island"] = u.manifest.ID + ":" + kind + ":" + name
+	root.P["data-ada-plugin"] = u.manifest.ID
+	root.P["data-ada-module"] = client
+	root.P["data-ada-props"] = string(public)
+
+	raw, err := json.Marshal(root)
+	if err != nil {
+		return RenderHTML(vnode)
+	}
+	out, err := RenderHTML(raw)
+	if err != nil {
+		log.Printf("frontend: 插件 %s 的 %s:%s 标记注入失败（降级纯 SSR）: %v", u.manifest.ID, kind, name, err)
+		return RenderHTML(vnode)
+	}
+	return out, nil
+}
+
+// publicIslandProps 去掉 CSRF：它已经存在于页面隐藏字段，不能复制进
+// data-ada-props。客户端 loader 会在 hydrate 前从页面读取同一份 token。
+func publicIslandProps(raw json.RawMessage) (json.RawMessage, error) {
+	var p renderProps
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, err
+	}
+	p.App.CSRF = ""
+	return json.Marshal(p)
+}
+
+// clientURL 返回插件浏览器 bundle 的 /ext URL（带内容指纹）；没有声明时为空。
+func (b *Bridge) clientURL(u *unit) string {
+	if u == nil || u.manifest.Frontend == nil {
+		return ""
+	}
+	client := strings.TrimSpace(u.manifest.Frontend.Client)
+	if client == "" {
+		return ""
+	}
+	base := "/ext/" + url.PathEscape(u.manifest.ID) + "/static/" + url.PathEscape(client)
+	if data, ok := u.script.StaticAssets[client]; ok {
+		sum := sha256.Sum256(data)
+		base += "?v=" + hex.EncodeToString(sum[:4])
+	}
+	return base
 }
 
 // renderProps 是传给 TSX 的 props 形状（7.5 的投影；插件不能借 props 读别的线程或文件）。
