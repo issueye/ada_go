@@ -448,14 +448,10 @@ go test ./plugins/official -run TestClientBundleSizes -v
    - `.tu-page[data-ada-mounted="1"]`；
    - 无 `data-ada-error`；
    - 点击「显示缓存命中率」后 `aria-pressed="true"`，正文出现「缓存命中率：」。
-4. `/ext/provider-admin/providers`：
-   - `[data-provider-admin][data-ada-mounted="1"]`；
-   - 无 `data-ada-error`；
-   - legacy `provider-admin.js` 已加载并接管列表，空态显示「还没有供应商，点击右上角「添加供应商」。」。
-5. `/ext/provider-admin/providers-next`：
+4. `/ext/provider-admin/providers`（组件化页替换后）：
    - `[data-provider-admin-next][data-ada-mounted="1"]`；
-   - 无 `data-ada-error`；
+   - 标题「模型设置」，无 `data-ada-error`；
    - 初始「正在读取供应商…」被 `/state` 结果替换，空态显示「还没有供应商」；
-   - 刷新按钮存在；页面没有 `[data-provider-admin]`，legacy 脚本不会接管该原型页。
+   - 页面没有 `[data-provider-admin]`，也不再加载 `provider-admin.js`。
 
-结论：同构 hydration、客户端本地状态、页面标记、真实 route 取数、插槽/页面标记与 legacy 脚本共存均在真实浏览器成立。遗留：该冒烟尚未自动化，token/端口是本地临时值，不进入仓库。
+结论：同构 hydration、客户端本地状态、页面标记、真实 route 取数、插槽/页面标记与组件化 provider 页均在真实浏览器成立。遗留：该冒烟尚未自动化，token/端口是本地临时值，不进入仓库。
