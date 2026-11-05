@@ -497,7 +497,7 @@ go test ./plugins/official -run TestClientBundleSizes -v
 | CSRF 不进入 props | ✅ | `TestHydrateSlotInjectsIslandMarkers` 断言 `csrf-secret` 不出现在 `data-ada-props` |
 | props 上限 | ✅ | 32KB 超限降级纯 SSR（P1-4） |
 | CSP 无 eval/new Function | ✅ | `TestClientBundlesHonorCSP` 覆盖全部随包 client bundle；`pluginbuild` 构建期扫描 |
-| 第三方插件隔离 | ⚠️ 不支持 | 第三方不能用客户端岛屿；服务端驱动/iframe 方案仍待评估 |
+| 第三方插件隔离 | ⚠️ 不支持 | 第三方不能用客户端岛屿；方案取舍见 [21-third-party-islands.md](21-third-party-islands.md) |
 | Electron 主世界 | ⚠️ 手工 | 真实 Electron 未自动化；需复查 preload/contextIsolation 下 `window.adaAPI` 暴露面 |
 
 结论：装配期与浏览器 bundle 边界有自动化门禁；第三方隔离与 Electron 主世界仍是发布前手工复查项。
