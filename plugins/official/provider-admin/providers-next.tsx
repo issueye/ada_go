@@ -143,6 +143,36 @@ export default defineComponent({
           this.status = "更新失败：" + ((err && err.message) || String(err));
         });
     },
+    removeProvider() {
+      const selected = this.selected;
+      if (!selected) return;
+      const api = (window as any).adaAPI;
+      if (typeof api !== "function") {
+        this.status = "当前页面没有 adaAPI，无法删除供应商。";
+        return;
+      }
+      const remove = () => {
+        this.status = "正在删除供应商…";
+        api("provider-admin", "/remove", {
+          method: "POST",
+          body: { id: selected.id },
+        })
+          .then(() => {
+            this.status = "供应商已删除。";
+            this.selectedId = "";
+            this.load();
+          })
+          .catch((err: any) => {
+            this.status = "删除失败：" + ((err && err.message) || String(err));
+          });
+      };
+      const confirm = (window as any).adaConfirm;
+      if (typeof confirm === "function") {
+        confirm("删除供应商「" + (selected.displayName || selected.id) + "」？其模型配置会一起删除。", remove);
+      } else {
+        remove();
+      }
+    },
   },
   render(h) {
     const selected = this.selected;
@@ -201,6 +231,11 @@ export default defineComponent({
                     variant={selected.disabled ? "secondary" : "ghost"}
                     onClick={this.toggleProvider}
                   >{selected.disabled ? "启用" : "停用"}</Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={this.removeProvider}
+                  >删除</Button>
                 </div>
 
                 <div class="ada-tabs__list" role="tablist">

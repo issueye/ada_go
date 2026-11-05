@@ -182,6 +182,34 @@ var providers_next_default = defineComponent({
       }).catch((err) => {
         this.status = "更新失败：" + (err && err.message || String(err));
       });
+    },
+    removeProvider() {
+      const selected = this.selected;
+      if (!selected) return;
+      const api = window.adaAPI;
+      if (typeof api !== "function") {
+        this.status = "当前页面没有 adaAPI，无法删除供应商。";
+        return;
+      }
+      const remove = () => {
+        this.status = "正在删除供应商…";
+        api("provider-admin", "/remove", {
+          method: "POST",
+          body: { id: selected.id }
+        }).then(() => {
+          this.status = "供应商已删除。";
+          this.selectedId = "";
+          this.load();
+        }).catch((err) => {
+          this.status = "删除失败：" + (err && err.message || String(err));
+        });
+      };
+      const confirm = window.adaConfirm;
+      if (typeof confirm === "function") {
+        confirm("删除供应商「" + (selected.displayName || selected.id) + "」？其模型配置会一起删除。", remove);
+      } else {
+        remove();
+      }
     }
   },
   render(h2) {
@@ -206,6 +234,14 @@ var providers_next_default = defineComponent({
         onClick: this.toggleProvider
       },
       selected.disabled ? "启用" : "停用"
+    ), /* @__PURE__ */ h2(
+      Button,
+      {
+        size: "sm",
+        variant: "danger",
+        onClick: this.removeProvider
+      },
+      "删除"
     )), /* @__PURE__ */ h2("div", { class: "ada-tabs__list", role: "tablist" }, /* @__PURE__ */ h2(
       "button",
       {

@@ -18,7 +18,12 @@ globalThis.AdaRender = require('../static/ada-render.js');
 require('../static/ada-ui-iso.js');
 
 const calls = [];
+let confirmMessage = '';
 global.window = {
+  adaConfirm(message, onConfirm) {
+    confirmMessage = message;
+    onConfirm();
+  },
   adaAPI(plugin, route, options) {
     calls.push({ plugin, route, options });
     if (route === '/state') {
@@ -40,6 +45,7 @@ global.window = {
     }
     if (route === '/select') return Promise.resolve({ ok: true });
     if (route === '/save') return Promise.resolve({ ok: true });
+    if (route === '/remove') return Promise.resolve({ ok: true });
     return Promise.reject(new Error('unexpected route ' + route));
   },
 };
@@ -106,4 +112,16 @@ test('providers-next：/state 取数、模型表与设为当前', async () => {
   assert.equal(save.options.body.disabled, true);
   assert.equal(save.options.body.models.length, 2);
   assert.equal(save.options.body.apiKey, undefined, 'apiKey 留空表示保留原值');
+
+  const remove = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '删除');
+  assert.ok(remove, '详情头应提供删除按钮');
+  remove.dispatchEvent({ type: 'click' });
+  for (let i = 0; i < 20; i += 1) {
+    if (calls.some((c) => c.route === '/remove')) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const removeCall = calls.find((c) => c.route === '/remove');
+  assert.ok(removeCall, '应调用 /remove');
+  assert.deepEqual(removeCall.options.body, { id: 'p1' });
+  assert.ok(confirmMessage.includes('删除供应商'), '删除前应走 adaConfirm');
 });
