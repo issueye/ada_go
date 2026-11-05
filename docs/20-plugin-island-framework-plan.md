@@ -366,4 +366,5 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - **P0-2 已完成**：`internal/gateway/web/testdata/iso-hydrate.test.js` 覆盖 `renderToJSON → 服务端 HTML → hydrate → 点击更新`；同时发现并修复嵌套组件 hydrate 后首次更新丢失 DOM 引用的 bug（`ada-render.js` 的 `hydrateNode` 首跑不再替换已接管的 `subTree`）。
 - **P0-3 已完成**：`iso-parity.js` 归一化比较工具 + `internal/gateway/frontend/testdata/iso/` 共享 fixture；Go `TestIsoParityGolden` 与 Node `iso-parity.test.js` 对同一份 VNode 比较 SSR golden 与客户端 mount 结构。
 - **P1-1 已完成**：`frontend.client`、`slots[].hydrate`、`pages[].hydrate` 进入清单 Schema 与 Go 结构；装配期校验 client 路径、`frontend.script` 能力、builtin/verified 信任与静态资源存在性（`newUnit`），旧插件缺省行为不变。测试：`manifest_islands_test.go`、`bridge_client_test.go`。
-- **下一步**：P1-2 浏览器 bundle 构建工具（Go esbuild、CSP 扫描、内容哈希）。
+- **P1-2 已完成**：`tools/pluginbuild` 用 Go esbuild 把 `client.tsx` 打成单文件 ESM；`ada:render`/`ada:ui` 由 shim 从 `globalThis` 取，产物带内容指纹、512KB 上限、CSP 扫描与 `--check`。测试：`tools/pluginbuild/build_test.go`。
+- **下一步**：P1-3 服务端同构渲染模式（`ada:render` 虚拟模块 + `renderToJSON` + 编译缓存）。
