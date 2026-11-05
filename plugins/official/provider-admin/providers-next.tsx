@@ -539,7 +539,7 @@ export default defineComponent({
                 </button>
               ))
             ) : (
-              <Empty title="还没有供应商" description="到原「供应商」页添加一个供应商。" />
+              <Empty title="还没有供应商" description="点击右上角「添加供应商」创建。" />
             )}
           </div>
 
@@ -804,7 +804,7 @@ export default defineComponent({
                 )}
               </div>
             ) : (
-              <Empty title="选择一个供应商" description="从左侧列表选择，或到原页面添加。" />
+              <Empty title="选择一个供应商" description="从左侧列表选择，或点击右上角添加供应商。" />
             )}
           </section>
         </div>

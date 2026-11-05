@@ -528,7 +528,7 @@ var providers_next_default = defineComponent({
       },
       /* @__PURE__ */ h2("span", { class: "pm-item__name" }, provider.displayName || provider.id),
       /* @__PURE__ */ h2("span", { class: "pm-item__meta" }, provider.protocol || "未设置协议")
-    )) : /* @__PURE__ */ h2(Empty, { title: "还没有供应商", description: "到原「供应商」页添加一个供应商。" })), /* @__PURE__ */ h2("section", { class: "pm-detail", "aria-label": "供应商详情" }, this.addingProvider ? /* @__PURE__ */ h2("div", { class: "pm-info" }, /* @__PURE__ */ h2("h2", { class: "pm-detail__title" }, "新增供应商"), /* @__PURE__ */ h2(
+    )) : /* @__PURE__ */ h2(Empty, { title: "还没有供应商", description: "点击右上角「添加供应商」创建。" })), /* @__PURE__ */ h2("section", { class: "pm-detail", "aria-label": "供应商详情" }, this.addingProvider ? /* @__PURE__ */ h2("div", { class: "pm-info" }, /* @__PURE__ */ h2("h2", { class: "pm-detail__title" }, "新增供应商"), /* @__PURE__ */ h2(
       Input,
       {
         id: "pm-new-provider-name",
@@ -818,7 +818,7 @@ var providers_next_default = defineComponent({
         rows: selected.models || [],
         columns: this.modelColumns
       }
-    ))) : /* @__PURE__ */ h2(Empty, { title: "选择一个供应商", description: "从左侧列表选择，或到原页面添加。" }))));
+    ))) : /* @__PURE__ */ h2(Empty, { title: "选择一个供应商", description: "从左侧列表选择，或点击右上角添加供应商。" }))));
   }
 });
 

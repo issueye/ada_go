@@ -494,9 +494,9 @@ go test ./plugins/official -run TestClientBundleSizes -v
 |---|---|---|
 | 无 JS 首屏 | ✅ 基础页 | `token-usage` SSR 数据；`ui-hello-tsx` 纯 SSR；`provider-admin` 经 `backend.read` 动作预取 `/state`，`TestUIExtRoutes` 断言供应商名出现在 HTML |
 | 无 JS 表单 | ⚠️ 只读 | 供应商页无 JS 可看目录/详情，但不能保存；写入依赖客户端状态与 CSRF 注入 |
-| 键盘焦点 | ✅ 基础 | `Tabs` roving tabindex 有测试；Button/Input 是原生控件；Modal 适配器保留焦点 |
+| 键盘焦点 | ✅ 基础 | `Tabs` roving tabindex 有测试；Button/Input 是原生控件；真实 Chromium 中聚焦「显示缓存命中率」后 Enter 可切换，`aria-pressed=true` |
 | 视觉 token | ✅ 门禁 | `adag verify ui`：a_da token/CSS/DOM 基线一致，无硬编码色与奇数尺寸 |
-| 视觉回归 | ⚠️ 手工 | 尚无截图基线；需真实浏览器逐页对比 |
+| 视觉回归 | ⚠️ 手工 | 已有 token-usage / providers 两张 1547x826 截图；发现并修正供应商空态仍写「原页面」的文案，尚无截图基线 |
 | 读屏/缩放 | ⚠️ 未做 | 需要人工验收 |
 
 结论：无 JS 与键盘有基础覆盖，但**表单写入、读屏、缩放与视觉回归**仍是手工验收项，不能宣称 P3-5 全部完成。
