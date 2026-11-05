@@ -4,6 +4,7 @@ package frontend
 // 非 hydrate 贡献保持原 SSR，不出现标记。
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -57,6 +58,7 @@ export default defineComponent({
 	for _, want := range []string{
 		`data-ada-plugin-island="demo:slot:sidebar.top"`,
 		`data-ada-plugin="demo"`,
+		`data-ada-entry="slot:sidebar.top"`,
 		`data-ada-module="/ext/demo/static/client.js?v=`,
 		`data-ada-props="`,
 		`class="island"`,
@@ -155,5 +157,56 @@ export default defineComponent({ render(h) { return <div class="corner">x</div>;
 	}
 	if b.HasIslands("overview", req) {
 		t.Fatal("overview 不渲染 chat.corner，不应报告 HasIslands")
+	}
+}
+
+// P2-3：多个 hydrate 贡献共享同一插槽时，标记必须落在各自根元素上，
+// 不能额外包一层容器（否则插槽的 flex/`> *` 布局会被破坏）。
+func TestHydrateSlotKeepsRootsUnwrapped(t *testing.T) {
+	m := &plugins.Manifest{
+		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
+		Trust: plugins.TrustBuiltin,
+		Frontend: &plugins.Frontend{
+			Capabilities: []plugins.Capability{plugins.CapFrontendScript},
+			Client:       "client.js",
+			Slots: []plugins.SlotContribution{
+				{Slot: "sidebar.top", Template: "one.tsx", Hydrate: true, Order: 1},
+				{Slot: "sidebar.top", Template: "two.tsx", Hydrate: true, Order: 2},
+			},
+		},
+	}
+	src := `import { h, defineComponent } from "ada:render";
+export default defineComponent({ render(h) { return <div class="%s">%s</div>; } });
+`
+	b, err := NewBridge(BridgeOptions{
+		Scripts: []host.Script{{
+			Manifest: m,
+			Bundle: map[string]string{
+				"one.tsx": fmt.Sprintf(src, "one", "1"),
+				"two.tsx": fmt.Sprintf(src, "two", "2"),
+			},
+			StaticAssets: map[string][]byte{"client.js": []byte("export default {}")},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewBridge: %v", err)
+	}
+	html, n, err := b.Slot("sidebar.top", httptest.NewRequest(http.MethodGet, "/", nil))
+	if err != nil {
+		t.Fatalf("Slot: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("贡献数 = %d，期望 2", n)
+	}
+	text := string(html)
+	// 根元素自己带标记；没有额外的 wrapper 元素。
+	if strings.Count(text, "data-ada-plugin-island=") != 2 {
+		t.Fatalf("两个根都应带标记：%s", text)
+	}
+	if strings.Contains(text, `<div data-ada-plugin-island`) {
+		t.Fatalf("不应生成包裹层：%s", text)
+	}
+	if !strings.Contains(text, `class="one"`) || !strings.Contains(text, `class="two"`) {
+		t.Fatalf("两个根的 class 应保留：%s", text)
 	}
 }

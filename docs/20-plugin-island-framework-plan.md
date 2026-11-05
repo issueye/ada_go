@@ -376,4 +376,5 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - **P1 完成**。
 - **P2-1 基础版完成**：新增 `ada-ui-iso.js`（`render(h)`，无字符串模板）首批 Badge/Card/Button/Input/Textarea/TextField/Empty；服务端 `ada:render` 增加 `ada:ui` 虚拟模块，浏览器 `AdaUIIso` + pluginbuild shim 优先使用它；SSR 展开为原生标签，不残留 `$C`。测试：`TestRenderIslandWithIsoComponents`、`TestIsoComponentsRenderThroughGo`、`iso-components.test.js`。剩余 Select/Tabs/Table/Modal/Icon/TodoList/Notice 与逐组件 parity 留 P2-1 后续批次。
 - **P2-2 基础版完成**：`provide`/`inject`（组件级 + `app.provide`）、`watch`、`watchEffect` 实例作用域与卸载自动停止、`unmounted` 钩子、`defineStore`（state/getters/actions/单例）与 `$snapshot`/`$hydrate`；`renderToJSON` 保留组件 parent 链，SSR 的 provide/inject 与浏览器一致。测试：`ada-state.test.js`、`TestRenderIslandStateAndProvide`。自动把 store 快照注入岛屿 props 留后续。
-- **下一步**：P2-3 插槽级岛屿（根属性/包裹层策略、布局回归）。
+- **P2-3 基础版完成**：岛屿标记新增 `data-ada-entry`，`plugin-islands.js` 支持 bundle 的 `islands` 映射（一个 bundle 多 page/slot entry，default 兜底）；插槽标记仍落在根元素上、不额外包裹，`TestHydrateSlotKeepsRootsUnwrapped` 守住布局。`ui-hello-tsx` 增加 `sidebar.top` 插槽岛与 `client.tsx` 多 entry bundle，`TestUIExtRoutes` 端到端覆盖。
+- **下一步**：P2-4 `provider-admin` 迁移（首个真实业务页面；保留无 JS 回退）。

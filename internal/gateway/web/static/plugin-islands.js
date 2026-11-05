@@ -59,9 +59,11 @@
     element.setAttribute('data-ada-loading', '1');
 
     loadModule(moduleURL).then(function (mod) {
-      var def = mod && (mod.default || mod.Island);
+      var entry = element.getAttribute('data-ada-entry') || '';
+      var def = entry && mod && mod.islands ? mod.islands[entry] : null;
+      if (!def) def = mod && (mod.default || mod.Island);
       if (!isComponentDef(def)) {
-        throw new Error('bundle 没有 default 组件定义（需要 render/setup/template）');
+        throw new Error('bundle 没有 entry "' + entry + '" 对应的组件定义（需要 render/setup/template）');
       }
       var props = readProps(element);
       if (!props.app || typeof props.app !== 'object') props.app = {};

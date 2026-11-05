@@ -204,6 +204,7 @@ func TestUIExtRoutes(t *testing.T) {
 	}
 	for _, want := range []string{
 		`data-ada-plugin-island="ui-hello-tsx:page:counter"`,
+		`data-ada-entry="page:counter"`,
 		`data-ada-module="/ext/ui-hello-tsx/static/client.js?v=`,
 		`data-ada-props="`,
 		`<strong>0</strong>`,
@@ -217,8 +218,17 @@ func TestUIExtRoutes(t *testing.T) {
 	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/javascript; charset=utf-8" {
 		t.Fatalf("client bundle = %d %q", rec.Code, rec.Header().Get("Content-Type"))
 	}
-	if rec := uiGet(t, srv, "/ext/ui-hello-tsx/hello"); strings.Contains(rec.Body.String(), "plugin-islands.js") {
-		t.Fatal("legacy hello 页面没有岛屿，不应加载 plugin-islands.js")
+	// sidebar.top 是插槽级岛屿：hello 页虽然没有页面 hydrate，也应出现插槽标记。
+	rec = uiGet(t, srv, "/ext/ui-hello-tsx/hello")
+	for _, want := range []string{
+		`data-ada-entry="slot:sidebar.top"`,
+		`class="ext-hello-slot"`,
+		`badge-brand`,
+		`plugin-islands.js`,
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("sidebar 插槽岛缺少 %q\n%s", want, rec.Body.String())
+		}
 	}
 	if rec := uiGet(t, srv, "/ext/no-such-plugin/hello"); rec.Code != http.StatusNotFound {
 		t.Fatalf("未知插件 = %d, want 404", rec.Code)

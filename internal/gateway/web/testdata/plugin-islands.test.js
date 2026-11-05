@@ -63,3 +63,33 @@ test('plugin-islands：动态加载模块、补 CSRF 并 hydrate 根元素', asy
   assert.equal(root.getAttribute('data-ada-error'), null, '不应进入错误态');
   assert.equal(root.textContent, 'x:tok', 'CSRF 应从页面隐藏字段补进 props');
 });
+
+test('plugin-islands：按 data-ada-entry 从 islands 映射选择组件', async () => {
+  const moduleSource = `const Slot = {
+    render(h) { return h("div", { class: "picked" }, "slot"); }
+  };
+  const Page = {
+    render(h) { return h("div", { class: "default" }, "page"); }
+  };
+  export const islands = { "slot:sidebar.top": Slot };
+  export default Page;`;
+  const moduleURL = 'data:text/javascript,' + encodeURIComponent(moduleSource);
+
+  const root = global.document.createElement('div');
+  root.setAttribute('class', 'picked');
+  root.setAttribute('data-ada-plugin-island', 'demo:slot:sidebar.top');
+  root.setAttribute('data-ada-entry', 'slot:sidebar.top');
+  root.setAttribute('data-ada-module', moduleURL);
+  root.setAttribute('data-ada-props', '{}');
+  root.textContent = 'slot';
+  global.document.body.appendChild(root);
+
+  global.window.AdaPluginIslands.boot();
+  for (let i = 0; i < 50 && root.getAttribute('data-ada-mounted') !== '1'; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  assert.equal(root.getAttribute('data-ada-mounted'), '1');
+  assert.equal(root.getAttribute('data-ada-error'), null);
+  assert.equal(root.textContent, 'slot', '应选择 islands 映射中的 slot，而不是 default page');
+});

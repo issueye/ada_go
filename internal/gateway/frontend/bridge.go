@@ -728,6 +728,7 @@ func (b *Bridge) wrapIslandHTML(u *unit, vnode json.RawMessage, kind, name strin
 	}
 	root.P["data-ada-plugin-island"] = u.manifest.ID + ":" + kind + ":" + name
 	root.P["data-ada-plugin"] = u.manifest.ID
+	root.P["data-ada-entry"] = kind + ":" + name
 	root.P["data-ada-module"] = client
 	root.P["data-ada-props"] = string(public)
 
