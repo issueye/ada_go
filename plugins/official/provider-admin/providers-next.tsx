@@ -23,6 +23,8 @@ export default defineComponent({
       fetchError: "",
       editing: false,
       form: { name: "", protocol: "", baseUrl: "", proxy: "", headersText: "", apiKey: "" },
+      editingModelId: "",
+      modelForm: { displayName: "", contextWindow: "", supportsTools: false, disabled: false },
     };
   },
   computed: {
@@ -54,6 +56,15 @@ export default defineComponent({
               onClick: () => self.selectModel(row.id),
             }, "设为当前");
           },
+        },
+        {
+          label: "操作",
+          render: (row: any, index: number, h: any) =>
+            h(Button, {
+              size: "sm",
+              variant: "ghost",
+              onClick: () => self.startEditModel(row),
+            }, "编辑"),
         },
       ];
     },
@@ -303,6 +314,63 @@ export default defineComponent({
           this.status = "保存失败：" + ((err && err.message) || String(err));
         });
     },
+    startEditModel(row: any) {
+      if (!row) return;
+      this.editingModelId = row.id;
+      this.modelForm = {
+        displayName: row.displayName || "",
+        contextWindow: row.contextWindow === undefined || row.contextWindow === null ? "" : String(row.contextWindow),
+        supportsTools: !!row.supportsTools,
+        disabled: !!row.disabled,
+      };
+    },
+    cancelModelEdit() {
+      this.editingModelId = "";
+    },
+    saveModel() {
+      const selected = this.selected;
+      if (!selected || !this.editingModelId) return;
+      const api = (window as any).adaAPI;
+      if (typeof api !== "function") {
+        this.status = "当前页面没有 adaAPI，无法保存模型。";
+        return;
+      }
+      const target = this.editingModelId;
+      const models = (selected.models || []).map((m: any) => {
+        if (!m || m.id !== target) return m;
+        const next: any = Object.assign({}, m, {
+          displayName: String(this.modelForm.displayName || "").trim(),
+          supportsTools: !!this.modelForm.supportsTools,
+          disabled: !!this.modelForm.disabled,
+        });
+        const context = String(this.modelForm.contextWindow || "").trim();
+        if (context) next.contextWindow = Number(context);
+        else delete next.contextWindow;
+        return next;
+      });
+      this.status = "正在保存模型…";
+      api("provider-admin", "/save", {
+        method: "POST",
+        body: {
+          id: selected.id,
+          name: selected.displayName || selected.id,
+          protocol: selected.protocol || "",
+          baseUrl: selected.baseUrl || "",
+          proxy: selected.proxy || "",
+          headers: selected.headers || {},
+          disabled: !!selected.disabled,
+          models,
+        },
+      })
+        .then(() => {
+          this.status = "模型已保存。";
+          this.editingModelId = "";
+          this.load();
+        })
+        .catch((err: any) => {
+          this.status = "保存模型失败：" + ((err && err.message) || String(err));
+        });
+    },
   },
   render(h) {
     const selected = this.selected;
@@ -459,6 +527,38 @@ export default defineComponent({
                   )
                 ) : (
                   <div>
+                    {this.editingModelId ? (
+                      <div class="pm-info">
+                        <Input
+                          id="pm-model-name"
+                          label="显示名"
+                          modelValue={this.modelForm.displayName}
+                          onInput={(value: any) => { this.modelForm.displayName = String(value || ""); }}
+                        />
+                        <Input
+                          id="pm-model-context"
+                          type="number"
+                          label="上下文窗口"
+                          modelValue={this.modelForm.contextWindow}
+                          placeholder="例如 128000"
+                          onInput={(value: any) => { this.modelForm.contextWindow = String(value || ""); }}
+                        />
+                        <p class="pm-info__actions">
+                          <Button
+                            size="sm"
+                            variant={this.modelForm.supportsTools ? "primary" : "secondary"}
+                            onClick={() => { this.modelForm.supportsTools = !this.modelForm.supportsTools; }}
+                          >工具：{this.modelForm.supportsTools ? "支持" : "不支持"}</Button>
+                          <Button
+                            size="sm"
+                            variant={this.modelForm.disabled ? "secondary" : "ghost"}
+                            onClick={() => { this.modelForm.disabled = !this.modelForm.disabled; }}
+                          >状态：{this.modelForm.disabled ? "停用" : "启用"}</Button>
+                          <Button size="sm" variant="primary" onClick={this.saveModel}>保存模型</Button>
+                          <Button size="sm" variant="secondary" onClick={this.cancelModelEdit}>取消</Button>
+                        </p>
+                      </div>
+                    ) : null}
                     {this.fetchError ? (
                       <p class="pm-status" data-tone="danger" role="alert">{this.fetchError}</p>
                     ) : null}

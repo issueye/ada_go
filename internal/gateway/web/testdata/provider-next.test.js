@@ -114,6 +114,30 @@ test('providers-next：/state 取数、模型表与设为当前', async () => {
   const current = root.textContent.includes('当前');
   assert.equal(current, true);
 
+  const modelEdit = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '编辑');
+  assert.ok(modelEdit, '模型行应提供编辑按钮');
+  modelEdit.dispatchEvent({ type: 'click' });
+  await globalThis.AdaRender.nextTick();
+  const modelName = root.querySelector('#pm-model-name');
+  const modelContext = root.querySelector('#pm-model-context');
+  assert.ok(modelName && modelContext, '模型编辑应渲染显示名/上下文输入');
+  modelName.value = '模型一（改）';
+  modelName.dispatchEvent({ type: 'input' });
+  modelContext.value = '256000';
+  modelContext.dispatchEvent({ type: 'input' });
+  await globalThis.AdaRender.nextTick();
+  const saveModel = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存模型');
+  assert.ok(saveModel, '模型编辑应提供保存按钮');
+  saveModel.dispatchEvent({ type: 'click' });
+  for (let i = 0; i < 20; i += 1) {
+    if (calls.some((c) => c.route === '/save')) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const modelSave = calls.find((c) => c.route === '/save').options.body;
+  const savedModel = modelSave.models.find((m) => m.id === 'm1');
+  assert.equal(savedModel.displayName, '模型一（改）');
+  assert.equal(savedModel.contextWindow, 256000);
+
   const switchButton = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '设为当前');
   assert.ok(switchButton, '非当前模型应提供设为当前按钮');
   switchButton.dispatchEvent({ type: 'click' });
@@ -133,7 +157,7 @@ test('providers-next：/state 取数、模型表与设为当前', async () => {
     if (calls.some((c) => c.route === '/save')) break;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  const save = calls.find((c) => c.route === '/save');
+  const save = calls.filter((c) => c.route === '/save').slice(-1)[0];
   assert.ok(save, '应调用 /save');
   assert.equal(save.options.body.id, 'p1');
   assert.equal(save.options.body.disabled, true);
