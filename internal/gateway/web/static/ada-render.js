@@ -336,6 +336,10 @@
   }
 
   /* ---- 轻量 store：模块级单例；每个 app/运行时各自一份 ---- */
+
+  var storeRegistry = Object.create(null);
+  var pendingStoreSnapshots = Object.create(null);
+
   function defineStore(id, options) {
     options = options || {};
     var cache = null;
@@ -390,10 +394,37 @@
         }
       });
       cache = store;
+      storeRegistry[id] = store;
+      if (Object.prototype.hasOwnProperty.call(pendingStoreSnapshots, id)) {
+        store.$hydrate(pendingStoreSnapshots[id]);
+      }
       return store;
     };
     useStore.$id = id;
     return useStore;
+  }
+
+  // collectStoreSnapshots 由服务端岛屿入口调用，把本次渲染用到的 store 状态
+  // 交给 Bridge，随后注入 data-ada-props 的 stores 字段。
+  function collectStoreSnapshots() {
+    var out = {};
+    for (var id in storeRegistry) {
+      if (Object.prototype.hasOwnProperty.call(storeRegistry, id)) {
+        out[id] = storeRegistry[id].$snapshot();
+      }
+    }
+    return out;
+  }
+
+  // hydrateStores 在客户端挂载前调用；store 可能还没创建，先暂存，
+  // defineStore 首次实例化时自动恢复。
+  function hydrateStores(snapshots) {
+    if (!snapshots || typeof snapshots !== 'object') return;
+    for (var id in snapshots) {
+      if (!Object.prototype.hasOwnProperty.call(snapshots, id)) continue;
+      pendingStoreSnapshots[id] = snapshots[id];
+      if (storeRegistry[id]) storeRegistry[id].$hydrate(snapshots[id]);
+    }
   }
 
   /* ---- keyed VNode patch：服务端增量 → 客户端数组 ---- */
@@ -2959,6 +2990,8 @@
     provide: provide,
     inject: inject,
     defineStore: defineStore,
+    collectStoreSnapshots: collectStoreSnapshots,
+    hydrateStores: hydrateStores,
     keyed: keyed,
     applyVNodePatches: applyVNodePatches,
     nextTick: nextTick,

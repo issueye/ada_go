@@ -5,6 +5,7 @@ package frontend
 
 import (
 	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -83,6 +84,24 @@ func TestLegacySlotHasNoIslandMarkers(t *testing.T) {
 	}
 	if strings.Contains(string(html), "data-ada-plugin-island") {
 		t.Fatalf("非 hydrate 贡献不应有岛屿标记：%s", html)
+	}
+}
+
+func TestHydrateSlotCarriesStoreSnapshots(t *testing.T) {
+	b := islandBridge(t, true, `import { h, defineComponent, defineStore } from "ada:render";
+const useStore = defineStore("bridge-store", { state() { return { n: 4 }; } });
+export default defineComponent({
+  setup() { return { store: useStore() }; },
+  render(h) { return <div class="island">{this.store.n}</div>; }
+});
+`)
+	htmlText, _, err := b.Slot("sidebar.top", httptest.NewRequest(http.MethodGet, "/", nil))
+	if err != nil {
+		t.Fatalf("Slot: %v", err)
+	}
+	raw := html.UnescapeString(string(htmlText))
+	if !strings.Contains(raw, `"stores":{"bridge-store":{"n":4}}`) {
+		t.Fatalf("data-ada-props 未携带 store 快照：%s", raw)
 	}
 }
 

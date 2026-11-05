@@ -687,16 +687,16 @@ func (b *Bridge) renderIslandEntry(u *unit, templateName, kind, name string, r *
 	if err != nil {
 		return "", err
 	}
-	vnode, err := b.renderer.RenderIsland(src, props)
+	vnode, stores, err := b.renderer.RenderIslandWithStores(src, props)
 	if err != nil {
 		return "", err
 	}
-	return b.wrapIslandHTML(u, vnode, kind, name, props)
+	return b.wrapIslandHTML(u, vnode, stores, kind, name, props)
 }
 
 // wrapIslandHTML 给根元素加 data-ada-* 标记；根是 $C/文本/null 时不加标记，
 // 保持纯 SSR（没有可挂载的宿主元素，硬包一层会破坏插槽布局）。
-func (b *Bridge) wrapIslandHTML(u *unit, vnode json.RawMessage, kind, name string, props json.RawMessage) (template.HTML, error) {
+func (b *Bridge) wrapIslandHTML(u *unit, vnode, stores json.RawMessage, kind, name string, props json.RawMessage) (template.HTML, error) {
 	trimmed := bytes.TrimSpace(vnode)
 	if len(trimmed) == 0 || string(trimmed) == "null" {
 		return "", nil
@@ -711,7 +711,7 @@ func (b *Bridge) wrapIslandHTML(u *unit, vnode json.RawMessage, kind, name strin
 		return RenderHTML(vnode)
 	}
 
-	public, err := publicIslandProps(props)
+	public, err := publicIslandProps(props, stores)
 	if err != nil {
 		return RenderHTML(vnode)
 	}
@@ -746,12 +746,18 @@ func (b *Bridge) wrapIslandHTML(u *unit, vnode json.RawMessage, kind, name strin
 
 // publicIslandProps 去掉 CSRF：它已经存在于页面隐藏字段，不能复制进
 // data-ada-props。客户端 loader 会在 hydrate 前从页面读取同一份 token。
-func publicIslandProps(raw json.RawMessage) (json.RawMessage, error) {
-	var p renderProps
+// stores 是服务端 defineStore 的快照，客户端挂载前用 hydrateStores 恢复。
+func publicIslandProps(raw, stores json.RawMessage) (json.RawMessage, error) {
+	var p map[string]any
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, err
 	}
-	p.App.CSRF = ""
+	if app, ok := p["app"].(map[string]any); ok {
+		delete(app, "csrf")
+	}
+	if s := bytes.TrimSpace(stores); len(s) > 0 && string(s) != "{}" && string(s) != "null" {
+		p["stores"] = json.RawMessage(append([]byte(nil), s...))
+	}
 	return json.Marshal(p)
 }
 

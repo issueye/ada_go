@@ -17,6 +17,9 @@ global.document = createDocument();
 const Ada = require('../static/ada-render.js');
 const AdaUI = require('../static/ada-ui.js');
 
+globalThis.AdaRender = Ada;
+globalThis.AdaUI = AdaUI;
+
 // 模拟浏览器全局：loader 只依赖 window.AdaRender / window.AdaUI。
 global.window = {
   AdaRender: Ada,
@@ -92,4 +95,37 @@ test('plugin-islands：按 data-ada-entry 从 islands 映射选择组件', async
   assert.equal(root.getAttribute('data-ada-mounted'), '1');
   assert.equal(root.getAttribute('data-ada-error'), null);
   assert.equal(root.textContent, 'slot', '应选择 islands 映射中的 slot，而不是 default page');
+});
+
+test('plugin-islands：data-ada-props.stores 在 store 创建前恢复', async () => {
+  const moduleSource = `const use = globalThis.AdaRender.defineStore("loader-store", {
+    state() { return { n: 1 }; }
+  });
+  export default {
+    render(h) {
+      return h("div", { class: "store" }, String(use().n));
+    }
+  };`;
+  const moduleURL = 'data:text/javascript,' + encodeURIComponent(moduleSource);
+
+  const root = global.document.createElement('div');
+  root.setAttribute('class', 'store');
+  root.setAttribute('data-ada-plugin-island', 'demo:page:store');
+  root.setAttribute('data-ada-entry', 'page:store');
+  root.setAttribute('data-ada-module', moduleURL);
+  root.setAttribute('data-ada-props', JSON.stringify({
+    app: { route: '/' },
+    stores: { 'loader-store': { n: 7 } },
+  }));
+  root.textContent = '7';
+  global.document.body.appendChild(root);
+
+  global.window.AdaPluginIslands.boot();
+  for (let i = 0; i < 50 && root.getAttribute('data-ada-mounted') !== '1'; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  assert.equal(root.getAttribute('data-ada-mounted'), '1');
+  assert.equal(root.getAttribute('data-ada-error'), null);
+  assert.equal(root.textContent, '7', 'store 应在首次创建时恢复快照');
 });

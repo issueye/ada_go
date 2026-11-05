@@ -144,7 +144,8 @@ const {
 | `watchEffect(fn)` | 立即执行并收集依赖；组件 setup/data 中创建时随卸载自动停止 |
 | `provide(key, value)` / `inject(key, default?)` | 组件级依赖注入；`app.provide(key, value)` 提供 app 级默认值 |
 | `defineStore(id, { state, getters, actions })` | 轻量模块级 store；返回 `useStore(initialState?)`，同一 id 单例 |
-| `store.$snapshot()` / `store.$hydrate(data)` | 显式导出/恢复 store 状态；自动注入到岛屿 props 留后续阶段 |
+| `store.$snapshot()` / `store.$hydrate(data)` | 显式导出/恢复 store 状态；岛屿渲染会自动收集快照进 `data-ada-props.stores`，客户端挂载前恢复 |
+| `collectStoreSnapshots()` / `hydrateStores(data)` | 服务端收集本次渲染的 store 快照；客户端在 store 创建前暂存、首次实例化时恢复 |
 | `keyed(vnode, key)` | 给 VNode 挂稳定 key；线格式没有 `k`，客户端按业务 key 重新挂 |
 | `applyVNodePatches(items, patches)` | 应用 `{key, mode:"upsert"|"remove", vnode}` 列表，返回新 `[{key,vnode}]`，由响应式数组驱动 keyed patch |
 | `AdaPatchStream.create({element, url, initial})` | 订阅 SSE `patch` 帧并驱动 keyed 列表；`source` 可注入测试；返回 `{app, proxy, close}` |

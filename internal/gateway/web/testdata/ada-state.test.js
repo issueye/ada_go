@@ -117,3 +117,17 @@ test('defineStore：单例、getter、action、快照与恢复', () => {
   assert.equal(store.n, 10);
   assert.deepEqual(store.$snapshot(), { n: 10 });
 });
+
+test('store 快照：hydrateStores 可在 store 创建前恢复', () => {
+  const use = Ada.defineStore('hydrated-store', {
+    state() {
+      return { n: 1 };
+    },
+  });
+
+  Ada.hydrateStores({ 'hydrated-store': { n: 9 } });
+  const store = use();
+  assert.equal(store.n, 9, '首次创建时应应用待处理快照');
+
+  assert.deepEqual(Ada.collectStoreSnapshots()['hydrated-store'], { n: 9 });
+});

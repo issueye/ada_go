@@ -148,3 +148,33 @@ func TestRenderIslandStateAndProvide(t *testing.T) {
 		}
 	}
 }
+
+const islandStoreSnapshotSource = `import { h, defineComponent, defineStore } from "ada:render";
+
+const useStore = defineStore("island-store", {
+  state() { return { n: 3 }; },
+});
+
+export default defineComponent({
+  setup() {
+    return { store: useStore() };
+  },
+  render(h) {
+    return <div class="store">{this.store.n}</div>;
+  },
+});
+`
+
+func TestRenderIslandWithStoreSnapshots(t *testing.T) {
+	r := NewRenderer(WithRenderEngineSource(islandEngineSource(t)))
+	vnode, stores, err := r.RenderIslandWithStores(islandStoreSnapshotSource, nil)
+	if err != nil {
+		t.Fatalf("RenderIslandWithStores: %v", err)
+	}
+	if !strings.Contains(string(vnode), `"v":"3"`) {
+		t.Fatalf("VNode 缺少 store 状态: %s", vnode)
+	}
+	if !strings.Contains(string(stores), `"island-store"`) || !strings.Contains(string(stores), `"n":3`) {
+		t.Fatalf("store 快照缺少状态: %s", stores)
+	}
+}

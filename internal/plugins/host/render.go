@@ -235,19 +235,27 @@ func (r *Renderer) RenderBlockTemplate(src string, props json.RawMessage) (json.
 //
 // 需要装配方通过 WithRenderEngineSource 提供引擎源码；没有配置时 fail-closed。
 func (r *Renderer) RenderIsland(src string, props json.RawMessage) (json.RawMessage, error) {
+	vnode, _, err := r.RenderIslandWithStores(src, props)
+	return vnode, err
+}
+
+// RenderIslandWithStores 与 RenderIsland 相同，并返回本次渲染用到的
+// defineStore 快照（JSON object）；Bridge 会把它并入 data-ada-props.stores，
+// 客户端挂载前用 hydrateStores 恢复。
+func (r *Renderer) RenderIslandWithStores(src string, props json.RawMessage) (json.RawMessage, json.RawMessage, error) {
 	if len(r.engineSrc) == 0 {
-		return nil, errors.New("host: 未配置 ada-render 引擎源，同构渲染不可用")
+		return nil, nil, errors.New("host: 未配置 ada-render 引擎源，同构渲染不可用")
 	}
 	return r.renderIsland(src, props, r.islandTime)
 }
 
-func (r *Renderer) renderIsland(src string, props json.RawMessage, budget time.Duration) (json.RawMessage, error) {
+func (r *Renderer) renderIsland(src string, props json.RawMessage, budget time.Duration) (json.RawMessage, json.RawMessage, error) {
 	if len(src) == 0 {
-		return nil, errors.New("host: 同构渲染模板源码为空")
+		return nil, nil, errors.New("host: 同构渲染模板源码为空")
 	}
 	js, err := r.compileIsland(src)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	rt := moejs.NewRuntime(moejs.Options{
@@ -263,11 +271,11 @@ func (r *Renderer) renderIsland(src string, props json.RawMessage, budget time.D
 	}
 	setup.Stop()
 	if err != nil {
-		return nil, r.renderError("同构模块加载", err)
+		return nil, nil, r.renderError("同构模块加载", err)
 	}
 	fn, ok := rt.Export("default")
 	if !ok || !engine.IsCallable(fn) {
-		return nil, errors.New("host: 同构模板缺少 `export default` 组件定义")
+		return nil, nil, errors.New("host: 同构模板缺少 `export default` 组件定义")
 	}
 
 	started := time.Now()
@@ -278,31 +286,44 @@ func (r *Renderer) renderIsland(src string, props json.RawMessage, budget time.D
 	if len(props) > 0 {
 		v, perr := rt.ParseJSON(props)
 		if perr != nil {
-			return nil, fmt.Errorf("host: 同构 props 不是合法 JSON: %w", perr)
+			return nil, nil, fmt.Errorf("host: 同构 props 不是合法 JSON: %w", perr)
 		}
 		arg = v
 	}
 	res, err := rt.CallFunction(fn, moejs.Undefined(), arg)
 	if err != nil {
 		if isRenderTimeout(err) {
-			return nil, fmt.Errorf("host: 同构渲染超出预算 %v（实际墙钟 %v）", budget, time.Since(started))
+			return nil, nil, fmt.Errorf("host: 同构渲染超出预算 %v（实际墙钟 %v）", budget, time.Since(started))
 		}
-		return nil, r.renderError("同构模板执行", err)
+		return nil, nil, r.renderError("同构模板执行", err)
 	}
 	if res.IsObject() {
 		r0 := rt.Realm()
 		if then, terr := r0.GetMethod(res, r0.KeyFromGoString("then")); terr == nil && engine.IsCallable(then) {
-			return nil, errors.New("host: 同构渲染返回了 Promise（渲染必须同步）")
+			return nil, nil, errors.New("host: 同构渲染返回了 Promise（渲染必须同步）")
 		}
 	}
 	raw, err := rt.AppendJSON(nil, res)
 	if err != nil {
-		return nil, fmt.Errorf("host: 同构渲染结果不可 JSON 序列化: %w", err)
+		return nil, nil, fmt.Errorf("host: 同构渲染结果不可 JSON 序列化: %w", err)
 	}
 	if len(raw) > maxRenderVNodeBytes {
-		return nil, fmt.Errorf("host: 同构渲染结果 %d 字节，超过 VNode 输出上限 %d", len(raw), maxRenderVNodeBytes)
+		return nil, nil, fmt.Errorf("host: 同构渲染结果 %d 字节，超过 VNode 输出上限 %d", len(raw), maxRenderVNodeBytes)
 	}
-	return json.RawMessage(raw), nil
+
+	stores := json.RawMessage("{}")
+	if storeFn, ok := rt.Export("__adaStores"); ok && engine.IsCallable(storeFn) {
+		storeRes, serr := rt.CallFunction(storeFn, moejs.Undefined())
+		if serr != nil {
+			return nil, nil, r.renderError("store 快照", serr)
+		}
+		storeRaw, serr := rt.AppendJSON(nil, storeRes)
+		if serr != nil {
+			return nil, nil, fmt.Errorf("host: store 快照不可 JSON 序列化: %w", serr)
+		}
+		stores = json.RawMessage(storeRaw)
+	}
+	return json.RawMessage(raw), stores, nil
 }
 
 // linkIsland 链接 ada-render + 插件模块 + 一个只做 renderToJSON 的入口。
@@ -316,8 +337,9 @@ func (r *Renderer) linkIsland(pluginJS string) (*moejs.Module, error) {
 		return nil, fmt.Errorf("host: 同构插件模块编译失败: %w", err)
 	}
 	const wrapper = `import def from "adag:entry";
-import { renderToJSON } from "ada:render";
+import { renderToJSON, collectStoreSnapshots } from "ada:render";
 export default function (props) { return renderToJSON(def, props); }
+export function __adaStores() { return collectStoreSnapshots(); }
 `
 	entry, err := moejs.Compile("adag:island", wrapper)
 	if err != nil {
@@ -366,6 +388,8 @@ export const watchEffect = __R.watchEffect;
 export const provide = __R.provide;
 export const inject = __R.inject;
 export const defineStore = __R.defineStore;
+export const collectStoreSnapshots = __R.collectStoreSnapshots;
+export const hydrateStores = __R.hydrateStores;
 export const nextTick = __R.nextTick;
 export const renderToJSON = __R.renderToJSON;
 `

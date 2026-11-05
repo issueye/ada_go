@@ -67,6 +67,10 @@
         throw new Error('bundle 没有 entry "' + entry + '" 对应的组件定义（需要 render/setup/template）');
       }
       var props = readProps(element);
+      if (props.stores) {
+        AdaRender.hydrateStores(props.stores);
+        delete props.stores;
+      }
       if (!props.app || typeof props.app !== 'object') props.app = {};
       if (!props.app.csrf) {
         var token = readCSRF();
