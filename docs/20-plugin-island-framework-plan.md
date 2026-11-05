@@ -414,7 +414,7 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - 第三方插件仍不能使用客户端岛屿；决策与后续 iframe 方案见 [21-third-party-islands.md](21-third-party-islands.md)。
 - 没有自动化真实浏览器回归（hydration/DOM parity 靠 Node harness + Go golden；冒烟为手工）。
 - 无 JS 时 provider 页可看目录/详情，但表单写入依赖 JS/CSRF；读屏/缩放/视觉回归未做。
-- 12 插槽全开的 SSR 已有基线（45.9ms），浏览器 hydration/首屏预算仍未测。
+- 12 插槽全开的 SSR 已有基线（45.9ms），真实浏览器 hydration 本地冒烟约 12-15ms；CI/多设备/低端机仍未测。
 
 ## 16. P3-3 性能基线（2026-11-05）
 
@@ -429,6 +429,15 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - 每次渲染仍新建 moejs Runtime 并加载约 97KB 引擎；编译结果按源码哈希缓存。
 - 12 插槽 SSR 合计约 45.9ms，低于页面 300ms 预算；但浏览器 hydration、HTTP 与首屏绘制未计入。
 - 后续仍需要真实浏览器性能记录与按需 island/Runtime 池评估。
+
+真实 Chromium（本地 fake 网关，ego lite）：
+
+| 页面 | DOMContentLoaded | load | 岛屿 hydration |
+|---|---|---|---|
+| `/ext/token-usage/usage` | 102ms | 106ms | 11.6ms |
+| `/ext/provider-admin/providers` | 77ms | 77ms | 15.1ms |
+
+`plugin-islands.js` 暴露 `window.AdaIslandsDiagnostics`：`total/hydrated/failed/pending/durationMs` 与每个岛的 `entry/ok/durationMs`，用于本地和线上排查 hydration 降级。
 - 随包浏览器 bundle：`provider-admin` 2,079B、`ui-hello-tsx` 2,642B、`token-usage` 4,226B（含 banner，远低于 512KB 上限）。
 
 命令：

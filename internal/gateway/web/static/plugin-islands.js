@@ -21,6 +21,19 @@
   var AdaUI = window.AdaUI || null;
   var AdaUIIso = window.AdaUIIso || null;
   var moduleCache = Object.create(null);
+  var diagnostics = {
+    startedAt: 0,
+    durationMs: 0,
+    total: 0,
+    hydrated: 0,
+    failed: 0,
+    pending: 0,
+    islands: [],
+  };
+
+  function now() {
+    return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+  }
 
   function readProps(element) {
     try {
@@ -51,16 +64,19 @@
   }
 
   function hydrate(element) {
-    if (!element || element.getAttribute('data-ada-mounted') === '1') return;
+    if (!element || element.getAttribute('data-ada-mounted') === '1') return Promise.resolve(false);
     var moduleURL = element.getAttribute('data-ada-module') || '';
-    if (!moduleURL) return;
+    if (!moduleURL) return Promise.resolve(false);
 
     var label = element.getAttribute('data-ada-plugin-island') || moduleURL;
+    var entry = element.getAttribute('data-ada-entry') || '';
+    var started = now();
+    diagnostics.total += 1;
+    diagnostics.pending += 1;
     element.setAttribute('data-ada-mounted', '1');
     element.setAttribute('data-ada-loading', '1');
 
-    loadModule(moduleURL).then(function (mod) {
-      var entry = element.getAttribute('data-ada-entry') || '';
+    return loadModule(moduleURL).then(function (mod) {
       var def = entry && mod && mod.islands ? mod.islands[entry] : null;
       if (!def) def = mod && (mod.default || mod.Island);
       if (!isComponentDef(def)) {
@@ -98,20 +114,58 @@
       }
       app.mount(element, { hydrate: true, rootElement: true });
       element.removeAttribute('data-ada-loading');
+      diagnostics.hydrated += 1;
+      diagnostics.islands.push({
+        label: label,
+        entry: entry,
+        durationMs: Math.round((now() - started) * 10) / 10,
+        ok: true,
+      });
+      return true;
     }).catch(function (err) {
       // 失败时保留 SSR DOM，并允许后续再次尝试（例如网络恢复后）。
       element.removeAttribute('data-ada-mounted');
       element.removeAttribute('data-ada-loading');
       element.setAttribute('data-ada-error', '1');
+      diagnostics.failed += 1;
+      diagnostics.islands.push({
+        label: label,
+        entry: entry,
+        durationMs: Math.round((now() - started) * 10) / 10,
+        ok: false,
+      });
       if (window.console && typeof window.console.error === 'function') {
         window.console.error('[ada-islands] ' + label + ' hydrate 失败', err);
       }
+      return false;
+    }).then(function (ok) {
+      diagnostics.pending -= 1;
+      if (diagnostics.pending === 0) {
+        diagnostics.durationMs = Math.round((now() - diagnostics.startedAt) * 10) / 10;
+        if (window.performance && typeof window.performance.measure === 'function') {
+          try {
+            window.performance.measure('ada:islands', {
+              start: diagnostics.startedAt,
+              end: now(),
+            });
+          } catch (err) { /* 老浏览器没有 measure options，忽略 */ }
+        }
+      }
+      return ok;
     });
   }
 
   function boot() {
+    diagnostics.startedAt = now();
     var nodes = document.querySelectorAll('[data-ada-plugin-island]');
-    for (var i = 0; i < nodes.length; i += 1) hydrate(nodes[i]);
+    window.AdaIslandsDiagnostics = diagnostics;
+    if (!nodes.length) {
+      diagnostics.durationMs = 0;
+      return Promise.resolve([]);
+    }
+    var tasks = [];
+    for (var i = 0; i < nodes.length; i += 1) tasks.push(hydrate(nodes[i]));
+    return Promise.all(tasks);
   }
 
   if (document.readyState === 'loading') {

@@ -31,7 +31,7 @@ require('../static/plugin-islands.js');
 
 test('plugin-islands：动态加载模块、补 CSRF 并 hydrate 根元素', async () => {
   const moduleSource = `export default {
-    props: { label: { default: "" } },
+    props: { label: { default: "" }, app: { default: {} } },
     data() { return { n: 1 }; },
     render(h) {
       const token = this.app && this.app.csrf ? this.app.csrf : "none";
@@ -57,14 +57,23 @@ test('plugin-islands：动态加载模块、补 CSRF 并 hydrate 根元素', asy
 
   global.window.AdaPluginIslands.boot();
 
-  // 动态 import 是异步的；轮询到 mounted 或超时。
-  for (let i = 0; i < 50 && root.getAttribute('data-ada-mounted') !== '1'; i += 1) {
+  // 动态 import 是异步的；轮询诊断到 pending 清零或超时。
+  for (let i = 0; i < 50; i += 1) {
+    const d = global.window.AdaIslandsDiagnostics;
+    if (d && d.pending === 0 && d.hydrated === 1) break;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 
   assert.equal(root.getAttribute('data-ada-mounted'), '1', '岛屿应完成 hydrate');
   assert.equal(root.getAttribute('data-ada-error'), null, '不应进入错误态');
   assert.equal(root.textContent, 'x:tok', 'CSRF 应从页面隐藏字段补进 props');
+  const diag = global.window.AdaIslandsDiagnostics;
+  assert.ok(diag, '应暴露诊断对象');
+  assert.equal(diag.total, 1);
+  assert.equal(diag.hydrated, 1);
+  assert.equal(diag.failed, 0);
+  assert.equal(diag.pending, 0);
+  assert.ok(diag.durationMs >= 0);
 });
 
 test('plugin-islands：按 data-ada-entry 从 islands 映射选择组件', async () => {
