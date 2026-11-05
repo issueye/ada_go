@@ -68,7 +68,9 @@ var providers_next_default = defineComponent({
       status: "",
       fetching: false,
       remoteModels: [],
-      fetchError: ""
+      fetchError: "",
+      editing: false,
+      form: { name: "", protocol: "", baseUrl: "", apiKey: "" }
     };
   },
   computed: {
@@ -131,6 +133,7 @@ var providers_next_default = defineComponent({
     select(id) {
       this.selectedId = id;
       this.tab = "info";
+      this.editing = false;
     },
     setTab(tab) {
       this.tab = tab;
@@ -274,6 +277,49 @@ var providers_next_default = defineComponent({
       }).catch((err) => {
         this.status = "添加失败：" + (err && err.message || String(err));
       });
+    },
+    startEdit() {
+      const selected = this.selected;
+      if (!selected) return;
+      this.form = {
+        name: selected.displayName || selected.id,
+        protocol: selected.protocol || "",
+        baseUrl: selected.baseUrl || "",
+        apiKey: ""
+      };
+      this.editing = true;
+    },
+    cancelEdit() {
+      this.editing = false;
+    },
+    saveProvider() {
+      const selected = this.selected;
+      if (!selected) return;
+      const api = window.adaAPI;
+      if (typeof api !== "function") {
+        this.status = "当前页面没有 adaAPI，无法保存供应商。";
+        return;
+      }
+      const body = {
+        id: selected.id,
+        name: String(this.form.name || "").trim() || selected.displayName || selected.id,
+        protocol: String(this.form.protocol || "").trim() || selected.protocol || "",
+        baseUrl: String(this.form.baseUrl || "").trim(),
+        proxy: selected.proxy || "",
+        headers: selected.headers || {},
+        disabled: !!selected.disabled,
+        models: selected.models || []
+      };
+      const key = String(this.form.apiKey || "").trim();
+      if (key) body.apiKey = key;
+      this.status = "正在保存供应商…";
+      api("provider-admin", "/save", { method: "POST", body }).then(() => {
+        this.status = "供应商已保存。";
+        this.editing = false;
+        this.load();
+      }).catch((err) => {
+        this.status = "保存失败：" + (err && err.message || String(err));
+      });
     }
   },
   render(h2) {
@@ -337,7 +383,51 @@ var providers_next_default = defineComponent({
         onClick: () => this.setTab("models")
       },
       "模型列表"
-    )), this.tab === "info" ? /* @__PURE__ */ h2("div", { class: "pm-info" }, /* @__PURE__ */ h2("p", null, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "ID"), /* @__PURE__ */ h2("code", null, selected.id)), /* @__PURE__ */ h2("p", null, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "协议"), selected.protocol || "—"), /* @__PURE__ */ h2("p", null, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "端点"), /* @__PURE__ */ h2("code", null, selected.baseUrl || "—")), /* @__PURE__ */ h2("p", null, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "密钥"), selected.apiKeyHint ? "尾号 " + selected.apiKeyHint : "未保存")) : /* @__PURE__ */ h2("div", null, this.fetchError ? /* @__PURE__ */ h2("p", { class: "pm-status", "data-tone": "danger", role: "alert" }, this.fetchError) : null, this.remoteModels.length ? /* @__PURE__ */ h2("p", { class: "pm-status" }, "拉取到 ", this.remoteModels.length, " 个模型。", /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.addFetchedModels }, "添加未配置模型")) : null, /* @__PURE__ */ h2(
+    )), this.tab === "info" ? this.editing ? /* @__PURE__ */ h2("div", { class: "pm-info" }, /* @__PURE__ */ h2(
+      Input,
+      {
+        id: "pm-name",
+        label: "名称",
+        modelValue: this.form.name,
+        onInput: (value) => {
+          this.form.name = String(value || "");
+        }
+      }
+    ), /* @__PURE__ */ h2(
+      Input,
+      {
+        id: "pm-protocol",
+        label: "API 格式",
+        modelValue: this.form.protocol,
+        placeholder: "openai-chat / openai-responses / anthropic-messages",
+        onInput: (value) => {
+          this.form.protocol = String(value || "");
+        }
+      }
+    ), /* @__PURE__ */ h2(
+      Input,
+      {
+        id: "pm-base-url",
+        label: "端点",
+        modelValue: this.form.baseUrl,
+        placeholder: "https://api.example.com/v1",
+        onInput: (value) => {
+          this.form.baseUrl = String(value || "");
+        }
+      }
+    ), /* @__PURE__ */ h2(
+      Input,
+      {
+        id: "pm-api-key",
+        type: "password",
+        label: "API Key",
+        modelValue: this.form.apiKey,
+        placeholder: "留空保持原值",
+        onInput: (value) => {
+          this.form.apiKey = String(value || "");
+        }
+      }
+    ), /* @__PURE__ */ h2("p", { class: "pm-info__hint" }, "保存会整条替换供应商配置；API Key 留空表示保持原值，模型列表原样保留。"), /* @__PURE__ */ h2("div", { class: "pm-info__actions" }, /* @__PURE__ */ h2(Button, { variant: "primary", size: "sm", onClick: this.saveProvider }, "保存"), /* @__PURE__ */ h2(Button, { variant: "secondary", size: "sm", onClick: this.cancelEdit }, "取消"))) : /* @__PURE__ */ h2("div", { class: "pm-info" }, /* @__PURE__ */ h2("p", null, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "ID"), /* @__PURE__ */ h2("code", null, selected.id)), /* @__PURE__ */ h2("p", null, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "协议"), selected.protocol || "—"), /* @__PURE__ */ h2("p", null, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "端点"), /* @__PURE__ */ h2("code", null, selected.baseUrl || "—")), /* @__PURE__ */ h2("p", null, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "密钥"), selected.apiKeyHint ? "尾号 " + selected.apiKeyHint : "未保存"), /* @__PURE__ */ h2("div", { class: "pm-info__actions" }, /* @__PURE__ */ h2(Button, { variant: "secondary", size: "sm", onClick: this.startEdit }, "编辑"))) : /* @__PURE__ */ h2("div", null, this.fetchError ? /* @__PURE__ */ h2("p", { class: "pm-status", "data-tone": "danger", role: "alert" }, this.fetchError) : null, this.remoteModels.length ? /* @__PURE__ */ h2("p", { class: "pm-status" }, "拉取到 ", this.remoteModels.length, " 个模型。", /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.addFetchedModels }, "添加未配置模型")) : null, /* @__PURE__ */ h2(
       Table,
       {
         caption: (selected.displayName || selected.id) + " 的模型",

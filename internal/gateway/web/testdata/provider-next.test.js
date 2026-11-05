@@ -19,6 +19,21 @@ require('../static/ada-ui-iso.js');
 
 const calls = [];
 let confirmMessage = '';
+const provider = {
+  id: 'p1',
+  displayName: '演示供应商',
+  protocol: 'openai',
+  baseUrl: 'https://example.test/v1',
+  hasApiKey: true,
+  apiKeyHint: '1234',
+  models: [
+    { id: 'm1', displayName: '模型一', contextWindow: 128000, supportsTools: true },
+    { id: 'm2', displayName: '模型二', contextWindow: 64000, supportsTools: false },
+  ],
+};
+const providers = [provider];
+const current = { providerId: 'p1', modelId: 'm1' };
+
 global.window = {
   adaConfirm(message, onConfirm) {
     confirmMessage = message;
@@ -27,25 +42,30 @@ global.window = {
   adaAPI(plugin, route, options) {
     calls.push({ plugin, route, options });
     if (route === '/state') {
-      return Promise.resolve({
-        providers: [{
-          id: 'p1',
-          displayName: '演示供应商',
-          protocol: 'openai',
-          baseUrl: 'https://example.test/v1',
-          hasApiKey: true,
-          apiKeyHint: '1234',
-          models: [
-            { id: 'm1', displayName: '模型一', contextWindow: 128000, supportsTools: true },
-            { id: 'm2', displayName: '模型二', contextWindow: 64000, supportsTools: false },
-          ],
-        }],
-        current: { providerId: 'p1', modelId: 'm1' },
-      });
+      return Promise.resolve({ providers, current });
     }
-    if (route === '/select') return Promise.resolve({ ok: true });
-    if (route === '/save') return Promise.resolve({ ok: true });
-    if (route === '/remove') return Promise.resolve({ ok: true });
+    if (route === '/select') {
+      current.providerId = options.body.providerId;
+      current.modelId = options.body.modelId;
+      return Promise.resolve({ ok: true });
+    }
+    if (route === '/save') {
+      const body = options.body;
+      provider.displayName = body.name;
+      provider.protocol = body.protocol;
+      provider.baseUrl = body.baseUrl;
+      provider.disabled = !!body.disabled;
+      provider.models = body.models;
+      if (body.apiKey) {
+        provider.hasApiKey = true;
+        provider.apiKeyHint = 'new';
+      }
+      return Promise.resolve({ ok: true });
+    }
+    if (route === '/remove') {
+      providers.length = 0;
+      return Promise.resolve({ ok: true });
+    }
     if (route === '/fetch-models') {
       return Promise.resolve([
         { id: 'm3', displayName: '模型三', contextWindow: 32000, supportsTools: true },
@@ -138,6 +158,46 @@ test('providers-next：/state 取数、模型表与设为当前', async () => {
   const saves = calls.filter((c) => c.route === '/save');
   assert.ok(saves.length >= 2, '添加模型应再次调用 /save');
   assert.equal(saves[saves.length - 1].options.body.models.length, 3);
+
+  const infoTab = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '供应商信息');
+  assert.ok(infoTab);
+  infoTab.dispatchEvent({ type: 'click' });
+  await globalThis.AdaRender.nextTick();
+  const edit = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '编辑');
+  assert.ok(edit, '信息页应提供编辑按钮');
+  edit.dispatchEvent({ type: 'click' });
+  await globalThis.AdaRender.nextTick();
+
+  const name = root.querySelector('#pm-name');
+  const protocol = root.querySelector('#pm-protocol');
+  const baseUrl = root.querySelector('#pm-base-url');
+  const apiKey = root.querySelector('#pm-api-key');
+  assert.ok(name && protocol && baseUrl && apiKey, '编辑表单应渲染四个输入');
+  name.value = '新名称';
+  name.dispatchEvent({ type: 'input' });
+  protocol.value = 'openai-chat';
+  protocol.dispatchEvent({ type: 'input' });
+  baseUrl.value = 'https://new.example/v1';
+  baseUrl.dispatchEvent({ type: 'input' });
+  apiKey.value = 'sk-new';
+  apiKey.dispatchEvent({ type: 'input' });
+  await globalThis.AdaRender.nextTick();
+
+  const saveButton = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存');
+  assert.ok(saveButton, '编辑表单应提供保存按钮');
+  saveButton.dispatchEvent({ type: 'click' });
+  for (let i = 0; i < 20; i += 1) {
+    if (calls.filter((c) => c.route === '/save').length >= 3) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const savesAfterEdit = calls.filter((c) => c.route === '/save');
+  assert.ok(savesAfterEdit.length >= 3, '保存表单应调用 /save');
+  const editSave = savesAfterEdit[savesAfterEdit.length - 1].options.body;
+  assert.equal(editSave.name, '新名称');
+  assert.equal(editSave.protocol, 'openai-chat');
+  assert.equal(editSave.baseUrl, 'https://new.example/v1');
+  assert.equal(editSave.apiKey, 'sk-new');
+  assert.equal(editSave.models.length, 3, '保存表单应保留现有模型');
 
   const remove = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '删除');
   assert.ok(remove, '详情头应提供删除按钮');

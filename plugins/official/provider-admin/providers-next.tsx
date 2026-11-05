@@ -6,7 +6,7 @@
  * 「真实业务数据 + 客户端 fetch + 本地状态」在岛屿运行时里成立。
  */
 import { defineComponent } from "ada:render";
-import { Badge, Button, Empty, Table } from "ada:ui";
+import { Badge, Button, Empty, Input, Table } from "ada:ui";
 
 export default defineComponent({
   data() {
@@ -21,6 +21,8 @@ export default defineComponent({
       fetching: false,
       remoteModels: [],
       fetchError: "",
+      editing: false,
+      form: { name: "", protocol: "", baseUrl: "", apiKey: "" },
     };
   },
   computed: {
@@ -86,6 +88,7 @@ export default defineComponent({
     select(id: string) {
       this.selectedId = id;
       this.tab = "info";
+      this.editing = false;
     },
     setTab(tab: string) {
       this.tab = tab;
@@ -239,6 +242,51 @@ export default defineComponent({
           this.status = "添加失败：" + ((err && err.message) || String(err));
         });
     },
+    startEdit() {
+      const selected = this.selected;
+      if (!selected) return;
+      this.form = {
+        name: selected.displayName || selected.id,
+        protocol: selected.protocol || "",
+        baseUrl: selected.baseUrl || "",
+        apiKey: "",
+      };
+      this.editing = true;
+    },
+    cancelEdit() {
+      this.editing = false;
+    },
+    saveProvider() {
+      const selected = this.selected;
+      if (!selected) return;
+      const api = (window as any).adaAPI;
+      if (typeof api !== "function") {
+        this.status = "当前页面没有 adaAPI，无法保存供应商。";
+        return;
+      }
+      const body: any = {
+        id: selected.id,
+        name: String(this.form.name || "").trim() || selected.displayName || selected.id,
+        protocol: String(this.form.protocol || "").trim() || selected.protocol || "",
+        baseUrl: String(this.form.baseUrl || "").trim(),
+        proxy: selected.proxy || "",
+        headers: selected.headers || {},
+        disabled: !!selected.disabled,
+        models: selected.models || [],
+      };
+      const key = String(this.form.apiKey || "").trim();
+      if (key) body.apiKey = key;
+      this.status = "正在保存供应商…";
+      api("provider-admin", "/save", { method: "POST", body })
+        .then(() => {
+          this.status = "供应商已保存。";
+          this.editing = false;
+          this.load();
+        })
+        .catch((err: any) => {
+          this.status = "保存失败：" + ((err && err.message) || String(err));
+        });
+    },
   },
   render(h) {
     const selected = this.selected;
@@ -330,12 +378,53 @@ export default defineComponent({
                 </div>
 
                 {this.tab === "info" ? (
-                  <div class="pm-info">
-                    <p><span class="pm-info__label">ID</span><code>{selected.id}</code></p>
-                    <p><span class="pm-info__label">协议</span>{selected.protocol || "—"}</p>
-                    <p><span class="pm-info__label">端点</span><code>{selected.baseUrl || "—"}</code></p>
-                    <p><span class="pm-info__label">密钥</span>{selected.apiKeyHint ? "尾号 " + selected.apiKeyHint : "未保存"}</p>
-                  </div>
+                  this.editing ? (
+                    <div class="pm-info">
+                      <Input
+                        id="pm-name"
+                        label="名称"
+                        modelValue={this.form.name}
+                        onInput={(value: any) => { this.form.name = String(value || ""); }}
+                      />
+                      <Input
+                        id="pm-protocol"
+                        label="API 格式"
+                        modelValue={this.form.protocol}
+                        placeholder="openai-chat / openai-responses / anthropic-messages"
+                        onInput={(value: any) => { this.form.protocol = String(value || ""); }}
+                      />
+                      <Input
+                        id="pm-base-url"
+                        label="端点"
+                        modelValue={this.form.baseUrl}
+                        placeholder="https://api.example.com/v1"
+                        onInput={(value: any) => { this.form.baseUrl = String(value || ""); }}
+                      />
+                      <Input
+                        id="pm-api-key"
+                        type="password"
+                        label="API Key"
+                        modelValue={this.form.apiKey}
+                        placeholder="留空保持原值"
+                        onInput={(value: any) => { this.form.apiKey = String(value || ""); }}
+                      />
+                      <p class="pm-info__hint">保存会整条替换供应商配置；API Key 留空表示保持原值，模型列表原样保留。</p>
+                      <div class="pm-info__actions">
+                        <Button variant="primary" size="sm" onClick={this.saveProvider}>保存</Button>
+                        <Button variant="secondary" size="sm" onClick={this.cancelEdit}>取消</Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div class="pm-info">
+                      <p><span class="pm-info__label">ID</span><code>{selected.id}</code></p>
+                      <p><span class="pm-info__label">协议</span>{selected.protocol || "—"}</p>
+                      <p><span class="pm-info__label">端点</span><code>{selected.baseUrl || "—"}</code></p>
+                      <p><span class="pm-info__label">密钥</span>{selected.apiKeyHint ? "尾号 " + selected.apiKeyHint : "未保存"}</p>
+                      <div class="pm-info__actions">
+                        <Button variant="secondary" size="sm" onClick={this.startEdit}>编辑</Button>
+                      </div>
+                    </div>
+                  )
                 ) : (
                   <div>
                     {this.fetchError ? (
