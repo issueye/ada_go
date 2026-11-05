@@ -60,12 +60,12 @@ func TestScriptsFromRepoDir(t *testing.T) {
 // eval/new Function；client.tsx 与 static/client.js 的同步由 pluginbuild --check
 // 在发布流程里校验（这里至少守住已提交产物）。
 func TestClientBundlesHonorCSP(t *testing.T) {
-	matches, err := filepath.Glob(filepath.Join("ui-hello-tsx", "static", "client.js"))
+	matches, err := filepath.Glob(filepath.Join("*", "static", "client.js"))
 	if err != nil {
 		t.Fatalf("Glob: %v", err)
 	}
-	if len(matches) == 0 {
-		t.Fatal("缺少 ui-hello-tsx/static/client.js")
+	if len(matches) < 3 {
+		t.Fatalf("随包 client bundle 数量 = %d，期望至少 3（ui-hello-tsx/token-usage/provider-admin）", len(matches))
 	}
 	danger := regexp.MustCompile(`\beval\s*\(|new\s+Function\s*\(`)
 	for _, name := range matches {

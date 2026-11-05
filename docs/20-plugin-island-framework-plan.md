@@ -388,3 +388,25 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - **P2-4b-1 完成**：`provider-admin` 首屏骨架改为同构组件（SSR + hydrate），交互仍由 legacy `provider-admin.js` 在 `DOMContentLoaded` 后接管；`pluginbuild` 生成 `static/client.js`。`TestUIExtRoutes` 覆盖页面标记、legacy 脚本与 island 引导共存。列表/详情/弹窗的组件化留 P2-4b-2。
 - **P3-1 客户端 bundle 门禁完成**：`ui-hello-tsx` / `token-usage` / `provider-admin` 统一从 `client.tsx` 构建；`TestOfficialClientBundlesInSync` 在 `go test ./app` 里跑 `pluginbuild --check`，阻止提交产物漂移。
 - **下一步**：P2-4b-2 `provider-admin` 交互组件化，或 P2 验收清单/文档收口。
+
+## 15. P2 验收结果（2026-11-05）
+
+| 项 | 状态 | 证据 |
+|---|---|---|
+| P2-1 同构组件集 | ✅ 基础集 | Badge/Card/Button/Input/Textarea/Table/Select/Tabs/Modal/Icon/TodoList/Notice/Empty；Select/Modal/Icon 用 `$C` 桥，Tabs 扩展 `hidden`/`tabindex` |
+| P2-2 状态管理 | ✅ | `provide/inject`、`watch`、effect scope、`defineStore`、自动快照注入 |
+| P2-3 插槽级岛屿 | ✅ 基础版 | `data-ada-entry`、`islands` 映射、根元素不包裹、sidebar 试点 |
+| P2-4a 只读真实页面 | ✅ | `token-usage` SSR + hydrate |
+| P2-4b-1 provider-admin 骨架 | ✅ | 同构骨架 + legacy JS 共存 |
+| P2-4b-2 provider-admin 交互 | ⬜ 未完成 | 列表/详情/页签/弹窗仍在 985 行 legacy JS |
+| P2-5 keyed VNode patch | ✅ 客户端 | `keyed` + `applyVNodePatches` + `AdaPatchStream` |
+| P3-1 bundle 同步门禁 | ✅ | `TestOfficialClientBundlesInSync` |
+| P3-2 CSP bundle 门禁 | ✅ | `TestClientBundlesHonorCSP` 覆盖全部随包 `static/client.js` |
+
+**已知未完成/风险：**
+
+- `provider-admin` 交互仍是 legacy DOM 操作；组件化前不能宣称「真实交互页已迁移」。
+- `Modal` 同构版本用 `body` 文本，不支持任意 slot 内容。
+- 第三方插件仍不能使用客户端岛屿；需要服务端驱动或 iframe 隔离方案。
+- 没有真实浏览器自动化（hydration/DOM parity 目前靠 Node harness + Go golden）。
+- 12 插槽全开的性能、bundle 体积、首屏预算尚未做专项基准。
