@@ -2455,7 +2455,11 @@
         var next = singleRoot(instance.render.call(instance.proxy, h), instance.def.name);
         if (firstRun) {
           firstRun = false;
-          instance.subTree = next;
+          // 子树已经由上面的 hydrateNode 接管，instance.subTree 上带着真实 DOM
+          // 引用；这里不能换成刚 render 出来的新树，否则第一次更新会拿一棵没有
+          // el 的旧树去 patch（嵌套组件 hydrate 后首次更新会报 addEventListener
+          // of undefined）。根 hydrate 的顺序不同：hydrateRoot 先 runner 再
+          // hydrateNode，所以它需要首跑时写入 subTree。
           return;
         }
         patch(instance.subTree, next, container, null, instance);
