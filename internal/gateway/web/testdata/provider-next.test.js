@@ -103,7 +103,45 @@ async function importBundle() {
   return import('data:text/javascript;base64,' + Buffer.from(source, 'utf8').toString('base64'));
 }
 
-test('providers-next：/state 取数、模型表与设为当前', async () => {
+test('providers-next：SSR props 直接渲染，不再请求 /state', async () => {
+  calls.length = 0;
+  const bundle = await importBundle();
+  const def = bundle.islands && bundle.islands['page:providers'];
+  assert.ok(def);
+
+  const root = global.document.createElement('div');
+  global.document.body.appendChild(root);
+  const app = globalThis.AdaRender.createApp({
+    components: {},
+    render: (h) => h(def, {
+      data: {
+        backend: {
+          'provider-admin': {
+            state: {
+              providers: [{
+                id: 'ssr1',
+                displayName: 'SSR 供应商',
+                protocol: 'openai-chat',
+                baseUrl: 'https://ssr.example/v1',
+                hasApiKey: false,
+                models: [],
+              }],
+              current: { providerId: 'ssr1', modelId: '' },
+            },
+          },
+        },
+      },
+    }),
+  });
+  app.mount(root);
+  await globalThis.AdaRender.nextTick();
+
+  assert.equal(root.querySelector('.pm-item__name').textContent, 'SSR 供应商');
+  assert.equal(root.textContent.includes('正在读取供应商'), false);
+  assert.equal(calls.filter((c) => c.route === '/state').length, 0);
+});
+
+test('providers-next：客户端 /state 取数与写操作', async () => {
   const bundle = await importBundle();
   const def = bundle.islands && bundle.islands['page:providers'];
   assert.ok(def, 'bundle 应导出 providers 岛');

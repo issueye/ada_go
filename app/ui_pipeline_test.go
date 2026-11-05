@@ -177,7 +177,18 @@ func TestProviderAdminSlotInComposer(t *testing.T) {
 
 // /ext 页面：hello 页 200，未知页面 404，静态资源 allowlist。
 func TestUIExtRoutes(t *testing.T) {
-	core := &uiFakeCore{}
+	core := &uiFakeCore{invokeOK: true, result: json.RawMessage(`{
+		"providers": [{
+			"id": "p_ui",
+			"displayName": "UI 供应商",
+			"protocol": "openai-chat",
+			"baseUrl": "https://ui.example/v1",
+			"hasApiKey": true,
+			"apiKeyHint": "1234",
+			"models": [{ "id": "m_ui", "displayName": "UI 模型", "supportsTools": true }]
+		}],
+		"current": { "providerId": "p_ui", "modelId": "m_ui" }
+	}`)}
 	srv := newUIServer(t, core)
 
 	rec := uiGet(t, srv, "/ext/ui-hello-tsx/hello")
@@ -262,7 +273,7 @@ func TestUIExtRoutes(t *testing.T) {
 		`data-ada-module="/ext/provider-admin/static/client.js?v=`,
 		`data-provider-admin-next="true"`,
 		`模型设置`,
-		`正在读取供应商`,
+		`UI 供应商`,
 		`plugin-islands.js`,
 	} {
 		if !strings.Contains(rec.Body.String(), want) {

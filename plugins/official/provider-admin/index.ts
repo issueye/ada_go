@@ -74,6 +74,11 @@ interface AgentAPI {
     path: string,
     handler: (req: RouteRequest, ctx: RouteContext) => unknown,
   ): void;
+  registerAction(def: {
+    name: string;
+    mode: "read" | "write";
+    execute: (input: unknown, ctx: RouteContext) => unknown;
+  }): void;
 }
 
 function bodyOf(req: RouteRequest): Record<string, unknown> {
@@ -92,6 +97,13 @@ function idOf(body: Record<string, unknown>): string {
 
 export default function (agent: AgentAPI): void {
   agent.route("GET", "/state", (_req, ctx) => ctx.providers.list());
+
+  // 只读动作 state：供页面 SSR 预取，首屏/无 JS 也能看到供应商目录。
+  agent.registerAction({
+    name: "state",
+    mode: "read",
+    execute: async (_input, ctx) => ctx.providers.list(),
+  });
 
   agent.route("POST", "/save", (req, ctx) => {
     const body = bodyOf(req);

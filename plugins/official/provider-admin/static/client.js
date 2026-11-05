@@ -50,13 +50,22 @@ var Radio = C["Radio"];
 
 // providers-next.tsx
 var providers_next_default = defineComponent({
+  props: {
+    data: { default: {} }
+  },
   data() {
+    const data = this.data || {};
+    const backend = data.backend || {};
+    const mine = backend["provider-admin"] || {};
+    const state = mine.state;
+    const providers = state && Array.isArray(state.providers) ? state.providers : [];
+    const current = state && state.current ? state.current : { providerId: "", modelId: "" };
     return {
-      loading: true,
+      loading: !state,
       error: "",
-      providers: [],
-      current: { providerId: "", modelId: "" },
-      selectedId: "",
+      providers,
+      current,
+      selectedId: providers.length ? providers[0].id : "",
       tab: "info",
       status: "",
       fetching: false,
@@ -120,7 +129,7 @@ var providers_next_default = defineComponent({
     }
   },
   mounted() {
-    this.load();
+    if (this.loading) this.load();
   },
   methods: {
     load() {
