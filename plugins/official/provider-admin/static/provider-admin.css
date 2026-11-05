@@ -199,8 +199,24 @@
 .pm-detail__head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pm-detail__meta,
+.pm-detail__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pm-detail__meta {
+  gap: 6px;
+}
+
+.pm-detail__actions {
+  margin-left: auto;
 }
 
 .pm-detail__title {
@@ -208,6 +224,17 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
+  flex: 1 1 auto;
+}
+
+.pm-item__meta {
+  flex: 0 0 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--ada-text-xs);
+  color: var(--ph-faint);
 }
 
 .pm-name {

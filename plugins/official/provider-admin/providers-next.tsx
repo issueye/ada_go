@@ -600,24 +600,28 @@ export default defineComponent({
               <div>
                 <div class="pm-detail__head">
                   <h2 class="pm-detail__title">{selected.displayName || selected.id}</h2>
-                  <Badge tone={selected.disabled ? "neutral" : "success"} label={selected.disabled ? "已停用" : "已启用"} />
-                  <Badge tone={selected.hasApiKey ? "success" : "warn"} label={selected.hasApiKey ? "密钥已保存" : "未配置密钥"} />
-                  <Button
-                    size="sm"
-                    variant={selected.disabled ? "secondary" : "ghost"}
-                    onClick={this.toggleProvider}
-                  >{selected.disabled ? "启用" : "停用"}</Button>
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    onClick={this.removeProvider}
-                  >删除</Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    disabled={this.fetching}
-                    onClick={this.fetchModels}
-                  >{this.fetching ? "拉取中…" : "拉取模型"}</Button>
+                  <div class="pm-detail__meta">
+                    <Badge tone={selected.disabled ? "neutral" : "success"} label={selected.disabled ? "已停用" : "已启用"} />
+                    <Badge tone={selected.hasApiKey ? "success" : "warn"} label={selected.hasApiKey ? "密钥已保存" : "未配置密钥"} />
+                  </div>
+                  <div class="pm-detail__actions">
+                    <Button
+                      size="sm"
+                      variant={selected.disabled ? "secondary" : "ghost"}
+                      onClick={this.toggleProvider}
+                    >{selected.disabled ? "启用" : "停用"}</Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={this.removeProvider}
+                    >删除</Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={this.fetching}
+                      onClick={this.fetchModels}
+                    >{this.fetching ? "拉取中…" : "拉取模型"}</Button>
+                  </div>
                 </div>
 
                 <div class="ada-tabs__list" role="tablist">

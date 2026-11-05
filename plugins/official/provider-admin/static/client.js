@@ -596,7 +596,7 @@ var providers_next_default = defineComponent({
           this.newProvider.apiKey = String(value || "");
         }
       }
-    ), /* @__PURE__ */ h2("p", { class: "pm-info__actions" }, /* @__PURE__ */ h2(Button, { variant: "primary", size: "sm", onClick: this.createProvider }, "创建供应商"), /* @__PURE__ */ h2(Button, { variant: "secondary", size: "sm", onClick: this.cancelAddProvider }, "取消"))) : selected ? /* @__PURE__ */ h2("div", null, /* @__PURE__ */ h2("div", { class: "pm-detail__head" }, /* @__PURE__ */ h2("h2", { class: "pm-detail__title" }, selected.displayName || selected.id), /* @__PURE__ */ h2(Badge, { tone: selected.disabled ? "neutral" : "success", label: selected.disabled ? "已停用" : "已启用" }), /* @__PURE__ */ h2(Badge, { tone: selected.hasApiKey ? "success" : "warn", label: selected.hasApiKey ? "密钥已保存" : "未配置密钥" }), /* @__PURE__ */ h2(
+    ), /* @__PURE__ */ h2("p", { class: "pm-info__actions" }, /* @__PURE__ */ h2(Button, { variant: "primary", size: "sm", onClick: this.createProvider }, "创建供应商"), /* @__PURE__ */ h2(Button, { variant: "secondary", size: "sm", onClick: this.cancelAddProvider }, "取消"))) : selected ? /* @__PURE__ */ h2("div", null, /* @__PURE__ */ h2("div", { class: "pm-detail__head" }, /* @__PURE__ */ h2("h2", { class: "pm-detail__title" }, selected.displayName || selected.id), /* @__PURE__ */ h2("div", { class: "pm-detail__meta" }, /* @__PURE__ */ h2(Badge, { tone: selected.disabled ? "neutral" : "success", label: selected.disabled ? "已停用" : "已启用" }), /* @__PURE__ */ h2(Badge, { tone: selected.hasApiKey ? "success" : "warn", label: selected.hasApiKey ? "密钥已保存" : "未配置密钥" })), /* @__PURE__ */ h2("div", { class: "pm-detail__actions" }, /* @__PURE__ */ h2(
       Button,
       {
         size: "sm",
@@ -621,7 +621,7 @@ var providers_next_default = defineComponent({
         onClick: this.fetchModels
       },
       this.fetching ? "拉取中…" : "拉取模型"
-    )), /* @__PURE__ */ h2("div", { class: "ada-tabs__list", role: "tablist" }, /* @__PURE__ */ h2(
+    ))), /* @__PURE__ */ h2("div", { class: "ada-tabs__list", role: "tablist" }, /* @__PURE__ */ h2(
       "button",
       {
         class: "ada-tabs__tab",
