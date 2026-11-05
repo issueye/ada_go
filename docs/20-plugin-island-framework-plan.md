@@ -359,3 +359,10 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - [ ] `provider-admin` 页面与至少一个插槽完成迁移，行为等价。
 - [ ] 文档、`adag verify`、Go/Node 测试全部通过。
 - [ ] 关闭特性开关后完全回到现有 SSR 路径。
+
+## 14. 当前进展（2026-11-05）
+
+- **P0-1 已完成**：`internal/plugins/host/iso_render_test.go` 证明 `ada-render.js` 可在 moejs 中无 DOM 运行，`renderToJSON` 输出 VNode，事件函数不进入线格式。
+- **P0-2 已完成**：`internal/gateway/web/testdata/iso-hydrate.test.js` 覆盖 `renderToJSON → 服务端 HTML → hydrate → 点击更新`；同时发现并修复嵌套组件 hydrate 后首次更新丢失 DOM 引用的 bug（`ada-render.js` 的 `hydrateNode` 首跑不再替换已接管的 `subTree`）。
+- **P0-3 已完成**：`iso-parity.js` 归一化比较工具 + `internal/gateway/frontend/testdata/iso/` 共享 fixture；Go `TestIsoParityGolden` 与 Node `iso-parity.test.js` 对同一份 VNode 比较 SSR golden 与客户端 mount 结构。
+- **下一步**：P1-1 清单字段与加载（`frontend.client`、`slots[].hydrate`、`pages[].hydrate`）。
