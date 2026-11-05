@@ -326,6 +326,7 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 			Enabled:           gate.Enabled,
 			InvalidateEnabled: gate.Invalidate,
 			MarkdownBlocks:    product.Capabilities.MarkdownBlocks,
+			DisableIslands:    disableIslandsFromEnv(),
 			BlockAudit: func(ev frontend.BlockAuditEvent) {
 				log.Printf("audit %s plugin=%s renderer=%s block=%s error=%s",
 					ev.Kind, ev.PluginID, ev.Renderer, ev.BlockID, ev.Error)
@@ -679,4 +680,13 @@ func selectFrontendScripts(scripts []host.Script) ([]host.Script, error) {
 		out = append(out, byID[id])
 	}
 	return out, nil
+}
+
+// disableIslandsFromEnv 是客户端岛屿的回滚开关；服务端 SSR 不受影响。
+func disableIslandsFromEnv() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ADAG_DISABLE_ISLANDS"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }

@@ -105,6 +105,47 @@ export default defineComponent({
 	}
 }
 
+func TestDisableIslandsKeepsSSRWithoutMarkers(t *testing.T) {
+	m := &plugins.Manifest{
+		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
+		Trust: plugins.TrustBuiltin,
+		Frontend: &plugins.Frontend{
+			Capabilities: []plugins.Capability{plugins.CapFrontendScript},
+			Client:       "client.js",
+			Slots: []plugins.SlotContribution{{
+				Slot: "sidebar.top", Template: "slot.tsx", Hydrate: true,
+			}},
+		},
+	}
+	b, err := NewBridge(BridgeOptions{
+		Scripts: []host.Script{{
+			Manifest: m,
+			Bundle: map[string]string{"slot.tsx": `import { h, defineComponent } from "ada:render";
+export default defineComponent({ render(h) { return <div class="island">hello</div>; } });
+`},
+			StaticAssets: map[string][]byte{"client.js": []byte("export default {}")},
+		}},
+		DisableIslands: true,
+	})
+	if err != nil {
+		t.Fatalf("NewBridge: %v", err)
+	}
+	if b.HasIslands("chat", httptest.NewRequest(http.MethodGet, "/", nil)) {
+		t.Fatal("DisableIslands 时 HasIslands 必须为 false")
+	}
+	htmlText, _, err := b.Slot("sidebar.top", httptest.NewRequest(http.MethodGet, "/", nil))
+	if err != nil {
+		t.Fatalf("Slot: %v", err)
+	}
+	text := string(htmlText)
+	if !strings.Contains(text, `class="island"`) {
+		t.Fatalf("关闭岛屿后仍应输出 SSR 内容：%s", text)
+	}
+	if strings.Contains(text, "data-ada-plugin-island") || strings.Contains(text, "data-ada-module") {
+		t.Fatalf("关闭岛屿后不应有客户端标记：%s", text)
+	}
+}
+
 func TestHydratePageInjectsIslandMarkers(t *testing.T) {
 	m := &plugins.Manifest{
 		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,

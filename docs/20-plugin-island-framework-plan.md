@@ -405,6 +405,7 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 | P3-2 CSP bundle 门禁 | ✅ | `TestClientBundlesHonorCSP` 覆盖全部随包 `static/client.js` |
 | P3-3 浏览器冒烟 | ✅ 手工 | 真实 Chromium 验证 hydration 与 legacy 共存（见 §17） |
 | P3-4 性能基线 | ✅ | 见 §16 |
+| P3-5 回滚开关 | ✅ 环境变量 | `ADAG_DISABLE_ISLANDS=1`，见 §18 |
 
 **已知未完成/风险：**
 
@@ -455,3 +456,22 @@ go test ./plugins/official -run TestClientBundleSizes -v
    - 页面没有 `[data-provider-admin]`，也不再加载 `provider-admin.js`。
 
 结论：同构 hydration、客户端本地状态、页面标记、真实 route 取数、插槽/页面标记与组件化 provider 页均在真实浏览器成立。遗留：该冒烟尚未自动化，token/端口是本地临时值，不进入仓库。
+
+## 18. P3-5 回滚开关（2026-11-05）
+
+设置环境变量：
+
+```sh
+ADAG_DISABLE_ISLANDS=1
+```
+
+行为：
+
+- Bridge 仍用同构组件输出 SSR（页面内容不丢）；
+- 不注入 `data-ada-plugin-island` / `data-ada-module` / `data-ada-props`；
+- `HasIslands` 返回 false，页面不加载 `ada-render` / `ada-ui-iso` / `plugin-islands`；
+- 用于线上快速回滚客户端 hydration，不需要改插件清单或回退二进制。
+
+测试：`TestDisableIslandsKeepsSSRWithoutMarkers`。
+
+剩余 P3-5：产品级特性开关 UI、无 JS/键盘/视觉回归清单。

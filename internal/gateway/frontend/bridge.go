@@ -59,6 +59,9 @@ type BridgeOptions struct {
 	InvalidateEnabled func(workspace string)
 	// MarkdownBlocks 是产品 capabilities.markdownBlocks：false 时 Block 渲染入口关闭。
 	MarkdownBlocks bool
+	// DisableIslands 关闭客户端岛屿接管：服务端仍用同构组件输出 SSR，
+	// 但不注入 data-ada-* 标记、不加载 plugin-islands，作为回滚开关。
+	DisableIslands bool
 	// BlockAudit 接收块渲染失败审计（不包含 data 原文）。
 	BlockAudit func(BlockAuditEvent)
 }
@@ -118,6 +121,7 @@ type Bridge struct {
 	blockCache     map[string]blockCacheEntry
 	markdownBlocks bool
 	blockAudit     func(BlockAuditEvent)
+	disableIslands bool
 }
 
 var _ web.PluginUI = (*Bridge)(nil)
@@ -139,6 +143,7 @@ func NewBridge(opts BridgeOptions) (*Bridge, error) {
 		invalidate:     opts.InvalidateEnabled,
 		markdownBlocks: opts.MarkdownBlocks,
 		blockAudit:     opts.BlockAudit,
+		disableIslands: opts.DisableIslands,
 	}
 	pairs := make([]host.ComponentPair, 0, len(AllowedComponents)+1)
 	for _, name := range AllowedComponents {
@@ -691,6 +696,10 @@ func (b *Bridge) renderIslandEntry(u *unit, templateName, kind, name string, r *
 	if err != nil {
 		return "", err
 	}
+	if b.disableIslands {
+		// 回滚开关：保留同构 SSR，但不注入标记、不加载客户端岛。
+		return RenderHTML(vnode)
+	}
 	return b.wrapIslandHTML(u, vnode, stores, kind, name, props)
 }
 
@@ -795,7 +804,7 @@ var shellIslandSlots = []string{"sidebar.top", "sidebar.bottom", "topbar.right"}
 
 // HasIslands 实现 web.IslandDetector：报告当前页面是否有启用的 hydrate 贡献。
 func (b *Bridge) HasIslands(page string, r *http.Request) bool {
-	if b == nil {
+	if b == nil || b.disableIslands {
 		return false
 	}
 	if strings.HasPrefix(page, "ext:") {
