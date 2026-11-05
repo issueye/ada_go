@@ -6,9 +6,10 @@
   "description": "按工作区与当前会话展示 token 用量（输入/输出/缓存）与成本；数据来自 Core usage.get。",
   "trust": "builtin",
   "frontend": {
-    "capabilities": ["backend.read"],
+    "capabilities": ["backend.read", "frontend.script"],
+    "client": "client.js",
     "nav": [{ "label": "Token 用量", "slug": "usage" }],
-    "pages": [{ "slug": "usage", "title": "Token 用量", "template": "page.tsx" }],
+    "pages": [{ "slug": "usage", "title": "Token 用量", "template": "page.tsx", "hydrate": true }],
     "blocks": [{
       "name": "usage-card",
       "title": "Token 用量卡片",

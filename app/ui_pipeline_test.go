@@ -230,6 +230,27 @@ func TestUIExtRoutes(t *testing.T) {
 			t.Fatalf("sidebar 插槽岛缺少 %q\n%s", want, rec.Body.String())
 		}
 	}
+
+	// P2-4 首个真实业务页面：Token 用量（只读投影 + 本地状态按钮）。
+	rec = uiGet(t, srv, "/ext/token-usage/usage")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /ext/token-usage/usage = %d\n%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{
+		`data-ada-entry="page:usage"`,
+		`data-ada-module="/ext/token-usage/static/client.js?v=`,
+		`tu-title`,
+		`显示缓存命中率`,
+		`plugin-islands.js`,
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("token-usage 岛缺少 %q\n%s", want, rec.Body.String())
+		}
+	}
+	rec = uiGet(t, srv, "/ext/token-usage/static/client.js")
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/javascript; charset=utf-8" {
+		t.Fatalf("token-usage client bundle = %d %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
 	if rec := uiGet(t, srv, "/ext/no-such-plugin/hello"); rec.Code != http.StatusNotFound {
 		t.Fatalf("未知插件 = %d, want 404", rec.Code)
 	}

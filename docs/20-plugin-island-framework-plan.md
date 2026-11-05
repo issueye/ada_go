@@ -198,7 +198,7 @@ data-ada-props="<JSON>"
 | P2-1 | 同构组件库 | `ada-ui-iso`（或给 `ada-ui` 增加 `render(h)` 实现）：Button/Input/Select/Card/Tabs/Table/Modal/Icon/TodoList/Notice/Empty；逐组件 parity 测试 |
 | P2-2 | 状态管理 | `defineStore`、`provide/inject`、effect scope、`watch`；SSR 状态快照 |
 | P2-3 | 插槽岛屿 | 根属性注入/包裹层策略；`chat.corner`、`thread.tray`、`composer.*` 布局回归 |
-| P2-4 | 迁移 | `tools-plan`、`tools-ask`、`token-usage`、`ui-charts` 按优先级迁移 |
+| P2-4 | 真实页面迁移 | 先迁移只读真实页 `token-usage`（P2-4a）；`provider-admin` 交互页留 P2-4b |
 | P2-5 | 服务端 VNode patch | key 信封（`{key,vnode,mode}`）、SSE 增量、客户端 patch 适配器 |
 | P2-6 | 开发诊断 | hydrate 不一致警告；SSR/CSR 首帧差异日志；严格模式 |
 
@@ -377,4 +377,5 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - **P2-1 基础版完成**：新增 `ada-ui-iso.js`（`render(h)`，无字符串模板）首批 Badge/Card/Button/Input/Textarea/TextField/Empty；服务端 `ada:render` 增加 `ada:ui` 虚拟模块，浏览器 `AdaUIIso` + pluginbuild shim 优先使用它；SSR 展开为原生标签，不残留 `$C`。测试：`TestRenderIslandWithIsoComponents`、`TestIsoComponentsRenderThroughGo`、`iso-components.test.js`。剩余 Select/Tabs/Table/Modal/Icon/TodoList/Notice 与逐组件 parity 留 P2-1 后续批次。
 - **P2-2 基础版完成**：`provide`/`inject`（组件级 + `app.provide`）、`watch`、`watchEffect` 实例作用域与卸载自动停止、`unmounted` 钩子、`defineStore`（state/getters/actions/单例）与 `$snapshot`/`$hydrate`；`renderToJSON` 保留组件 parent 链，SSR 的 provide/inject 与浏览器一致。测试：`ada-state.test.js`、`TestRenderIslandStateAndProvide`。自动把 store 快照注入岛屿 props 留后续。
 - **P2-3 基础版完成**：岛屿标记新增 `data-ada-entry`，`plugin-islands.js` 支持 bundle 的 `islands` 映射（一个 bundle 多 page/slot entry，default 兜底）；插槽标记仍落在根元素上、不额外包裹，`TestHydrateSlotKeepsRootsUnwrapped` 守住布局。`ui-hello-tsx` 增加 `sidebar.top` 插槽岛与 `client.tsx` 多 entry bundle，`TestUIExtRoutes` 端到端覆盖。
-- **下一步**：P2-4 `provider-admin` 迁移（首个真实业务页面；保留无 JS 回退）。
+- **P2-4a 完成**：`token-usage` 页面迁移为 `defineComponent`，服务端 SSR + 浏览器 hydrate；「显示缓存命中率」是本地状态；`pluginbuild` 生成 `static/client.js`。`TestUIExtRoutes` 覆盖页面标记、bundle 与 NeedsUI。`provider-admin` 等交互页留 P2-4b。
+- **下一步**：P2-4b `provider-admin`（或先做 P2-5 keyed VNode patch）。
