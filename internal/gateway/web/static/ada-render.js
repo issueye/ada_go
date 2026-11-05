@@ -2665,9 +2665,17 @@
           p: options.props || {},
           c: []
         };
-        this._container = container;
+        var rootElement = mountOptions.rootElement === true;
+        if (rootElement && !mountOptions.hydrate) {
+          throw new Error('[ada-render] rootElement 只用于 hydrate（服务端已经在页面上输出了根元素）');
+        }
+        // rootElement 时 container 是页面里已经存在的根节点本身；卸载不能清空
+        // 它的父容器（会带走兄弟节点），交给 unmountComponent 移除子树根。
+        this._container = rootElement ? null : container;
         if (mountOptions.hydrate) {
-          this._instance = hydrateRoot(rootVNode, container, this);
+          this._instance = rootElement
+            ? hydrateRootElement(rootVNode, container, this)
+            : hydrateRoot(rootVNode, container, this);
         } else {
           // 普通 mount 是「接管这个容器」：先清掉 SSR 回退，否则会变成
           // 回退 DOM + 客户端 DOM 两份。hydrate 走另一条路，不动服务端节点。
@@ -2720,6 +2728,19 @@
   }
 
   function hydrateRoot(vnode, container, app) {
+    return hydrateRootAt(vnode, skipHydrationNoise(container.firstChild), container, app);
+  }
+
+  /* rootElement：服务端把岛屿标记直接打在根元素上，调用方传进来的就是根元素，
+     不是它的父容器。hydrate 从该元素开始，patch/替换仍以父节点为容器。 */
+  function hydrateRootElement(vnode, element, app) {
+    if (!element || !element.parentNode) {
+      throw new Error('[ada-render] rootElement hydrate 需要已在文档中的根元素');
+    }
+    return hydrateRootAt(vnode, element, element.parentNode, app);
+  }
+
+  function hydrateRootAt(vnode, dom, container, app) {
     var instance = createInstance(vnode, null, app);
     vnode._component = instance;
     var firstRun = true;
@@ -2739,7 +2760,7 @@
     });
     instance.effect = runner;
     runner();
-    hydrateNode(instance.subTree, skipHydrationNoise(container.firstChild), container, instance);
+    hydrateNode(instance.subTree, dom, container, instance);
     instance.isMounted = true;
     callHook(instance, 'mounted');
     return instance;

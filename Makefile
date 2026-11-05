@@ -63,7 +63,7 @@ test:
 	$(GO) test ./...
 
 test-js:
-	$(NODE) --test internal/gateway/web/testdata/ada-render.test.js internal/gateway/web/testdata/ada-ui.test.js internal/gateway/web/testdata/ada-block-consistency.test.js internal/gateway/web/testdata/ada-block-components.test.js internal/gateway/web/testdata/iso-hydrate.test.js internal/gateway/web/testdata/iso-parity.test.js internal/gateway/web/testdata/composer-draft.test.js
+	$(NODE) --test internal/gateway/web/testdata/ada-render.test.js internal/gateway/web/testdata/ada-ui.test.js internal/gateway/web/testdata/ada-block-consistency.test.js internal/gateway/web/testdata/ada-block-components.test.js internal/gateway/web/testdata/iso-hydrate.test.js internal/gateway/web/testdata/iso-parity.test.js internal/gateway/web/testdata/plugin-islands.test.js internal/gateway/web/testdata/composer-draft.test.js
 
 # M0 已知限制：-race 依赖 cgo，Windows 无 MSVC/clang 工具链时跑不了（11 §13.2 无 cgo）；
 # CI 与 ci-gate.sh 的 Windows 腿自动降级为 test，M5 发布加固时补 windows race。

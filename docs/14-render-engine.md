@@ -133,6 +133,7 @@ const {
 |---|---|
 | `createApp(options)` | `options` 即根组件：`data` / `props` / `computed` / `methods` / `template` / `render` / `setup` / `components` / `allowHTML` |
 | `app.mount(el, { hydrate })` | `el` 可以是选择器或元素；普通 mount 会先清空容器再接管，`hydrate: true` 保留服务端 DOM |
+| `app.mount(el, { hydrate: true, rootElement: true })` | `el` 是服务端已经输出的根元素本身（插件岛屿标记在根上）；hydrate 从该元素开始，卸载只移除子树，不清空父容器 |
 | `app.unmount()` | 停止 effect、移除 DOM |
 | `app.component(name, def)` | 全局注册组件；支持 `ui-my-card` / `my-card` / `myCard` / `MyCard` 解析 |
 | `h(tagOrComponent, props, ...children)` | 元素或组件 VNode；`onClick` 自动转事件绑定 |

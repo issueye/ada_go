@@ -75,3 +75,30 @@ test('同构组件：renderToJSON → 服务端 HTML → hydrate 复用节点并
 
   assert.equal(serverRoot.querySelector('span').textContent, 'a:2');
 });
+
+test('rootElement：直接 hydrate 页面里已经存在的岛屿根元素', async () => {
+  const vnode = Ada.renderToJSON(Ada.h(Card, { label: 'b' }));
+  const host = global.document.createElement('div');
+  global.document.body.appendChild(host);
+  host.innerHTML = serialize(vnode);
+
+  const root = host.firstChild;
+  root.setAttribute('data-ada-plugin-island', 'demo:slot:test');
+
+  const app = Ada.createApp({
+    components: { Card },
+    render(h) {
+      return h(Card, { label: 'b' });
+    },
+  });
+  app.mount(root, { hydrate: true, rootElement: true });
+
+  assert.equal(host.firstChild, root, 'rootElement hydrate 不应替换根元素');
+  assert.equal(root.querySelector('span').textContent, 'b:1');
+
+  root.querySelector('button').dispatchEvent({ type: 'click' });
+  await Ada.nextTick();
+
+  assert.equal(root.querySelector('span').textContent, 'b:2');
+  assert.equal(host.childNodes.length, 1, '不应在根元素外新增节点');
+});
