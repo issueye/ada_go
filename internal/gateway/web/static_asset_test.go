@@ -24,7 +24,7 @@ func TestStaticAssetAdaRender(t *testing.T) {
 // 岛屿运行时的静态资源必须满足 CSP：不能出现 eval() / new Function()。
 func TestIslandAssetsHonorCSP(t *testing.T) {
 	danger := regexp.MustCompile(`\beval\s*\(|new\s+Function\s*\(`)
-	for _, name := range []string{"ada-render.js", "ada-ui.js", "ada-ui-iso.js", "plugin-islands.js"} {
+	for _, name := range []string{"ada-render.js", "ada-patch-stream.js", "ada-ui.js", "ada-ui-iso.js", "plugin-islands.js"} {
 		data, ok := StaticAsset(name)
 		if !ok || len(data) == 0 {
 			t.Fatalf("缺少静态资源 %s", name)

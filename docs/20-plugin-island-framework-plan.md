@@ -380,4 +380,5 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - **P2-3 基础版完成**：岛屿标记新增 `data-ada-entry`，`plugin-islands.js` 支持 bundle 的 `islands` 映射（一个 bundle 多 page/slot entry，default 兜底）；插槽标记仍落在根元素上、不额外包裹，`TestHydrateSlotKeepsRootsUnwrapped` 守住布局。`ui-hello-tsx` 增加 `sidebar.top` 插槽岛与 `client.tsx` 多 entry bundle，`TestUIExtRoutes` 端到端覆盖。
 - **P2-4a 完成**：`token-usage` 页面迁移为 `defineComponent`，服务端 SSR + 浏览器 hydrate；「显示缓存命中率」是本地状态；`pluginbuild` 生成 `static/client.js`。`TestUIExtRoutes` 覆盖页面标记、bundle 与 NeedsUI。`provider-admin` 等交互页留 P2-4b。
 - **P2-5 客户端适配完成**：`keyed(vnode,key)` 与 `applyVNodePatches(items, patches)` 支持 `{key,mode:"upsert"|"remove",vnode}` 信封；`ada-patch.test.js` 验证按 key 复用 DOM、文本就地更新、删除不重建其它行。Gateway SSE 的 VNode 帧接入留 P2-5b。
-- **下一步**：P2-4b `provider-admin` 迁移，或 P2-5b SSE VNode patch 接入（二选一，建议先 P2-4b 验证真实交互页）。
+- **P2-5b 客户端流适配完成**：新增 `ada-patch-stream.js`，订阅 SSE `patch` 帧（`{patches:[...]}`）并驱动 keyed 列表；`source` 可注入，便于测试与自定义 EventSource。测试：`ada-patch-stream.test.js`。服务端具体 route 的帧格式仍由插件自行发送。
+- **下一步**：P2-4b `provider-admin` 迁移。
