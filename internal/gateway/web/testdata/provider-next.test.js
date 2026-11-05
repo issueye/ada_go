@@ -46,6 +46,11 @@ global.window = {
     if (route === '/select') return Promise.resolve({ ok: true });
     if (route === '/save') return Promise.resolve({ ok: true });
     if (route === '/remove') return Promise.resolve({ ok: true });
+    if (route === '/fetch-models') {
+      return Promise.resolve([
+        { id: 'm3', displayName: '模型三', contextWindow: 32000, supportsTools: true },
+      ]);
+    }
     return Promise.reject(new Error('unexpected route ' + route));
   },
 };
@@ -112,6 +117,27 @@ test('providers-next：/state 取数、模型表与设为当前', async () => {
   assert.equal(save.options.body.disabled, true);
   assert.equal(save.options.body.models.length, 2);
   assert.equal(save.options.body.apiKey, undefined, 'apiKey 留空表示保留原值');
+
+  const fetchButton = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '拉取模型');
+  assert.ok(fetchButton, '详情头应提供拉取模型按钮');
+  fetchButton.dispatchEvent({ type: 'click' });
+  for (let i = 0; i < 20; i += 1) {
+    if (root.textContent.includes('拉取到 1 个模型')) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await globalThis.AdaRender.nextTick();
+  }
+  assert.ok(root.textContent.includes('拉取到 1 个模型'));
+
+  const addButton = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '添加未配置模型');
+  assert.ok(addButton, '拉取后应提供添加按钮');
+  addButton.dispatchEvent({ type: 'click' });
+  for (let i = 0; i < 20; i += 1) {
+    if (calls.filter((c) => c.route === '/save').length >= 2) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const saves = calls.filter((c) => c.route === '/save');
+  assert.ok(saves.length >= 2, '添加模型应再次调用 /save');
+  assert.equal(saves[saves.length - 1].options.body.models.length, 3);
 
   const remove = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '删除');
   assert.ok(remove, '详情头应提供删除按钮');

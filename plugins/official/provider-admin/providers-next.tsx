@@ -18,6 +18,9 @@ export default defineComponent({
       selectedId: "",
       tab: "info",
       status: "",
+      fetching: false,
+      remoteModels: [],
+      fetchError: "",
     };
   },
   computed: {
@@ -173,6 +176,69 @@ export default defineComponent({
         remove();
       }
     },
+    fetchModels() {
+      const selected = this.selected;
+      if (!selected) return;
+      const api = (window as any).adaAPI;
+      if (typeof api !== "function") {
+        this.fetchError = "当前页面没有 adaAPI，无法拉取模型。";
+        return;
+      }
+      this.fetching = true;
+      this.fetchError = "";
+      this.remoteModels = [];
+      api("provider-admin", "/fetch-models", {
+        method: "POST",
+        body: { id: selected.id },
+      })
+        .then((models: any) => {
+          this.fetching = false;
+          this.remoteModels = Array.isArray(models) ? models : [];
+          this.status = this.remoteModels.length ? "拉取到 " + this.remoteModels.length + " 个模型。" : "没有拉取到模型。";
+        })
+        .catch((err: any) => {
+          this.fetching = false;
+          this.fetchError = "拉取失败：" + ((err && err.message) || String(err));
+        });
+    },
+    addFetchedModels() {
+      const selected = this.selected;
+      if (!selected) return;
+      const existing = {};
+      (selected.models || []).forEach((m: any) => { existing[m.id] = true; });
+      const added = this.remoteModels.filter((m: any) => m && m.id && !existing[m.id]);
+      if (!added.length) {
+        this.status = "没有需要新增的模型。";
+        return;
+      }
+      const api = (window as any).adaAPI;
+      if (typeof api !== "function") {
+        this.status = "当前页面没有 adaAPI，无法保存模型。";
+        return;
+      }
+      this.status = "正在添加 " + added.length + " 个模型…";
+      api("provider-admin", "/save", {
+        method: "POST",
+        body: {
+          id: selected.id,
+          name: selected.displayName || selected.id,
+          protocol: selected.protocol || "",
+          baseUrl: selected.baseUrl || "",
+          proxy: selected.proxy || "",
+          headers: selected.headers || {},
+          disabled: !!selected.disabled,
+          models: (selected.models || []).concat(added),
+        },
+      })
+        .then(() => {
+          this.status = "已添加 " + added.length + " 个模型。";
+          this.remoteModels = [];
+          this.load();
+        })
+        .catch((err: any) => {
+          this.status = "添加失败：" + ((err && err.message) || String(err));
+        });
+    },
   },
   render(h) {
     const selected = this.selected;
@@ -236,6 +302,12 @@ export default defineComponent({
                     variant="danger"
                     onClick={this.removeProvider}
                   >删除</Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={this.fetching}
+                    onClick={this.fetchModels}
+                  >{this.fetching ? "拉取中…" : "拉取模型"}</Button>
                 </div>
 
                 <div class="ada-tabs__list" role="tablist">
@@ -265,12 +337,23 @@ export default defineComponent({
                     <p><span class="pm-info__label">密钥</span>{selected.apiKeyHint ? "尾号 " + selected.apiKeyHint : "未保存"}</p>
                   </div>
                 ) : (
-                  <Table
-                    caption={(selected.displayName || selected.id) + " 的模型"}
-                    rowKey="id"
-                    rows={selected.models || []}
-                    columns={this.modelColumns}
-                  />
+                  <div>
+                    {this.fetchError ? (
+                      <p class="pm-status" data-tone="danger" role="alert">{this.fetchError}</p>
+                    ) : null}
+                    {this.remoteModels.length ? (
+                      <p class="pm-status">
+                        拉取到 {this.remoteModels.length} 个模型。
+                        <Button size="sm" variant="secondary" onClick={this.addFetchedModels}>添加未配置模型</Button>
+                      </p>
+                    ) : null}
+                    <Table
+                      caption={(selected.displayName || selected.id) + " 的模型"}
+                      rowKey="id"
+                      rows={selected.models || []}
+                      columns={this.modelColumns}
+                    />
+                  </div>
                 )}
               </div>
             ) : (
