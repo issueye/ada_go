@@ -396,13 +396,49 @@ func (s *Server) handleThreadGet(ctx context.Context, raw json.RawMessage) (any,
 	}
 	pending := s.pending(ctx, p.ThreadID)
 	items, hasMore := s.items(ctx, page.Items, pending, limit, page.NextCursor != "")
-	return map[string]any{
+	out := map[string]any{
 		"thread":       threadJSON(th),
 		"items":        items,
 		"seq":          s.sess.LastSeq(p.ThreadID),
 		"run":          s.runState(p.ThreadID),
 		"interactions": interactionsJSON(pending),
 		"hasMore":      hasMore,
+	}
+	if stats, err := s.contextStats(ctx, p.ThreadID); err == nil {
+		out["context"] = stats
+	}
+	return out, nil
+}
+
+// contextStats 估算当前上下文占用：从 head 回溯到最近压缩点，累加 entry.Tokens。
+// 系统提示词与工具 Schema 的 token 不在 entry 里，这里只统计真实消息窗口；
+// 因此它是保守下界，前端按「约」展示，不把它当精确计费数据。
+func (s *Server) contextStats(ctx context.Context, threadID string) (map[string]any, error) {
+	window, err := s.sess.Store().TraceFromHead(ctx, threadID)
+	if err != nil {
+		return nil, err
+	}
+	tokens := 0
+	if window.Compaction != nil {
+		tokens += int(window.Compaction.Tokens)
+	}
+	for _, e := range window.Entries {
+		tokens += int(e.Tokens)
+	}
+	if tokens < 0 {
+		tokens = 0
+	}
+	ref := s.sess.ModelRefFor(threadID)
+	limit := int(ref.ContextWindow)
+	percent := 0
+	if limit > 0 {
+		percent = (tokens*100 + limit/2) / limit
+		if percent > 100 {
+			percent = 100
+		}
+	}
+	return map[string]any{
+		"tokens": tokens, "window": limit, "percent": percent,
 	}, nil
 }
 
@@ -882,10 +918,14 @@ func (s *Server) handleModelSet(ctx context.Context, raw json.RawMessage) (any, 
 		if _, err := s.sess.GetThread(ctx, p.ThreadID); err != nil {
 			return nil, rpcError(err)
 		}
-		s.sess.SetThreadModel(p.ThreadID, ref)
+		if err := s.sess.SaveThreadModel(ctx, p.ThreadID, ref); err != nil {
+			return nil, rpcError(err)
+		}
 		scope = "thread"
 	} else {
-		s.sess.SetWorkspaceModel(ref)
+		if err := s.sess.SaveWorkspaceModel(ctx, ref); err != nil {
+			return nil, rpcError(err)
+		}
 	}
 	return map[string]any{
 		"model": proto.ModelRef{

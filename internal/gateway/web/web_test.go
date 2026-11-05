@@ -357,6 +357,9 @@ func TestHomeRendersThreadList(t *testing.T) {
 	wantContains(t, body, `data-workspace-controls`)
 	wantContains(t, body, "选择工作区")
 	wantContains(t, body, "file-picker.js")
+	wantContains(t, body, "composer-draft.js")
+	wantContains(t, body, `data-draft-key="new-task"`)
+	wantContains(t, body, `data-thread-running="0"`)
 	wantContains(t, body, "描述你要完成的任务")
 	wantContains(t, body, `href="/threads/th_1"`)
 	wantContains(t, body, "ada-thread-list")
@@ -734,17 +737,22 @@ func TestThreadPageRendersTranscriptToolCardAndTray(t *testing.T) {
 	wantContains(t, body, `ada-select__fallback`)
 	wantContains(t, body, `data-select-input value="允许一次" disabled`)
 	wantContains(t, body, `/threads/th_1/abort`)
-	// 两个中止入口（顶栏「停止」与输入区「中止」）都必须带 CSRF 字段，
-	// 否则 POST /abort 会被安全中间件以 csrf_invalid 拒绝。
-	wantContains(t, body, `id="abort-form"`)
-	wantContains(t, body, `form="abort-form"`)
-	if got := strings.Count(body, `action="/threads/th_1/abort" data-confirm="确定中止当前轮次吗？"><input type="hidden" name="csrf_token"`); got != 2 {
-		t.Fatalf("带 CSRF 的中止表单 = %d，期望 2（顶栏 + 输入区）", got)
+	// 中止入口只在顶栏；输入区不再重复放「中止」按钮，避免和队列/指标抢空间。
+	// POST /abort 仍必须带 CSRF 字段，否则会被安全中间件以 csrf_invalid 拒绝。
+	if got := strings.Count(body, `action="/threads/th_1/abort" data-confirm="确定中止当前轮次吗？"><input type="hidden" name="csrf_token"`); got != 1 {
+		t.Fatalf("带 CSRF 的中止表单 = %d，期望 1（仅顶栏）", got)
 	}
+	wantContains(t, body, "缓存命中")
 
-	// Composer 表单。
+	// Composer 表单。整页刷新（模型/工作区切换、桌面壳热更新）时草稿按会话恢复。
 	wantContains(t, body, `action="/threads/th_1/send"`)
 	wantContains(t, body, `name="text"`)
+	wantContains(t, body, `data-draft-key="thread:th_1"`)
+	wantContains(t, body, `data-thread-id="th_1"`)
+	wantContains(t, body, `data-outbox`)
+	wantContains(t, body, "深度求索中")
+	wantContains(t, body, `data-run-started-at="2026-10-28T10:00:00Z"`)
+	wantContains(t, body, "composer-draft.js")
 
 	call, ok := core.lastCall("thread.entries")
 	if !ok {
@@ -753,6 +761,20 @@ func TestThreadPageRendersTranscriptToolCardAndTray(t *testing.T) {
 	if got := call.Params["limit"]; got != 100 {
 		t.Fatalf("thread.entries limit = %v, want 100", got)
 	}
+}
+
+func TestThreadPageRendersContextRingAndCacheHit(t *testing.T) {
+	core := newFakeCore().
+		on("thread.get", `{"thread":{"id":"th_1","workspace":"","title":"指标会话","createdAt":"2026-10-28T09:00:00Z","updatedAt":"2026-10-28T10:00:00Z","archived":false},"items":[],"seq":1,"run":{"runId":"run_1","status":"terminal","terminal":"completed"},"context":{"tokens":705000,"window":1048576,"percent":67},"interactions":[],"hasMore":false}`).
+		on("thread.entries", `{"entries":[],"hasMore":false}`).
+		on("thread.list", emptyThreadList).
+		on("usage.get", `{"thread":{"inputTokens":1000,"cacheTokens":990},"workspace":{}}`)
+	srv, _ := newServer(t, core)
+
+	body := serve(t, srv, "GET", "/threads/th_1", nil).Body.String()
+	wantContains(t, body, `ada-token-ring`)
+	wantContains(t, body, `aria-label="上下文已用 67% · 约 705K / 1M"`)
+	wantContains(t, body, "缓存命中 99%")
 }
 
 func TestThreadPageExposesLiveStreamHooks(t *testing.T) {
@@ -777,7 +799,7 @@ func TestThreadPageExposesLiveStreamHooks(t *testing.T) {
 func TestStaticAppJSServed(t *testing.T) {
 	srv, _ := newServer(t, newFakeCore())
 
-	for _, target := range []string{"/static/app.js", "/static/chat-live.js"} {
+	for _, target := range []string{"/static/app.js", "/static/chat-live.js", "/static/composer-draft.js"} {
 		rec := serve(t, srv, "GET", target, nil)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s = %d", target, rec.Code)
@@ -792,12 +814,21 @@ func TestStaticAppJSServed(t *testing.T) {
 			t.Fatalf("%s Cache-Control = %q", target, cc)
 		}
 	}
-	// a_da 外壳脚本：提示条 + 确认弹窗 + 侧栏。
-	wantContains(t, serve(t, srv, "GET", "/static/app.js", nil).Body.String(), "data-confirm")
+	// a_da 外壳脚本：提示条 + 确认弹窗 + 侧栏 + 会话右键菜单。
+	appJS := serve(t, srv, "GET", "/static/app.js", nil).Body.String()
+	wantContains(t, appJS, "data-confirm")
+	wantContains(t, appJS, "contextmenu")
+	wantContains(t, appJS, "data-thread-menu-action")
+	wantContains(t, appJS, "/archive")
+	wantContains(t, appJS, "AdaOutbox")
+	wantContains(t, appJS, "data-outbox-action")
+	wantContains(t, appJS, "a_da_outbox:")
+	wantContains(t, serve(t, srv, "GET", "/static/components.js", nil).Body.String(), "tickRunStatusElapsed")
 	// 实时增强脚本：SSE 增量。
 	live := serve(t, srv, "GET", "/static/chat-live.js", nil).Body.String()
 	wantContains(t, live, "EventSource")
 	wantContains(t, live, "evt.message.delta")
+	wantContains(t, live, "AdaOutbox.onRunEnd")
 	// 实时块必须保存思考文本节点：handleDelta 通过 entry.thinkingText 追加增量，
 	// 漏存时每个思考事件都会抛 TypeError，界面只剩正文没有实时思考。
 	wantContains(t, live, "thinkingText: thinkingText")
@@ -806,6 +837,12 @@ func TestStaticAppJSServed(t *testing.T) {
 	wantContains(t, live, "ada-disclosure__summary")
 	wantContains(t, live, "ada-thinking")
 	wantNotContains(t, live, "live-thinking")
+
+	// 草稿脚本：按 data-draft-key 恢复，提交与页面卸载都要走同一套清理/落盘。
+	draft := serve(t, srv, "GET", "/static/composer-draft.js", nil).Body.String()
+	wantContains(t, draft, "data-draft-key")
+	wantContains(t, draft, "a_da_draft:")
+	wantContains(t, draft, "pagehide")
 }
 
 // TestAskWizardEnablesAllFieldsBeforeSubmit 钉多题分步表单的提交契约：非当前步的字段
@@ -2237,6 +2274,48 @@ func TestThreadDeleteCallsCoreAndRedirects(t *testing.T) {
 	}
 	if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, "/?notice=") {
 		t.Fatalf("当前会话回跳 = %q, want /?notice=…", loc)
+	}
+}
+
+func TestThreadArchiveCallsCoreAndRedirects(t *testing.T) {
+	core := newFakeCore().on("thread.archive", `{"archived":true}`)
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "POST", "/threads/th_1/archive", url.Values{"next": {"/threads/th_2"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("状态 = %d, want 303; body=%s", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); !strings.Contains(loc, "/threads/th_2?notice=") {
+		t.Fatalf("回跳 = %q, want /threads/th_2?notice=…", loc)
+	}
+	call, ok := core.lastCall("thread.archive")
+	if !ok || call.Params["threadId"] != "th_1" || call.Params["archived"] != true {
+		t.Fatalf("thread.archive 参数 = %+v", call.Params)
+	}
+
+	// 归档当前会话：回首页，避免刷新后继续停在已从侧栏消失的页面。
+	rec = serve(t, srv, "POST", "/threads/th_1/archive", url.Values{"next": {"/threads/th_1"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("状态 = %d, want 303", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, "/?notice=") {
+		t.Fatalf("当前会话回跳 = %q, want /?notice=…", loc)
+	}
+}
+
+func TestThreadArchiveRejectsRunningThread(t *testing.T) {
+	core := newFakeCore().on("turn.get", `{"run":{"status":"running"},"queueLength":0}`)
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "POST", "/threads/th_1/archive", url.Values{"next": {"/threads/th_1"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("状态 = %d, want 303", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); !strings.Contains(loc, "error=") {
+		t.Fatalf("运行中归档回跳 = %q，期望带 error", loc)
+	}
+	if _, ok := core.lastCall("thread.archive"); ok {
+		t.Fatal("运行中的会话不应调用 thread.archive")
 	}
 }
 

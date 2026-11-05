@@ -133,6 +133,8 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 		s.prepareTranscriptEdits(r, transcript, id, get.Run.Status)
 	}
 	run := buildRun(get.Run)
+	contextView := buildContextView(get.Context)
+	cacheHit, hasCache := s.cacheHitPercent(r, id)
 	threads, _ := s.listThreads(r, 50)
 	title := strings.TrimSpace(get.Thread.Title)
 	if title == "" {
@@ -161,6 +163,9 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 		Run:                 run,
 		Transcript:          transcript,
 		TranscriptStateJSON: string(stateJSON),
+		Context:             contextView,
+		CacheHitPercent:     cacheHit,
+		HasCache:            hasCache,
 		Interactions:        buildInteractions(get.Interactions, id, s.csrf(r)),
 		TurnKey:             newIdempotencyKey(),
 		Models:              models,
@@ -1175,6 +1180,61 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirect(w, flashRedirect(next, "notice", "会话已删除"))
+}
+
+// handleThreadArchive 归档会话：从侧栏隐藏但不软删，归档记录仍保留在 state.db。
+//
+// 与删除一样只接受站内 next，并拒绝正在运行的会话；归档当前会话时回首页，
+// 避免刷新后落到一个已经不在侧栏里的页面。
+func (s *Server) handleThreadArchive(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	next := strings.TrimSpace(r.PostFormValue("next"))
+	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.Contains(next, `\`) {
+		next = safeReturnPath(r)
+	}
+	if next == threadPath(id) || next == "/thread/"+id || strings.HasPrefix(next, threadPath(id)+"?") {
+		next = "/"
+	}
+	if id == "" {
+		redirect(w, flashRedirect(next, "error", "缺少会话 id"))
+		return
+	}
+	switch s.turnStatus(r, id) {
+	case "running", "waiting_input", "finishing":
+		redirect(w, flashRedirect(next, "error", "会话正在运行，请先停止当前轮次再归档。"))
+		return
+	}
+	if _, err := s.call(r, "thread.archive", map[string]any{"threadId": id, "archived": true}); err != nil {
+		redirect(w, flashRedirect(next, "error", cleanRPCError(err)))
+		return
+	}
+	redirect(w, flashRedirect(next, "notice", "会话已归档"))
+}
+
+// cacheHitPercent 读取线程累计用量中的缓存命中率。缓存 token 是输入 token 的子集，
+// 因此命中率 = cache / input；没有用量时返回 false，页面显示「—」。
+func (s *Server) cacheHitPercent(r *http.Request, threadID string) (int, bool) {
+	raw, err := s.call(r, "usage.get", map[string]any{"threadId": threadID})
+	if err != nil {
+		return 0, false
+	}
+	var res struct {
+		Thread struct {
+			InputTokens int `json:"inputTokens"`
+			CacheTokens int `json:"cacheTokens"`
+		} `json:"thread"`
+	}
+	if json.Unmarshal(raw, &res) != nil || res.Thread.InputTokens <= 0 {
+		return 0, false
+	}
+	percent := (res.Thread.CacheTokens*100 + res.Thread.InputTokens/2) / res.Thread.InputTokens
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	return percent, true
 }
 
 // modelOptions 是输入框旁模型选择器的数据（model.list 投影）；失败时返回空列表，

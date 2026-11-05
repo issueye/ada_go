@@ -81,13 +81,23 @@
     }
   }
 
-  function reloadOnce() {
+  function reloadOnce(reason) {
     if (reloading) return;
     reloading = true;
     try {
       if (source) source.close();
     } catch (e) {
       /* 忽略关闭失败 */
+    }
+    // 正常收尾时若还有待发送队列，让 outbox 先发队首并自己导航；其余终态
+    // （错误/中断/等待答复）仍直接 reload，队列留在输入框上方等用户处理。
+    if (
+      String(reason || "") === "completed" &&
+      window.AdaOutbox &&
+      typeof window.AdaOutbox.onRunEnd === "function" &&
+      window.AdaOutbox.onRunEnd(reason)
+    ) {
+      return;
     }
     window.location.reload();
   }
@@ -695,13 +705,15 @@
       (data && (data.terminal || data.terminalResult)) ||
       ""
     ).toLowerCase();
+    // 让 app.js 的 outbox 判断「是否还在运行」时看得到最新状态。
+    if (root && status) root.setAttribute("data-run-status", status);
 
     if (terminal || status === "terminal" || TERMINAL[status]) {
-      reloadOnce();
+      reloadOnce(terminal || status);
       return;
     }
     if (status === "waiting_input") {
-      reloadOnce();
+      reloadOnce("waiting_input");
       return;
     }
     // finishing 紧跟着 terminal：为了这一帧先插一条状态条再整页 reload，

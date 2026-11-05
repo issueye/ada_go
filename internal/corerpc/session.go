@@ -52,6 +52,8 @@ type Session interface {
 	ModelError() error
 	SetWorkspaceModel(ref ports.ModelRef)
 	SetThreadModel(threadID string, ref ports.ModelRef)
+	SaveWorkspaceModel(ctx context.Context, ref ports.ModelRef) error
+	SaveThreadModel(ctx context.Context, threadID string, ref ports.ModelRef) error
 	ForgetThreadModel(threadID string)
 	LastSeq(threadID string) int64
 	RefreshProviderConfigs()

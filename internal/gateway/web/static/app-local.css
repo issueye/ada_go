@@ -2520,3 +2520,307 @@ form[data-submitting] .ada-btn[type="submit"]::after {
   border-bottom: 0;
 }
 
+/* ── 待发送消息浮窗 ───────────────────────────────────────────────────
+   运行中发送的消息先落在本地 outbox，浮在输入框上方（不挤占正文布局），
+   每条消息只给图标按钮：编辑 / 立即发送 / 删除。 */
+.ada-composer {
+  position: relative;
+}
+.ada-outbox {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 60;
+  width: min(860px, calc(100% - 48px));
+  max-height: min(44vh, 360px);
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-elevated);
+  box-shadow: var(--ada-shadow-raised);
+  transform: translateX(-50%);
+}
+.ada-outbox[hidden] {
+  display: none;
+}
+.ada-outbox__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px 6px;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-xs);
+}
+.ada-outbox__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border-radius: var(--ada-radius-sm);
+}
+.ada-outbox__item + .ada-outbox__item {
+  border-top: 1px solid var(--ph-line);
+}
+.ada-outbox__text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--ph-ink);
+  font-size: var(--ada-text-sm);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.ada-outbox__actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+.ada-outbox__action {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--ada-radius-sm);
+  background: transparent;
+  color: var(--ph-muted);
+  cursor: pointer;
+}
+.ada-outbox__action:hover {
+  background: var(--ph-subtle);
+  color: var(--ph-ink);
+}
+.ada-outbox__action--primary:hover {
+  color: var(--ph-brand-ink);
+}
+.ada-outbox__action--danger:hover {
+  background: var(--ph-danger-soft);
+  color: var(--ph-danger-ink);
+}
+.ada-outbox__action:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.ada-outbox[aria-busy="true"] {
+  opacity: 0.72;
+}
+.ada-outbox[aria-busy="true"] .ada-outbox__action {
+  pointer-events: none;
+}
+@media (max-width: 760px) {
+  .ada-outbox {
+    width: calc(100% - 24px);
+  }
+}
+
+/* ── 会话右键菜单 ─────────────────────────────────────────────────────
+   菜单由 app.js 在 contextmenu 时定位到鼠标点；沿用行菜单的条目样式，
+   面板本身用 fixed 避免被侧栏的滚动容器裁切。 */
+.ada-context-menu {
+  position: fixed;
+  z-index: 90;
+  display: grid;
+  min-width: 172px;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-elevated);
+  box-shadow: var(--ph-shadow);
+}
+.ada-context-menu[hidden] {
+  display: none;
+}
+.ada-context-menu .ada-row-menu__item:focus-visible {
+  outline: 2px solid var(--ph-brand);
+  outline-offset: -2px;
+}
+
+/* ── 运行状态：深度求索中，用时 N 秒 … ───────────────────────────────
+   不用带边框的 warning 药丸，改成品牌色的一行状态：四根呼吸条 + 可读
+   文案 + 三点省略号；计时由 components.js 每秒更新。 */
+.ada-run-status-dock {
+  /* 与 composer 卡片左缘对齐：卡片 max-width 860 居中，窄屏回落到
+     composer 的 24/16/12px 内边距。 */
+  left: max(24px, calc((100% - 860px) / 2));
+  bottom: 10px;
+}
+@media (max-width: 960px) {
+  .ada-run-status-dock {
+    left: max(16px, calc((100% - 860px) / 2));
+  }
+}
+@media (max-width: 680px) {
+  .ada-run-status-dock {
+    left: 12px;
+  }
+}
+.ada-run-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ph-brand-ink);
+  font-size: var(--ada-text-sm);
+  line-height: 1.2;
+  pointer-events: none;
+}
+.ada-run-status__mark {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--ph-brand);
+}
+.ada-run-status__mark svg {
+  display: block;
+  overflow: visible;
+}
+.ada-run-status__mark rect {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ada-run-status-bar 900ms ease-in-out infinite;
+}
+.ada-run-status__mark rect:nth-child(1) {
+  animation-delay: 0ms;
+}
+.ada-run-status__mark rect:nth-child(2) {
+  animation-delay: 120ms;
+}
+.ada-run-status__mark rect:nth-child(3) {
+  animation-delay: 240ms;
+}
+.ada-run-status__mark rect:nth-child(4) {
+  animation-delay: 360ms;
+}
+.ada-run-status__text {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ada-run-status__sep {
+  margin: 0 1px;
+}
+.ada-run-status__dots {
+  display: inline-flex;
+  width: 1.15em;
+  margin-left: 1px;
+}
+.ada-run-status__dots span {
+  display: inline-block;
+  opacity: 0.2;
+  animation: ada-run-status-dot 1.2s ease-in-out infinite;
+}
+.ada-run-status__dots span:nth-child(2) {
+  animation-delay: 150ms;
+}
+.ada-run-status__dots span:nth-child(3) {
+  animation-delay: 300ms;
+}
+@keyframes ada-run-status-bar {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scaleY(0.35);
+  }
+  45% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+@keyframes ada-run-status-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.2;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+@media (max-width: 760px) {
+  .ada-run-status {
+    font-size: var(--ada-text-xs);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ada-run-status__mark rect,
+  .ada-run-status__dots span {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ── 输入框下方 token / 缓存指标 ─────────────────────────────────────
+   终止按钮已移到顶栏「停止」；这里只保留只读指标：缓存命中率 + 上下文
+   占用环。环的 dash 值由服务端算好，放在 SVG 属性里以避开 CSP 禁止的
+   inline style。 */
+.ada-aux__actions {
+  gap: 12px;
+}
+.ada-aux__cache {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-xs);
+  white-space: nowrap;
+}
+.ada-aux__cache .ada-icon {
+  color: var(--ph-muted);
+}
+.ada-token-ring {
+  position: relative;
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--ph-brand);
+}
+.ada-token-ring__svg {
+  display: block;
+  width: 28px;
+  height: 28px;
+}
+.ada-token-ring__track {
+  fill: none;
+  stroke: var(--ph-line);
+  stroke-width: 2.5;
+}
+.ada-token-ring__value {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--ada-duration-fast) ease,
+    stroke-dasharray var(--ada-duration-fast) ease;
+}
+.ada-token-ring__label {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--ph-brand-ink);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+@media (max-width: 760px) {
+  .ada-aux__actions {
+    gap: 8px;
+  }
+}
+

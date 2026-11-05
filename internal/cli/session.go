@@ -377,6 +377,8 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 	if err := s.installAssembly(asm); err != nil {
 		return cleanup(err)
 	}
+	// 装配完成后再恢复持久化模型：ResolveModel 需要 provider 目录。
+	s.restoreModelSelections(ctx)
 
 	if cfg.EventsPath != "" {
 		f, err := os.Create(cfg.EventsPath)
@@ -1030,6 +1032,7 @@ func (s *Session) ForgetThreadModel(threadID string) {
 	s.mu.Lock()
 	delete(s.threadModels, threadID)
 	s.mu.Unlock()
+	s.forgetThreadModelState(threadID)
 }
 
 // ModelRefFor 返回线程当前生效模型；threadID 为空时返回工作区级模型。
@@ -1084,9 +1087,13 @@ func (s *Session) selectModelFromPlugin(ctx context.Context, providerID, modelID
 		if _, err := s.store.GetThread(ctx, threadID); err != nil {
 			return host.ModelRef{}, err
 		}
-		s.SetThreadModel(threadID, ref)
+		if err := s.SaveThreadModel(ctx, threadID, ref); err != nil {
+			return host.ModelRef{}, err
+		}
 	} else {
-		s.SetWorkspaceModel(ref)
+		if err := s.SaveWorkspaceModel(ctx, ref); err != nil {
+			return host.ModelRef{}, err
+		}
 	}
 	return host.ModelRef{ProviderID: ref.ProviderID, ModelID: ref.ModelID, ThinkingLevel: ref.ThinkingLevel}, nil
 }

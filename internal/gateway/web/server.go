@@ -206,6 +206,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /threads/{id}/send", s.handleTurn)
 	mux.HandleFunc("POST /threads/{id}/resend", s.handleTurnResend)
 	mux.HandleFunc("POST /threads/{id}/abort", s.handleCancel)
+	mux.HandleFunc("POST /threads/{id}/archive", s.handleThreadArchive)
 	mux.HandleFunc("POST /threads/{id}/delete", s.handleThreadDelete)
 	mux.HandleFunc("POST /threads/{id}/interaction/{requestId}", s.handleInteraction)
 	// 兼容旧动作路径（M2 的 /turn、/cancel）。

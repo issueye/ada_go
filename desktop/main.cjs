@@ -815,6 +815,16 @@ function registerIpcHandlers() {
 // 开发期刷新：重复 npm start 或源码变化时，按最新源码重建网关、清缓存并刷新页面。
 // 保留当前页面（例如正在看的会话），只有端口变化或当前是准备页时才回首页。
 let refreshingToLatest = false
+let hotRetryTimer = null
+
+// 忙等重试只保留一个定时器：页面忙时源码可能连续变化，每个变化各排一个 15s
+// 重试会让重试次数虚增、多个重试同时醒来；合并成一个即可，重建总是取最新源码。
+function cancelHotRetry() {
+  if (!hotRetryTimer) return
+  clearTimeout(hotRetryTimer)
+  hotRetryTimer = null
+}
+
 function sameOriginPageUrl(previousUrl) {
   try {
     const prev = new URL(previousUrl)
@@ -826,28 +836,40 @@ function sameOriginPageUrl(previousUrl) {
   }
 }
 
-// turnRunning 报告当前页面是否有一轮在跑（含「等用户回答」的暂停态）。
+// pageBusyReason 报告当前页面是否「不该被热更新打断」，返回 'run' / 'composer' / ''。
 //
 // 重建 = restartGatewaySupervisor() = taskkill /T 整棵进程树：正在跑这一轮的 Core
 // 会被一起杀掉，run 落库成 interrupted/core_unavailable，用户看到的就是「会话突然
 // 中断」。而本仓库的 agent 任务恰好会改 plugins/、internal/（都是被监听的目录），
 // 等于每写一个文件就把自己这一轮杀掉——所以热更新前必须先问一句「现在忙不忙」。
 //
+// 另一种忙是「输入框里有没发出去的内容」：源码一变就 loadURL，用户刚敲的字会被
+// 整页刷新抹掉。带 data-draft-key 的 composer 虽然有 composer-draft.js 兜底恢复，
+// 但刷新本身会打断输入，所以这里也先排队，等输入框空了再重建。
+//
 // 直接读页面自己的状态：会话页的 #transcript 上由模板与 chat-live.js 维护
 // data-run-status（running / waiting_input / 终态）。它不依赖 workspace cookie、
 // 不额外发请求，也不会有「读不到就误判空闲」的第二种真相。
-async function turnRunning() {
-  if (!mainWindow || mainWindow.isDestroyed()) return false
+async function pageBusyReason() {
+  if (!mainWindow || mainWindow.isDestroyed()) return ''
   try {
-    const status = await mainWindow.webContents.executeJavaScript(
-      "(() => { const el = document.getElementById('transcript'); return el ? String(el.dataset.runStatus || '') : ''; })()",
+    const state = await mainWindow.webContents.executeJavaScript(
+      `(() => {
+        const transcript = document.getElementById('transcript');
+        const status = transcript ? String(transcript.dataset.runStatus || '') : '';
+        if (status === 'running' || status === 'waiting_input') return 'run';
+        const fields = document.querySelectorAll('form[data-new-task] textarea[name="text"], form.ada-composer textarea[name="text"]');
+        for (const field of fields) {
+          if (field.value && String(field.value).trim() !== '') return 'composer';
+        }
+        return '';
+      })()`,
       true,
     )
-    const value = String(status || '')
-    return value === 'running' || value === 'waiting_input'
+    return state === 'run' || state === 'composer' ? state : ''
   } catch (err) {
-    appendLauncherLog(`[热更新] 读取轮次状态失败: ${err?.message ?? String(err)}`)
-    return false
+    appendLauncherLog(`[热更新] 读取页面状态失败: ${err?.message ?? String(err)}`)
+    return ''
   }
 }
 
@@ -855,6 +877,7 @@ async function refreshToLatest(reason = '重复启动') {
   showMainWindow()
   if (app.isPackaged) return
   if (refreshingToLatest) return
+  cancelHotRetry()
   refreshingToLatest = true
   const previousUrl = mainWindow ? mainWindow.webContents.getURL() : ''
   try {
@@ -881,7 +904,8 @@ async function refreshToLatest(reason = '重复启动') {
 const DEV_WATCH = !app.isPackaged && process.env.ADAGO_DEV_WATCH !== '0'
 const HOT_WATCH_DIRS = ['cmd', 'internal', 'app', 'plugins', 'products', 'mcp_projects/cron']
 const HOT_WATCH_EXTS = new Set(['.go', '.ts', '.tsx', '.js', '.json', '.css', '.tmpl'])
-const HOT_SKIP_PARTS = new Set(['node_modules', '.git', 'bin', 'out', 'dist-cache', '.adago', 'dist'])
+// testdata 只服务 Node/Go 测试、不进入网关产物；改测试不应触发重建和页面刷新。
+const HOT_SKIP_PARTS = new Set(['node_modules', '.git', 'bin', 'out', 'dist-cache', '.adago', 'dist', 'testdata'])
 let devWatchers = []
 let hotTimer = null
 let hotBusy = false
@@ -902,7 +926,7 @@ function isHotSource(rel) {
 
 function scheduleHotReload(filename) {
   if (!DEV_WATCH) return
-  if (refreshingToLatest || hotBusy) return
+  if (refreshingToLatest || hotBusy || hotRetryTimer) return
   if (Date.now() < hotIgnoreUntil) return
   if (hotTimer) clearTimeout(hotTimer)
   hotTimer = setTimeout(() => {
@@ -911,8 +935,8 @@ function scheduleHotReload(filename) {
   }, 700)
 }
 
-// 轮次在跑时只排队：15s 后重试，最多等 10 分钟；再久就放弃这一轮改动，
-// 留到下一次变化或下次启动（横幅/日志里能查到）。
+// 页面忙（轮次在跑或输入框有未发送内容）时只排队：15s 后重试，最多等 10 分钟；
+// 再久就放弃这一轮改动，留到下一次变化或下次启动（日志里能查到）。
 const HOT_BUSY_RETRY_MS = 15000
 const HOT_BUSY_MAX_RETRIES = 40
 let hotBusyRetries = 0
@@ -922,15 +946,22 @@ async function runHotReload(filename) {
   hotBusy = true
   try {
     appendLauncherLog(`[热更新] 检测到变化: ${filename || '(unknown)'}`)
-    if (await turnRunning()) {
+    const busy = await pageBusyReason()
+    if (busy) {
       hotBusyRetries += 1
       if (hotBusyRetries > HOT_BUSY_MAX_RETRIES) {
         hotBusyRetries = 0
         appendLauncherLog(`[热更新] 等了 ${(HOT_BUSY_RETRY_MS * HOT_BUSY_MAX_RETRIES) / 60000} 分钟仍未空闲，放弃本轮重建（改动会在下次启动生效）`)
         return
       }
-      appendLauncherLog(`[热更新] 有轮次正在运行，推迟重建（${HOT_BUSY_RETRY_MS / 1000}s 后重试，第 ${hotBusyRetries} 次）`)
-      setTimeout(() => { void runHotReload(filename) }, HOT_BUSY_RETRY_MS)
+      const reason = busy === 'composer' ? '输入框有未发送内容' : '有轮次正在运行'
+      appendLauncherLog(`[热更新] ${reason}，推迟重建（${HOT_BUSY_RETRY_MS / 1000}s 后重试，第 ${hotBusyRetries} 次）`)
+      if (!hotRetryTimer) {
+        hotRetryTimer = setTimeout(() => {
+          hotRetryTimer = null
+          void runHotReload(filename)
+        }, HOT_BUSY_RETRY_MS)
+      }
       return
     }
     hotBusyRetries = 0

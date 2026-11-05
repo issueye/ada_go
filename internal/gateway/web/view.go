@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"math"
 	"net/url"
 	"sort"
 	"strconv"
@@ -86,11 +87,18 @@ type interactionDTO struct {
 	ExpiresAt  string   `json:"expiresAt"`
 }
 
+type contextStatsDTO struct {
+	Tokens  int `json:"tokens"`
+	Window  int `json:"window"`
+	Percent int `json:"percent"`
+}
+
 type threadGetResult struct {
 	Thread       threadDTO        `json:"thread"`
 	Items        []itemDTO        `json:"items"`
 	Seq          int64            `json:"seq"`
 	Run          runStateDTO      `json:"run"`
+	Context      *contextStatsDTO `json:"context"`
 	Interactions []interactionDTO `json:"interactions"`
 	HasMore      bool             `json:"hasMore"`
 }
@@ -272,10 +280,24 @@ type threadData struct {
 	// CurrentModelLevels/Level 是当前模型可选的推理档位与已选档位。
 	CurrentModelLevels []string
 	CurrentModelLevel  string
+	// Context 是输入框下方的上下文占用环；CacheHitPercent 是线程累计缓存命中率。
+	Context         contextView
+	CacheHitPercent int
+	HasCache        bool
 	// HasOlder/OlderHref 是对话流顶部的「加载更早消息」链接（8.2 游标分页）：
 	// Core 的 thread.entries 默认只回最近 100 条，更早的历史靠它继续翻。
 	HasOlder  bool
 	OlderHref string
+}
+
+type contextView struct {
+	Has        bool
+	Percent    int
+	Tokens     string
+	Window     string
+	Title      string
+	DashArray  string
+	DashOffset string
 }
 
 type modelOption struct {
@@ -615,6 +637,68 @@ type pluginDetailState struct {
 type offlineData struct {
 	baseData
 	Reason string
+}
+
+// buildContextView 把 Core 的上下文统计转成 SVG 环参数；没有窗口配置时隐藏。
+func buildContextView(stats *contextStatsDTO) contextView {
+	if stats == nil {
+		return contextView{}
+	}
+	windowTokens := stats.Window
+	assumed := false
+	percent := stats.Percent
+	if windowTokens <= 0 {
+		// 供应商没有声明窗口时仍给一个可读的估算环，并在 title 里明确标注；
+		// 用户补上 contextWindow 后会自动改用真实值。
+		windowTokens = 1_048_576
+		assumed = true
+		percent = (stats.Tokens*100 + windowTokens/2) / windowTokens
+	}
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	const radius = 15.0
+	circumference := 2 * math.Pi * radius
+	tokens := compactTokenCount(stats.Tokens)
+	window := compactTokenCount(windowTokens)
+	title := fmt.Sprintf("上下文已用 %d%% · 约 %s / %s", percent, tokens, window)
+	if assumed {
+		title += "（模型未声明窗口，按 1M 估算）"
+	}
+	return contextView{
+		Has:        true,
+		Percent:    percent,
+		Tokens:     tokens,
+		Window:     window,
+		Title:      title,
+		DashArray:  fmt.Sprintf("%.2f", circumference),
+		DashOffset: fmt.Sprintf("%.2f", circumference*(1-float64(percent)/100)),
+	}
+}
+
+func compactTokenCount(n int) string {
+	if n < 0 {
+		n = 0
+	}
+	switch {
+	case n >= 1_000_000:
+		v := float64(n) / 1_000_000
+		if v >= 10 {
+			return fmt.Sprintf("%.0fM", v)
+		}
+		return strings.TrimSuffix(fmt.Sprintf("%.1f", v), ".0") + "M"
+	case n >= 1_000:
+		v := float64(n) / 1_000
+		if v >= 10 {
+			return fmt.Sprintf("%.0fK", v)
+		}
+		return strings.TrimSuffix(fmt.Sprintf("%.1f", v), ".0") + "K"
+	default:
+		return strconv.Itoa(n)
+	}
 }
 
 // buildRun 把 Core 的运行状态翻译成界面文案。

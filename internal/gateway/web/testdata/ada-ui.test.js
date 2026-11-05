@@ -392,14 +392,3 @@ test('Dropdown：菜单项、分隔线、select 与关闭', async () => {
   assert.equal(picked, 'b');
   assert.equal(details.open, false);
 });
-
-test('toast：创建、内容与手动关闭', () => {
-  const handle = UI.toast('已保存', { tone: 'success', duration: 0 });
-  const stack = global.document.querySelector('.ada-toast-stack');
-  assert.ok(stack);
-  const element = q(stack, '.ada-toast');
-  assert.ok(element.getAttribute('class').includes('alert-success'));
-  assert.equal(text(element).includes('已保存'), true);
-  handle.close();
-  assert.equal(element.getAttribute('class').includes('ada-toast--closing'), true);
-});

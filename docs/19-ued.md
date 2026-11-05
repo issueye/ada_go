@@ -118,6 +118,10 @@ ada 词根统一，四种写法各有边界，**不得混用**：
 - CSP `style-src 'self'`：模板与 JS 禁止内联 style 属性（`adag verify` 把守）；动态预览色一律走 CSS 变量类（如 `.ada-swatch--moss`）。
 - 表单：Enter 提交必须处理 IME（`isComposing` 必拦）；破坏性操作必须走 `data-confirm`，后果句见 19.2.3。
 - **提交态**：整页 POST 的表单在提交后必须有可见反馈与防重复——表单打 `data-submitting` + `aria-busy="true"`，提交按钮降透明度、`cursor:progress`、禁二次点击（`pointer-events:none`），**不用 `disabled`**（`disabled` 的 submitter 不参与表单数据，`name="decision"` 这类按钮的值会丢）。`data-confirm` 拦下的提交不进入提交态，等用户确认后 `requestSubmit()` 再来一次；bfcache 恢复时（`pageshow.persisted`）必须复位。
+- **输入草稿**：主 composer（新建任务与会话页）的未发送文本按 `data-draft-key` 存 `localStorage`（`a_da_draft:<key>`），整页刷新/热更新后恢复，提交成功或清空输入时删除；图片是 `File` 对象，不进文本草稿。新增 composer 必须带唯一的 `data-draft-key`。
+- **会话行右键**：侧栏会话行提供「复制会话 ID / 归档会话」；运行中的会话禁用归档。归档只从列表隐藏，不软删历史；当前会话归档后回首页。模型/工作区选择随 `state.db` 持久化，刷新或 Core 重启后保持。
+- **待发送队列**：运行中发送的消息先进入输入框上方的 outbox 浮窗，不立即 `turn.steer`；每条提供编辑 / 立即发送 / 删除（纯图标按钮），队列按会话存 `localStorage`，刷新不丢；当前轮正常 `completed` 时自动发队首，其余继续排队。带图片的消息仍走原生立即发送（`File` 不能跨刷新保存）。
+- **输入区指标**：输入框下方只放只读信息（缓存命中率、上下文占用环），不再重复放「中止」；中止只在顶栏。上下文占用按 head 路径 entry token 估算，带「约」标注；缓存命中率 = cacheTokens / inputTokens。
 
 ## 19.5 交互模式规范
 
@@ -162,7 +166,7 @@ ada 词根统一，四种写法各有边界，**不得混用**：
 
 - live 语义：生成中 `role="status"`，错误 `role="alert"`；新增动态区域照此二分。
 - 滚动意图识别：用户上翻即停止强制跟随，「回到最新」出现；此逻辑收敛在 chat-live.js，不重复实现。
-- 运行中反馈 = 左下运行 dock + 工具行呼吸条 + 秒级耗时刷新，三者已有，新运行态 UI 复用同一套。
+- 运行中反馈 = 输入框上方一行品牌色「深度求索中，用时 N 秒 …」+ 工具行呼吸条 + 秒级耗时刷新；状态文案与计时由同一处运行态驱动，不再用带边框的 warning 药丸。新运行态 UI 复用同一套。
 
 ## 19.6 可访问性标准
 

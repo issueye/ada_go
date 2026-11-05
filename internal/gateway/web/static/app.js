@@ -214,7 +214,17 @@
       body: body.toString()
     }).then(function (res) {
       if (res.type === "opaqueredirect" || res.ok) {
-        window.location.reload();
+        // 服务端已持久化到线程/工作区；不再整页 reload，避免刷新期间
+        // 丢掉输入草稿，也避免用户误以为「刷新后模型又被重置」。
+        var input = picker.querySelector("[data-select-input]");
+        var value = providerId + "|" + modelId;
+        if (input) input.value = value;
+        var rows = picker.querySelectorAll("[data-value]");
+        for (var i = 0; i < rows.length; i += 1) {
+          rows[i].setAttribute("data-current-level", rows[i].getAttribute("data-value") === value ? (level || "") : "");
+        }
+        picker.removeAttribute("aria-busy");
+        notify("模型已切换");
         return null;
       }
       return res.text().then(function (text) {
@@ -859,6 +869,434 @@
     if (railSearch) railSearch.addEventListener('click', focusSearch);
   }
 
+  /* ── 待发送消息 outbox ───────────────────────────────────────────────
+     运行中发送的消息不再立刻走 turn.steer，而是先落本地队列，浮在输入框
+     上方；用户可编辑、立即发送或删除。刷新后队列仍在（localStorage）。
+     当前轮次正常完成时自动发送队首，其余继续等待下一轮。 */
+  var outboxForm = null;
+  var outboxHost = null;
+  var outboxThreadID = "";
+  var outboxItems = [];
+  var outboxSending = false;
+  var OUTBOX_LIMIT = 20;
+
+  function outboxKey(threadID) {
+    return 'a_da_outbox:' + threadID;
+  }
+
+  function readOutbox(threadID) {
+    try {
+      var raw = window.localStorage.getItem(outboxKey(threadID));
+      var parsed = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(function (item) {
+        return item && typeof item.text === 'string' && item.text.trim() !== '';
+      }).slice(0, OUTBOX_LIMIT);
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function writeOutbox() {
+    if (!outboxThreadID) return;
+    try {
+      window.localStorage.setItem(outboxKey(outboxThreadID), JSON.stringify(outboxItems));
+    } catch (error) {
+      /* 存储不可用：队列本次页面内仍然生效 */
+    }
+  }
+
+  function outboxIcon(name) {
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'ada-icon');
+    svg.setAttribute('width', '14');
+    svg.setAttribute('height', '14');
+    svg.setAttribute('aria-hidden', 'true');
+    var use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', '#i-' + name);
+    svg.appendChild(use);
+    return svg;
+  }
+
+  function outboxActionButton(action, iconName, label, tone) {
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'ada-outbox__action' + (tone ? ' ada-outbox__action--' + tone : '');
+    button.setAttribute('data-outbox-action', action);
+    button.setAttribute('aria-label', label);
+    button.setAttribute('title', label);
+    button.appendChild(outboxIcon(iconName));
+    return button;
+  }
+
+  function renderOutbox() {
+    if (!outboxHost) return;
+    outboxHost.textContent = '';
+    outboxHost.hidden = outboxItems.length === 0;
+
+    var head = document.createElement('div');
+    head.className = 'ada-outbox__head';
+    var title = document.createElement('span');
+    title.textContent = '待发送 · ' + outboxItems.length;
+    head.appendChild(title);
+    outboxHost.appendChild(head);
+
+    outboxItems.forEach(function (item) {
+      var row = document.createElement('div');
+      row.className = 'ada-outbox__item';
+      row.setAttribute('data-outbox-id', item.id);
+
+      var text = document.createElement('p');
+      text.className = 'ada-outbox__text';
+      text.textContent = item.text;
+      text.setAttribute('title', item.text);
+      row.appendChild(text);
+
+      var actions = document.createElement('div');
+      actions.className = 'ada-outbox__actions';
+      actions.appendChild(outboxActionButton('edit', 'edit', '编辑'));
+      actions.appendChild(outboxActionButton('send', 'send', '立即发送', 'primary'));
+      actions.appendChild(outboxActionButton('delete', 'trash', '删除', 'danger'));
+      row.appendChild(actions);
+      outboxHost.appendChild(row);
+    });
+  }
+
+  function currentRunStatus() {
+    var root = document.getElementById('transcript');
+    return root ? String(root.getAttribute('data-run-status') || '').toLowerCase() : '';
+  }
+
+  function runIsActive() {
+    var status = currentRunStatus();
+    return status === 'running' || status === 'waiting_input' || status === 'finishing';
+  }
+
+  function enqueueOutbox(text) {
+    var value = String(text || '').trim();
+    if (!value) return false;
+    if (outboxItems.length >= OUTBOX_LIMIT) {
+      notify('待发送消息最多 ' + OUTBOX_LIMIT + ' 条，请先处理已有消息。', 'error');
+      return false;
+    }
+    outboxItems.push({
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      text: value
+    });
+    writeOutbox();
+    renderOutbox();
+    return true;
+  }
+
+  function removeOutboxItem(id) {
+    var index = -1;
+    for (var i = 0; i < outboxItems.length; i += 1) {
+      if (outboxItems[i].id === id) {
+        index = i;
+        break;
+      }
+    }
+    if (index < 0) return null;
+    var item = outboxItems.splice(index, 1)[0];
+    writeOutbox();
+    renderOutbox();
+    return item;
+  }
+
+  function editOutboxItem(id) {
+    if (outboxSending) return;
+    var item = removeOutboxItem(id);
+    if (!item || !outboxForm) return;
+    var input = outboxForm.querySelector('textarea[name="text"]');
+    if (!input) return;
+    input.value = item.text + (input.value ? '\n' + input.value : '');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    try {
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(item.text.length, item.text.length);
+    } catch (error) {
+      /* 焦点/光标失败不影响编辑 */
+    }
+  }
+
+  function deleteOutboxItem(id) {
+    if (outboxSending) return;
+    if (removeOutboxItem(id)) notify('已删除待发送消息');
+  }
+
+  function sendOutboxItem(id, auto) {
+    if (outboxSending || !outboxForm) return;
+    if (currentRunStatus() === 'waiting_input' || currentRunStatus() === 'finishing') {
+      notify('当前轮次正在等待答复或收尾，请稍后再发送。', 'error');
+      return;
+    }
+    var item = null;
+    for (var i = 0; i < outboxItems.length; i += 1) {
+      if (outboxItems[i].id === id) {
+        item = outboxItems[i];
+        break;
+      }
+    }
+    if (!item) return;
+
+    var csrf = document.querySelector('meta[name="csrf-token"]');
+    var body = new URLSearchParams();
+    body.set('text', item.text);
+    // 队列项 id 同时作为幂等键：网络失败后重试同一条不会起两轮。
+    body.set('idempotencyKey', item.id);
+    outboxSending = true;
+    outboxHost.setAttribute('aria-busy', 'true');
+
+    fetch(outboxForm.getAttribute('action') || window.location.pathname + '/send', {
+      method: 'POST',
+      credentials: 'same-origin',
+      redirect: 'manual',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'X-CSRF-Token': csrf ? csrf.getAttribute('content') : ''
+      },
+      body: body.toString()
+    }).then(function (res) {
+      // 网关成功时是 303；manual 重定向在 Chromium 里是 opaqueredirect。
+      if (res.type === 'opaqueredirect' || res.status === 303) {
+        removeOutboxItem(item.id);
+        window.location.href = '/threads/' + encodeURIComponent(outboxThreadID);
+        return null;
+      }
+      throw new Error('HTTP ' + res.status);
+    }).catch(function (err) {
+      outboxSending = false;
+      outboxHost.removeAttribute('aria-busy');
+      if (auto) {
+        window.location.reload();
+        return;
+      }
+      notify('发送待发送消息失败：' + (err && err.message ? err.message : err), 'error');
+    });
+  }
+
+  function handleOutboxClick(event) {
+    var button = event.target.closest && event.target.closest('[data-outbox-action]');
+    if (!button || !outboxHost) return;
+    var row = button.closest('[data-outbox-id]');
+    if (!row) return;
+    var id = row.getAttribute('data-outbox-id');
+    var action = button.getAttribute('data-outbox-action');
+    if (action === 'edit') editOutboxItem(id);
+    else if (action === 'delete') deleteOutboxItem(id);
+    else if (action === 'send') sendOutboxItem(id, false);
+  }
+
+  function handleOutboxSubmit(event) {
+    if (event.defaultPrevented || !runIsActive()) return;
+    var form = event.target;
+    if (form !== outboxForm) return;
+    var input = form.querySelector('textarea[name="text"]');
+    if (!input) return;
+    var text = String(input.value || '').trim();
+    if (!text) return; // 纯图片消息沿用原生发送
+
+    // 图片暂不进 outbox：File 无法跨刷新保存，交给原生 turn.steer 立即送达。
+    var images = form.querySelector('input[name="images"]');
+    if (images && images.files && images.files.length > 0) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (!enqueueOutbox(text)) return;
+    input.value = '';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    try {
+      input.focus({ preventScroll: true });
+    } catch (error) {
+      /* 忽略 */
+    }
+    notify('已加入待发送队列');
+  }
+
+  function initOutbox() {
+    outboxForm = document.querySelector('form.ada-composer[data-thread-id]');
+    outboxHost = document.querySelector('[data-outbox]');
+    if (!outboxForm || !outboxHost) return;
+    outboxThreadID = outboxForm.getAttribute('data-thread-id') || '';
+    if (!outboxThreadID) return;
+    outboxItems = readOutbox(outboxThreadID);
+    renderOutbox();
+    outboxForm.addEventListener('submit', handleOutboxSubmit, true);
+    outboxHost.addEventListener('click', handleOutboxClick);
+  }
+
+  // chat-live.js 在 completed 终态、整页 reload 之前调用：有队列就先发队首，
+  // 并让出 reload（发送成功后由 sendOutboxItem 自己导航）。
+  window.AdaOutbox = {
+    onRunEnd: function (reason) {
+      if (String(reason || '') !== 'completed') return false;
+      if (!outboxItems.length || !outboxForm) return false;
+      if (outboxSending) return true;
+      sendOutboxItem(outboxItems[0].id, true);
+      return true;
+    }
+  };
+
+  /* ── 会话右键菜单：复制 ID / 归档 ───────────────────────────────────── */
+  var threadMenu = null;
+  var threadMenuRow = null;
+  var threadMenuBound = false;
+
+  function closeThreadMenu(restoreFocus) {
+    if (!threadMenu || threadMenu.hidden) return;
+    threadMenu.hidden = true;
+    var row = threadMenuRow;
+    threadMenuRow = null;
+    if (restoreFocus && row) {
+      var link = row.querySelector('.ada-thread__link');
+      if (link) link.focus({ preventScroll: true });
+    }
+  }
+
+  function copyText(text) {
+    if (window.AdaComponents && typeof window.AdaComponents.copyText === 'function') {
+      return window.AdaComponents.copyText(text);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return Promise.reject(new Error('当前环境不支持剪贴板'));
+  }
+
+  function copyThreadID(row) {
+    var id = row.getAttribute('data-thread-row') || '';
+    if (!id) return;
+    copyText(id).then(function () {
+      notify('会话 ID 已复制');
+    }).catch(function () {
+      notify('复制失败，请手动选择会话 ID。', 'error');
+    });
+  }
+
+  function archiveThread(row) {
+    var id = row.getAttribute('data-thread-row') || '';
+    if (!id) return;
+    var titleNode = row.querySelector('.ada-thread__title');
+    var title = titleNode ? titleNode.textContent : '这个会话';
+    var form = document.createElement('form');
+    form.method = 'post';
+    form.action = '/threads/' + encodeURIComponent(id) + '/archive';
+    form.hidden = true;
+
+    var csrf = document.querySelector('meta[name="csrf-token"]');
+    if (csrf) {
+      var token = document.createElement('input');
+      token.type = 'hidden';
+      token.name = 'csrf_token';
+      token.value = csrf.getAttribute('content') || '';
+      form.appendChild(token);
+    }
+    var next = document.createElement('input');
+    next.type = 'hidden';
+    next.name = 'next';
+    next.value = window.location.pathname + window.location.search;
+    form.appendChild(next);
+    document.body.appendChild(form);
+
+    var submit = function () {
+      form.submit();
+    };
+    if (typeof window.adaConfirm === 'function' && document.querySelector('[data-confirm-dialog]')) {
+      window.adaConfirm('归档会话「' + title + '」？归档后不再显示在侧栏。', submit);
+    } else {
+      submit();
+    }
+    // 用户取消确认时表单不会提交；留一个兜底清理，避免隐藏表单常驻 DOM。
+    window.setTimeout(function () {
+      if (form.isConnected) form.remove();
+    }, 30000);
+  }
+
+  function ensureThreadMenu() {
+    if (threadMenu) return threadMenu;
+    threadMenu = document.createElement('div');
+    threadMenu.className = 'ada-context-menu';
+    threadMenu.setAttribute('role', 'menu');
+    threadMenu.setAttribute('aria-label', '会话操作');
+    threadMenu.hidden = true;
+    threadMenu.innerHTML =
+      '<button class="ada-row-menu__item" type="button" role="menuitem" data-thread-menu-action="copy">复制会话 ID</button>' +
+      '<button class="ada-row-menu__item" type="button" role="menuitem" data-thread-menu-action="archive">归档会话</button>';
+    document.body.appendChild(threadMenu);
+
+    threadMenu.addEventListener('click', function (event) {
+      var button = event.target.closest && event.target.closest('[data-thread-menu-action]');
+      if (!button || button.disabled) return;
+      var action = button.getAttribute('data-thread-menu-action');
+      var row = threadMenuRow;
+      if (!row) return;
+      if (action === 'copy') {
+        copyThreadID(row);
+        closeThreadMenu(false);
+        return;
+      }
+      if (action === 'archive') {
+        closeThreadMenu(false);
+        archiveThread(row);
+      }
+    });
+    return threadMenu;
+  }
+
+  function openThreadMenu(row, x, y) {
+    var menu = ensureThreadMenu();
+    threadMenuRow = row;
+    var running = row.getAttribute('data-thread-running') === '1';
+    var archive = menu.querySelector('[data-thread-menu-action="archive"]');
+    if (archive) {
+      archive.disabled = running;
+      archive.title = running ? '运行中的会话不能归档' : '';
+    }
+
+    menu.hidden = false;
+    menu.style.left = '0px';
+    menu.style.top = '0px';
+    var width = menu.offsetWidth;
+    var height = menu.offsetHeight;
+    var left = Math.max(8, Math.min(x, window.innerWidth - width - 8));
+    var top = Math.max(8, Math.min(y, window.innerHeight - height - 8));
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+
+    var first = menu.querySelector('button:not(:disabled)');
+    if (first) first.focus({ preventScroll: true });
+  }
+
+  function bindThreadContextMenu() {
+    if (threadMenuBound) return;
+    threadMenuBound = true;
+
+    document.addEventListener('contextmenu', function (event) {
+      var row = event.target.closest && event.target.closest('[data-thread-row]');
+      var list = document.getElementById('thread-list');
+      if (!row || !list || !list.contains(row)) {
+        closeThreadMenu(false);
+        return;
+      }
+      event.preventDefault();
+      openThreadMenu(row, event.clientX, event.clientY);
+    });
+
+    document.addEventListener('pointerdown', function (event) {
+      if (!threadMenu || threadMenu.hidden) return;
+      if (!threadMenu.contains(event.target)) closeThreadMenu(false);
+    }, true);
+
+    document.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape' || !threadMenu || threadMenu.hidden) return;
+      event.preventDefault();
+      closeThreadMenu(true);
+    });
+
+    window.addEventListener('resize', function () { closeThreadMenu(false); });
+    window.addEventListener('scroll', function () { closeThreadMenu(false); }, true);
+  }
+
   /* 选择/登记工作区：POST /api/workspace/select 记住 cookie，成功后调用方刷新页面。 */
   function selectWorkspace(path) {
     var csrf = document.querySelector('meta[name="csrf-token"]');
@@ -1066,9 +1504,11 @@
     bindScrollBottom();
     bindAskWizards(document);
     bindThreadSearch();
+    bindThreadContextMenu();
     bindWorkspaceTree();
     bindSidebarResizer();
     bindNewTask();
+    initOutbox();
     bindModelCascades();
     bindNewTaskShortcut();
     // 恢复上次的折叠偏好（宽屏）并让按钮文案与真实状态一致

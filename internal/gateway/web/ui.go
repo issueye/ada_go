@@ -61,6 +61,7 @@ var iconDefs = []iconDef{
 	{"i-chat", `<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/>`},
 	{"i-grid", `<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>`},
 	{"i-server", `<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 8h.01M7 17h.01"/>`},
+	{"i-database", `<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>`},
 	{"i-chart", `<path d="M3 20h18"/><path d="M6 20v-6"/><path d="M11 20V8"/><path d="M16 20v-9"/><path d="M21 20V5"/>`},
 	{"i-folder", `<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>`},
 	{"i-image", `<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="1.6"/><path d="m21 15-4.5-4.5L7 20"/>`},
@@ -640,8 +641,10 @@ func renderWorkspaceThreadRows(threads []threadSummaryDTO, wsIndex int, csrf, cu
 func renderThreadRow(t sidebarThread, activeThreadID, csrf, currentPath, wsQuery string) string {
 	active := activeThreadID != "" && t.ID == activeThreadID
 	dot := ""
+	running := "0"
 	if t.Running {
 		dot = `<span class="ada-thread__dot" title="运行中" aria-label="运行中"></span>`
+		running = "1"
 	}
 	elapsed := relativeTime(t.UpdatedMS)
 	timeHTML := ""
@@ -658,9 +661,10 @@ func renderThreadRow(t sidebarThread, activeThreadID, csrf, currentPath, wsQuery
 		)
 	}
 	return fmt.Sprintf(
-		`<div class="%s" data-thread-row="%s"><a class="ada-thread__link" href="/threads/%s%s"%s><span class="ada-thread__title">%s</span><span class="ada-thread__meta">%s%s</span></a>%s</div>`,
+		`<div class="%s" data-thread-row="%s"%s><a class="ada-thread__link" href="/threads/%s%s"%s><span class="ada-thread__title">%s</span><span class="ada-thread__meta">%s%s</span></a>%s</div>`,
 		classList("ada-thread", boolClass(active, "is-active")),
-		esc(t.ID), esc(t.ID), wsQuery, attr("title", t.Title), esc(t.Title), dot, timeHTML, actions,
+		esc(t.ID), attr("data-thread-running", running),
+		esc(t.ID), wsQuery, attr("title", t.Title), esc(t.Title), dot, timeHTML, actions,
 	)
 }
 

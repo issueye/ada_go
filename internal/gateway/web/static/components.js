@@ -255,6 +255,25 @@
     }
   }
 
+  /* 输入框上方的运行状态：用 Run.StartedAt 算「用时 N 秒」。
+     服务端时间字符串解析失败时退回本次页面加载时刻，避免显示负时长。 */
+  function tickRunStatusElapsed() {
+    var node = document.querySelector('.ada-run-status[data-run-started-at]');
+    if (!node) return;
+    var started = Date.parse(node.getAttribute('data-run-started-at') || '');
+    if (!isFinite(started) || started > Date.now() + 60000) {
+      if (!node._adaRunStart) node._adaRunStart = Date.now();
+      started = node._adaRunStart;
+    }
+    var seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
+    var text =
+      seconds >= 60
+        ? Math.floor(seconds / 60) + ' 分 ' + (seconds % 60) + ' 秒'
+        : seconds + ' 秒';
+    var elapsed = node.querySelector('[data-run-elapsed]');
+    if (elapsed && elapsed.textContent !== text) elapsed.textContent = text;
+  }
+
   /* ── 「＋」菜单：点外面或按 Esc 收起 ────────────────────────────────── */
   /* details 自己只管开合：不处理"点别处"，菜单会一直挂在输入框上方。 */
   var plusBound = false;
@@ -536,8 +555,12 @@
     bindPlusMenu();
     bindPopoverExclusion();
     openDialogFromQuery();
-    // 运行中的工具每秒刷新一次耗时：1s 粒度足够，也能让"它还在跑"看得见。
-    window.setInterval(tickRunningElapsed, 1000);
+    // 运行中的工具/状态每秒刷新一次耗时：1s 粒度足够，也能让"它还在跑"看得见。
+    window.setInterval(function () {
+      tickRunningElapsed();
+      tickRunStatusElapsed();
+    }, 1000);
+    tickRunStatusElapsed();
     watchTranscript();
   }
 

@@ -30,8 +30,10 @@ make desktop-pack   # electron-builder --win dir，产物在 desktop/dist/
 开发模式还会启动文件监听（`ADAGO_DEV_WATCH=0` 可关闭）：`cmd`、`internal`、`app`、
 `plugins`、`products` 以及根目录 `go.mod`/`go.sum` 变化后，700ms 防抖再走同一条
 「刷新后端插件 dist → go build → 重启网关 → 清缓存 → 原地刷新当前页面」流程。
-`desktop/`、`dist/`、`bin/`、`node_modules/` 与 `_test.go` 不触发。重启会中断正在
-运行的轮次；页面地址不变（端口变化时才回首页）。
+`desktop/`、`dist/`、`bin/`、`node_modules/`、`testdata/` 与 `_test.go` 不触发。重启会中断正在
+运行的轮次；页面地址不变（端口变化时才回首页）。页面「忙」时（有在途轮次，或
+新建任务/会话 composer 里有未发送文本）热更新只排队：15s 后重试，最多等 10 分钟，
+空闲后再重建，避免整页刷新打断输入；composer 草稿另由前端落盘兜底。
 
 ## 与 a_da 的差异（迁移适配点）
 

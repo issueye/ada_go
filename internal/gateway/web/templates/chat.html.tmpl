@@ -50,7 +50,7 @@
               {{template "csrf" .}}
               <div class="ada-composer__card ada-newtask__card">
                 <div class="ada-composer__thumbs" data-image-thumbs hidden></div>
-                <textarea class="ada-composer__input" name="text" rows="2" maxlength="65536" placeholder="向 {{.ProductName}} 提问，或描述一个任务…" aria-label="任务描述"></textarea>
+                <textarea class="ada-composer__input" name="text" rows="2" maxlength="65536" data-draft-key="new-task" placeholder="向 {{.ProductName}} 提问，或描述一个任务…" aria-label="任务描述"></textarea>
                 <input class="ada-composer__image-input" id="ada-image-input-new" type="file" name="images" multiple accept="image/png,image/jpeg,image/webp,image/gif" aria-hidden="true" tabindex="-1">
                 <div class="ada-composer__bar">
                   <div class="ada-composer__group ada-composer__group--left">
@@ -107,7 +107,7 @@
     </div>
 
     <div class="ada-float-dock" id="composer-above" aria-label="插件悬浮区">{{slot "composer.above" .Slots.ComposerAbove .SlotCounts.ComposerAbove ""}}</div>
-    <div class="ada-run-status-dock" id="run-status">{{if .Run.Active}}<span class="ada-run-status" role="status" aria-live="polite" aria-label="运行中" title="运行中"><svg class="ada-run-status__spin" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-opacity=".25" stroke-width="2"/><path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>{{end}}</div>
+    <div class="ada-run-status-dock" id="run-status">{{if or .Run.Active (eq .Run.Status "waiting_input")}}<span class="ada-run-status" data-run-state="{{.Run.Status}}" data-run-started-at="{{.Run.StartedAt}}" role="status" aria-live="polite" aria-label="{{.Run.Label}}"><span class="ada-run-status__mark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="3.6" y="9" width="2.4" height="6" rx="1.2"/><rect x="8.4" y="5" width="2.4" height="14" rx="1.2"/><rect x="13.2" y="7" width="2.4" height="10" rx="1.2"/><rect x="18" y="10" width="2.4" height="4" rx="1.2"/></svg></span><span class="ada-run-status__text" aria-hidden="true"><span data-run-label>{{if eq .Run.Status "waiting_input"}}等待你的答复{{else if eq .Run.Status "finishing"}}正在收尾{{else}}深度求索中{{end}}</span><span class="ada-run-status__sep">，</span><span>用时 <span data-run-elapsed>— 秒</span></span><span class="ada-run-status__dots"><span>.</span><span>.</span><span>.</span></span></span></span>{{end}}</div>
   </div>
 
   <div class="ada-trays" id="ada-trays" role="region" aria-live="polite" aria-label="待处理事项">
@@ -116,12 +116,13 @@
   </div>
 
   {{if .Thread.ID}}
-  <form class="ada-composer" method="post" action="/threads/{{.Thread.ID}}/send" enctype="multipart/form-data">
+  <form class="ada-composer" method="post" action="/threads/{{.Thread.ID}}/send" data-thread-id="{{.Thread.ID}}" enctype="multipart/form-data">
     {{template "csrf" .}}
+    <div class="ada-outbox" data-outbox role="region" aria-live="polite" aria-label="待发送消息" hidden></div>
     <div class="ada-composer__card">
       {{/* 缩略图位置与新建任务页保持一致：始终在输入框上方。 */}}
       <div class="ada-composer__thumbs" data-image-thumbs hidden></div>
-      <textarea class="ada-composer__input" name="text" rows="2" maxlength="65536" placeholder="向 {{.ProductName}} 提问，或指派一个任务…" aria-label="消息输入框" required></textarea>
+      <textarea class="ada-composer__input" name="text" rows="2" maxlength="65536" data-draft-key="thread:{{.Thread.ID}}" placeholder="向 {{.ProductName}} 提问，或指派一个任务…" aria-label="消息输入框" required></textarea>
       <div class="ada-composer__bar">
         <div class="ada-composer__group ada-composer__group--left">
           <input class="ada-composer__image-input" id="ada-image-input-{{.Thread.ID}}" type="file" name="images" multiple accept="image/png,image/jpeg,image/webp,image/gif" aria-hidden="true" tabindex="-1">
@@ -157,7 +158,7 @@
         </div>
         <div class="ada-composer__group ada-composer__group--right">
           {{slot "composer.right" .Slots.ComposerRight .SlotCounts.ComposerRight ""}}
-          <button class="ada-send" type="submit" aria-label="{{if .Run.Active}}排队发送{{else}}发送{{end}}" title="{{if .Run.Active}}运行中发送会排队，在当前步骤后送达{{else}}发送（Enter）{{end}}">{{icon "i-send" 14}}</button>
+          <button class="ada-send" type="submit" aria-label="{{if .Run.Active}}加入待发送队列{{else}}发送{{end}}" title="{{if .Run.Active}}加入待发送队列，可编辑或立即发送{{else}}发送（Enter）{{end}}">{{icon "i-send" 14}}</button>
         </div>
       </div>
     </div>
@@ -168,16 +169,14 @@
           <span class="ada-aux__item ada-aux__item--neutral"><span>工作区：{{.WorkspaceName}}</span></span>
         </span>
         <div class="ada-aux__actions">
-          {{/* 按钮用 form 属性关联到下方的独立表单：form 不能嵌套在发送表单里，
-               否则解析器会提前闭合外层表单，而且中止表单拿不到 CSRF 字段。 */}}
-          {{if .Run.Active}}<button class="ada-btn ada-btn--danger ada-btn--sm ada-aux__action" type="submit" form="abort-form">{{icon "i-stop" 14}}<span class="ada-btn__label">中止</span></button>{{end}}
+          <span class="ada-aux__cache" title="缓存命中率：输入 token 中命中缓存的比例">{{icon "i-database" 12}}<span>缓存命中 {{if .HasCache}}{{.CacheHitPercent}}%{{else}}—{{end}}</span></span>
+          {{if .Context.Has}}<span class="ada-token-ring" title="{{.Context.Title}}" role="img" aria-label="{{.Context.Title}}"><svg class="ada-token-ring__svg" viewBox="0 0 36 36" aria-hidden="true"><circle class="ada-token-ring__track" cx="18" cy="18" r="15"></circle><circle class="ada-token-ring__value" cx="18" cy="18" r="15" transform="rotate(-90 18 18)" stroke-dasharray="{{.Context.DashArray}}" stroke-dashoffset="{{.Context.DashOffset}}"></circle></svg><span class="ada-token-ring__label">{{.Context.Percent}}%</span></span>{{end}}
         </div>
         <span class="ada-aux__plugins">{{slot "composer.footer" .Slots.ComposerFooter .SlotCounts.ComposerFooter ""}}</span>
       </div>
     </div>
     <input type="hidden" name="idempotencyKey" value="{{.TurnKey}}">
   </form>
-  {{if .Run.Active}}<form id="abort-form" class="ada-action-form" method="post" action="/threads/{{.Thread.ID}}/abort" data-confirm="确定中止当前轮次吗？">{{template "csrf" .}}</form>{{end}}
   <script src="{{asset "chat-live.js"}}" defer></script>
   {{end}}
 {{template "shell_end" .}}{{end}}
