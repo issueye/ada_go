@@ -404,7 +404,7 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 | P3-1 bundle 同步/CSP 门禁 | ✅ | `TestOfficialClientBundlesInSync`、`TestClientBundlesHonorCSP` |
 | P3-2 浏览器冒烟 | ✅ 手工 | 真实 Chromium 验证 hydration、SSR 预取与页面标记（见 §17） |
 | P3-3 性能基线 | ✅ | 见 §16 |
-| P3-4 安全复查 | ⚠️ 部分手工 | T3/CSRF/CSP 有自动化；Electron 主世界待手工复查（见 §20） |
+| P3-4 安全复查 | ⚠️ 部分手工 | T3/CSRF/CSP/Electron 静态配置有自动化；Electron 运行时与第三方隔离仍待手工（见 §20） |
 | P3-5 回滚/验收 | ✅ 回滚；⚠️ 手工项 | `capabilities.pluginIslands` / `ADAG_DISABLE_ISLANDS`；无 JS 表单、读屏/视觉仍待手工（见 §18/§19） |
 
 **已知未完成/风险：**
@@ -511,6 +511,6 @@ go test ./plugins/official -run TestClientBundleSizes -v
 | props 上限 | ✅ | 32KB 超限降级纯 SSR（P1-4） |
 | CSP 无 eval/new Function | ✅ | `TestClientBundlesHonorCSP` 覆盖全部随包 client bundle；`pluginbuild` 构建期扫描 |
 | 第三方插件隔离 | ⚠️ 不支持 | 第三方不能用客户端岛屿；方案取舍见 [21-third-party-islands.md](21-third-party-islands.md) |
-| Electron 主世界 | ⚠️ 手工 | 真实 Electron 未自动化；需复查 preload/contextIsolation 下 `window.adaAPI` 暴露面 |
+| Electron 主世界 | ⚠️ 静态门禁 ✅ / 运行时手工 | `desktop/security.test.js` 钉住 contextIsolation/nodeIntegration/webSecurity/allowRunningInsecureContent 与外部导航拦截；真实 Electron 仍待手工 |
 
-结论：装配期与浏览器 bundle 边界有自动化门禁；第三方隔离与 Electron 主世界仍是发布前手工复查项。
+结论：装配期与浏览器 bundle 边界有自动化门禁；Electron 静态配置已收紧，真实 Electron 运行时与第三方隔离仍是发布前手工复查项。

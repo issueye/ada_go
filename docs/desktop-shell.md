@@ -62,8 +62,9 @@ launcher.log 位置语义（`~/.adago/launcher.log`）、网关不可用时的�
 
 ## 安全与边界
 
-- 窗口 `contextIsolation: true`、`nodeIntegration: false`；`webSecurity: false`
-  与 a_da 保持一致（界面来自 `http://127.0.0.1`，CSP 由网关中间件下发）。
+- 窗口 `contextIsolation: true`、`nodeIntegration: false`；`webSecurity: true`、
+  `allowRunningInsecureContent: false`。界面来自 `http://127.0.0.1`，同源资源不需要
+  关闭浏览器安全策略；CSP 仍由网关中间件下发。
 - 网关只绑回环；令牌经环境变量注入网关，不进命令行参数。
 - `?token=` 登录只在 GET 生效，303 后 query 里的 token 即失效（cookie 是
   HttpOnly 的会话 cookie）。
