@@ -149,6 +149,53 @@
   min-height: 0;
 }
 
+/* 详情内容是块级文本：标签与值必须有明确列宽，长 ID/端点可换行，
+   否则 ID、协议、端点会和标签粘在一起。 */
+.pm-detail > div {
+  width: 100%;
+  min-width: 0;
+}
+
+.pm-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.pm-info p {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0;
+  min-width: 0;
+}
+
+.pm-info__label {
+  flex: 0 0 56px;
+  color: var(--ph-faint);
+}
+
+.pm-info code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pm-info__hint {
+  margin: 0;
+  font-size: var(--ada-text-sm);
+  color: var(--ph-muted);
+}
+
+.pm-info__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0;
+}
+
 .pm-detail__head {
   display: flex;
   align-items: center;

@@ -694,10 +694,10 @@ export default defineComponent({
                     </div>
                   ) : (
                     <div class="pm-info">
-                      <p><span class="pm-info__label">ID</span><code>{selected.id}</code></p>
-                      <p><span class="pm-info__label">协议</span>{selected.protocol || "—"}</p>
-                      <p><span class="pm-info__label">端点</span><code>{selected.baseUrl || "—"}</code></p>
-                      <p><span class="pm-info__label">密钥</span>{selected.apiKeyHint ? "尾号 " + selected.apiKeyHint : "未保存"}</p>
+                      <p aria-label={"ID " + selected.id}><span class="pm-info__label">ID</span><code>{selected.id}</code></p>
+                      <p aria-label={"协议 " + (selected.protocol || "未设置")}><span class="pm-info__label">协议</span>{selected.protocol || "—"}</p>
+                      <p aria-label={"端点 " + (selected.baseUrl || "未设置")}><span class="pm-info__label">端点</span><code>{selected.baseUrl || "—"}</code></p>
+                      <p aria-label={"密钥 " + (selected.apiKeyHint ? "尾号 " + selected.apiKeyHint : "未保存")}><span class="pm-info__label">密钥</span>{selected.apiKeyHint ? "尾号 " + selected.apiKeyHint : "未保存"}</p>
                       <div class="pm-info__actions">
                         <Button variant="secondary" size="sm" onClick={this.startEdit}>编辑</Button>
                       </div>
