@@ -72,6 +72,8 @@ var providers_next_default = defineComponent({
       editing: false,
       form: { name: "", protocol: "", baseUrl: "", proxy: "", headersText: "", apiKey: "" },
       editingModelId: "",
+      addingModel: false,
+      newModel: { id: "", displayName: "", contextWindow: "" },
       modelForm: {
         displayName: "",
         contextWindow: "",
@@ -371,14 +373,39 @@ var providers_next_default = defineComponent({
     cancelModelEdit() {
       this.editingModelId = "";
     },
-    saveModel() {
+    persistModels(models, message) {
       const selected = this.selected;
-      if (!selected || !this.editingModelId) return;
+      if (!selected) return;
       const api = window.adaAPI;
       if (typeof api !== "function") {
         this.status = "当前页面没有 adaAPI，无法保存模型。";
         return;
       }
+      this.status = "正在保存模型…";
+      api("provider-admin", "/save", {
+        method: "POST",
+        body: {
+          id: selected.id,
+          name: selected.displayName || selected.id,
+          protocol: selected.protocol || "",
+          baseUrl: selected.baseUrl || "",
+          proxy: selected.proxy || "",
+          headers: selected.headers || {},
+          disabled: !!selected.disabled,
+          models
+        }
+      }).then(() => {
+        this.status = message;
+        this.editingModelId = "";
+        this.addingModel = false;
+        this.load();
+      }).catch((err) => {
+        this.status = "保存模型失败：" + (err && err.message || String(err));
+      });
+    },
+    saveModel() {
+      const selected = this.selected;
+      if (!selected || !this.editingModelId) return;
       const target = this.editingModelId;
       const models = (selected.models || []).map((m) => {
         if (!m || m.id !== target) return m;
@@ -398,26 +425,50 @@ var providers_next_default = defineComponent({
         else delete next.input;
         return next;
       });
-      this.status = "正在保存模型…";
-      api("provider-admin", "/save", {
-        method: "POST",
-        body: {
-          id: selected.id,
-          name: selected.displayName || selected.id,
-          protocol: selected.protocol || "",
-          baseUrl: selected.baseUrl || "",
-          proxy: selected.proxy || "",
-          headers: selected.headers || {},
-          disabled: !!selected.disabled,
-          models
-        }
-      }).then(() => {
-        this.status = "模型已保存。";
-        this.editingModelId = "";
-        this.load();
-      }).catch((err) => {
-        this.status = "保存模型失败：" + (err && err.message || String(err));
-      });
+      this.persistModels(models, "模型已保存。");
+    },
+    startAddModel() {
+      this.addingModel = true;
+      this.editingModelId = "";
+      this.newModel = { id: "", displayName: "", contextWindow: "" };
+    },
+    cancelAddModel() {
+      this.addingModel = false;
+    },
+    addModel() {
+      const selected = this.selected;
+      if (!selected) return;
+      const id = String(this.newModel.id || "").trim();
+      if (!id) {
+        this.status = "模型 ID 不能为空。";
+        return;
+      }
+      if ((selected.models || []).some((m) => m && m.id === id)) {
+        this.status = "模型 ID 已存在。";
+        return;
+      }
+      const next = {
+        id,
+        displayName: String(this.newModel.displayName || "").trim() || id,
+        supportsTools: false
+      };
+      const context = String(this.newModel.contextWindow || "").trim();
+      if (context) next.contextWindow = Number(context);
+      this.persistModels((selected.models || []).concat(next), "模型已添加。");
+    },
+    removeModel() {
+      const selected = this.selected;
+      const target = this.editingModelId;
+      if (!selected || !target) return;
+      const run = () => {
+        this.persistModels((selected.models || []).filter((m) => m && m.id !== target), "模型已删除。");
+      };
+      const confirm = window.adaConfirm;
+      if (typeof confirm === "function") {
+        confirm("删除模型「" + target + "」？", run);
+      } else {
+        run();
+      }
     }
   },
   render(h2) {
@@ -549,7 +600,40 @@ var providers_next_default = defineComponent({
           this.form.apiKey = String(value || "");
         }
       }
-    ), /* @__PURE__ */ h2("p", { class: "pm-info__hint" }, "保存会整条替换供应商配置；API Key 留空表示保持原值，模型列表原样保留。"), /* @__PURE__ */ h2("div", { class: "pm-info__actions" }, /* @__PURE__ */ h2(Button, { variant: "primary", size: "sm", onClick: this.saveProvider }, "保存"), /* @__PURE__ */ h2(Button, { variant: "secondary", size: "sm", onClick: this.cancelEdit }, "取消"))) : /* @__PURE__ */ h2("div", { class: "pm-info" }, /* @__PURE__ */ h2("p", null, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "ID"), /* @__PURE__ */ h2("code", null, selected.id)), /* @__PURE__ */ h2("p", null, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "协议"), selected.protocol || "—"), /* @__PURE__ */ h2("p", null, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "端点"), /* @__PURE__ */ h2("code", null, selected.baseUrl || "—")), /* @__PURE__ */ h2("p", null, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "密钥"), selected.apiKeyHint ? "尾号 " + selected.apiKeyHint : "未保存"), /* @__PURE__ */ h2("div", { class: "pm-info__actions" }, /* @__PURE__ */ h2(Button, { variant: "secondary", size: "sm", onClick: this.startEdit }, "编辑"))) : /* @__PURE__ */ h2("div", null, this.editingModelId ? /* @__PURE__ */ h2("div", { class: "pm-info" }, /* @__PURE__ */ h2(
+    ), /* @__PURE__ */ h2("p", { class: "pm-info__hint" }, "保存会整条替换供应商配置；API Key 留空表示保持原值，模型列表原样保留。"), /* @__PURE__ */ h2("div", { class: "pm-info__actions" }, /* @__PURE__ */ h2(Button, { variant: "primary", size: "sm", onClick: this.saveProvider }, "保存"), /* @__PURE__ */ h2(Button, { variant: "secondary", size: "sm", onClick: this.cancelEdit }, "取消"))) : /* @__PURE__ */ h2("div", { class: "pm-info" }, /* @__PURE__ */ h2("p", null, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "ID"), /* @__PURE__ */ h2("code", null, selected.id)), /* @__PURE__ */ h2("p", null, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "协议"), selected.protocol || "—"), /* @__PURE__ */ h2("p", null, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "端点"), /* @__PURE__ */ h2("code", null, selected.baseUrl || "—")), /* @__PURE__ */ h2("p", null, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "密钥"), selected.apiKeyHint ? "尾号 " + selected.apiKeyHint : "未保存"), /* @__PURE__ */ h2("div", { class: "pm-info__actions" }, /* @__PURE__ */ h2(Button, { variant: "secondary", size: "sm", onClick: this.startEdit }, "编辑"))) : /* @__PURE__ */ h2("div", null, this.addingModel ? /* @__PURE__ */ h2("div", { class: "pm-info" }, /* @__PURE__ */ h2(
+      Input,
+      {
+        id: "pm-new-model-id",
+        label: "模型 ID",
+        modelValue: this.newModel.id,
+        placeholder: "例如 gpt-4.1",
+        onInput: (value) => {
+          this.newModel.id = String(value || "");
+        }
+      }
+    ), /* @__PURE__ */ h2(
+      Input,
+      {
+        id: "pm-new-model-name",
+        label: "显示名",
+        modelValue: this.newModel.displayName,
+        onInput: (value) => {
+          this.newModel.displayName = String(value || "");
+        }
+      }
+    ), /* @__PURE__ */ h2(
+      Input,
+      {
+        id: "pm-new-model-context",
+        type: "number",
+        label: "上下文窗口",
+        modelValue: this.newModel.contextWindow,
+        placeholder: "例如 128000",
+        onInput: (value) => {
+          this.newModel.contextWindow = String(value || "");
+        }
+      }
+    ), /* @__PURE__ */ h2("p", { class: "pm-info__actions" }, /* @__PURE__ */ h2(Button, { size: "sm", variant: "primary", onClick: this.addModel }, "添加"), /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.cancelAddModel }, "取消"))) : /* @__PURE__ */ h2("p", { class: "pm-info__actions" }, /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.startAddModel }, "添加模型")), this.editingModelId ? /* @__PURE__ */ h2("div", { class: "pm-info" }, /* @__PURE__ */ h2(
       Input,
       {
         id: "pm-model-name",
@@ -615,7 +699,7 @@ var providers_next_default = defineComponent({
       },
       "状态：",
       this.modelForm.disabled ? "停用" : "启用"
-    ), /* @__PURE__ */ h2(Button, { size: "sm", variant: "primary", onClick: this.saveModel }, "保存模型"), /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.cancelModelEdit }, "取消"))) : null, this.fetchError ? /* @__PURE__ */ h2("p", { class: "pm-status", "data-tone": "danger", role: "alert" }, this.fetchError) : null, this.remoteModels.length ? /* @__PURE__ */ h2("p", { class: "pm-status" }, "拉取到 ", this.remoteModels.length, " 个模型。", /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.addFetchedModels }, "添加未配置模型")) : null, /* @__PURE__ */ h2(
+    ), /* @__PURE__ */ h2(Button, { size: "sm", variant: "primary", onClick: this.saveModel }, "保存模型"), /* @__PURE__ */ h2(Button, { size: "sm", variant: "danger", onClick: this.removeModel }, "删除模型"), /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.cancelModelEdit }, "取消"))) : null, this.fetchError ? /* @__PURE__ */ h2("p", { class: "pm-status", "data-tone": "danger", role: "alert" }, this.fetchError) : null, this.remoteModels.length ? /* @__PURE__ */ h2("p", { class: "pm-status" }, "拉取到 ", this.remoteModels.length, " 个模型。", /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.addFetchedModels }, "添加未配置模型")) : null, /* @__PURE__ */ h2(
       Table,
       {
         caption: (selected.displayName || selected.id) + " 的模型",

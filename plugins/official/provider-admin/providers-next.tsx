@@ -24,6 +24,8 @@ export default defineComponent({
       editing: false,
       form: { name: "", protocol: "", baseUrl: "", proxy: "", headersText: "", apiKey: "" },
       editingModelId: "",
+      addingModel: false,
+      newModel: { id: "", displayName: "", contextWindow: "" },
       modelForm: {
         displayName: "",
         contextWindow: "",
@@ -336,14 +338,41 @@ export default defineComponent({
     cancelModelEdit() {
       this.editingModelId = "";
     },
-    saveModel() {
+    persistModels(models: any[], message: string) {
       const selected = this.selected;
-      if (!selected || !this.editingModelId) return;
+      if (!selected) return;
       const api = (window as any).adaAPI;
       if (typeof api !== "function") {
         this.status = "当前页面没有 adaAPI，无法保存模型。";
         return;
       }
+      this.status = "正在保存模型…";
+      api("provider-admin", "/save", {
+        method: "POST",
+        body: {
+          id: selected.id,
+          name: selected.displayName || selected.id,
+          protocol: selected.protocol || "",
+          baseUrl: selected.baseUrl || "",
+          proxy: selected.proxy || "",
+          headers: selected.headers || {},
+          disabled: !!selected.disabled,
+          models,
+        },
+      })
+        .then(() => {
+          this.status = message;
+          this.editingModelId = "";
+          this.addingModel = false;
+          this.load();
+        })
+        .catch((err: any) => {
+          this.status = "保存模型失败：" + ((err && err.message) || String(err));
+        });
+    },
+    saveModel() {
+      const selected = this.selected;
+      if (!selected || !this.editingModelId) return;
       const target = this.editingModelId;
       const models = (selected.models || []).map((m: any) => {
         if (!m || m.id !== target) return m;
@@ -369,28 +398,50 @@ export default defineComponent({
         else delete next.input;
         return next;
       });
-      this.status = "正在保存模型…";
-      api("provider-admin", "/save", {
-        method: "POST",
-        body: {
-          id: selected.id,
-          name: selected.displayName || selected.id,
-          protocol: selected.protocol || "",
-          baseUrl: selected.baseUrl || "",
-          proxy: selected.proxy || "",
-          headers: selected.headers || {},
-          disabled: !!selected.disabled,
-          models,
-        },
-      })
-        .then(() => {
-          this.status = "模型已保存。";
-          this.editingModelId = "";
-          this.load();
-        })
-        .catch((err: any) => {
-          this.status = "保存模型失败：" + ((err && err.message) || String(err));
-        });
+      this.persistModels(models, "模型已保存。");
+    },
+    startAddModel() {
+      this.addingModel = true;
+      this.editingModelId = "";
+      this.newModel = { id: "", displayName: "", contextWindow: "" };
+    },
+    cancelAddModel() {
+      this.addingModel = false;
+    },
+    addModel() {
+      const selected = this.selected;
+      if (!selected) return;
+      const id = String(this.newModel.id || "").trim();
+      if (!id) {
+        this.status = "模型 ID 不能为空。";
+        return;
+      }
+      if ((selected.models || []).some((m: any) => m && m.id === id)) {
+        this.status = "模型 ID 已存在。";
+        return;
+      }
+      const next: any = {
+        id,
+        displayName: String(this.newModel.displayName || "").trim() || id,
+        supportsTools: false,
+      };
+      const context = String(this.newModel.contextWindow || "").trim();
+      if (context) next.contextWindow = Number(context);
+      this.persistModels((selected.models || []).concat(next), "模型已添加。");
+    },
+    removeModel() {
+      const selected = this.selected;
+      const target = this.editingModelId;
+      if (!selected || !target) return;
+      const run = () => {
+        this.persistModels((selected.models || []).filter((m: any) => m && m.id !== target), "模型已删除。");
+      };
+      const confirm = (window as any).adaConfirm;
+      if (typeof confirm === "function") {
+        confirm("删除模型「" + target + "」？", run);
+      } else {
+        run();
+      }
     },
   },
   render(h) {
@@ -548,6 +599,39 @@ export default defineComponent({
                   )
                 ) : (
                   <div>
+                    {this.addingModel ? (
+                      <div class="pm-info">
+                        <Input
+                          id="pm-new-model-id"
+                          label="模型 ID"
+                          modelValue={this.newModel.id}
+                          placeholder="例如 gpt-4.1"
+                          onInput={(value: any) => { this.newModel.id = String(value || ""); }}
+                        />
+                        <Input
+                          id="pm-new-model-name"
+                          label="显示名"
+                          modelValue={this.newModel.displayName}
+                          onInput={(value: any) => { this.newModel.displayName = String(value || ""); }}
+                        />
+                        <Input
+                          id="pm-new-model-context"
+                          type="number"
+                          label="上下文窗口"
+                          modelValue={this.newModel.contextWindow}
+                          placeholder="例如 128000"
+                          onInput={(value: any) => { this.newModel.contextWindow = String(value || ""); }}
+                        />
+                        <p class="pm-info__actions">
+                          <Button size="sm" variant="primary" onClick={this.addModel}>添加</Button>
+                          <Button size="sm" variant="secondary" onClick={this.cancelAddModel}>取消</Button>
+                        </p>
+                      </div>
+                    ) : (
+                      <p class="pm-info__actions">
+                        <Button size="sm" variant="secondary" onClick={this.startAddModel}>添加模型</Button>
+                      </p>
+                    )}
                     {this.editingModelId ? (
                       <div class="pm-info">
                         <Input
@@ -590,6 +674,7 @@ export default defineComponent({
                             onClick={() => { this.modelForm.disabled = !this.modelForm.disabled; }}
                           >状态：{this.modelForm.disabled ? "停用" : "启用"}</Button>
                           <Button size="sm" variant="primary" onClick={this.saveModel}>保存模型</Button>
+                          <Button size="sm" variant="danger" onClick={this.removeModel}>删除模型</Button>
                           <Button size="sm" variant="secondary" onClick={this.cancelModelEdit}>取消</Button>
                         </p>
                       </div>

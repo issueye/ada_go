@@ -193,6 +193,55 @@ test('providers-next：/state 取数、模型表与设为当前', async () => {
   assert.ok(saves.length >= 2, '添加模型应再次调用 /save');
   assert.equal(saves[saves.length - 1].options.body.models.length, 3);
 
+  const addModel = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '添加模型');
+  assert.ok(addModel, '模型页应提供添加模型');
+  addModel.dispatchEvent({ type: 'click' });
+  await globalThis.AdaRender.nextTick();
+  const newId = root.querySelector('#pm-new-model-id');
+  const newName = root.querySelector('#pm-new-model-name');
+  const newContext = root.querySelector('#pm-new-model-context');
+  assert.ok(newId && newName && newContext);
+  newId.value = 'm4';
+  newId.dispatchEvent({ type: 'input' });
+  newName.value = '模型四';
+  newName.dispatchEvent({ type: 'input' });
+  newContext.value = '16000';
+  newContext.dispatchEvent({ type: 'input' });
+  await globalThis.AdaRender.nextTick();
+  const addConfirm = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '添加');
+  assert.ok(addConfirm);
+  addConfirm.dispatchEvent({ type: 'click' });
+  for (let i = 0; i < 20; i += 1) {
+    if (calls.filter((c) => c.route === '/save').length >= 3) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const afterAdd = calls.filter((c) => c.route === '/save').slice(-1)[0].options.body;
+  assert.ok(afterAdd.models.some((m) => m.id === 'm4'));
+  assert.equal(afterAdd.models.find((m) => m.id === 'm4').contextWindow, 16000);
+
+  for (let i = 0; i < 20; i += 1) {
+    if (root.textContent.includes('m4')) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await globalThis.AdaRender.nextTick();
+  }
+
+  const row = [...root.querySelectorAll('tbody tr')].find((r) => r.textContent.includes('m4'));
+  assert.ok(row, '新模型应出现在表格');
+  const rowEdit = [...row.querySelectorAll('button')].find((b) => b.textContent.trim() === '编辑');
+  assert.ok(rowEdit);
+  rowEdit.dispatchEvent({ type: 'click' });
+  await globalThis.AdaRender.nextTick();
+  const removeModel = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '删除模型');
+  assert.ok(removeModel);
+  removeModel.dispatchEvent({ type: 'click' });
+  for (let i = 0; i < 20; i += 1) {
+    if (calls.filter((c) => c.route === '/save').length >= 4) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const afterRemove = calls.filter((c) => c.route === '/save').slice(-1)[0].options.body;
+  assert.ok(!afterRemove.models.some((m) => m.id === 'm4'));
+  assert.equal(afterRemove.models.length, 3);
+
   const infoTab = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '供应商信息');
   assert.ok(infoTab);
   infoTab.dispatchEvent({ type: 'click' });
