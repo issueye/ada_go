@@ -206,11 +206,11 @@ data-ada-props="<JSON>"
 
 | ID | 任务 | 产物 |
 |---|---|---|
-| P3-1 | 安全测试 | T3 拒绝、CSRF 不进入 props、CSP 无 eval、Electron 主世界风险复查 |
-| P3-2 | 性能 | 12 插槽全开、页面 300ms/插槽 100ms；bundle 大小与首屏 |
-| P3-3 | 文档 | 07/14/15/05、plugin-helper SPEC/manual、decisions；新增本计划索引 |
-| P3-4 | 特性开关与回滚 | 产品/插件级开关；关闭后完全回到 SSR 路径 |
-| P3-5 | 验收 | 无 JS、键盘/焦点、视觉回归、真实浏览器冒烟 |
+| P3-1 | 构建与 CSP 门禁 | client.tsx ↔ static/client.js 同步；bundle 无 eval/new Function；512KB 上限 |
+| P3-2 | 真实浏览器冒烟 | hydration、客户端状态、插槽/页面标记、legacy 脚本共存 |
+| P3-3 | 性能基线 | 岛屿 SSR 墙钟/分配、12 插槽加法成本、bundle 体积 |
+| P3-4 | 文档与安全复查 | 07/14/15/05、plugin-helper SPEC/manual、T3 拒绝、CSRF 不进入 props、Electron 主世界风险 |
+| P3-5 | 特性开关、回滚与验收 | 产品/插件级开关；无 JS、键盘/焦点、视觉回归 |
 
 ## 6. 关键接口草案
 
@@ -402,6 +402,8 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 | P2-5 keyed VNode patch | ✅ 客户端 | `keyed` + `applyVNodePatches` + `AdaPatchStream` |
 | P3-1 bundle 同步门禁 | ✅ | `TestOfficialClientBundlesInSync` |
 | P3-2 CSP bundle 门禁 | ✅ | `TestClientBundlesHonorCSP` 覆盖全部随包 `static/client.js` |
+| P3-3 浏览器冒烟 | ✅ 手工 | 真实 Chromium 验证 hydration 与 legacy 共存（见 §17） |
+| P3-4 性能基线 | ✅ | 见 §16 |
 
 **已知未完成/风险：**
 
@@ -430,3 +432,24 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 go test ./internal/plugins/host -run '^$' -bench 'BenchmarkRenderIsland' -benchtime=10x -benchmem
 go test ./plugins/official -run TestClientBundleSizes -v
 ```
+
+## 17. P3-3 浏览器冒烟（2026-11-05）
+
+真实 Chromium（ego lite）手工验证，非 CI：
+
+1. 构建 `bin/adag.exe`，启动：
+   ```sh
+   bin/adag.exe gateway --fake --product products/coding.agent.json \
+     --workspace . --addr 127.0.0.1:52353 --data-dir %TEMP%\adag-e2e-data
+   ```
+2. 用网关 stdout 的 `token` 登录 `/?token=…`。
+3. `/ext/token-usage/usage`：
+   - `.tu-page[data-ada-mounted="1"]`；
+   - 无 `data-ada-error`；
+   - 点击「显示缓存命中率」后 `aria-pressed="true"`，正文出现「缓存命中率：」。
+4. `/ext/provider-admin/providers`：
+   - `[data-provider-admin][data-ada-mounted="1"]`；
+   - 无 `data-ada-error`；
+   - legacy `provider-admin.js` 已加载并接管列表，空态显示「还没有供应商，点击右上角「添加供应商」。」。
+
+结论：同构 hydration、客户端本地状态、插槽/页面标记与 legacy 脚本共存均在真实浏览器成立。遗留：该冒烟尚未自动化，token/端口是本地临时值，不进入仓库。
