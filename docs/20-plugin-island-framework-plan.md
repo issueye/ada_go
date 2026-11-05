@@ -487,3 +487,17 @@ go test ./plugins/official -run TestClientBundleSizes -v
 | 读屏/缩放 | ⚠️ 未做 | 需要人工验收 |
 
 结论：无 JS 与键盘有基础覆盖，但**表单写入、读屏、缩放与视觉回归**仍是手工验收项，不能宣称 P3-5 全部完成。
+
+## 20. P3-4 安全复查（2026-11-05）
+
+| 边界 | 状态 | 证据 |
+|---|---|---|
+| T3 `frontend.client` 信任 | ✅ | `TestManifestIslandValidation`：builtin/verified 允许，third-party 拒绝 |
+| `hydrate` 必须有 client + `frontend.script` | ✅ | 同上，缺一即装配期拒绝 |
+| CSRF 不进入 props | ✅ | `TestHydrateSlotInjectsIslandMarkers` 断言 `csrf-secret` 不出现在 `data-ada-props` |
+| props 上限 | ✅ | 32KB 超限降级纯 SSR（P1-4） |
+| CSP 无 eval/new Function | ✅ | `TestClientBundlesHonorCSP` 覆盖全部随包 client bundle；`pluginbuild` 构建期扫描 |
+| 第三方插件隔离 | ⚠️ 不支持 | 第三方不能用客户端岛屿；服务端驱动/iframe 方案仍待评估 |
+| Electron 主世界 | ⚠️ 手工 | 真实 Electron 未自动化；需复查 preload/contextIsolation 下 `window.adaAPI` 暴露面 |
+
+结论：装配期与浏览器 bundle 边界有自动化门禁；第三方隔离与 Electron 主世界仍是发布前手工复查项。

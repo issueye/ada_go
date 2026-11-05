@@ -35,6 +35,13 @@ func TestManifestIslandValidation(t *testing.T) {
 		t.Fatalf("合法 hydrate 清单被拒: %v", err)
 	}
 
+	verified := islandManifest(plugins.TrustVerified, "client.js",
+		[]plugins.Capability{plugins.CapFrontendScript}, true, false)
+	verified.Sig = "sig"
+	if err := verified.Validate("demo"); err != nil {
+		t.Fatalf("verified 带 client 应允许: %v", err)
+	}
+
 	for _, tc := range []struct {
 		name string
 		m    *plugins.Manifest
