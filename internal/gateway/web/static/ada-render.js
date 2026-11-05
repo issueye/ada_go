@@ -52,6 +52,8 @@
 
   var activeEffect = null;
   var effectStack = [];
+  var activeInstance = null;
+  var instanceStack = [];
   var targetMap = new WeakMap();
   var effectUid = 0;
   var RAW = typeof Symbol === 'function' ? Symbol('raw') : '__ada_raw__';
@@ -275,7 +277,124 @@
       scheduler: function () { queueJob(runner); }
     });
     runner();
+    if (activeInstance && activeInstance._effects) activeInstance._effects.push(runner);
     return runner;
+  }
+
+  /* ---- 组件实例作用域：provide/inject、watch 自动停止 ---- */
+
+  function withInstance(instance, fn) {
+    instanceStack.push(activeInstance);
+    activeInstance = instance;
+    try {
+      return fn();
+    } finally {
+      activeInstance = instanceStack.length ? instanceStack.pop() : null;
+    }
+  }
+
+  function provide(key, value) {
+    if (!activeInstance) throw new Error('[ada-render] provide() 只能在组件 setup/data 中调用');
+    if (!activeInstance.provides) activeInstance.provides = Object.create(null);
+    activeInstance.provides[key] = value;
+  }
+
+  function inject(key, defaultValue) {
+    var instance = activeInstance;
+    while (instance) {
+      if (instance.provides && key in instance.provides) return instance.provides[key];
+      instance = instance.parent;
+    }
+    return typeof defaultValue === 'function' ? defaultValue() : defaultValue;
+  }
+
+  // watch(source, cb)：source 为 getter/ref；浅比较，值不变不触发。
+  // 返回 stop；在组件 setup 中调用时随组件卸载自动停止。
+  function watch(source, cb, options) {
+    options = options || {};
+    var getter;
+    if (typeof source === 'function') getter = source;
+    else if (source && source.__ada_ref) getter = function () { return source.value; };
+    else getter = function () { return source; };
+
+    var runner;
+    var job = function () {
+      var next = runner();
+      if (next === oldValue) return;
+      var previous = oldValue;
+      oldValue = next;
+      cb(next, previous);
+    };
+    runner = effect(getter, {
+      lazy: true,
+      scheduler: function () { queueJob(job); }
+    });
+    var oldValue = runner();
+    if (activeInstance && activeInstance._effects) activeInstance._effects.push(runner);
+    if (options.immediate) cb(oldValue, undefined);
+    return function stopWatch() { stop(runner); };
+  }
+
+  /* ---- 轻量 store：模块级单例；每个 app/运行时各自一份 ---- */
+
+  function defineStore(id, options) {
+    options = options || {};
+    var cache = null;
+    var useStore = function (initialState) {
+      if (cache) return cache;
+      var state = typeof options.state === 'function' ? options.state() : (options.state || {});
+      var stateKeys = Object.keys(state);
+      if (initialState && typeof initialState === 'object') {
+        for (var key in initialState) {
+          if (Object.prototype.hasOwnProperty.call(initialState, key)) {
+            if (stateKeys.indexOf(key) === -1) stateKeys.push(key);
+            state[key] = initialState[key];
+          }
+        }
+      }
+      var store = reactive(state);
+      var getters = options.getters || {};
+      Object.keys(getters).forEach(function (name) {
+        var ref = computed(function () { return getters[name].call(store, store); });
+        Object.defineProperty(store, name, {
+          enumerable: false,
+          get: function () { return ref.value; }
+        });
+      });
+      var actions = options.actions || {};
+      Object.keys(actions).forEach(function (name) {
+        Object.defineProperty(store, name, {
+          enumerable: false,
+          value: function () { return actions[name].apply(store, arguments); }
+        });
+      });
+      Object.defineProperty(store, '$id', { value: id, enumerable: false });
+      Object.defineProperty(store, '$snapshot', {
+        enumerable: false,
+        value: function () {
+          var out = {};
+          for (var i = 0; i < stateKeys.length; i += 1) {
+            var key = stateKeys[i];
+            if (key in store) out[key] = store[key];
+          }
+          return JSON.parse(JSON.stringify(out));
+        }
+      });
+      Object.defineProperty(store, '$hydrate', {
+        enumerable: false,
+        value: function (snapshot) {
+          if (!snapshot || typeof snapshot !== 'object') return;
+          for (var i = 0; i < stateKeys.length; i += 1) {
+            var key = stateKeys[i];
+            if (Object.prototype.hasOwnProperty.call(snapshot, key)) store[key] = snapshot[key];
+          }
+        }
+      });
+      cache = store;
+      return store;
+    };
+    useStore.$id = id;
+    return useStore;
   }
 
   /* ---- 调度：一次事件循环内合并同一组件的重复更新 ---- */
@@ -1864,6 +1983,8 @@
       proxy: null,
       subTree: null,
       effect: null,
+      _effects: [],
+      provides: Object.create(parent && parent.provides ? parent.provides : (ownerApp && ownerApp._provides) || null),
       isMounted: false,
       isUnmounted: false
     };
@@ -1910,7 +2031,9 @@
         slots: instance.slots,
         attrs: vnode.p
       };
-      var setupResult = def.setup(instance.props, setupContext);
+      var setupResult = withInstance(instance, function () {
+        return def.setup(instance.props, setupContext);
+      });
       if (typeof setupResult === 'function') {
         setupRender = setupResult;
       } else if (isObject(setupResult)) {
@@ -1918,7 +2041,9 @@
       }
     }
 
-    var initialData = typeof def.data === 'function' ? def.data.call(instance.proxy) : (def.data || {});
+    var initialData = withInstance(instance, function () {
+      return typeof def.data === 'function' ? def.data.call(instance.proxy) : (def.data || {});
+    });
     instance.data = reactive(initialData);
 
     if (def.computed) {
@@ -2392,6 +2517,9 @@
   function unmountComponent(instance) {
     if (!instance || instance.isUnmounted) return;
     instance.isUnmounted = true;
+    callHook(instance, 'unmounted');
+    for (var i = 0; i < (instance._effects || []).length; i += 1) stop(instance._effects[i]);
+    instance._effects = [];
     stop(instance.effect);
     unmount(instance.subTree);
   }
@@ -2579,17 +2707,23 @@
         def = registered;
         resolvedNode = { t: COMPONENT, n: def, p: node.p, c: node.c, s: node.s, k: node.k };
       }
-      var instance = createInstance(resolvedNode, null, {
+      var instance = createInstance(resolvedNode, (ctx && ctx.parent) || null, {
         _doc: ctx && ctx.app && ctx.app._doc,
         _options: ctx && ctx.app && ctx.app._options,
-        _components: (ctx && ctx.components) || EMPTY_COMPONENTS
+        _components: (ctx && ctx.components) || EMPTY_COMPONENTS,
+        _provides: ctx && ctx.app ? ctx.app._provides : null
       });
       var rendered = instance.render.call(instance.proxy, h);
       if (Array.isArray(rendered)) {
         if (rendered.length !== 1) throw new Error('[ada-render] SSR 组件必须只有一个根节点');
         rendered = rendered[0];
       }
-      return serializeNode(rendered, ctx, depth + 1);
+      var childCtx = {
+        components: (ctx && ctx.components) || EMPTY_COMPONENTS,
+        app: (ctx && ctx.app) || null,
+        parent: instance
+      };
+      return serializeNode(rendered, childCtx, depth + 1);
     }
 
     if (node._html !== undefined) {
@@ -2621,7 +2755,8 @@
     var app = options && options.app;
     var ctx = {
       components: (options && options.components) || (app && app._components) || EMPTY_COMPONENTS,
-      app: app || null
+      app: app || null,
+      parent: null
     };
     var vnode = isVNode(componentOrVNode)
       ? componentOrVNode
@@ -2643,9 +2778,14 @@
     var app = {
       _options: options,
       _components: Object.create(null),
+      _provides: Object.create(null),
       _doc: options.document || DOC,
       _instance: null,
       _container: null,
+      provide: function (key, value) {
+        this._provides[key] = value;
+        return this;
+      },
       component: function (name, def) {
         if (def === undefined) return this._components[name];
         this._components[name] = normalizeComponent(def);
@@ -2780,7 +2920,11 @@
     reactive: reactive,
     ref: ref,
     computed: computed,
+    watch: watch,
     watchEffect: watchEffect,
+    provide: provide,
+    inject: inject,
+    defineStore: defineStore,
     nextTick: nextTick,
     renderToJSON: renderToJSON,
     toJSON: renderToJSON,

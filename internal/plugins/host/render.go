@@ -361,7 +361,11 @@ export const createApp = __R.createApp;
 export const reactive = __R.reactive;
 export const ref = __R.ref;
 export const computed = __R.computed;
+export const watch = __R.watch;
 export const watchEffect = __R.watchEffect;
+export const provide = __R.provide;
+export const inject = __R.inject;
+export const defineStore = __R.defineStore;
 export const nextTick = __R.nextTick;
 export const renderToJSON = __R.renderToJSON;
 `

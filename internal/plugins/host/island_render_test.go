@@ -100,3 +100,51 @@ func TestRenderIslandWithIsoComponents(t *testing.T) {
 		t.Fatalf("同构组件应展开为原生标签，不应残留 $C：%s", text)
 	}
 }
+
+const islandStateSource = `import { h, defineComponent, defineStore, provide, inject } from "ada:render";
+
+const useStore = defineStore("demo", {
+  state() { return { n: 2 }; },
+  getters: { double(state) { return state.n * 2; } },
+  actions: { inc() { this.n += 1; } },
+});
+
+const Child = defineComponent({
+  setup() {
+    return { theme: inject("theme", "default") };
+  },
+  render(h) {
+    return <span class="theme">{this.theme}</span>;
+  },
+});
+
+export default defineComponent({
+  setup() {
+    provide("theme", "dark");
+    return { store: useStore() };
+  },
+  render(h) {
+    return (
+      <div class="state">
+        <span class="count">{this.store.n}</span>
+        <span class="double">{this.store.double}</span>
+        <Child />
+      </div>
+    );
+  },
+});
+`
+
+func TestRenderIslandStateAndProvide(t *testing.T) {
+	r := NewRenderer(WithRenderEngineSource(islandEngineSource(t)))
+	raw, err := r.RenderIsland(islandStateSource, nil)
+	if err != nil {
+		t.Fatalf("RenderIsland: %v", err)
+	}
+	text := string(raw)
+	for _, want := range []string{`"v":"2"`, `"v":"4"`, `"v":"dark"`, `"class":"state"`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("SSR 状态/注入缺少 %s：%s", want, text)
+		}
+	}
+}
