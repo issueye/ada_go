@@ -1,10 +1,8 @@
-// 浏览器 bundle 入口：page.tsx 与组件化原型共用一份 bundle。
-import Page from "./page.tsx";
+// 浏览器 bundle 入口：供应商页使用组件化实现。
 import ProvidersNext from "./providers-next.tsx";
 
 export const islands = {
-  "page:providers": Page,
-  "page:providers-next": ProvidersNext,
+  "page:providers": ProvidersNext,
 };
 
-export default Page;
+export default ProvidersNext;

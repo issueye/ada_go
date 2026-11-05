@@ -493,8 +493,8 @@ export default defineComponent({
       <section class="pm-page" data-provider-admin-next>
         <div class="pm-head">
           <div class="pm-head__text">
-            <h1 class="pm-title">模型设置（组件化原型）</h1>
-            <p class="pm-sub">只读演示：数据经插件 route /state 读取；写入仍使用原页面。</p>
+            <h1 class="pm-title">模型设置</h1>
+            <p class="pm-sub">管理自定义模型供应商，配置后可在聊天时选择使用。</p>
           </div>
           <div class="pm-head__actions">
             <Badge tone="brand" label={providers.length ? providers.length + " 个供应商" : "无供应商"} />

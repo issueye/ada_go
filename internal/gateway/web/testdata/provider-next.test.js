@@ -105,8 +105,8 @@ async function importBundle() {
 
 test('providers-next：/state 取数、模型表与设为当前', async () => {
   const bundle = await importBundle();
-  const def = bundle.islands && bundle.islands['page:providers-next'];
-  assert.ok(def, 'bundle 应导出 providers-next 岛');
+  const def = bundle.islands && bundle.islands['page:providers'];
+  assert.ok(def, 'bundle 应导出 providers 岛');
 
   const root = global.document.createElement('div');
   global.document.body.appendChild(root);

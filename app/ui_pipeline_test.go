@@ -252,7 +252,7 @@ func TestUIExtRoutes(t *testing.T) {
 		t.Fatalf("token-usage client bundle = %d %q", rec.Code, rec.Header().Get("Content-Type"))
 	}
 
-	// P2-4b-1：provider-admin 首屏骨架同构化，交互仍由 legacy provider-admin.js 接管。
+	// P2-4b-2b：providers 页已替换为组件化实现，legacy provider-admin.js 不再加载。
 	rec = uiGet(t, srv, "/ext/provider-admin/providers")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /ext/provider-admin/providers = %d\n%s", rec.Code, rec.Body.String())
@@ -260,32 +260,23 @@ func TestUIExtRoutes(t *testing.T) {
 	for _, want := range []string{
 		`data-ada-entry="page:providers"`,
 		`data-ada-module="/ext/provider-admin/static/client.js?v=`,
-		`data-provider-admin="true"`,
-		`data-pm-refresh`,
-		`/ext/provider-admin/static/provider-admin.js`,
+		`data-provider-admin-next="true"`,
+		`模型设置`,
+		`正在读取供应商`,
 		`plugin-islands.js`,
 	} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("provider-admin 岛缺少 %q\n%s", want, rec.Body.String())
 		}
 	}
-
-	// P2-4b-2 组件化原型：真实 route 数据 + 本地状态，读写仍在原页面。
-	rec = uiGet(t, srv, "/ext/provider-admin/providers-next")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /ext/provider-admin/providers-next = %d\n%s", rec.Code, rec.Body.String())
+	if strings.Contains(rec.Body.String(), "/ext/provider-admin/static/provider-admin.js") {
+		t.Fatal("provider-admin.js 不应再被加载")
 	}
-	for _, want := range []string{
-		`data-ada-entry="page:providers-next"`,
-		`data-ada-module="/ext/provider-admin/static/client.js?v=`,
-		`data-provider-admin-next="true"`,
-		`模型设置（组件化原型）`,
-		`正在读取供应商`,
-		`plugin-islands.js`,
-	} {
-		if !strings.Contains(rec.Body.String(), want) {
-			t.Fatalf("providers-next 岛缺少 %q\n%s", want, rec.Body.String())
-		}
+	if strings.Contains(rec.Body.String(), `data-provider-admin="true"`) {
+		t.Fatal("legacy provider-admin 骨架不应再渲染")
+	}
+	if rec := uiGet(t, srv, "/ext/provider-admin/providers-next"); rec.Code != http.StatusNotFound {
+		t.Fatalf("providers-next 过渡页应已移除，got %d", rec.Code)
 	}
 	if rec := uiGet(t, srv, "/ext/no-such-plugin/hello"); rec.Code != http.StatusNotFound {
 		t.Fatalf("未知插件 = %d, want 404", rec.Code)

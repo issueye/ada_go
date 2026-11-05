@@ -386,9 +386,9 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - **P2-5 客户端适配完成**：`keyed(vnode,key)` 与 `applyVNodePatches(items, patches)` 支持 `{key,mode:"upsert"|"remove",vnode}` 信封；`ada-patch.test.js` 验证按 key 复用 DOM、文本就地更新、删除不重建其它行。Gateway SSE 的 VNode 帧接入留 P2-5b。
 - **P2-5b 客户端流适配完成**：新增 `ada-patch-stream.js`，订阅 SSE `patch` 帧（`{patches:[...]}`）并驱动 keyed 列表；`source` 可注入，便于测试与自定义 EventSource。测试：`ada-patch-stream.test.js`。服务端具体 route 的帧格式仍由插件自行发送。
 - **P2-4b-1 完成**：`provider-admin` 首屏骨架改为同构组件（SSR + hydrate），交互仍由 legacy `provider-admin.js` 在 `DOMContentLoaded` 后接管；`pluginbuild` 生成 `static/client.js`。`TestUIExtRoutes` 覆盖页面标记、legacy 脚本与 island 引导共存。
-- **P2-4b-2a 完成**：新增组件化原型页 `/ext/provider-admin/providers-next`：`providers-next.tsx` 经插件 route `/state` 取数，用 `Badge/Button/Empty/Input/Table` 渲染列表、详情、模型表与本地页签状态；支持新增供应商；模型行支持「设为当前」（POST `/select`）、编辑（显示名/上下文/推理等级/输入模态/工具/启停）、新增与删除；详情头支持启用/停用（POST `/save`）、删除（POST `/remove`，走 `adaConfirm`）、拉取模型（POST `/fetch-models`）与名称/格式/端点/代理/请求头/API Key 编辑保存。与原 `providers` 页并存。真实 Chromium 验证 `data-ada-mounted=1`、无错误、空态与刷新按钮；Node 假 `adaAPI` 测试覆盖取数、模型表/字段编辑/新增/删除、`/select`、`/save`、`/remove`、`/fetch-models`、新增供应商与编辑表单。完整交互迁移仍留 P2-4b-2b（替换原页）。
+- **P2-4b-2b 完成**：`providers` 页已替换为 `providers-next.tsx` 组件化实现；新增供应商、设为当前、启用/停用、删除、拉取/添加模型、模型新增/删除/编辑（显示名/上下文/推理等级/输入模态/工具/启停）与供应商信息/代理/请求头/API Key 编辑全部走组件状态。`provider-admin.js` 不再由清单加载；`page.tsx`/legacy 脚本保留作历史参考。`TestUIExtRoutes` 断言旧脚本不加载、过渡页 404；`provider-next.test.js` 覆盖全部写操作。
 - **P3-1 客户端 bundle 门禁完成**：`ui-hello-tsx` / `token-usage` / `provider-admin` 统一从 `client.tsx` 构建；`TestOfficialClientBundlesInSync` 在 `go test ./app` 里跑 `pluginbuild --check`，阻止提交产物漂移。
-- **下一步**：P2-4b-2 `provider-admin` 交互组件化，或 P2 验收清单/文档收口。
+- **下一步**：P3-4 文档/安全复查、P3-5 特性开关/回滚/无 JS 验收。
 
 ## 15. P2 验收结果（2026-11-05）
 
@@ -399,7 +399,7 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 | P2-3 插槽级岛屿 | ✅ 基础版 | `data-ada-entry`、`islands` 映射、根元素不包裹、sidebar 试点 |
 | P2-4a 只读真实页面 | ✅ | `token-usage` SSR + hydrate |
 | P2-4b-1 provider-admin 骨架 | ✅ | 同构骨架 + legacy JS 共存 |
-| P2-4b-2 provider-admin 交互 | ⬜ 未完成 | 列表/详情/页签/弹窗仍在 985 行 legacy JS |
+| P2-4b-2 provider-admin 交互 | ✅ | `providers` 已替换为组件化页；legacy JS 不再加载 |
 | P2-5 keyed VNode patch | ✅ 客户端 | `keyed` + `applyVNodePatches` + `AdaPatchStream` |
 | P3-1 bundle 同步门禁 | ✅ | `TestOfficialClientBundlesInSync` |
 | P3-2 CSP bundle 门禁 | ✅ | `TestClientBundlesHonorCSP` 覆盖全部随包 `static/client.js` |

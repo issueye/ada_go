@@ -19,12 +19,11 @@
 | 类型 | 内容 |
 | --- | --- |
 | 插槽 | `composer.left`（`slot.tsx`，order 10）：模型选择器旁的「模型设置」入口 |
-| 导航 / 页面 | 导航「供应商」→ 页面 `/ext/provider-admin/providers`（`page.tsx`，SSR + hydrate） |
-| 原型页 | `/ext/provider-admin/providers-next`（`providers-next.tsx`，组件化原型，经 `/state` 取数；支持新增供应商、设为当前、启用/停用、删除、拉取/添加模型、模型新增/删除/编辑与供应商信息编辑） |
-| 脚本 / 样式 | `provider-admin.js`、`provider-admin.css`（`static/`） |
-| 浏览器 bundle | `static/client.js`（`pluginbuild` 从 `page.tsx` 生成） |
+| 导航 / 页面 | 导航「供应商」→ 页面 `/ext/provider-admin/providers`（`providers-next.tsx`，SSR + hydrate） |
+| 样式 | `provider-admin.css`（`static/`） |
+| 浏览器 bundle | `static/client.js`（`pluginbuild` 从 `client.tsx` 生成） |
 
-P2-4b-1：首屏骨架已改为同构组件，服务端 SSR + 浏览器 hydrate；列表/详情/弹窗等交互仍由 `provider-admin.js` 接管（legacy 脚本在 `DOMContentLoaded` 后读取同一份骨架）。P2-4b-2 再把这些交互迁到组件状态。禁用插件时入口、页面与脚本一起消失。
+P2-4b-2b：`providers` 页已替换为组件化实现，支持新增供应商、设为当前、启用/停用、删除、拉取/添加模型、模型新增/删除/编辑与供应商信息编辑。legacy `provider-admin.js` / `page.tsx` 保留在仓库作历史参考，但清单不再加载脚本。禁用插件时入口、页面与 bundle 一起消失。
 
 ## 构建
 
