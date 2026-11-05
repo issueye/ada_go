@@ -372,4 +372,5 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - **P1-5 已完成**：`plugin-islands.js` 扫描岛屿、按 URL 动态 import、读 `data-ada-props`、从页面 `csrf_token` 补 CSRF，并用 `mount(el, {hydrate:true, rootElement:true})` 接管根元素；单岛失败保留 SSR DOM。引擎新增 `rootElement` hydrate 入口。测试：`plugin-islands.test.js`、`iso-hydrate.test.js`。
 - **P1-6 已完成**：新增 `web.IslandDetector`，Bridge 按页面实际渲染的插槽/页面判断是否有 hydrate 贡献（`HasIslands`）；`base()` 据此设置 `NeedsUI`，空会话也不会覆盖该结果。没有岛屿的页面不加载 `ada-render`/`ada-ui`/`plugin-islands`；legacy `frontend.scripts` 行为暂不变。测试：`TestIslandDetectorGatesPluginIslandAssets`、`TestHasIslandsForChatSlot`。
 - **P1-7 已完成（最小试点）**：`ui-hello-tsx` 新增 `counter` 页面：`counter.tsx` 导出 `defineComponent`，服务端注入岛屿标记，`pluginbuild` 生成 `static/client.js`，浏览器用同一份组件 hydrate；`hello` 保持纯 SSR。端到端测试见 `app/ui_pipeline_test.go` 的 `TestUIExtRoutes`。`provider-admin` 的真实迁移留到 P2-4。
-- **下一步**：P1-8 收口测试（无 JS/CSP/动作桥回归），然后进入 P2-1 同构组件库。
+- **P1-8 已完成**：`TestIslandAssetsHonorCSP` 守住 ada-render/ada-ui/plugin-islands 的 CSP；`TestClientBundlesHonorCSP` 守住随包 client bundle；无 JS 首屏由 `TestUIExtRoutes` 覆盖；动作桥/插槽回归沿用既有测试。
+- **P1 完成**。下一步：P2-1 同构组件库（`render(h)` 化），然后 P2-3 插槽级岛屿与 P2-4 `provider-admin` 迁移。

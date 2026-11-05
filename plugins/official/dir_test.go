@@ -56,6 +56,29 @@ func TestScriptsFromRepoDir(t *testing.T) {
 	}
 }
 
+// TestClientBundlesHonorCSP 钉住随包浏览器 bundle：pluginbuild 产物不能含
+// eval/new Function；client.tsx 与 static/client.js 的同步由 pluginbuild --check
+// 在发布流程里校验（这里至少守住已提交产物）。
+func TestClientBundlesHonorCSP(t *testing.T) {
+	matches, err := filepath.Glob(filepath.Join("ui-hello-tsx", "static", "client.js"))
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+	if len(matches) == 0 {
+		t.Fatal("缺少 ui-hello-tsx/static/client.js")
+	}
+	danger := regexp.MustCompile(`\beval\s*\(|new\s+Function\s*\(`)
+	for _, name := range matches {
+		data, rerr := os.ReadFile(name)
+		if rerr != nil {
+			t.Fatalf("读取 %s: %v", name, rerr)
+		}
+		if loc := danger.FindIndex(data); loc != nil {
+			t.Fatalf("%s 含 CSP 禁止的 eval/new Function（字节 %d 附近）", name, loc[0])
+		}
+	}
+}
+
 // TestMCPSkillPackaged 钉住 mcp-client 随包技能：插件目录里要真的有
 // skills/mcp-tools/SKILL.md，并能被宿主解析成 name/description。
 func TestMCPSkillPackaged(t *testing.T) {
