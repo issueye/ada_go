@@ -19,10 +19,18 @@
 | 类型 | 内容 |
 | --- | --- |
 | 插槽 | `composer.left`（`slot.tsx`，order 10）：模型选择器旁的「模型设置」入口 |
-| 导航 / 页面 | 导航「供应商」→ 页面 `/ext/provider-admin/providers`（`page.tsx`） |
+| 导航 / 页面 | 导航「供应商」→ 页面 `/ext/provider-admin/providers`（`page.tsx`，SSR + hydrate） |
 | 脚本 / 样式 | `provider-admin.js`、`provider-admin.css`（`static/`） |
+| 浏览器 bundle | `static/client.js`（`pluginbuild` 从 `page.tsx` 生成） |
 
-页面首屏只渲染骨架，数据与交互全部由 `provider-admin.js` 调本插件 route 完成。禁用插件时入口、页面与脚本一起消失。
+P2-4b-1：首屏骨架已改为同构组件，服务端 SSR + 浏览器 hydrate；列表/详情/弹窗等交互仍由 `provider-admin.js` 接管（legacy 脚本在 `DOMContentLoaded` 后读取同一份骨架）。P2-4b-2 再把这些交互迁到组件状态。禁用插件时入口、页面与脚本一起消失。
+
+## 构建
+
+```sh
+go run ./tools/pluginbuild -dir plugins/official/provider-admin -entry page.tsx -out static/client.js
+go run ./tools/pluginbuild -dir plugins/official/provider-admin -entry page.tsx -out static/client.js -check
+```
 
 ## 后端路由
 

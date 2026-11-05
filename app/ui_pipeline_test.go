@@ -251,6 +251,24 @@ func TestUIExtRoutes(t *testing.T) {
 	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/javascript; charset=utf-8" {
 		t.Fatalf("token-usage client bundle = %d %q", rec.Code, rec.Header().Get("Content-Type"))
 	}
+
+	// P2-4b-1：provider-admin 首屏骨架同构化，交互仍由 legacy provider-admin.js 接管。
+	rec = uiGet(t, srv, "/ext/provider-admin/providers")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /ext/provider-admin/providers = %d\n%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{
+		`data-ada-entry="page:providers"`,
+		`data-ada-module="/ext/provider-admin/static/client.js?v=`,
+		`data-provider-admin="true"`,
+		`data-pm-refresh`,
+		`/ext/provider-admin/static/provider-admin.js`,
+		`plugin-islands.js`,
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("provider-admin 岛缺少 %q\n%s", want, rec.Body.String())
+		}
+	}
 	if rec := uiGet(t, srv, "/ext/no-such-plugin/hello"); rec.Code != http.StatusNotFound {
 		t.Fatalf("未知插件 = %d, want 404", rec.Code)
 	}

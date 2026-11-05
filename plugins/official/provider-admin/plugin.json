@@ -11,9 +11,10 @@
   },
   "frontend": {
     "capabilities": ["frontend.script"],
+    "client": "client.js",
     "slots": [{ "slot": "composer.left", "template": "slot.tsx", "order": 10 }],
     "nav": [{ "label": "供应商", "slug": "providers" }],
-    "pages": [{ "slug": "providers", "title": "供应商", "template": "page.tsx" }],
+    "pages": [{ "slug": "providers", "title": "供应商", "template": "page.tsx", "hydrate": true }],
     "scripts": ["provider-admin.js"],
     "styles": ["provider-admin.css"],
     "assets": "static"

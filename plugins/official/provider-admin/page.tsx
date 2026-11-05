@@ -1,43 +1,48 @@
 /**
  * 供应商管理（official/provider-admin）：Master-Detail 的模型设置页。
  *
- * 左侧是供应商列表；右侧详情分「供应商信息」「模型列表」两个页签，由
- * provider-admin.js 渲染与切换。首屏只渲染骨架；数据与操作全部经本插件
- * route（GET /state、POST /save、/remove、/fetch-models、/select）。API Key
- * 由后端保存，页面只显示“已配置 + 尾号”，输入框留空表示保持原值；
- * 「获取模型」把供应商 /models 的结果放进弹窗里挑，而不是直接摊在页面上。
+ * P2-4b-1：首屏骨架改为同构组件（服务端 SSR + 浏览器 hydrate），交互仍由
+ * static/provider-admin.js 接管。这样先验证真实交互页与岛屿共存，再在
+ * P2-4b-2 把列表/详情/弹窗逐步迁到组件状态。
+ *
+ * 数据与操作全部经本插件 route（GET /state、POST /save、/remove、
+ * /fetch-models、/select）。API Key 由后端保存，页面只显示“已配置 + 尾号”。
  */
-export default function Page(_props: any) {
-  return (
-    <div class="pm-page" data-provider-admin>
-      <div class="pm-head">
-        <div class="pm-head__text">
-          <h1 class="pm-title">模型设置</h1>
-          <p class="pm-sub">管理自定义模型供应商，配置后可在聊天时选择使用。</p>
-        </div>
-        <div class="pm-head__actions">
-          <button class="ada-btn ada-btn--secondary ada-btn--sm" type="button" data-pm-refresh title="重新读取供应商列表">
-            刷新
-          </button>
-          <button class="ada-btn ada-btn--primary ada-btn--sm" type="button" data-pm-add>
-            添加供应商
-          </button>
-        </div>
-      </div>
+import { defineComponent } from "ada:render";
 
-      <p class="pm-status" data-pm-status role="status" aria-live="polite"></p>
-
-      <div class="pm-layout">
-        <div class="pm-list" data-pm-list aria-label="供应商列表">
-          <p class="pm-empty">正在读取供应商…</p>
-        </div>
-        <section class="pm-detail" data-pm-detail aria-label="供应商详情">
-          <div class="pm-placeholder">
-            <span class="pm-placeholder__title">选择一个供应商</span>
-            <span class="pm-placeholder__hint">从左侧选择，或添加一个新的供应商。</span>
+export default defineComponent({
+  render(h) {
+    return (
+      <div class="pm-page" data-provider-admin>
+        <div class="pm-head">
+          <div class="pm-head__text">
+            <h1 class="pm-title">模型设置</h1>
+            <p class="pm-sub">管理自定义模型供应商，配置后可在聊天时选择使用。</p>
           </div>
-        </section>
+          <div class="pm-head__actions">
+            <button class="ada-btn ada-btn--secondary ada-btn--sm" type="button" data-pm-refresh title="重新读取供应商列表">
+              刷新
+            </button>
+            <button class="ada-btn ada-btn--primary ada-btn--sm" type="button" data-pm-add>
+              添加供应商
+            </button>
+          </div>
+        </div>
+
+        <p class="pm-status" data-pm-status role="status" aria-live="polite"></p>
+
+        <div class="pm-layout">
+          <div class="pm-list" data-pm-list aria-label="供应商列表">
+            <p class="pm-empty">正在读取供应商…</p>
+          </div>
+          <section class="pm-detail" data-pm-detail aria-label="供应商详情">
+            <div class="pm-placeholder">
+              <span class="pm-placeholder__title">选择一个供应商</span>
+              <span class="pm-placeholder__hint">从左侧选择，或添加一个新的供应商。</span>
+            </div>
+          </section>
+        </div>
       </div>
-    </div>
-  );
-}
+    );
+  },
+});
