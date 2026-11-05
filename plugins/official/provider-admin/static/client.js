@@ -72,7 +72,14 @@ var providers_next_default = defineComponent({
       editing: false,
       form: { name: "", protocol: "", baseUrl: "", proxy: "", headersText: "", apiKey: "" },
       editingModelId: "",
-      modelForm: { displayName: "", contextWindow: "", supportsTools: false, disabled: false }
+      modelForm: {
+        displayName: "",
+        contextWindow: "",
+        supportsTools: false,
+        disabled: false,
+        thinkingLevels: "",
+        inputModes: ""
+      }
     };
   },
   computed: {
@@ -356,7 +363,9 @@ var providers_next_default = defineComponent({
         displayName: row.displayName || "",
         contextWindow: row.contextWindow === void 0 || row.contextWindow === null ? "" : String(row.contextWindow),
         supportsTools: !!row.supportsTools,
-        disabled: !!row.disabled
+        disabled: !!row.disabled,
+        thinkingLevels: Array.isArray(row.thinkingLevels) ? row.thinkingLevels.join(", ") : "",
+        inputModes: Array.isArray(row.input) ? row.input.join(", ") : ""
       };
     },
     cancelModelEdit() {
@@ -381,6 +390,12 @@ var providers_next_default = defineComponent({
         const context = String(this.modelForm.contextWindow || "").trim();
         if (context) next.contextWindow = Number(context);
         else delete next.contextWindow;
+        const levels = String(this.modelForm.thinkingLevels || "").split(",").map((value) => value.trim()).filter(Boolean);
+        if (levels.length) next.thinkingLevels = levels;
+        else delete next.thinkingLevels;
+        const inputs = String(this.modelForm.inputModes || "").split(",").map((value) => value.trim()).filter(Boolean);
+        if (inputs.length) next.input = inputs;
+        else delete next.input;
         return next;
       });
       this.status = "正在保存模型…";
@@ -554,6 +569,28 @@ var providers_next_default = defineComponent({
         placeholder: "例如 128000",
         onInput: (value) => {
           this.modelForm.contextWindow = String(value || "");
+        }
+      }
+    ), /* @__PURE__ */ h2(
+      Input,
+      {
+        id: "pm-model-levels",
+        label: "推理等级（逗号分隔）",
+        modelValue: this.modelForm.thinkingLevels,
+        placeholder: "low, medium, high",
+        onInput: (value) => {
+          this.modelForm.thinkingLevels = String(value || "");
+        }
+      }
+    ), /* @__PURE__ */ h2(
+      Input,
+      {
+        id: "pm-model-inputs",
+        label: "输入模态（逗号分隔）",
+        modelValue: this.modelForm.inputModes,
+        placeholder: "text, image",
+        onInput: (value) => {
+          this.modelForm.inputModes = String(value || "");
         }
       }
     ), /* @__PURE__ */ h2("p", { class: "pm-info__actions" }, /* @__PURE__ */ h2(

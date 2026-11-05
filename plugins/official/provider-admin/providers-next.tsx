@@ -24,7 +24,14 @@ export default defineComponent({
       editing: false,
       form: { name: "", protocol: "", baseUrl: "", proxy: "", headersText: "", apiKey: "" },
       editingModelId: "",
-      modelForm: { displayName: "", contextWindow: "", supportsTools: false, disabled: false },
+      modelForm: {
+        displayName: "",
+        contextWindow: "",
+        supportsTools: false,
+        disabled: false,
+        thinkingLevels: "",
+        inputModes: "",
+      },
     };
   },
   computed: {
@@ -322,6 +329,8 @@ export default defineComponent({
         contextWindow: row.contextWindow === undefined || row.contextWindow === null ? "" : String(row.contextWindow),
         supportsTools: !!row.supportsTools,
         disabled: !!row.disabled,
+        thinkingLevels: Array.isArray(row.thinkingLevels) ? row.thinkingLevels.join(", ") : "",
+        inputModes: Array.isArray(row.input) ? row.input.join(", ") : "",
       };
     },
     cancelModelEdit() {
@@ -346,6 +355,18 @@ export default defineComponent({
         const context = String(this.modelForm.contextWindow || "").trim();
         if (context) next.contextWindow = Number(context);
         else delete next.contextWindow;
+        const levels = String(this.modelForm.thinkingLevels || "")
+          .split(",")
+          .map((value: string) => value.trim())
+          .filter(Boolean);
+        if (levels.length) next.thinkingLevels = levels;
+        else delete next.thinkingLevels;
+        const inputs = String(this.modelForm.inputModes || "")
+          .split(",")
+          .map((value: string) => value.trim())
+          .filter(Boolean);
+        if (inputs.length) next.input = inputs;
+        else delete next.input;
         return next;
       });
       this.status = "正在保存模型…";
@@ -542,6 +563,20 @@ export default defineComponent({
                           modelValue={this.modelForm.contextWindow}
                           placeholder="例如 128000"
                           onInput={(value: any) => { this.modelForm.contextWindow = String(value || ""); }}
+                        />
+                        <Input
+                          id="pm-model-levels"
+                          label="推理等级（逗号分隔）"
+                          modelValue={this.modelForm.thinkingLevels}
+                          placeholder="low, medium, high"
+                          onInput={(value: any) => { this.modelForm.thinkingLevels = String(value || ""); }}
+                        />
+                        <Input
+                          id="pm-model-inputs"
+                          label="输入模态（逗号分隔）"
+                          modelValue={this.modelForm.inputModes}
+                          placeholder="text, image"
+                          onInput={(value: any) => { this.modelForm.inputModes = String(value || ""); }}
                         />
                         <p class="pm-info__actions">
                           <Button

@@ -120,11 +120,17 @@ test('providers-next：/state 取数、模型表与设为当前', async () => {
   await globalThis.AdaRender.nextTick();
   const modelName = root.querySelector('#pm-model-name');
   const modelContext = root.querySelector('#pm-model-context');
-  assert.ok(modelName && modelContext, '模型编辑应渲染显示名/上下文输入');
+  const modelLevels = root.querySelector('#pm-model-levels');
+  const modelInputs = root.querySelector('#pm-model-inputs');
+  assert.ok(modelName && modelContext && modelLevels && modelInputs, '模型编辑应渲染显示名/上下文/推理等级/输入模态');
   modelName.value = '模型一（改）';
   modelName.dispatchEvent({ type: 'input' });
   modelContext.value = '256000';
   modelContext.dispatchEvent({ type: 'input' });
+  modelLevels.value = 'low, high';
+  modelLevels.dispatchEvent({ type: 'input' });
+  modelInputs.value = 'text, image';
+  modelInputs.dispatchEvent({ type: 'input' });
   await globalThis.AdaRender.nextTick();
   const saveModel = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存模型');
   assert.ok(saveModel, '模型编辑应提供保存按钮');
@@ -137,6 +143,8 @@ test('providers-next：/state 取数、模型表与设为当前', async () => {
   const savedModel = modelSave.models.find((m) => m.id === 'm1');
   assert.equal(savedModel.displayName, '模型一（改）');
   assert.equal(savedModel.contextWindow, 256000);
+  assert.deepEqual(savedModel.thinkingLevels, ['low', 'high']);
+  assert.deepEqual(savedModel.input, ['text', 'image']);
 
   const switchButton = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '设为当前');
   assert.ok(switchButton, '非当前模型应提供设为当前按钮');
