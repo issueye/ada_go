@@ -287,8 +287,74 @@
     },
   });
 
-  var Input = register('Input', {
+  var Table = register('Table', {
     props: {
+      columns: { default: function () { return []; } },
+      rows: { default: function () { return []; } },
+      rowKey: { default: '' },
+      empty: { default: '暂无数据' },
+      loading: BOOL,
+      striped: BOOL,
+      hover: BOOL_TRUE,
+      caption: { default: '' },
+    },
+    methods: {
+      valueAt: function (row, column) {
+        if (typeof column.value === 'function') return column.value(row);
+        if (column.key) return row ? row[column.key] : '';
+        return '';
+      },
+      cellContent: function (h, row, column, index) {
+        if (typeof column.render === 'function') return column.render(row, index, h);
+        var value = this.valueAt(row, column);
+        return value === null || value === undefined ? '' : value;
+      },
+      keyFor: function (row, index) {
+        var key;
+        if (typeof this.rowKey === 'function') key = this.rowKey(row, index);
+        else if (this.rowKey) key = row ? row[this.rowKey] : undefined;
+        else key = row ? row.id : undefined;
+        return key === undefined || key === null ? index : key;
+      },
+    },
+    render: function (h) {
+      var columns = this.columns || [];
+      var rows = this.rows || [];
+      var self = this;
+      var head = h('thead', null, h('tr', null, columns.map(function (column) {
+        return h('th', { scope: 'col', class: column.headerClass || column.class || '' }, column.label || '');
+      })));
+      var body;
+      if (this.loading) {
+        body = h('tbody', null, h('tr', null, h('td', {
+          colspan: columns.length || 1,
+          class: 'ada-table__empty',
+        }, '加载中…')));
+      } else if (!rows.length) {
+        body = h('tbody', null, h('tr', null, h('td', {
+          colspan: columns.length || 1,
+          class: 'ada-table__empty',
+        }, this.empty)));
+      } else {
+        body = h('tbody', null, rows.map(function (row, index) {
+          return h('tr', { key: self.keyFor(row, index) }, columns.map(function (column) {
+            return h('td', { class: column.class || '' }, self.cellContent(h, row, column, index));
+          }));
+        }));
+      }
+      var table = h('table', {
+        class: ['table', this.striped ? 'ada-table--striped' : '', this.hover ? 'ada-table--hover' : ''],
+      }, [
+        this.caption ? h('caption', null, this.caption) : null,
+        head,
+        body,
+      ]);
+      return h('div', { class: 'ada-table-wrap' }, table);
+    },
+  });
+  components.DataTable = Table;
+
+  var Input = register('Input', {    props: {
       modelValue: { default: '' },
       type: { default: 'text' },
       name: { default: '' },

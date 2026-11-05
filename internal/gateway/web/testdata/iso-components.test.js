@@ -141,3 +141,32 @@ test('ada-ui-iso：TodoList/Notice 通过 Icon 桥输出原生结构', () => {
   assert.equal(root.querySelectorAll('.ada-todo__step svg.ada-icon').length, 3);
 });
 
+test('ada-ui-iso：Table 输出原生 table 与列定义', () => {
+  const root = global.document.createElement('div');
+  global.document.body.appendChild(root);
+  const app = globalThis.AdaRender.createApp({
+    render(h) {
+      return h(UI.components.Table, {
+        caption: '模型列表',
+        rowKey: 'id',
+        columns: [
+          { key: 'name', label: '名称' },
+          { key: 'size', label: '大小', class: 'is-size' },
+        ],
+        rows: [
+          { id: 'a', name: '甲', size: '1K' },
+          { id: 'b', name: '乙', size: '2K' },
+        ],
+      });
+    },
+  });
+  app.mount(root);
+
+  assert.ok(root.querySelector('.ada-table-wrap table.table'));
+  assert.equal(root.querySelector('caption').textContent, '模型列表');
+  assert.equal(root.querySelectorAll('thead th').length, 2);
+  assert.equal(root.querySelectorAll('tbody tr').length, 2);
+  assert.equal(root.querySelector('tbody tr td').textContent, '甲');
+  assert.ok(root.querySelector('td.is-size'));
+});
+

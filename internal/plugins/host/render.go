@@ -387,6 +387,8 @@ export const Empty = __UI.components.Empty;
 export const Icon = __UI.components.Icon;
 export const TodoList = __UI.components.TodoList;
 export const Notice = __UI.components.Notice;
+export const Table = __UI.components.Table;
+export const DataTable = __UI.components.DataTable;
 `
 }
 

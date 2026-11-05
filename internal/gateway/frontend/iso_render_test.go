@@ -84,6 +84,65 @@ export default defineComponent({
 });
 `
 
+const isoTableSource = `import { h, defineComponent } from "ada:render";
+import { Table } from "ada:ui";
+
+export default defineComponent({
+  render(h) {
+    return (
+      <Table
+        caption="模型列表"
+        rowKey="id"
+        columns={[
+          { key: "name", label: "名称" },
+          { key: "size", label: "大小", class: "is-size" },
+        ]}
+        rows={[
+          { id: "a", name: "甲", size: "1K" },
+          { id: "b", name: "乙", size: "2K" },
+        ]}
+      />
+    );
+  },
+});
+`
+
+func TestIsoTableRenderThroughGo(t *testing.T) {
+	engine, err := os.ReadFile(filepath.Join("..", "web", "static", "ada-render.js"))
+	if err != nil {
+		t.Fatalf("读取 ada-render.js: %v", err)
+	}
+	iso, err := os.ReadFile(filepath.Join("..", "web", "static", "ada-ui-iso.js"))
+	if err != nil {
+		t.Fatalf("读取 ada-ui-iso.js: %v", err)
+	}
+	r := host.NewRenderer(
+		host.WithRenderEngineSource(string(engine)),
+		host.WithIsoComponentsSource(string(iso)),
+	)
+	vnode, err := r.RenderIsland(isoTableSource, nil)
+	if err != nil {
+		t.Fatalf("RenderIsland: %v", err)
+	}
+	html, err := RenderHTML(vnode)
+	if err != nil {
+		t.Fatalf("RenderHTML: %v", err)
+	}
+	text := string(html)
+	for _, want := range []string{
+		`<div class="ada-table-wrap">`,
+		`<table class="table ada-table--hover">`,
+		`<caption>模型列表</caption>`,
+		`<th scope="col">名称</th>`,
+		`<th class="is-size" scope="col">大小</th>`,
+		`<td class="is-size">1K</td>`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("SSR HTML 缺少 %s\n%s", want, text)
+		}
+	}
+}
+
 func TestIsoIconTodoNoticeRenderThroughGo(t *testing.T) {
 	engine, err := os.ReadFile(filepath.Join("..", "web", "static", "ada-render.js"))
 	if err != nil {
