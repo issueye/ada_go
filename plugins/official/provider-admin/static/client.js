@@ -68,8 +68,10 @@ var providers_next_default = defineComponent({
       selectedId: providers.length ? providers[0].id : "",
       tab: "info",
       status: "",
+      fetchOpen: false,
       fetching: false,
-      remoteModels: [],
+      fetchedModels: [],
+      selectedFetch: {},
       fetchError: "",
       editing: false,
       form: { name: "", protocol: "", baseUrl: "", proxy: "", headersText: "", apiKey: "" },
@@ -78,13 +80,15 @@ var providers_next_default = defineComponent({
       editingModelId: "",
       addingModel: false,
       newModel: { id: "", displayName: "", contextWindow: "" },
+      levelDraft: "",
+      levelInputOpen: false,
       modelForm: {
         displayName: "",
         contextWindow: "",
         supportsTools: false,
         disabled: false,
-        thinkingLevels: "",
-        inputModes: ""
+        thinkingLevels: [],
+        inputModes: []
       }
     };
   },
@@ -94,6 +98,13 @@ var providers_next_default = defineComponent({
         if (this.providers[i].id === this.selectedId) return this.providers[i];
       }
       return this.providers[0] || null;
+    },
+    selectedFetchCount() {
+      let count = 0;
+      Object.keys(this.selectedFetch).forEach((key) => {
+        if (this.selectedFetch[key]) count += 1;
+      });
+      return count;
     },
     modelColumns() {
       const self = this;
@@ -240,7 +251,7 @@ var providers_next_default = defineComponent({
         remove();
       }
     },
-    fetchModels() {
+    openFetchModels() {
       const selected = this.selected;
       if (!selected) return;
       const api = window.adaAPI;
@@ -248,58 +259,47 @@ var providers_next_default = defineComponent({
         this.fetchError = "当前页面没有 adaAPI，无法拉取模型。";
         return;
       }
+      this.fetchOpen = true;
       this.fetching = true;
       this.fetchError = "";
-      this.remoteModels = [];
+      this.fetchedModels = [];
+      this.selectedFetch = {};
       api("provider-admin", "/fetch-models", {
         method: "POST",
         body: { id: selected.id }
       }).then((models) => {
         this.fetching = false;
-        this.remoteModels = Array.isArray(models) ? models : [];
-        this.status = this.remoteModels.length ? "拉取到 " + this.remoteModels.length + " 个模型。" : "没有拉取到模型。";
+        this.fetchedModels = Array.isArray(models) ? models : [];
       }).catch((err) => {
         this.fetching = false;
         this.fetchError = "拉取失败：" + (err && err.message || String(err));
       });
     },
-    addFetchedModels() {
+    closeFetch() {
+      this.fetchOpen = false;
+      this.fetchedModels = [];
+      this.selectedFetch = {};
+      this.fetchError = "";
+    },
+    toggleFetchModel(modelId, checked) {
+      this.selectedFetch = Object.assign({}, this.selectedFetch, { [modelId]: checked });
+    },
+    addSelectedModels() {
       const selected = this.selected;
       if (!selected) return;
       const existing = {};
       (selected.models || []).forEach((m) => {
         existing[m.id] = true;
       });
-      const added = this.remoteModels.filter((m) => m && m.id && !existing[m.id]);
+      const added = this.fetchedModels.filter(
+        (m) => m && m.id && !existing[m.id] && this.selectedFetch[m.id]
+      );
       if (!added.length) {
-        this.status = "没有需要新增的模型。";
+        this.status = "没有勾选可添加的模型。";
         return;
       }
-      const api = window.adaAPI;
-      if (typeof api !== "function") {
-        this.status = "当前页面没有 adaAPI，无法保存模型。";
-        return;
-      }
-      this.status = "正在添加 " + added.length + " 个模型…";
-      api("provider-admin", "/save", {
-        method: "POST",
-        body: {
-          id: selected.id,
-          name: selected.displayName || selected.id,
-          protocol: selected.protocol || "",
-          baseUrl: selected.baseUrl || "",
-          proxy: selected.proxy || "",
-          headers: selected.headers || {},
-          disabled: !!selected.disabled,
-          models: (selected.models || []).concat(added)
-        }
-      }).then(() => {
-        this.status = "已添加 " + added.length + " 个模型。";
-        this.remoteModels = [];
-        this.load();
-      }).catch((err) => {
-        this.status = "添加失败：" + (err && err.message || String(err));
-      });
+      this.closeFetch();
+      this.persistModels((selected.models || []).concat(added), "已添加 " + added.length + " 个模型。");
     },
     startEdit() {
       const selected = this.selected;
@@ -404,17 +404,57 @@ var providers_next_default = defineComponent({
     startEditModel(row) {
       if (!row) return;
       this.editingModelId = row.id;
+      this.levelInputOpen = false;
+      this.levelDraft = "";
       this.modelForm = {
         displayName: row.displayName || "",
         contextWindow: row.contextWindow === void 0 || row.contextWindow === null ? "" : String(row.contextWindow),
         supportsTools: !!row.supportsTools,
         disabled: !!row.disabled,
-        thinkingLevels: Array.isArray(row.thinkingLevels) ? row.thinkingLevels.join(", ") : "",
-        inputModes: Array.isArray(row.input) ? row.input.join(", ") : ""
+        thinkingLevels: Array.isArray(row.thinkingLevels) ? row.thinkingLevels.slice() : [],
+        inputModes: Array.isArray(row.input) ? row.input.slice() : []
       };
     },
     cancelModelEdit() {
       this.editingModelId = "";
+      this.levelInputOpen = false;
+      this.levelDraft = "";
+    },
+    openLevelInput() {
+      this.levelInputOpen = true;
+      this.levelDraft = "";
+    },
+    addLevel() {
+      const value = String(this.levelDraft || "").trim();
+      if (value && this.modelForm.thinkingLevels.indexOf(value) < 0) {
+        this.modelForm.thinkingLevels.push(value);
+      }
+      this.levelDraft = "";
+      this.levelInputOpen = false;
+    },
+    cancelLevelInput() {
+      this.levelDraft = "";
+      this.levelInputOpen = false;
+    },
+    removeLevel(index) {
+      this.modelForm.thinkingLevels.splice(index, 1);
+    },
+    onLevelKeydown(event) {
+      if (!event) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        this.addLevel();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        this.cancelLevelInput();
+      }
+    },
+    toggleInputMode(mode, checked) {
+      const list = this.modelForm.inputModes.slice();
+      const index = list.indexOf(mode);
+      if (checked && index < 0) list.push(mode);
+      if (!checked && index >= 0) list.splice(index, 1);
+      this.modelForm.inputModes = list;
     },
     persistModels(models, message) {
       const selected = this.selected;
@@ -460,10 +500,10 @@ var providers_next_default = defineComponent({
         const context = String(this.modelForm.contextWindow || "").trim();
         if (context) next.contextWindow = Number(context);
         else delete next.contextWindow;
-        const levels = String(this.modelForm.thinkingLevels || "").split(",").map((value) => value.trim()).filter(Boolean);
+        const levels = this.modelForm.thinkingLevels.slice();
         if (levels.length) next.thinkingLevels = levels;
         else delete next.thinkingLevels;
-        const inputs = String(this.modelForm.inputModes || "").split(",").map((value) => value.trim()).filter(Boolean);
+        const inputs = this.modelForm.inputModes.slice();
         if (inputs.length) next.input = inputs;
         else delete next.input;
         return next;
@@ -618,7 +658,7 @@ var providers_next_default = defineComponent({
         size: "sm",
         variant: "secondary",
         disabled: this.fetching,
-        onClick: this.fetchModels
+        onClick: this.openFetchModels
       },
       this.fetching ? "拉取中…" : "拉取模型"
     ))), /* @__PURE__ */ h2("div", { class: "ada-tabs__list", role: "tablist" }, /* @__PURE__ */ h2(
@@ -766,29 +806,45 @@ var providers_next_default = defineComponent({
           this.modelForm.contextWindow = String(value || "");
         }
       }
-    ), /* @__PURE__ */ h2(
-      Input,
+    ), /* @__PURE__ */ h2("div", { class: "pm-field" }, /* @__PURE__ */ h2("span", { class: "pm-field__label" }, "推理等级"), /* @__PURE__ */ h2("div", { class: "pm-levels" }, this.modelForm.thinkingLevels.map((level, index) => /* @__PURE__ */ h2("span", { class: "pm-level", key: level }, /* @__PURE__ */ h2("span", { class: "pm-level__name" }, level), /* @__PURE__ */ h2(
+      "button",
       {
-        id: "pm-model-levels",
-        label: "推理等级（逗号分隔）",
-        modelValue: this.modelForm.thinkingLevels,
-        placeholder: "low, medium, high",
-        onInput: (value) => {
-          this.modelForm.thinkingLevels = String(value || "");
-        }
-      }
-    ), /* @__PURE__ */ h2(
-      Input,
+        type: "button",
+        class: "pm-level__remove",
+        "aria-label": "移除推理等级 " + level,
+        onClick: () => this.removeLevel(index)
+      },
+      "×"
+    ))), this.levelInputOpen ? /* @__PURE__ */ h2(
+      "input",
       {
-        id: "pm-model-inputs",
-        label: "输入模态（逗号分隔）",
-        modelValue: this.modelForm.inputModes,
-        placeholder: "text, image",
-        onInput: (value) => {
-          this.modelForm.inputModes = String(value || "");
-        }
+        id: "pm-level-input",
+        class: "pm-level__input",
+        value: this.levelDraft,
+        placeholder: "low / high",
+        onInput: (event) => {
+          this.levelDraft = event.target.value;
+        },
+        onKeydown: this.onLevelKeydown
       }
-    ), /* @__PURE__ */ h2("p", { class: "pm-info__actions" }, /* @__PURE__ */ h2(
+    ) : /* @__PURE__ */ h2(
+      "button",
+      {
+        type: "button",
+        class: "pm-level__add",
+        "aria-label": "添加推理等级",
+        onClick: this.openLevelInput
+      },
+      "+"
+    ))), /* @__PURE__ */ h2("div", { class: "pm-field" }, /* @__PURE__ */ h2("span", { class: "pm-field__label" }, "输入模态"), /* @__PURE__ */ h2("div", { class: "pm-checks" }, ["text", "image", "audio", "video"].map((mode) => /* @__PURE__ */ h2("label", { class: "checkbox-row", key: mode }, /* @__PURE__ */ h2(
+      "input",
+      {
+        id: "pm-mode-" + mode,
+        type: "checkbox",
+        checked: this.modelForm.inputModes.indexOf(mode) >= 0,
+        onChange: (event) => this.toggleInputMode(mode, event.target.checked)
+      }
+    ), mode)))), /* @__PURE__ */ h2("p", { class: "pm-info__actions" }, /* @__PURE__ */ h2(
       Button,
       {
         size: "sm",
@@ -810,7 +866,7 @@ var providers_next_default = defineComponent({
       },
       "状态：",
       this.modelForm.disabled ? "停用" : "启用"
-    ), /* @__PURE__ */ h2(Button, { size: "sm", variant: "primary", onClick: this.saveModel }, "保存模型"), /* @__PURE__ */ h2(Button, { size: "sm", variant: "danger", onClick: this.removeModel }, "删除模型"), /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.cancelModelEdit }, "取消"))) : null, this.fetchError ? /* @__PURE__ */ h2("p", { class: "pm-status", "data-tone": "danger", role: "alert" }, this.fetchError) : null, this.remoteModels.length ? /* @__PURE__ */ h2("p", { class: "pm-status" }, "拉取到 ", this.remoteModels.length, " 个模型。", /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.addFetchedModels }, "添加未配置模型")) : null, /* @__PURE__ */ h2(
+    ), /* @__PURE__ */ h2(Button, { size: "sm", variant: "primary", onClick: this.saveModel }, "保存模型"), /* @__PURE__ */ h2(Button, { size: "sm", variant: "danger", onClick: this.removeModel }, "删除模型"), /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.cancelModelEdit }, "取消"))) : null, /* @__PURE__ */ h2(
       Table,
       {
         caption: (selected.displayName || selected.id) + " 的模型",
@@ -818,7 +874,29 @@ var providers_next_default = defineComponent({
         rows: selected.models || [],
         columns: this.modelColumns
       }
-    ))) : /* @__PURE__ */ h2(Empty, { title: "选择一个供应商", description: "从左侧列表选择，或点击右上角添加供应商。" }))));
+    ))) : /* @__PURE__ */ h2(Empty, { title: "选择一个供应商", description: "从左侧列表选择，或点击右上角添加供应商。" }))), this.fetchOpen ? /* @__PURE__ */ h2("div", { class: "pm-modal", role: "dialog", "aria-modal": "true", "aria-labelledby": "pm-fetch-title" }, /* @__PURE__ */ h2("div", { class: "pm-modal__backdrop", onClick: this.closeFetch }), /* @__PURE__ */ h2("div", { class: "pm-modal__panel" }, /* @__PURE__ */ h2("div", { class: "pm-modal__head" }, /* @__PURE__ */ h2("h2", { id: "pm-fetch-title", class: "pm-modal__title" }, "从「", selected ? selected.displayName || selected.id : "", "」选择模型"), /* @__PURE__ */ h2(Button, { size: "sm", variant: "ghost", onClick: this.closeFetch }, "关闭")), /* @__PURE__ */ h2("p", { class: "pm-fetch__hint" }, "勾选要添加的模型；已添加的模型不可重复选择。"), this.fetching ? /* @__PURE__ */ h2("p", { class: "pm-fetch__state" }, "正在拉取模型…") : this.fetchError ? /* @__PURE__ */ h2("p", { class: "pm-fetch__state pm-fetch__state--error", role: "alert" }, this.fetchError) : this.fetchedModels.length === 0 ? /* @__PURE__ */ h2("p", { class: "pm-fetch__state" }, "没有拉取到模型。") : /* @__PURE__ */ h2("div", { class: "pm-fetch__list" }, this.fetchedModels.map((model) => {
+      const added = !!(selected && (selected.models || []).some((m) => m && m.id === model.id));
+      return /* @__PURE__ */ h2("label", { class: "pm-fetch__row" + (added ? " is-added" : ""), key: model.id }, /* @__PURE__ */ h2(
+        "input",
+        {
+          type: "checkbox",
+          checked: !!this.selectedFetch[model.id],
+          disabled: added,
+          onChange: (event) => this.toggleFetchModel(model.id, event.target.checked)
+        }
+      ), /* @__PURE__ */ h2("span", { class: "ada-remote__id" }, model.id), /* @__PURE__ */ h2("span", { class: "ada-remote__meta" }, model.displayName || ""), added ? /* @__PURE__ */ h2("span", { class: "badge badge-neutral" }, "已添加") : null);
+    })), /* @__PURE__ */ h2("div", { class: "pm-modal__actions" }, /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.closeFetch }, "取消"), /* @__PURE__ */ h2(
+      Button,
+      {
+        size: "sm",
+        variant: "primary",
+        disabled: this.selectedFetchCount === 0,
+        onClick: this.addSelectedModels
+      },
+      "添加所选（",
+      this.selectedFetchCount,
+      "）"
+    )))) : null);
   }
 });
 

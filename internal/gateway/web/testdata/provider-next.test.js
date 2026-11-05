@@ -221,17 +221,29 @@ test('providers-next：客户端 /state 取数与写操作', async () => {
   await globalThis.AdaRender.nextTick();
   const modelName = root.querySelector('#pm-model-name');
   const modelContext = root.querySelector('#pm-model-context');
-  const modelLevels = root.querySelector('#pm-model-levels');
-  const modelInputs = root.querySelector('#pm-model-inputs');
-  assert.ok(modelName && modelContext && modelLevels && modelInputs, '模型编辑应渲染显示名/上下文/推理等级/输入模态');
-  modelName.value = '模型一（改）';
+  const levelAdd = root.querySelector('.pm-level__add');
+  const imageMode = root.querySelector('#pm-mode-image');
+  assert.ok(modelName && modelContext && levelAdd && imageMode, '模型编辑应渲染显示名/上下文/等级标签/模态复选框');  modelName.value = '模型一（改）';
   modelName.dispatchEvent({ type: 'input' });
   modelContext.value = '256000';
   modelContext.dispatchEvent({ type: 'input' });
-  modelLevels.value = 'low, high';
-  modelLevels.dispatchEvent({ type: 'input' });
-  modelInputs.value = 'text, image';
-  modelInputs.dispatchEvent({ type: 'input' });
+
+  for (const level of ['low', 'high']) {
+    root.querySelector('.pm-level__add').dispatchEvent({ type: 'click' });
+    await globalThis.AdaRender.nextTick();
+    const levelInput = root.querySelector('#pm-level-input');
+    assert.ok(levelInput, '添加等级应出现输入框');
+    levelInput.value = level;
+    levelInput.dispatchEvent({ type: 'input' });
+    levelInput.dispatchEvent({ type: 'keydown', key: 'Enter', preventDefault() {} });
+    await globalThis.AdaRender.nextTick();
+  }
+  assert.equal(root.querySelectorAll('.pm-level__name').length, 2, '应出现两个等级标签');
+
+  const pickedMode = root.querySelector('#pm-mode-image');
+  assert.ok(pickedMode, '模态复选框应存在');
+  pickedMode.checked = true;
+  pickedMode.dispatchEvent({ type: 'change' });
   await globalThis.AdaRender.nextTick();
   const saveModel = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存模型');
   assert.ok(saveModel, '模型编辑应提供保存按钮');
@@ -245,7 +257,7 @@ test('providers-next：客户端 /state 取数与写操作', async () => {
   assert.equal(savedModel.displayName, '模型一（改）');
   assert.equal(savedModel.contextWindow, 256000);
   assert.deepEqual(savedModel.thinkingLevels, ['low', 'high']);
-  assert.deepEqual(savedModel.input, ['text', 'image']);
+  assert.deepEqual(savedModel.input, ['image']);
 
   const switchButton = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '设为当前');
   assert.ok(switchButton, '非当前模型应提供设为当前按钮');
@@ -277,22 +289,31 @@ test('providers-next：客户端 /state 取数与写操作', async () => {
   assert.ok(fetchButton, '详情头应提供拉取模型按钮');
   fetchButton.dispatchEvent({ type: 'click' });
   for (let i = 0; i < 20; i += 1) {
-    if (root.textContent.includes('拉取到 1 个模型')) break;
+    if (root.querySelector('.pm-modal')) break;
     await new Promise((resolve) => setTimeout(resolve, 10));
     await globalThis.AdaRender.nextTick();
   }
-  assert.ok(root.textContent.includes('拉取到 1 个模型'));
+  const modal = root.querySelector('.pm-modal');
+  assert.ok(modal, '拉取模型应打开弹窗');
+  assert.ok(modal.textContent.includes('m3'), '弹窗应列出远端模型');
 
-  const addButton = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '添加未配置模型');
-  assert.ok(addButton, '拉取后应提供添加按钮');
-  addButton.dispatchEvent({ type: 'click' });
+  const fetchedCheckbox = modal.querySelector('input[type="checkbox"]');
+  assert.ok(fetchedCheckbox, '弹窗应提供复选框');
+  fetchedCheckbox.checked = true;
+  fetchedCheckbox.dispatchEvent({ type: 'change' });
+  await globalThis.AdaRender.nextTick();
+  const addSelected = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '添加所选（1）');
+  assert.ok(addSelected, '勾选后应启用添加所选');
+  addSelected.dispatchEvent({ type: 'click' });
   for (let i = 0; i < 20; i += 1) {
     if (existingSaves().length >= 3) break;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   const saves = existingSaves();
   assert.ok(saves.length >= 2, '添加模型应再次调用 /save');
-  assert.equal(saves[saves.length - 1].options.body.models.length, 3);
+  assert.ok(saves[saves.length - 1].options.body.models.some((m) => m.id === 'm3'));
+  await globalThis.AdaRender.nextTick();
+  assert.equal(root.querySelector('.pm-modal'), null, '添加后弹窗应关闭');
 
   const addModel = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '添加模型');
   assert.ok(addModel, '模型页应提供添加模型');

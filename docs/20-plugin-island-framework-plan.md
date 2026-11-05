@@ -386,7 +386,7 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - **P2-5 客户端适配完成**：`keyed(vnode,key)` 与 `applyVNodePatches(items, patches)` 支持 `{key,mode:"upsert"|"remove",vnode}` 信封；`ada-patch.test.js` 验证按 key 复用 DOM、文本就地更新、删除不重建其它行。Gateway SSE 的 VNode 帧接入留 P2-5b。
 - **P2-5b 客户端流适配完成**：新增 `ada-patch-stream.js`，订阅 SSE `patch` 帧（`{patches:[...]}`）并驱动 keyed 列表；`source` 可注入，便于测试与自定义 EventSource。测试：`ada-patch-stream.test.js`。服务端具体 route 的帧格式仍由插件自行发送。
 - **P2-4b-1 完成**：`provider-admin` 首屏骨架改为同构组件（SSR + hydrate），交互仍由 legacy `provider-admin.js` 在 `DOMContentLoaded` 后接管；`pluginbuild` 生成 `static/client.js`。`TestUIExtRoutes` 覆盖页面标记、legacy 脚本与 island 引导共存。
-- **P2-4b-2b 完成**：`providers` 页已替换为 `providers-next.tsx` 组件化实现；新增供应商、设为当前、启用/停用、删除、拉取/添加模型、模型新增/删除/编辑（显示名/上下文/推理等级/输入模态/工具/启停）与供应商信息/代理/请求头/API Key 编辑全部走组件状态。`provider-admin.js` 不再由清单加载；`page.tsx`/legacy 脚本保留作历史参考。页面通过 `backend.read` 动作 `state` 预取目录，SSR/无 JS 可显示供应商。`TestUIExtRoutes` 断言旧脚本不加载、SSR 预取生效、过渡页 404；`provider-next.test.js` 覆盖 SSR props 与全部写操作。
+- **P2-4b-2b 完成**：`providers` 页已替换为 `providers-next.tsx` 组件化实现；新增供应商、设为当前、启用/停用、删除、拉取/添加模型、模型新增/删除/编辑（显示名/上下文/推理等级/输入模态/工具/启停）与供应商信息/代理/请求头/API Key 编辑全部走组件状态。拉取模型改为勾选弹窗，只添加选中的模型；推理等级为动态标签，输入模态为复选框。`provider-admin.js` 不再由清单加载；`page.tsx`/legacy 脚本保留作历史参考。页面通过 `backend.read` 动作 `state` 预取目录，SSR/无 JS 可显示供应商。`TestUIExtRoutes` 断言旧脚本不加载、SSR 预取生效、过渡页 404；`provider-next.test.js` 覆盖 SSR props、勾选弹窗、等级标签/模态复选框与全部写操作。
 - **P3-1 客户端 bundle 门禁完成**：`ui-hello-tsx` / `token-usage` / `provider-admin` 统一从 `client.tsx` 构建；`TestOfficialClientBundlesInSync` 在 `go test ./app` 里跑 `pluginbuild --check`，阻止提交产物漂移。
 - **下一步**：P3-4 文档/安全复查、P3-5 特性开关/回滚/无 JS 验收。
 

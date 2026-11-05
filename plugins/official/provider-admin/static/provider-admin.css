@@ -636,6 +636,104 @@
   gap: 12px;
 }
 
+/* 拉取模型选择弹窗：自绘遮罩/面板，避免依赖 legacy ada-modal 运行时。 */
+.pm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+}
+
+.pm-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--ph-ink);
+  opacity: 0.35;
+}
+
+.pm-modal__panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(560px, calc(100vw - 2rem));
+  max-height: 80dvh;
+  padding: 18px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-lg);
+  background: var(--ph-surface);
+  box-shadow: var(--ph-shadow);
+}
+
+.pm-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pm-modal__title {
+  margin: 0;
+  font-size: var(--ada-text-lg);
+  font-weight: 600;
+}
+
+.pm-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.pm-fetch__list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 48dvh;
+  overflow-y: auto;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+}
+
+.pm-fetch__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--ph-line);
+  font-size: var(--ada-text-sm);
+}
+
+.pm-fetch__row:last-child {
+  border-bottom: 0;
+}
+
+.pm-fetch__row.is-added {
+  background: var(--ph-subtle);
+}
+
+.pm-fetch__row .ada-remote__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ph-faint);
+}
+
+.pm-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.pm-checks .checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--ada-text-sm);
+  color: var(--ph-ink);
+}
+
 /* 推理等级芯片：与截图一致，从左到右表示低→高。 */
 .pm-levels {
   display: flex;

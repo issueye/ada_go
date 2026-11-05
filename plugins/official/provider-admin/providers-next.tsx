@@ -29,8 +29,10 @@ export default defineComponent({
       selectedId: providers.length ? providers[0].id : "",
       tab: "info",
       status: "",
+      fetchOpen: false,
       fetching: false,
-      remoteModels: [],
+      fetchedModels: [],
+      selectedFetch: {},
       fetchError: "",
       editing: false,
       form: { name: "", protocol: "", baseUrl: "", proxy: "", headersText: "", apiKey: "" },
@@ -39,13 +41,15 @@ export default defineComponent({
       editingModelId: "",
       addingModel: false,
       newModel: { id: "", displayName: "", contextWindow: "" },
+      levelDraft: "",
+      levelInputOpen: false,
       modelForm: {
         displayName: "",
         contextWindow: "",
         supportsTools: false,
         disabled: false,
-        thinkingLevels: "",
-        inputModes: "",
+        thinkingLevels: [],
+        inputModes: [],
       },
     };
   },
@@ -55,6 +59,13 @@ export default defineComponent({
         if (this.providers[i].id === this.selectedId) return this.providers[i];
       }
       return this.providers[0] || null;
+    },
+    selectedFetchCount() {
+      let count = 0;
+      Object.keys(this.selectedFetch).forEach((key) => {
+        if (this.selectedFetch[key]) count += 1;
+      });
+      return count;
     },
     modelColumns() {
       const self = this;
@@ -212,7 +223,7 @@ export default defineComponent({
         remove();
       }
     },
-    fetchModels() {
+    openFetchModels() {
       const selected = this.selected;
       if (!selected) return;
       const api = (window as any).adaAPI;
@@ -220,60 +231,47 @@ export default defineComponent({
         this.fetchError = "当前页面没有 adaAPI，无法拉取模型。";
         return;
       }
+      this.fetchOpen = true;
       this.fetching = true;
       this.fetchError = "";
-      this.remoteModels = [];
+      this.fetchedModels = [];
+      this.selectedFetch = {};
       api("provider-admin", "/fetch-models", {
         method: "POST",
         body: { id: selected.id },
       })
         .then((models: any) => {
           this.fetching = false;
-          this.remoteModels = Array.isArray(models) ? models : [];
-          this.status = this.remoteModels.length ? "拉取到 " + this.remoteModels.length + " 个模型。" : "没有拉取到模型。";
+          this.fetchedModels = Array.isArray(models) ? models : [];
         })
         .catch((err: any) => {
           this.fetching = false;
           this.fetchError = "拉取失败：" + ((err && err.message) || String(err));
         });
     },
-    addFetchedModels() {
+    closeFetch() {
+      this.fetchOpen = false;
+      this.fetchedModels = [];
+      this.selectedFetch = {};
+      this.fetchError = "";
+    },
+    toggleFetchModel(modelId: string, checked: boolean) {
+      this.selectedFetch = Object.assign({}, this.selectedFetch, { [modelId]: checked });
+    },
+    addSelectedModels() {
       const selected = this.selected;
       if (!selected) return;
       const existing = {};
       (selected.models || []).forEach((m: any) => { existing[m.id] = true; });
-      const added = this.remoteModels.filter((m: any) => m && m.id && !existing[m.id]);
+      const added = this.fetchedModels.filter(
+        (m: any) => m && m.id && !existing[m.id] && this.selectedFetch[m.id],
+      );
       if (!added.length) {
-        this.status = "没有需要新增的模型。";
+        this.status = "没有勾选可添加的模型。";
         return;
       }
-      const api = (window as any).adaAPI;
-      if (typeof api !== "function") {
-        this.status = "当前页面没有 adaAPI，无法保存模型。";
-        return;
-      }
-      this.status = "正在添加 " + added.length + " 个模型…";
-      api("provider-admin", "/save", {
-        method: "POST",
-        body: {
-          id: selected.id,
-          name: selected.displayName || selected.id,
-          protocol: selected.protocol || "",
-          baseUrl: selected.baseUrl || "",
-          proxy: selected.proxy || "",
-          headers: selected.headers || {},
-          disabled: !!selected.disabled,
-          models: (selected.models || []).concat(added),
-        },
-      })
-        .then(() => {
-          this.status = "已添加 " + added.length + " 个模型。";
-          this.remoteModels = [];
-          this.load();
-        })
-        .catch((err: any) => {
-          this.status = "添加失败：" + ((err && err.message) || String(err));
-        });
+      this.closeFetch();
+      this.persistModels((selected.models || []).concat(added), "已添加 " + added.length + " 个模型。");
     },
     startEdit() {
       const selected = this.selected;
@@ -379,17 +377,58 @@ export default defineComponent({
     },
     startEditModel(row: any) {
       if (!row) return;
-      this.editingModelId = row.id;      this.modelForm = {
+      this.editingModelId = row.id;
+      this.levelInputOpen = false;
+      this.levelDraft = "";
+      this.modelForm = {
         displayName: row.displayName || "",
         contextWindow: row.contextWindow === undefined || row.contextWindow === null ? "" : String(row.contextWindow),
         supportsTools: !!row.supportsTools,
         disabled: !!row.disabled,
-        thinkingLevels: Array.isArray(row.thinkingLevels) ? row.thinkingLevels.join(", ") : "",
-        inputModes: Array.isArray(row.input) ? row.input.join(", ") : "",
+        thinkingLevels: Array.isArray(row.thinkingLevels) ? row.thinkingLevels.slice() : [],
+        inputModes: Array.isArray(row.input) ? row.input.slice() : [],
       };
     },
     cancelModelEdit() {
       this.editingModelId = "";
+      this.levelInputOpen = false;
+      this.levelDraft = "";
+    },
+    openLevelInput() {
+      this.levelInputOpen = true;
+      this.levelDraft = "";
+    },
+    addLevel() {
+      const value = String(this.levelDraft || "").trim();
+      if (value && this.modelForm.thinkingLevels.indexOf(value) < 0) {
+        this.modelForm.thinkingLevels.push(value);
+      }
+      this.levelDraft = "";
+      this.levelInputOpen = false;
+    },
+    cancelLevelInput() {
+      this.levelDraft = "";
+      this.levelInputOpen = false;
+    },
+    removeLevel(index: number) {
+      this.modelForm.thinkingLevels.splice(index, 1);
+    },
+    onLevelKeydown(event: any) {
+      if (!event) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        this.addLevel();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        this.cancelLevelInput();
+      }
+    },
+    toggleInputMode(mode: string, checked: boolean) {
+      const list = this.modelForm.inputModes.slice();
+      const index = list.indexOf(mode);
+      if (checked && index < 0) list.push(mode);
+      if (!checked && index >= 0) list.splice(index, 1);
+      this.modelForm.inputModes = list;
     },
     persistModels(models: any[], message: string) {
       const selected = this.selected;
@@ -437,16 +476,10 @@ export default defineComponent({
         const context = String(this.modelForm.contextWindow || "").trim();
         if (context) next.contextWindow = Number(context);
         else delete next.contextWindow;
-        const levels = String(this.modelForm.thinkingLevels || "")
-          .split(",")
-          .map((value: string) => value.trim())
-          .filter(Boolean);
+        const levels = this.modelForm.thinkingLevels.slice();
         if (levels.length) next.thinkingLevels = levels;
         else delete next.thinkingLevels;
-        const inputs = String(this.modelForm.inputModes || "")
-          .split(",")
-          .map((value: string) => value.trim())
-          .filter(Boolean);
+        const inputs = this.modelForm.inputModes.slice();
         if (inputs.length) next.input = inputs;
         else delete next.input;
         return next;
@@ -619,7 +652,7 @@ export default defineComponent({
                       size="sm"
                       variant="secondary"
                       disabled={this.fetching}
-                      onClick={this.fetchModels}
+                      onClick={this.openFetchModels}
                     >{this.fetching ? "拉取中…" : "拉取模型"}</Button>
                   </div>
                 </div>
@@ -758,20 +791,55 @@ export default defineComponent({
                           placeholder="例如 128000"
                           onInput={(value: any) => { this.modelForm.contextWindow = String(value || ""); }}
                         />
-                        <Input
-                          id="pm-model-levels"
-                          label="推理等级（逗号分隔）"
-                          modelValue={this.modelForm.thinkingLevels}
-                          placeholder="low, medium, high"
-                          onInput={(value: any) => { this.modelForm.thinkingLevels = String(value || ""); }}
-                        />
-                        <Input
-                          id="pm-model-inputs"
-                          label="输入模态（逗号分隔）"
-                          modelValue={this.modelForm.inputModes}
-                          placeholder="text, image"
-                          onInput={(value: any) => { this.modelForm.inputModes = String(value || ""); }}
-                        />
+                        <div class="pm-field">
+                          <span class="pm-field__label">推理等级</span>
+                          <div class="pm-levels">
+                            {this.modelForm.thinkingLevels.map((level: string, index: number) => (
+                              <span class="pm-level" key={level}>
+                                <span class="pm-level__name">{level}</span>
+                                <button
+                                  type="button"
+                                  class="pm-level__remove"
+                                  aria-label={"移除推理等级 " + level}
+                                  onClick={() => this.removeLevel(index)}
+                                >×</button>
+                              </span>
+                            ))}
+                            {this.levelInputOpen ? (
+                              <input
+                                id="pm-level-input"
+                                class="pm-level__input"
+                                value={this.levelDraft}
+                                placeholder="low / high"
+                                onInput={(event: any) => { this.levelDraft = event.target.value; }}
+                                onKeydown={this.onLevelKeydown}
+                              />
+                            ) : (
+                              <button
+                                type="button"
+                                class="pm-level__add"
+                                aria-label="添加推理等级"
+                                onClick={this.openLevelInput}
+                              >+</button>
+                            )}
+                          </div>
+                        </div>
+                        <div class="pm-field">
+                          <span class="pm-field__label">输入模态</span>
+                          <div class="pm-checks">
+                            {["text", "image", "audio", "video"].map((mode: string) => (
+                              <label class="checkbox-row" key={mode}>
+                                <input
+                                  id={"pm-mode-" + mode}
+                                  type="checkbox"
+                                  checked={this.modelForm.inputModes.indexOf(mode) >= 0}
+                                  onChange={(event: any) => this.toggleInputMode(mode, event.target.checked)}
+                                />
+                                {mode}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
                         <p class="pm-info__actions">
                           <Button
                             size="sm"
@@ -789,15 +857,6 @@ export default defineComponent({
                         </p>
                       </div>
                     ) : null}
-                    {this.fetchError ? (
-                      <p class="pm-status" data-tone="danger" role="alert">{this.fetchError}</p>
-                    ) : null}
-                    {this.remoteModels.length ? (
-                      <p class="pm-status">
-                        拉取到 {this.remoteModels.length} 个模型。
-                        <Button size="sm" variant="secondary" onClick={this.addFetchedModels}>添加未配置模型</Button>
-                      </p>
-                    ) : null}
                     <Table
                       caption={(selected.displayName || selected.id) + " 的模型"}
                       rowKey="id"
@@ -812,6 +871,55 @@ export default defineComponent({
             )}
           </section>
         </div>
+        {this.fetchOpen ? (
+          <div class="pm-modal" role="dialog" aria-modal="true" aria-labelledby="pm-fetch-title">
+            <div class="pm-modal__backdrop" onClick={this.closeFetch}></div>
+            <div class="pm-modal__panel">
+              <div class="pm-modal__head">
+                <h2 id="pm-fetch-title" class="pm-modal__title">
+                  从「{selected ? (selected.displayName || selected.id) : ""}」选择模型
+                </h2>
+                <Button size="sm" variant="ghost" onClick={this.closeFetch}>关闭</Button>
+              </div>
+              <p class="pm-fetch__hint">勾选要添加的模型；已添加的模型不可重复选择。</p>
+              {this.fetching ? (
+                <p class="pm-fetch__state">正在拉取模型…</p>
+              ) : this.fetchError ? (
+                <p class="pm-fetch__state pm-fetch__state--error" role="alert">{this.fetchError}</p>
+              ) : this.fetchedModels.length === 0 ? (
+                <p class="pm-fetch__state">没有拉取到模型。</p>
+              ) : (
+                <div class="pm-fetch__list">
+                  {this.fetchedModels.map((model: any) => {
+                    const added = !!(selected && (selected.models || []).some((m: any) => m && m.id === model.id));
+                    return (
+                      <label class={"pm-fetch__row" + (added ? " is-added" : "")} key={model.id}>
+                        <input
+                          type="checkbox"
+                          checked={!!this.selectedFetch[model.id]}
+                          disabled={added}
+                          onChange={(event: any) => this.toggleFetchModel(model.id, event.target.checked)}
+                        />
+                        <span class="ada-remote__id">{model.id}</span>
+                        <span class="ada-remote__meta">{model.displayName || ""}</span>
+                        {added ? <span class="badge badge-neutral">已添加</span> : null}
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              <div class="pm-modal__actions">
+                <Button size="sm" variant="secondary" onClick={this.closeFetch}>取消</Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled={this.selectedFetchCount === 0}
+                  onClick={this.addSelectedModels}
+                >添加所选（{this.selectedFetchCount}）</Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </section>
     );
   },
