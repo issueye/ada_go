@@ -2740,6 +2740,25 @@
     return out;
   }
 
+  // 宿主组件（$C）的 props 可以带数组/对象（Select options、Todo steps 等）；
+  // 元素属性仍只允许标量。函数与内部字段照旧剥离。
+  function cleanComponentProps(props) {
+    var out = {};
+    if (!props) return out;
+    for (var key in props) {
+      if (!Object.prototype.hasOwnProperty.call(props, key)) continue;
+      if (key === 'key' || key.charAt(0) === '$' || key.charAt(0) === '_') continue;
+      if (key === 'on' || (key.charAt(0) === 'o' && key.charAt(1) === 'n' && typeof props[key] === 'function')) continue;
+      var value = props[key];
+      if (typeof value === 'function' || value === undefined) continue;
+      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ||
+        Array.isArray(value) || isPlainObject(value)) {
+        out[key] = value;
+      }
+    }
+    return out;
+  }
+
   function serializeNode(node, ctx, depth) {
     if (node === null || node === undefined || typeof node === 'boolean') return null;
     if (typeof node === 'string' || typeof node === 'number') return { t: TEXT, v: String(node) };
@@ -2765,7 +2784,7 @@
           return {
             t: COMPONENT,
             n: def,
-            p: cleanProps(node.p),
+            p: cleanComponentProps(node.p),
             c: serializeChildren(node.c, ctx, depth)
           };
         }

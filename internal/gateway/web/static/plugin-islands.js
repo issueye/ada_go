@@ -90,6 +90,9 @@
       if (AdaUIIso && AdaUIIso.components && AdaUIIso.components.IconAdapter) {
         app.component('Icon', AdaUIIso.components.IconAdapter);
       }
+      if (AdaUIIso && AdaUIIso.components && AdaUIIso.components.SelectAdapter) {
+        app.component('Select', AdaUIIso.components.SelectAdapter);
+      }
       app.mount(element, { hydrate: true, rootElement: true });
       element.removeAttribute('data-ada-loading');
     }).catch(function (err) {

@@ -354,6 +354,132 @@
   });
   components.DataTable = Table;
 
+  /* Select：服务端保留 $C Select（Go renderSelect 输出 ada-select DOM）；
+     浏览器用 SelectAdapter 输出同一结构，并复用 ada-select.js 的交互。 */
+  function normalizeOptions(options) {
+    var out = [];
+    var list = Array.isArray(options) ? options : [];
+    for (var i = 0; i < list.length; i += 1) {
+      var item = list[i];
+      if (item && typeof item === 'object') {
+        out.push({ value: String(item.value === undefined ? '' : item.value), label: String(item.label === undefined ? item.value : item.label) });
+      } else {
+        out.push({ value: String(item), label: String(item) });
+      }
+    }
+    return out;
+  }
+
+  var SelectAdapter = defineComponent({
+    name: 'SelectAdapter',
+    props: {
+      options: { default: function () { return []; } },
+      value: { default: '' },
+      modelValue: { default: '' },
+      name: { default: '' },
+      class: { default: '' },
+      placeholder: { default: '' },
+      disabled: BOOL,
+      'aria-label': { default: '' },
+    },
+    computed: {
+      normalized: function () { return normalizeOptions(this.options); },
+      currentValue: function () {
+        var value = this.modelValue !== '' && this.modelValue !== null && this.modelValue !== undefined
+          ? this.modelValue
+          : this.value;
+        return value === null || value === undefined ? '' : String(value);
+      },
+    },
+    methods: {
+      onSelect: function (event) {
+        var value = event && event.detail ? event.detail.value : '';
+        this.$emit('update:modelValue', value);
+        this.$emit('change', value, event);
+      },
+    },
+    render: function (h) {
+      var options = this.normalized;
+      var value = this.currentValue;
+      if (value === '' && options.length) value = options[0].value;
+      var selectedLabel = this.placeholder || '';
+      var triggerClass = this.class ? 'ada-select__trigger ' + this.class : 'ada-select__trigger';
+      var dataProps = {};
+      var attrs = this.$attrs || {};
+      for (var key in attrs) {
+        if (Object.prototype.hasOwnProperty.call(attrs, key) && key.indexOf('data-') === 0) {
+          dataProps[key] = attrs[key];
+        }
+      }
+      var items = [];
+      for (var i = 0; i < options.length; i += 1) {
+        var option = options[i];
+        var selected = String(option.value) === value;
+        if (selected) selectedLabel = option.label || option.value;
+        items.push(h('button', {
+          class: selected ? 'ada-select__option is-selected' : 'ada-select__option',
+          type: 'button',
+          'data-value': option.value,
+          'aria-selected': selected ? 'true' : 'false',
+        }, option.label || option.value));
+      }
+      if (selectedLabel === '') selectedLabel = value;
+      return h('ada-select', Object.assign({
+        class: 'ada-select',
+        'onAda:select': this.onSelect,
+      }, dataProps), [
+        h('button', {
+          class: triggerClass,
+          type: 'button',
+          'data-select-trigger': '',
+          'aria-expanded': 'false',
+          'aria-label': this['aria-label'] || null,
+          disabled: !!this.disabled,
+        }, [
+          h('span', { class: 'ada-select__label', 'data-select-label': '' }, selectedLabel),
+          h('span', { class: 'ada-select__caret', 'aria-hidden': 'true' }, '▾'),
+        ]),
+        h('div', { class: 'ada-select__menu', 'data-select-menu': '', hidden: true }, items),
+        h('input', {
+          type: 'hidden',
+          'data-select-input': '',
+          name: this.name || null,
+          value: value,
+          disabled: !!this.disabled,
+        }),
+      ]);
+    },
+  });
+  components.SelectAdapter = SelectAdapter;
+
+  var Select = register('Select', {
+    props: {
+      options: { default: function () { return []; } },
+      value: { default: '' },
+      modelValue: { default: '' },
+      name: { default: '' },
+      class: { default: '' },
+      placeholder: { default: '' },
+      disabled: BOOL,
+      'aria-label': { default: '' },
+    },
+    render: function () {
+      var p = {};
+      for (var key in this.$props) {
+        if (Object.prototype.hasOwnProperty.call(this.$props, key)) p[key] = this.$props[key];
+      }
+      if (p.modelValue !== '' && p.modelValue !== null && p.modelValue !== undefined) {
+        p.value = p.modelValue;
+      }
+      var attrs = this.$attrs || {};
+      for (var attr in attrs) {
+        if (!Object.prototype.hasOwnProperty.call(attrs, attr)) continue;
+        if (attr.indexOf('data-') === 0 || attr === '$on') p[attr] = attrs[attr];
+      }
+      return host('Select', p);
+    },
+  });
+
   var Input = register('Input', {    props: {
       modelValue: { default: '' },
       type: { default: 'text' },

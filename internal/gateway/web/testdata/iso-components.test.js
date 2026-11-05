@@ -170,3 +170,32 @@ test('ada-ui-iso：Table 输出原生 table 与列定义', () => {
   assert.ok(root.querySelector('td.is-size'));
 });
 
+test('ada-ui-iso：Select 通过 SelectAdapter 输出 ada-select 结构', () => {
+  const root = global.document.createElement('div');
+  global.document.body.appendChild(root);
+  const app = globalThis.AdaRender.createApp({
+    components: { Select: UI.components.SelectAdapter },
+    render(h) {
+      return h(UI.components.Select, {
+        options: ['a', { value: 'b', label: '乙' }],
+        value: 'b',
+        name: 'preset',
+        class: 'cm-input',
+        'aria-label': '选择预设',
+      });
+    },
+  });
+  app.mount(root);
+
+  const picker = root.querySelector('ada-select.ada-select');
+  assert.ok(picker, '应输出 ada-select');
+  const trigger = picker.querySelector('button.ada-select__trigger.cm-input');
+  assert.ok(trigger, '触发器应带自定义 class');
+  assert.equal(trigger.getAttribute('aria-label'), '选择预设');
+  assert.equal(picker.querySelector('[data-select-label]').textContent, '乙');
+  assert.ok(picker.querySelector('.ada-select__option.is-selected[data-value="b"]'));
+  const hidden = picker.querySelector('input[type="hidden"][data-select-input]');
+  assert.equal(hidden.getAttribute('name'), 'preset');
+  assert.equal(hidden.getAttribute('value'), 'b');
+});
+

@@ -413,6 +413,7 @@ export const TodoList = __UI.components.TodoList;
 export const Notice = __UI.components.Notice;
 export const Table = __UI.components.Table;
 export const DataTable = __UI.components.DataTable;
+export const Select = __UI.components.Select;
 `
 }
 

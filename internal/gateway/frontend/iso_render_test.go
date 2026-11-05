@@ -143,6 +143,59 @@ func TestIsoTableRenderThroughGo(t *testing.T) {
 	}
 }
 
+const isoSelectSource = `import { h, defineComponent } from "ada:render";
+import { Select } from "ada:ui";
+
+export default defineComponent({
+  render(h) {
+    return (
+      <Select
+        options={["a", { value: "b", label: "乙" }]}
+        value="b"
+        name="preset"
+        class="cm-input"
+        aria-label="选择预设"
+      />
+    );
+  },
+});
+`
+
+func TestIsoSelectRenderThroughGo(t *testing.T) {
+	engine, err := os.ReadFile(filepath.Join("..", "web", "static", "ada-render.js"))
+	if err != nil {
+		t.Fatalf("读取 ada-render.js: %v", err)
+	}
+	iso, err := os.ReadFile(filepath.Join("..", "web", "static", "ada-ui-iso.js"))
+	if err != nil {
+		t.Fatalf("读取 ada-ui-iso.js: %v", err)
+	}
+	r := host.NewRenderer(
+		host.WithRenderEngineSource(string(engine)),
+		host.WithIsoComponentsSource(string(iso)),
+	)
+	vnode, err := r.RenderIsland(isoSelectSource, nil)
+	if err != nil {
+		t.Fatalf("RenderIsland: %v", err)
+	}
+	html, err := RenderHTML(vnode)
+	if err != nil {
+		t.Fatalf("RenderHTML: %v", err)
+	}
+	text := string(html)
+	for _, want := range []string{
+		`<ada-select class="ada-select">`,
+		`<button class="ada-select__trigger cm-input" type="button" data-select-trigger aria-expanded="false" aria-label="选择预设">`,
+		`<span class="ada-select__label" data-select-label>乙</span>`,
+		`class="ada-select__option is-selected" type="button" data-value="b" aria-selected="true">乙</button>`,
+		`<input type="hidden" data-select-input name="preset" value="b">`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("SSR HTML 缺少 %s\n%s", want, text)
+		}
+	}
+}
+
 func TestIsoIconTodoNoticeRenderThroughGo(t *testing.T) {
 	engine, err := os.ReadFile(filepath.Join("..", "web", "static", "ada-render.js"))
 	if err != nil {
