@@ -336,7 +336,6 @@
   }
 
   /* ---- 轻量 store：模块级单例；每个 app/运行时各自一份 ---- */
-
   function defineStore(id, options) {
     options = options || {};
     var cache = null;
@@ -395,6 +394,41 @@
     };
     useStore.$id = id;
     return useStore;
+  }
+
+  /* ---- keyed VNode patch：服务端增量 → 客户端数组 ---- */
+
+  // keyed 给 VNode 挂稳定 key；线格式没有 k 字段，客户端必须按业务 key 重新挂。
+  function keyed(vnode, key) {
+    if (vnode && typeof vnode === 'object') vnode.k = key;
+    return vnode;
+  }
+
+  // applyVNodePatches 把 {key, mode:"upsert"|"remove", vnode} 应用到
+  // [{key, vnode}] 列表，返回新列表；不修改入参。调用方把返回值放进
+  // 响应式数组，下一次渲染由引擎按 key 复用 DOM。
+  function applyVNodePatches(items, patches) {
+    var out = [];
+    var i;
+    for (i = 0; i < (items || []).length; i += 1) {
+      out.push({ key: items[i].key, vnode: items[i].vnode });
+    }
+    for (i = 0; i < (patches || []).length; i += 1) {
+      var patch = patches[i];
+      if (!patch || patch.key === undefined) continue;
+      var index = -1;
+      for (var j = 0; j < out.length; j += 1) {
+        if (out[j].key === patch.key) { index = j; break; }
+      }
+      if (patch.mode === 'remove') {
+        if (index >= 0) out.splice(index, 1);
+        continue;
+      }
+      var entry = { key: patch.key, vnode: patch.vnode };
+      if (index >= 0) out.splice(index, 1, entry);
+      else out.push(entry);
+    }
+    return out;
   }
 
   /* ---- 调度：一次事件循环内合并同一组件的重复更新 ---- */
@@ -2925,6 +2959,8 @@
     provide: provide,
     inject: inject,
     defineStore: defineStore,
+    keyed: keyed,
+    applyVNodePatches: applyVNodePatches,
     nextTick: nextTick,
     renderToJSON: renderToJSON,
     toJSON: renderToJSON,

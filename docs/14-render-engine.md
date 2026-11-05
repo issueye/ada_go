@@ -145,6 +145,8 @@ const {
 | `provide(key, value)` / `inject(key, default?)` | 组件级依赖注入；`app.provide(key, value)` 提供 app 级默认值 |
 | `defineStore(id, { state, getters, actions })` | 轻量模块级 store；返回 `useStore(initialState?)`，同一 id 单例 |
 | `store.$snapshot()` / `store.$hydrate(data)` | 显式导出/恢复 store 状态；自动注入到岛屿 props 留后续阶段 |
+| `keyed(vnode, key)` | 给 VNode 挂稳定 key；线格式没有 `k`，客户端按业务 key 重新挂 |
+| `applyVNodePatches(items, patches)` | 应用 `{key, mode:"upsert"|"remove", vnode}` 列表，返回新 `[{key,vnode}]`，由响应式数组驱动 keyed patch |
 | `evaluate(expr, scope)` | 单独执行模板表达式，便于测试/调试 |
 
 组件 `setup`/`data` 中创建的 `watch`/`watchEffect` 会登记到实例作用域，卸载时自动 `stop`；组件 `unmounted` 钩子现在也会被调用。`defineStore` 是同一 bundle 内的单例，跨插件不共享可变状态。
