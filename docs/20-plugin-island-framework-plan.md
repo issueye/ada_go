@@ -410,3 +410,23 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - 第三方插件仍不能使用客户端岛屿；需要服务端驱动或 iframe 隔离方案。
 - 没有真实浏览器自动化（hydration/DOM parity 目前靠 Node harness + Go golden）。
 - 12 插槽全开的性能、bundle 体积、首屏预算尚未做专项基准。
+
+## 16. P3-4 性能基线（2026-11-05）
+
+环境：Windows / amd64，Intel i5-10500 3.10GHz，Go 1.27.1，`go test -benchtime=10x -benchmem`。
+
+| 场景 | 墙钟/次 | 分配/次 |
+|---|---|---|
+| `RenderIsland`（原生标签） | 7.53ms | 3.29MB / 37,168 allocs |
+| `RenderIsland` + `ada:ui`（Card/Badge/Button） | 9.57ms | 4.49MB / 49,350 allocs |
+
+- 每次渲染仍新建 moejs Runtime 并加载约 97KB 引擎；编译结果按源码哈希缓存。
+- 单插槽预算 100ms、页面 300ms 仍有余量，但 12 个插槽各建 Runtime 时是**加法**；后续需要 Runtime 池或按需 island。
+- 随包浏览器 bundle：`provider-admin` 2,079B、`ui-hello-tsx` 2,642B、`token-usage` 4,226B（含 banner，远低于 512KB 上限）。
+
+命令：
+
+```sh
+go test ./internal/plugins/host -run '^$' -bench 'BenchmarkRenderIsland' -benchtime=10x -benchmem
+go test ./plugins/official -run TestClientBundleSizes -v
+```

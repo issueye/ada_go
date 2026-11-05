@@ -79,6 +79,25 @@ func TestClientBundlesHonorCSP(t *testing.T) {
 	}
 }
 
+// TestClientBundleSizes 记录随包 bundle 体积并守住 512KB 上限（与 extAssetMaxBytes 同口径）。
+func TestClientBundleSizes(t *testing.T) {
+	matches, err := filepath.Glob(filepath.Join("*", "static", "client.js"))
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+	const maxBytes = 512 << 10
+	for _, name := range matches {
+		info, serr := os.Stat(name)
+		if serr != nil {
+			t.Fatalf("Stat %s: %v", name, serr)
+		}
+		t.Logf("%s = %d bytes", name, info.Size())
+		if info.Size() > maxBytes {
+			t.Fatalf("%s = %d bytes，超过 %d 上限", name, info.Size(), maxBytes)
+		}
+	}
+}
+
 // TestMCPSkillPackaged 钉住 mcp-client 随包技能：插件目录里要真的有
 // skills/mcp-tools/SKILL.md，并能被宿主解析成 name/description。
 func TestMCPSkillPackaged(t *testing.T) {
