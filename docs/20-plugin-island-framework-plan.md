@@ -386,7 +386,7 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - **P2-5 客户端适配完成**：`keyed(vnode,key)` 与 `applyVNodePatches(items, patches)` 支持 `{key,mode:"upsert"|"remove",vnode}` 信封；`ada-patch.test.js` 验证按 key 复用 DOM、文本就地更新、删除不重建其它行。Gateway SSE 的 VNode 帧接入留 P2-5b。
 - **P2-5b 客户端流适配完成**：新增 `ada-patch-stream.js`，订阅 SSE `patch` 帧（`{patches:[...]}`）并驱动 keyed 列表；`source` 可注入，便于测试与自定义 EventSource。测试：`ada-patch-stream.test.js`。服务端具体 route 的帧格式仍由插件自行发送。
 - **P2-4b-1 完成**：`provider-admin` 首屏骨架改为同构组件（SSR + hydrate），交互仍由 legacy `provider-admin.js` 在 `DOMContentLoaded` 后接管；`pluginbuild` 生成 `static/client.js`。`TestUIExtRoutes` 覆盖页面标记、legacy 脚本与 island 引导共存。
-- **P2-4b-2a 完成**：新增只读组件化原型页 `/ext/provider-admin/providers-next`：`providers-next.tsx` 经插件 route `/state` 取数，用 `Badge/Button/Empty/Table` 渲染列表、详情、模型表与本地页签状态；与原 `providers` 页并存，写入仍走 legacy 页。真实 Chromium 验证 `data-ada-mounted=1`、无错误、空态与刷新按钮。完整交互迁移仍留 P2-4b-2b。
+- **P2-4b-2a 完成**：新增组件化原型页 `/ext/provider-admin/providers-next`：`providers-next.tsx` 经插件 route `/state` 取数，用 `Badge/Button/Empty/Table` 渲染列表、详情、模型表与本地页签状态；模型行支持「设为当前」（POST `/select`）。与原 `providers` 页并存，保存/删除/拉取模型仍走 legacy 页。真实 Chromium 验证 `data-ada-mounted=1`、无错误、空态与刷新按钮；Node 假 `adaAPI` 测试覆盖取数、模型表与 `/select` 写回。完整交互迁移仍留 P2-4b-2b。
 - **P3-1 客户端 bundle 门禁完成**：`ui-hello-tsx` / `token-usage` / `provider-admin` 统一从 `client.tsx` 构建；`TestOfficialClientBundlesInSync` 在 `go test ./app` 里跑 `pluginbuild --check`，阻止提交产物漂移。
 - **下一步**：P2-4b-2 `provider-admin` 交互组件化，或 P2 验收清单/文档收口。
 

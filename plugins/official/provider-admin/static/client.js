@@ -64,7 +64,8 @@ var providers_next_default = defineComponent({
       providers: [],
       current: { providerId: "", modelId: "" },
       selectedId: "",
-      tab: "info"
+      tab: "info",
+      status: ""
     };
   },
   computed: {
@@ -75,6 +76,7 @@ var providers_next_default = defineComponent({
       return this.providers[0] || null;
     },
     modelColumns() {
+      const self = this;
       return [
         { key: "id", label: "模型" },
         { key: "displayName", label: "显示名" },
@@ -82,6 +84,18 @@ var providers_next_default = defineComponent({
         {
           label: "工具",
           render: (row, index, h2) => h2("span", { class: "badge badge-neutral" }, row && row.supportsTools ? "支持" : "—")
+        },
+        {
+          label: "当前",
+          render: (row, index, h2) => {
+            const current = self.current.providerId === self.selectedId && self.current.modelId === row.id;
+            if (current) return h2("span", { class: "badge badge-success" }, "当前");
+            return h2(Button, {
+              size: "sm",
+              variant: "secondary",
+              onClick: () => self.selectModel(row.id)
+            }, "设为当前");
+          }
         }
       ];
     }
@@ -93,6 +107,7 @@ var providers_next_default = defineComponent({
     load() {
       this.loading = true;
       this.error = "";
+      this.status = "";
       const api = window.adaAPI;
       if (typeof api !== "function") {
         this.loading = false;
@@ -119,12 +134,31 @@ var providers_next_default = defineComponent({
     },
     isCurrentModel(row) {
       return this.current.providerId === this.selectedId && this.current.modelId === row.id;
+    },
+    selectModel(modelId) {
+      const selected = this.selected;
+      if (!selected) return;
+      const api = window.adaAPI;
+      if (typeof api !== "function") {
+        this.status = "当前页面没有 adaAPI，无法切换模型。";
+        return;
+      }
+      this.status = "正在切换当前模型…";
+      api("provider-admin", "/select", {
+        method: "POST",
+        body: { providerId: selected.id, modelId }
+      }).then(() => {
+        this.current = { providerId: selected.id, modelId };
+        this.status = "已切换当前模型。";
+      }).catch((err) => {
+        this.status = "切换失败：" + (err && err.message || String(err));
+      });
     }
   },
   render(h2) {
     const selected = this.selected;
     const providers = this.providers || [];
-    return /* @__PURE__ */ h2("section", { class: "pm-page", "data-provider-admin-next": true }, /* @__PURE__ */ h2("div", { class: "pm-head" }, /* @__PURE__ */ h2("div", { class: "pm-head__text" }, /* @__PURE__ */ h2("h1", { class: "pm-title" }, "模型设置（组件化原型）"), /* @__PURE__ */ h2("p", { class: "pm-sub" }, "只读演示：数据经插件 route /state 读取；写入仍使用原页面。")), /* @__PURE__ */ h2("div", { class: "pm-head__actions" }, /* @__PURE__ */ h2(Badge, { tone: "brand", label: providers.length ? providers.length + " 个供应商" : "无供应商" }), /* @__PURE__ */ h2(Button, { variant: "secondary", size: "sm", onClick: this.load }, "刷新"))), this.error ? /* @__PURE__ */ h2("p", { class: "pm-status", "data-tone": "danger", role: "alert" }, this.error) : null, /* @__PURE__ */ h2("div", { class: "pm-layout" }, /* @__PURE__ */ h2("div", { class: "pm-list", "aria-label": "供应商列表" }, this.loading ? /* @__PURE__ */ h2("p", { class: "pm-empty" }, "正在读取供应商…") : providers.length ? providers.map((provider) => /* @__PURE__ */ h2(
+    return /* @__PURE__ */ h2("section", { class: "pm-page", "data-provider-admin-next": true }, /* @__PURE__ */ h2("div", { class: "pm-head" }, /* @__PURE__ */ h2("div", { class: "pm-head__text" }, /* @__PURE__ */ h2("h1", { class: "pm-title" }, "模型设置（组件化原型）"), /* @__PURE__ */ h2("p", { class: "pm-sub" }, "只读演示：数据经插件 route /state 读取；写入仍使用原页面。")), /* @__PURE__ */ h2("div", { class: "pm-head__actions" }, /* @__PURE__ */ h2(Badge, { tone: "brand", label: providers.length ? providers.length + " 个供应商" : "无供应商" }), /* @__PURE__ */ h2(Button, { variant: "secondary", size: "sm", onClick: this.load }, "刷新"))), this.error ? /* @__PURE__ */ h2("p", { class: "pm-status", "data-tone": "danger", role: "alert" }, this.error) : null, this.status ? /* @__PURE__ */ h2("p", { class: "pm-status", role: "status" }, this.status) : null, /* @__PURE__ */ h2("div", { class: "pm-layout" }, /* @__PURE__ */ h2("div", { class: "pm-list", "aria-label": "供应商列表" }, this.loading ? /* @__PURE__ */ h2("p", { class: "pm-empty" }, "正在读取供应商…") : providers.length ? providers.map((provider) => /* @__PURE__ */ h2(
       "button",
       {
         key: provider.id,

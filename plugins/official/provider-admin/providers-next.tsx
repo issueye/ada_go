@@ -17,6 +17,7 @@ export default defineComponent({
       current: { providerId: "", modelId: "" },
       selectedId: "",
       tab: "info",
+      status: "",
     };
   },
   computed: {
@@ -27,6 +28,7 @@ export default defineComponent({
       return this.providers[0] || null;
     },
     modelColumns() {
+      const self = this;
       return [
         { key: "id", label: "模型" },
         { key: "displayName", label: "显示名" },
@@ -35,6 +37,18 @@ export default defineComponent({
           label: "工具",
           render: (row: any, index: number, h: any) =>
             h("span", { class: "badge badge-neutral" }, row && row.supportsTools ? "支持" : "—"),
+        },
+        {
+          label: "当前",
+          render: (row: any, index: number, h: any) => {
+            const current = self.current.providerId === self.selectedId && self.current.modelId === row.id;
+            if (current) return h("span", { class: "badge badge-success" }, "当前");
+            return h(Button, {
+              size: "sm",
+              variant: "secondary",
+              onClick: () => self.selectModel(row.id),
+            }, "设为当前");
+          },
         },
       ];
     },
@@ -46,6 +60,7 @@ export default defineComponent({
     load() {
       this.loading = true;
       this.error = "";
+      this.status = "";
       const api = (window as any).adaAPI;
       if (typeof api !== "function") {
         this.loading = false;
@@ -75,6 +90,27 @@ export default defineComponent({
     isCurrentModel(row: any) {
       return this.current.providerId === this.selectedId && this.current.modelId === row.id;
     },
+    selectModel(modelId: string) {
+      const selected = this.selected;
+      if (!selected) return;
+      const api = (window as any).adaAPI;
+      if (typeof api !== "function") {
+        this.status = "当前页面没有 adaAPI，无法切换模型。";
+        return;
+      }
+      this.status = "正在切换当前模型…";
+      api("provider-admin", "/select", {
+        method: "POST",
+        body: { providerId: selected.id, modelId },
+      })
+        .then(() => {
+          this.current = { providerId: selected.id, modelId };
+          this.status = "已切换当前模型。";
+        })
+        .catch((err: any) => {
+          this.status = "切换失败：" + ((err && err.message) || String(err));
+        });
+    },
   },
   render(h) {
     const selected = this.selected;
@@ -94,6 +130,9 @@ export default defineComponent({
 
         {this.error ? (
           <p class="pm-status" data-tone="danger" role="alert">{this.error}</p>
+        ) : null}
+        {this.status ? (
+          <p class="pm-status" role="status">{this.status}</p>
         ) : null}
 
         <div class="pm-layout">
