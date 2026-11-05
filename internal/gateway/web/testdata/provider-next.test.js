@@ -39,6 +39,7 @@ global.window = {
       });
     }
     if (route === '/select') return Promise.resolve({ ok: true });
+    if (route === '/save') return Promise.resolve({ ok: true });
     return Promise.reject(new Error('unexpected route ' + route));
   },
 };
@@ -91,4 +92,18 @@ test('providers-next：/state 取数、模型表与设为当前', async () => {
   const select = calls.find((c) => c.route === '/select');
   assert.ok(select, '应调用 /select');
   assert.deepEqual(select.options.body, { providerId: 'p1', modelId: 'm2' });
+
+  const disable = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '停用');
+  assert.ok(disable, '详情头应提供停用按钮');
+  disable.dispatchEvent({ type: 'click' });
+  for (let i = 0; i < 20; i += 1) {
+    if (calls.some((c) => c.route === '/save')) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const save = calls.find((c) => c.route === '/save');
+  assert.ok(save, '应调用 /save');
+  assert.equal(save.options.body.id, 'p1');
+  assert.equal(save.options.body.disabled, true);
+  assert.equal(save.options.body.models.length, 2);
+  assert.equal(save.options.body.apiKey, undefined, 'apiKey 留空表示保留原值');
 });

@@ -153,6 +153,35 @@ var providers_next_default = defineComponent({
       }).catch((err) => {
         this.status = "切换失败：" + (err && err.message || String(err));
       });
+    },
+    toggleProvider() {
+      const selected = this.selected;
+      if (!selected) return;
+      const api = window.adaAPI;
+      if (typeof api !== "function") {
+        this.status = "当前页面没有 adaAPI，无法更新供应商。";
+        return;
+      }
+      const nextDisabled = !selected.disabled;
+      this.status = nextDisabled ? "正在停用供应商…" : "正在启用供应商…";
+      api("provider-admin", "/save", {
+        method: "POST",
+        body: {
+          id: selected.id,
+          name: selected.displayName || selected.id,
+          protocol: selected.protocol || "",
+          baseUrl: selected.baseUrl || "",
+          proxy: selected.proxy || "",
+          headers: selected.headers || {},
+          disabled: nextDisabled,
+          models: selected.models || []
+        }
+      }).then(() => {
+        this.status = nextDisabled ? "供应商已停用。" : "供应商已启用。";
+        this.load();
+      }).catch((err) => {
+        this.status = "更新失败：" + (err && err.message || String(err));
+      });
     }
   },
   render(h2) {
@@ -169,7 +198,15 @@ var providers_next_default = defineComponent({
       },
       /* @__PURE__ */ h2("span", { class: "pm-item__name" }, provider.displayName || provider.id),
       /* @__PURE__ */ h2("span", { class: "pm-item__meta" }, provider.protocol || "未设置协议")
-    )) : /* @__PURE__ */ h2(Empty, { title: "还没有供应商", description: "到原「供应商」页添加一个供应商。" })), /* @__PURE__ */ h2("section", { class: "pm-detail", "aria-label": "供应商详情" }, selected ? /* @__PURE__ */ h2("div", null, /* @__PURE__ */ h2("div", { class: "pm-detail__head" }, /* @__PURE__ */ h2("h2", { class: "pm-detail__title" }, selected.displayName || selected.id), /* @__PURE__ */ h2(Badge, { tone: selected.disabled ? "neutral" : "success", label: selected.disabled ? "已停用" : "已启用" }), /* @__PURE__ */ h2(Badge, { tone: selected.hasApiKey ? "success" : "warn", label: selected.hasApiKey ? "密钥已保存" : "未配置密钥" })), /* @__PURE__ */ h2("div", { class: "ada-tabs__list", role: "tablist" }, /* @__PURE__ */ h2(
+    )) : /* @__PURE__ */ h2(Empty, { title: "还没有供应商", description: "到原「供应商」页添加一个供应商。" })), /* @__PURE__ */ h2("section", { class: "pm-detail", "aria-label": "供应商详情" }, selected ? /* @__PURE__ */ h2("div", null, /* @__PURE__ */ h2("div", { class: "pm-detail__head" }, /* @__PURE__ */ h2("h2", { class: "pm-detail__title" }, selected.displayName || selected.id), /* @__PURE__ */ h2(Badge, { tone: selected.disabled ? "neutral" : "success", label: selected.disabled ? "已停用" : "已启用" }), /* @__PURE__ */ h2(Badge, { tone: selected.hasApiKey ? "success" : "warn", label: selected.hasApiKey ? "密钥已保存" : "未配置密钥" }), /* @__PURE__ */ h2(
+      Button,
+      {
+        size: "sm",
+        variant: selected.disabled ? "secondary" : "ghost",
+        onClick: this.toggleProvider
+      },
+      selected.disabled ? "启用" : "停用"
+    )), /* @__PURE__ */ h2("div", { class: "ada-tabs__list", role: "tablist" }, /* @__PURE__ */ h2(
       "button",
       {
         class: "ada-tabs__tab",

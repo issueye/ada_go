@@ -111,6 +111,38 @@ export default defineComponent({
           this.status = "切换失败：" + ((err && err.message) || String(err));
         });
     },
+    toggleProvider() {
+      const selected = this.selected;
+      if (!selected) return;
+      const api = (window as any).adaAPI;
+      if (typeof api !== "function") {
+        this.status = "当前页面没有 adaAPI，无法更新供应商。";
+        return;
+      }
+      const nextDisabled = !selected.disabled;
+      this.status = nextDisabled ? "正在停用供应商…" : "正在启用供应商…";
+      // /save 是整条替换：必须把未编辑字段原样带回，apiKey 留空表示保留原值。
+      api("provider-admin", "/save", {
+        method: "POST",
+        body: {
+          id: selected.id,
+          name: selected.displayName || selected.id,
+          protocol: selected.protocol || "",
+          baseUrl: selected.baseUrl || "",
+          proxy: selected.proxy || "",
+          headers: selected.headers || {},
+          disabled: nextDisabled,
+          models: selected.models || [],
+        },
+      })
+        .then(() => {
+          this.status = nextDisabled ? "供应商已停用。" : "供应商已启用。";
+          this.load();
+        })
+        .catch((err: any) => {
+          this.status = "更新失败：" + ((err && err.message) || String(err));
+        });
+    },
   },
   render(h) {
     const selected = this.selected;
@@ -164,6 +196,11 @@ export default defineComponent({
                   <h2 class="pm-detail__title">{selected.displayName || selected.id}</h2>
                   <Badge tone={selected.disabled ? "neutral" : "success"} label={selected.disabled ? "已停用" : "已启用"} />
                   <Badge tone={selected.hasApiKey ? "success" : "warn"} label={selected.hasApiKey ? "密钥已保存" : "未配置密钥"} />
+                  <Button
+                    size="sm"
+                    variant={selected.disabled ? "secondary" : "ghost"}
+                    onClick={this.toggleProvider}
+                  >{selected.disabled ? "启用" : "停用"}</Button>
                 </div>
 
                 <div class="ada-tabs__list" role="tablist">
