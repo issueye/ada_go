@@ -1,4 +1,4 @@
-// generated from page.tsx (sha256:843c88a905f53db5) by tools/pluginbuild — do not edit
+// generated from client.tsx (sha256:e3811812a87122bc) by tools/pluginbuild — do not edit
 // ada-global:ada:render
 var R = globalThis.AdaRender;
 if (!R) throw new Error("[pluginbuild] 请先加载 ada-render.js");

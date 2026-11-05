@@ -28,8 +28,8 @@ P2-4b-1：首屏骨架已改为同构组件，服务端 SSR + 浏览器 hydrate�
 ## 构建
 
 ```sh
-go run ./tools/pluginbuild -dir plugins/official/provider-admin -entry page.tsx -out static/client.js
-go run ./tools/pluginbuild -dir plugins/official/provider-admin -entry page.tsx -out static/client.js -check
+go run ./tools/pluginbuild -dir plugins/official/provider-admin -entry client.tsx -out static/client.js
+go run ./tools/pluginbuild -dir plugins/official/provider-admin -entry client.tsx -out static/client.js -check
 ```
 
 ## 后端路由

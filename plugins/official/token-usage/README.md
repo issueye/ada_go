@@ -28,8 +28,8 @@
 ## 构建
 
 ```sh
-go run ./tools/pluginbuild -dir plugins/official/token-usage -entry page.tsx -out static/client.js
-go run ./tools/pluginbuild -dir plugins/official/token-usage -entry page.tsx -out static/client.js -check
+go run ./tools/pluginbuild -dir plugins/official/token-usage -entry client.tsx -out static/client.js
+go run ./tools/pluginbuild -dir plugins/official/token-usage -entry client.tsx -out static/client.js -check
 ```
 
 ## 数据形状
