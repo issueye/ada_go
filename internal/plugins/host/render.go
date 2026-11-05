@@ -123,12 +123,14 @@ func quoteJS(s string) string {
 // Renderer 把 TSX 模板渲染成 VNode JSON。并发安全：编译缓存有锁，
 // Runtime 每次渲染新建、不跨 goroutine。
 type Renderer struct {
-	mu        sync.Mutex
-	cache     map[string]string // 源内容 SHA-256 → transform 后的 ESM
-	compMod   string            // ssr:components 模块源码
-	slotTime  time.Duration
-	pageTime  time.Duration
-	blockTime time.Duration
+	mu         sync.Mutex
+	cache      map[string]string // 源内容 SHA-256 → transform 后的 ESM
+	compMod    string            // ssr:components 模块源码
+	engineSrc  string            // ada-render.js 源码（同构渲染模式）
+	slotTime   time.Duration
+	pageTime   time.Duration
+	blockTime  time.Duration
+	islandTime time.Duration
 }
 
 // RendererOption 定制 Renderer。
@@ -163,14 +165,34 @@ func WithBlockRenderBudget(d time.Duration) RendererOption {
 	}
 }
 
+// WithRenderEngineSource 提供 ada-render.js 源码，启用同构渲染模式。
+// 宿主不复制引擎：由装配方从 web 内嵌静态资源取出同一份文件传入。
+func WithRenderEngineSource(src string) RendererOption {
+	return func(r *Renderer) {
+		if len(src) > 0 {
+			r.engineSrc = src
+		}
+	}
+}
+
+// WithIslandRenderBudget 覆盖同构岛屿渲染预算（缺省同页面档）。
+func WithIslandRenderBudget(d time.Duration) RendererOption {
+	return func(r *Renderer) {
+		if d > 0 {
+			r.islandTime = d
+		}
+	}
+}
+
 // NewRenderer 构造渲染器。
 func NewRenderer(opts ...RendererOption) *Renderer {
 	r := &Renderer{
-		cache:     map[string]string{},
-		compMod:   renderPrelude,
-		slotTime:  DefaultRenderSlotTimeout,
-		pageTime:  DefaultRenderPageTimeout,
-		blockTime: DefaultRenderPageTimeout,
+		cache:      map[string]string{},
+		compMod:    renderPrelude,
+		slotTime:   DefaultRenderSlotTimeout,
+		pageTime:   DefaultRenderPageTimeout,
+		blockTime:  DefaultRenderPageTimeout,
+		islandTime: DefaultRenderPageTimeout,
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -193,6 +215,180 @@ func (r *Renderer) RenderPage(src string, props json.RawMessage) (json.RawMessag
 // 返回值可能是字面量 null，表示该块没有内容可展示。
 func (r *Renderer) RenderBlockTemplate(src string, props json.RawMessage) (json.RawMessage, error) {
 	return r.render(src, props, r.blockTime)
+}
+
+// RenderIsland 渲染一个同构岛屿（docs/20 P1-3）：
+//   - 插件默认导出是 defineComponent/组件定义；
+//   - 宿主用同一份 ada-render.js 的 renderToJSON 展开成 VNode；
+//   - 事件处理函数由 cleanProps 自动剥离，返回值仍走 Go 校验。
+//
+// 需要装配方通过 WithRenderEngineSource 提供引擎源码；没有配置时 fail-closed。
+func (r *Renderer) RenderIsland(src string, props json.RawMessage) (json.RawMessage, error) {
+	if len(r.engineSrc) == 0 {
+		return nil, errors.New("host: 未配置 ada-render 引擎源，同构渲染不可用")
+	}
+	return r.renderIsland(src, props, r.islandTime)
+}
+
+func (r *Renderer) renderIsland(src string, props json.RawMessage, budget time.Duration) (json.RawMessage, error) {
+	if len(src) == 0 {
+		return nil, errors.New("host: 同构渲染模板源码为空")
+	}
+	js, err := r.compileIsland(src)
+	if err != nil {
+		return nil, err
+	}
+
+	rt := moejs.NewRuntime(moejs.Options{
+		MemoryLimit: MemoryLimit,
+		Locale:      "en-US",
+	})
+	defer rt.ClearInterrupt()
+
+	setup := time.AfterFunc(DefaultCallTimeout, func() { rt.Interrupt(errRenderTimeout) })
+	linked, err := r.linkIsland(js)
+	if err == nil {
+		err = rt.Load(linked)
+	}
+	setup.Stop()
+	if err != nil {
+		return nil, r.renderError("同构模块加载", err)
+	}
+	fn, ok := rt.Export("default")
+	if !ok || !engine.IsCallable(fn) {
+		return nil, errors.New("host: 同构模板缺少 `export default` 组件定义")
+	}
+
+	started := time.Now()
+	watchdog := time.AfterFunc(budget, func() { rt.Interrupt(errRenderTimeout) })
+	defer watchdog.Stop()
+
+	arg := moejs.Undefined()
+	if len(props) > 0 {
+		v, perr := rt.ParseJSON(props)
+		if perr != nil {
+			return nil, fmt.Errorf("host: 同构 props 不是合法 JSON: %w", perr)
+		}
+		arg = v
+	}
+	res, err := rt.CallFunction(fn, moejs.Undefined(), arg)
+	if err != nil {
+		if isRenderTimeout(err) {
+			return nil, fmt.Errorf("host: 同构渲染超出预算 %v（实际墙钟 %v）", budget, time.Since(started))
+		}
+		return nil, r.renderError("同构模板执行", err)
+	}
+	if res.IsObject() {
+		r0 := rt.Realm()
+		if then, terr := r0.GetMethod(res, r0.KeyFromGoString("then")); terr == nil && engine.IsCallable(then) {
+			return nil, errors.New("host: 同构渲染返回了 Promise（渲染必须同步）")
+		}
+	}
+	raw, err := rt.AppendJSON(nil, res)
+	if err != nil {
+		return nil, fmt.Errorf("host: 同构渲染结果不可 JSON 序列化: %w", err)
+	}
+	if len(raw) > maxRenderVNodeBytes {
+		return nil, fmt.Errorf("host: 同构渲染结果 %d 字节，超过 VNode 输出上限 %d", len(raw), maxRenderVNodeBytes)
+	}
+	return json.RawMessage(raw), nil
+}
+
+// linkIsland 链接 ada-render + 插件模块 + 一个只做 renderToJSON 的入口。
+func (r *Renderer) linkIsland(pluginJS string) (*moejs.Module, error) {
+	engine, err := moejs.Compile("ada:render", r.engineModuleSource())
+	if err != nil {
+		return nil, fmt.Errorf("host: ada-render 模块编译失败: %w", err)
+	}
+	plugin, err := moejs.Compile("adag:entry", pluginJS)
+	if err != nil {
+		return nil, fmt.Errorf("host: 同构插件模块编译失败: %w", err)
+	}
+	const wrapper = `import def from "adag:entry";
+import { renderToJSON } from "ada:render";
+export default function (props) { return renderToJSON(def, props); }
+`
+	entry, err := moejs.Compile("adag:island", wrapper)
+	if err != nil {
+		return nil, fmt.Errorf("host: 同构入口编译失败: %w", err)
+	}
+	modules := map[string]*moejs.Module{
+		"ada:render": engine,
+		"adag:entry": plugin,
+	}
+	resolver := moejs.Resolver(func(_ moejs.Referrer, spec string) (*moejs.Module, error) {
+		if m, ok := modules[spec]; ok {
+			return m, nil
+		}
+		return nil, fmt.Errorf("host: 同构模板 import %q 不可用：只允许 ada:render（原生标签可自由使用；同构组件库在后续阶段接入）", spec)
+	})
+	linked, lerr := moejs.Link(entry, resolver)
+	if lerr != nil {
+		return nil, fmt.Errorf("host: 同构模块链接失败: %w", lerr)
+	}
+	return linked, nil
+}
+
+// engineModuleSource 把 UMD 引擎包成 ESM：先加载引擎（设置 globalThis.AdaRender），
+// 再导出宿主需要的原语。
+func (r *Renderer) engineModuleSource() string {
+	return r.engineSrc + `
+const __R = globalThis.AdaRender;
+if (!__R) throw new Error("ada-render 未加载");
+export const h = __R.h;
+export const host = __R.host;
+export const text = __R.text;
+export const defineComponent = __R.defineComponent;
+export const createApp = __R.createApp;
+export const reactive = __R.reactive;
+export const ref = __R.ref;
+export const computed = __R.computed;
+export const watchEffect = __R.watchEffect;
+export const nextTick = __R.nextTick;
+export const renderToJSON = __R.renderToJSON;
+`
+}
+
+// compileIsland 与 compile 分开缓存：同构模式用 h 工厂，旧模板用 jsx 工厂，
+// 同一个源文件在两套工厂下产物不同，不能共用缓存键。
+func (r *Renderer) compileIsland(src string) (string, error) {
+	sum := sha256.Sum256([]byte(src))
+	key := "island:" + hex.EncodeToString(sum[:])
+	r.mu.Lock()
+	if js, ok := r.cache[key]; ok {
+		r.mu.Unlock()
+		return js, nil
+	}
+	r.mu.Unlock()
+
+	result := api.Transform(src, api.TransformOptions{
+		Loader:           api.LoaderTSX,
+		JSX:              api.JSXTransform,
+		JSXFactory:       "h",
+		JSXFragment:      "Fragment",
+		Format:           api.FormatESModule,
+		Target:           api.ES2022,
+		Sourcefile:       "island.tsx",
+		MinifyWhitespace: true,
+	})
+	if len(result.Errors) > 0 {
+		e := result.Errors[0]
+		if e.Location != nil {
+			return "", fmt.Errorf("host: 同构 TSX 编译失败: %s（%s:%d）", e.Text, e.Location.File, e.Location.Line)
+		}
+		return "", fmt.Errorf("host: 同构 TSX 编译失败: %s", e.Text)
+	}
+	if len(result.Code) == 0 {
+		return "", errors.New("host: 同构 TSX 编译没有产物")
+	}
+	js := string(result.Code)
+	r.mu.Lock()
+	if len(r.cache) >= maxRenderCacheEntries {
+		r.cache = map[string]string{}
+	}
+	r.cache[key] = js
+	r.mu.Unlock()
+	return js, nil
 }
 
 // render 的一次完整执行：transform → Runtime → eval → 调用 → JSON。

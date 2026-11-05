@@ -144,10 +144,16 @@ func NewBridge(opts BridgeOptions) (*Bridge, error) {
 		pairs = append(pairs, host.ComponentPair{Export: name, Canonical: name})
 	}
 	pairs = append(pairs, host.ComponentPair{Export: "Todo", Canonical: "TodoList"})
+	engine, ok := web.StaticAsset("ada-render.js")
+	if !ok {
+		return nil, fmt.Errorf("frontend: 内嵌静态资源缺少 ada-render.js（同构渲染不可用）")
+	}
 	b.renderer = host.NewRenderer(
 		host.WithComponentsModule(host.ComponentModuleSource(pairs)),
+		host.WithRenderEngineSource(string(engine)),
 		// 注意毫秒换算：frontend 常量是 int 毫秒，Duration 直接传会变成纳秒。
 		host.WithRenderBudgets(SlotTimeoutMS*time.Millisecond, PageTimeoutMS*time.Millisecond),
+		host.WithIslandRenderBudget(PageTimeoutMS*time.Millisecond),
 		// 动态块用独立预算：Schema 的 x-limits.renderTimeoutMs 与这里必须同源，
 		// 否则门禁比对的不是真正生效的值。
 		host.WithBlockRenderBudget(web.MarkdownBlockRenderTimeoutMS*time.Millisecond),

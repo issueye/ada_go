@@ -2577,6 +2577,20 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
+// StaticAsset 返回内嵌静态资源的字节。宿主渲染器需要复用与浏览器同一份
+// ada-render.js，避免服务端与客户端两套引擎源；路径规则与 /static/ 一致。
+func StaticAsset(name string) ([]byte, bool) {
+	clean, ok := staticAssetName(staticPrefix + strings.TrimSpace(name))
+	if !ok {
+		return nil, false
+	}
+	data, err := fs.ReadFile(staticFS, "static/"+clean)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
 // staticAssetName 把 /static/ 之后的路径规范化；只接受规范相对路径。
 func staticAssetName(urlPath string) (string, bool) {
 	name := strings.TrimPrefix(urlPath, staticPrefix)
