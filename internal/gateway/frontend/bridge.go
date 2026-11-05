@@ -265,6 +265,11 @@ func newUnit(s host.Script) (*unit, error) {
 			return nil, fmt.Errorf("frontend: 插件 %s 的样式 %q 不在静态资源里", u.manifest.ID, style)
 		}
 	}
+	if client := strings.TrimSpace(u.manifest.Frontend.Client); client != "" {
+		if _, ok := s.StaticAssets[client]; !ok {
+			return nil, fmt.Errorf("frontend: 插件 %s 的 client %q 不在静态资源里", u.manifest.ID, client)
+		}
+	}
 	for _, script := range u.manifest.Frontend.Scripts {
 		if _, ok := s.StaticAssets[script]; !ok {
 			return nil, fmt.Errorf("frontend: 插件 %s 的脚本 %q 不在静态资源里", u.manifest.ID, script)

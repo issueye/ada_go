@@ -204,6 +204,11 @@
           "description": "前端能力位（§6.2：前端 capabilities 控制预取、脚本、静态资源等）。backend.read：允许 SSR 渲染时预取只读动作结果注入 props.data.backend；frontend.script：允许加载 scripts 静态 JS，仅 builtin/verified（third-party 声明即装配失败，x-trust-rule T3；§6.9/§7.5）。",
           "x-consumer": "gateway/render: 决定是否预取只读动作；gateway/web: 决定是否加载 scripts（受信任级别与 CSP script-src 'self' 双重约束）"
         },
+        "client": {
+          "$ref": "#/$defs/assetPath",
+          "description": "插件浏览器 bundle 的静态资源名（如 client.js），由 assets 目录提供。声明后可在 slots/pages 上用 hydrate:true 接管首屏；需要 frontend.script 能力且 trust 为 builtin/verified（third-party 声明即装配失败，x-trust-rule T3；§7.5）。",
+          "x-consumer": "gateway/frontend: 校验静态资源存在；gateway/web: 生成 /ext/{id}/static/<client> 模块 URL 并在 hydrate 贡献上注入 data-ada-module"
+        },
         "slots": {
           "type": "array",
           "items": {
@@ -221,6 +226,12 @@
                 "$ref": "#/$defs/templatePath",
                 "description": "TSX 模板（相对插件目录），导出 export function Slot(props)。模板不可编译即装配失败（§6.5 校验项）。",
                 "x-consumer": "gateway/render: 装配期编译该模板并注册 Slot 导出函数，渲染期执行取得 VNode"
+              },
+              "hydrate": {
+                "type": "boolean",
+                "default": false,
+                "description": "是否用 frontend.client 在浏览器 hydrate 该插槽贡献。缺省 false，保持现有 SSR-only 行为；声明 true 时插件必须同时声明 client、frontend.script 能力与 builtin/verified 信任。",
+                "x-consumer": "gateway/web: 给该插槽贡献注入 islands 标记并按需加载 client bundle；gateway/frontend: 校验 client 资源存在"
               },
               "order": {
                 "$ref": "#/$defs/orderValue",
@@ -248,6 +259,12 @@
                 "$ref": "#/$defs/templatePath",
                 "description": "页面 TSX 模板，导出 export function Page(props)。",
                 "x-consumer": "gateway/render: 编译该模板并在请求时执行 Page(props) 取得 VNode"
+              },
+              "hydrate": {
+                "type": "boolean",
+                "default": false,
+                "description": "是否用 frontend.client 在浏览器 hydrate 该页面。缺省 false，保持现有 SSR-only 行为；声明 true 时插件必须同时声明 client、frontend.script 能力与 builtin/verified 信任。",
+                "x-consumer": "gateway/web: 给 /ext 页面注入 islands 标记并按需加载 client bundle；gateway/frontend: 校验 client 资源存在"
               },
               "title": {
                 "type": "string",
@@ -500,7 +517,7 @@
       }
     },
     {
-      "x-trust-rule": "T3：third-party（含省略 trust 走默认值）禁止 exec、process、net.sse、ui.ask、subagent.invoke（§6.2/§6.9「默认禁止 exec」）与前端 frontend.script（§6.9「禁止前端脚本」、§7.5「需要 frontend.script 能力且信任级别为 builtin/verified」）。声明即装配失败。",
+      "x-trust-rule": "T3：third-party（含省略 trust 走默认值）禁止 exec、process、net.sse、ui.ask、subagent.invoke（§6.2/§6.9「默认禁止 exec」）与前端 frontend.script / frontend.client / hydrate（§6.9「禁止前端脚本」、§7.5「需要 frontend.script 能力且信任级别为 builtin/verified」、docs/20）。声明即装配失败。",
       "if": {
         "required": ["trust"],
         "properties": {
