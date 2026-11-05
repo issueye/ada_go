@@ -22,7 +22,7 @@ export default defineComponent({
       remoteModels: [],
       fetchError: "",
       editing: false,
-      form: { name: "", protocol: "", baseUrl: "", apiKey: "" },
+      form: { name: "", protocol: "", baseUrl: "", proxy: "", headersText: "", apiKey: "" },
     };
   },
   computed: {
@@ -245,16 +245,32 @@ export default defineComponent({
     startEdit() {
       const selected = this.selected;
       if (!selected) return;
+      const headers = selected.headers || {};
+      const lines = [];
+      Object.keys(headers).forEach((key) => { lines.push(key + ": " + headers[key]); });
       this.form = {
         name: selected.displayName || selected.id,
         protocol: selected.protocol || "",
         baseUrl: selected.baseUrl || "",
+        proxy: selected.proxy || "",
+        headersText: lines.join("\n"),
         apiKey: "",
       };
       this.editing = true;
     },
     cancelEdit() {
       this.editing = false;
+    },
+    parseHeaders(text: string) {
+      const out: any = {};
+      String(text || "").split(/\r?\n/).forEach((line) => {
+        const index = line.indexOf(":");
+        if (index <= 0) return;
+        const key = line.slice(0, index).trim();
+        const value = line.slice(index + 1).trim();
+        if (key) out[key] = value;
+      });
+      return out;
     },
     saveProvider() {
       const selected = this.selected;
@@ -269,8 +285,8 @@ export default defineComponent({
         name: String(this.form.name || "").trim() || selected.displayName || selected.id,
         protocol: String(this.form.protocol || "").trim() || selected.protocol || "",
         baseUrl: String(this.form.baseUrl || "").trim(),
-        proxy: selected.proxy || "",
-        headers: selected.headers || {},
+        proxy: String(this.form.proxy || "").trim(),
+        headers: this.parseHeaders(this.form.headersText),
         disabled: !!selected.disabled,
         models: selected.models || [],
       };
@@ -399,6 +415,22 @@ export default defineComponent({
                         modelValue={this.form.baseUrl}
                         placeholder="https://api.example.com/v1"
                         onInput={(value: any) => { this.form.baseUrl = String(value || ""); }}
+                      />
+                      <Input
+                        id="pm-proxy"
+                        label="代理"
+                        modelValue={this.form.proxy}
+                        placeholder="http://127.0.0.1:7890（可选）"
+                        onInput={(value: any) => { this.form.proxy = String(value || ""); }}
+                      />
+                      <Input
+                        id="pm-headers"
+                        label="请求头（每行 Key: Value）"
+                        multiline
+                        rows={4}
+                        modelValue={this.form.headersText}
+                        placeholder="X-Api-Version: 2024-01-01"
+                        onInput={(value: any) => { this.form.headersText = String(value || ""); }}
                       />
                       <Input
                         id="pm-api-key"

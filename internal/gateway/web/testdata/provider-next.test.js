@@ -24,6 +24,8 @@ const provider = {
   displayName: '演示供应商',
   protocol: 'openai',
   baseUrl: 'https://example.test/v1',
+  proxy: 'http://old.proxy:8080',
+  headers: { 'X-Old': '1' },
   hasApiKey: true,
   apiKeyHint: '1234',
   models: [
@@ -171,14 +173,20 @@ test('providers-next：/state 取数、模型表与设为当前', async () => {
   const name = root.querySelector('#pm-name');
   const protocol = root.querySelector('#pm-protocol');
   const baseUrl = root.querySelector('#pm-base-url');
+  const proxy = root.querySelector('#pm-proxy');
+  const headers = root.querySelector('#pm-headers');
   const apiKey = root.querySelector('#pm-api-key');
-  assert.ok(name && protocol && baseUrl && apiKey, '编辑表单应渲染四个输入');
+  assert.ok(name && protocol && baseUrl && proxy && headers && apiKey, '编辑表单应渲染全部输入');
   name.value = '新名称';
   name.dispatchEvent({ type: 'input' });
   protocol.value = 'openai-chat';
   protocol.dispatchEvent({ type: 'input' });
   baseUrl.value = 'https://new.example/v1';
   baseUrl.dispatchEvent({ type: 'input' });
+  proxy.value = 'http://127.0.0.1:7890';
+  proxy.dispatchEvent({ type: 'input' });
+  headers.value = 'X-A: 1\nX-B: two';
+  headers.dispatchEvent({ type: 'input' });
   apiKey.value = 'sk-new';
   apiKey.dispatchEvent({ type: 'input' });
   await globalThis.AdaRender.nextTick();
@@ -196,6 +204,8 @@ test('providers-next：/state 取数、模型表与设为当前', async () => {
   assert.equal(editSave.name, '新名称');
   assert.equal(editSave.protocol, 'openai-chat');
   assert.equal(editSave.baseUrl, 'https://new.example/v1');
+  assert.equal(editSave.proxy, 'http://127.0.0.1:7890');
+  assert.deepEqual(editSave.headers, { 'X-A': '1', 'X-B': 'two' });
   assert.equal(editSave.apiKey, 'sk-new');
   assert.equal(editSave.models.length, 3, '保存表单应保留现有模型');
 
