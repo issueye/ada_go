@@ -23,6 +23,8 @@ export default defineComponent({
       fetchError: "",
       editing: false,
       form: { name: "", protocol: "", baseUrl: "", proxy: "", headersText: "", apiKey: "" },
+      addingProvider: false,
+      newProvider: { name: "", protocol: "", baseUrl: "", proxy: "", headersText: "", apiKey: "" },
       editingModelId: "",
       addingModel: false,
       newModel: { id: "", displayName: "", contextWindow: "" },
@@ -265,6 +267,7 @@ export default defineComponent({
     startEdit() {
       const selected = this.selected;
       if (!selected) return;
+      this.addingProvider = false;
       const headers = selected.headers || {};
       const lines = [];
       Object.keys(headers).forEach((key) => { lines.push(key + ": " + headers[key]); });
@@ -323,10 +326,49 @@ export default defineComponent({
           this.status = "保存失败：" + ((err && err.message) || String(err));
         });
     },
+    startAddProvider() {
+      this.addingProvider = true;
+      this.editing = false;
+      this.newProvider = { name: "", protocol: "", baseUrl: "", proxy: "", headersText: "", apiKey: "" };
+    },
+    cancelAddProvider() {
+      this.addingProvider = false;
+    },
+    createProvider() {
+      const api = (window as any).adaAPI;
+      if (typeof api !== "function") {
+        this.status = "当前页面没有 adaAPI，无法新增供应商。";
+        return;
+      }
+      const body: any = {
+        name: String(this.newProvider.name || "").trim(),
+        protocol: String(this.newProvider.protocol || "").trim(),
+        baseUrl: String(this.newProvider.baseUrl || "").trim(),
+        proxy: String(this.newProvider.proxy || "").trim(),
+        headers: this.parseHeaders(this.newProvider.headersText),
+        disabled: false,
+        models: [],
+      };
+      if (!body.name) {
+        this.status = "供应商名称不能为空。";
+        return;
+      }
+      const key = String(this.newProvider.apiKey || "").trim();
+      if (key) body.apiKey = key;
+      this.status = "正在新增供应商…";
+      api("provider-admin", "/save", { method: "POST", body })
+        .then(() => {
+          this.status = "供应商已新增。";
+          this.addingProvider = false;
+          this.load();
+        })
+        .catch((err: any) => {
+          this.status = "新增失败：" + ((err && err.message) || String(err));
+        });
+    },
     startEditModel(row: any) {
       if (!row) return;
-      this.editingModelId = row.id;
-      this.modelForm = {
+      this.editingModelId = row.id;      this.modelForm = {
         displayName: row.displayName || "",
         contextWindow: row.contextWindow === undefined || row.contextWindow === null ? "" : String(row.contextWindow),
         supportsTools: !!row.supportsTools,
@@ -456,6 +498,7 @@ export default defineComponent({
           </div>
           <div class="pm-head__actions">
             <Badge tone="brand" label={providers.length ? providers.length + " 个供应商" : "无供应商"} />
+            <Button variant="primary" size="sm" onClick={this.startAddProvider}>添加供应商</Button>
             <Button variant="secondary" size="sm" onClick={this.load}>刷新</Button>
           </div>
         </div>
@@ -490,7 +533,59 @@ export default defineComponent({
           </div>
 
           <section class="pm-detail" aria-label="供应商详情">
-            {selected ? (
+            {this.addingProvider ? (
+              <div class="pm-info">
+                <h2 class="pm-detail__title">新增供应商</h2>
+                <Input
+                  id="pm-new-provider-name"
+                  label="名称"
+                  modelValue={this.newProvider.name}
+                  placeholder="例如 我的 OpenAI"
+                  onInput={(value: any) => { this.newProvider.name = String(value || ""); }}
+                />
+                <Input
+                  id="pm-new-provider-protocol"
+                  label="API 格式"
+                  modelValue={this.newProvider.protocol}
+                  placeholder="openai-chat / openai-responses / anthropic-messages"
+                  onInput={(value: any) => { this.newProvider.protocol = String(value || ""); }}
+                />
+                <Input
+                  id="pm-new-provider-base-url"
+                  label="端点"
+                  modelValue={this.newProvider.baseUrl}
+                  placeholder="https://api.example.com/v1"
+                  onInput={(value: any) => { this.newProvider.baseUrl = String(value || ""); }}
+                />
+                <Input
+                  id="pm-new-provider-proxy"
+                  label="代理"
+                  modelValue={this.newProvider.proxy}
+                  placeholder="http://127.0.0.1:7890（可选）"
+                  onInput={(value: any) => { this.newProvider.proxy = String(value || ""); }}
+                />
+                <Input
+                  id="pm-new-provider-headers"
+                  label="请求头（每行 Key: Value）"
+                  multiline
+                  rows={4}
+                  modelValue={this.newProvider.headersText}
+                  onInput={(value: any) => { this.newProvider.headersText = String(value || ""); }}
+                />
+                <Input
+                  id="pm-new-provider-api-key"
+                  type="password"
+                  label="API Key"
+                  modelValue={this.newProvider.apiKey}
+                  placeholder="可后补；留空表示未配置"
+                  onInput={(value: any) => { this.newProvider.apiKey = String(value || ""); }}
+                />
+                <p class="pm-info__actions">
+                  <Button variant="primary" size="sm" onClick={this.createProvider}>创建供应商</Button>
+                  <Button variant="secondary" size="sm" onClick={this.cancelAddProvider}>取消</Button>
+                </p>
+              </div>
+            ) : selected ? (
               <div>
                 <div class="pm-detail__head">
                   <h2 class="pm-detail__title">{selected.displayName || selected.id}</h2>

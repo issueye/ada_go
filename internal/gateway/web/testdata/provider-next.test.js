@@ -18,6 +18,9 @@ globalThis.AdaRender = require('../static/ada-render.js');
 require('../static/ada-ui-iso.js');
 
 const calls = [];
+const existingSaves = () => calls.filter(
+  (c) => c.route === '/save' && c.options && c.options.body && c.options.body.id,
+);
 let confirmMessage = '';
 const provider = {
   id: 'p1',
@@ -53,9 +56,24 @@ global.window = {
     }
     if (route === '/save') {
       const body = options.body;
+      if (!body.id) {
+        providers.push({
+          id: 'p2',
+          displayName: body.name,
+          protocol: body.protocol,
+          baseUrl: body.baseUrl,
+          proxy: body.proxy,
+          headers: body.headers,
+          hasApiKey: !!body.apiKey,
+          models: body.models || [],
+        });
+        return Promise.resolve({ ok: true });
+      }
       provider.displayName = body.name;
       provider.protocol = body.protocol;
       provider.baseUrl = body.baseUrl;
+      provider.proxy = body.proxy;
+      provider.headers = body.headers;
       provider.disabled = !!body.disabled;
       provider.models = body.models;
       if (body.apiKey) {
@@ -105,6 +123,51 @@ test('providers-next：/state 取数、模型表与设为当前', async () => {
   assert.equal(root.querySelector('.pm-item__name').textContent, '演示供应商');
   assert.ok(root.textContent.includes('密钥已保存'));
 
+  const addProvider = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '添加供应商');
+  assert.ok(addProvider, '页头应提供添加供应商');
+  addProvider.dispatchEvent({ type: 'click' });
+  await globalThis.AdaRender.nextTick();
+  const newProviderName = root.querySelector('#pm-new-provider-name');
+  const newProviderProtocol = root.querySelector('#pm-new-provider-protocol');
+  const newProviderBase = root.querySelector('#pm-new-provider-base-url');
+  const newProviderProxy = root.querySelector('#pm-new-provider-proxy');
+  const newProviderHeaders = root.querySelector('#pm-new-provider-headers');
+  const newProviderKey = root.querySelector('#pm-new-provider-api-key');
+  assert.ok(newProviderName && newProviderProtocol && newProviderBase && newProviderProxy && newProviderHeaders && newProviderKey);
+  newProviderName.value = '新供应商';
+  newProviderName.dispatchEvent({ type: 'input' });
+  newProviderProtocol.value = 'openai-chat';
+  newProviderProtocol.dispatchEvent({ type: 'input' });
+  newProviderBase.value = 'https://new-provider.example/v1';
+  newProviderBase.dispatchEvent({ type: 'input' });
+  newProviderProxy.value = '';
+  newProviderProxy.dispatchEvent({ type: 'input' });
+  newProviderHeaders.value = 'X-New: 1';
+  newProviderHeaders.dispatchEvent({ type: 'input' });
+  newProviderKey.value = 'sk-created';
+  newProviderKey.dispatchEvent({ type: 'input' });
+  await globalThis.AdaRender.nextTick();
+  const createProvider = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '创建供应商');
+  assert.ok(createProvider);
+  createProvider.dispatchEvent({ type: 'click' });
+  for (let i = 0; i < 20; i += 1) {
+    if (calls.some((c) => c.route === '/save' && !c.options.body.id)) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const createCall = calls.find((c) => c.route === '/save' && !c.options.body.id);
+  assert.ok(createCall, '新增供应商应调用 /save 且不带 id');
+  assert.equal(createCall.options.body.name, '新供应商');
+  assert.equal(createCall.options.body.protocol, 'openai-chat');
+  assert.equal(createCall.options.body.baseUrl, 'https://new-provider.example/v1');
+  assert.equal(createCall.options.body.apiKey, 'sk-created');
+  assert.deepEqual(createCall.options.body.headers, { 'X-New': '1' });
+
+  for (let i = 0; i < 20; i += 1) {
+    if (root.querySelectorAll('.pm-item').length >= 2) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await globalThis.AdaRender.nextTick();
+  }
+
   const modelsTab = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '模型列表');
   assert.ok(modelsTab);
   modelsTab.dispatchEvent({ type: 'click' });
@@ -136,10 +199,10 @@ test('providers-next：/state 取数、模型表与设为当前', async () => {
   assert.ok(saveModel, '模型编辑应提供保存按钮');
   saveModel.dispatchEvent({ type: 'click' });
   for (let i = 0; i < 20; i += 1) {
-    if (calls.some((c) => c.route === '/save')) break;
+    if (existingSaves().length >= 1) break;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  const modelSave = calls.find((c) => c.route === '/save').options.body;
+  const modelSave = existingSaves().slice(-1)[0].options.body;
   const savedModel = modelSave.models.find((m) => m.id === 'm1');
   assert.equal(savedModel.displayName, '模型一（改）');
   assert.equal(savedModel.contextWindow, 256000);
@@ -162,10 +225,10 @@ test('providers-next：/state 取数、模型表与设为当前', async () => {
   assert.ok(disable, '详情头应提供停用按钮');
   disable.dispatchEvent({ type: 'click' });
   for (let i = 0; i < 20; i += 1) {
-    if (calls.some((c) => c.route === '/save')) break;
+    if (existingSaves().length >= 2) break;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  const save = calls.filter((c) => c.route === '/save').slice(-1)[0];
+  const save = existingSaves().slice(-1)[0];
   assert.ok(save, '应调用 /save');
   assert.equal(save.options.body.id, 'p1');
   assert.equal(save.options.body.disabled, true);
@@ -186,10 +249,10 @@ test('providers-next：/state 取数、模型表与设为当前', async () => {
   assert.ok(addButton, '拉取后应提供添加按钮');
   addButton.dispatchEvent({ type: 'click' });
   for (let i = 0; i < 20; i += 1) {
-    if (calls.filter((c) => c.route === '/save').length >= 2) break;
+    if (existingSaves().length >= 3) break;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  const saves = calls.filter((c) => c.route === '/save');
+  const saves = existingSaves();
   assert.ok(saves.length >= 2, '添加模型应再次调用 /save');
   assert.equal(saves[saves.length - 1].options.body.models.length, 3);
 
@@ -212,10 +275,10 @@ test('providers-next：/state 取数、模型表与设为当前', async () => {
   assert.ok(addConfirm);
   addConfirm.dispatchEvent({ type: 'click' });
   for (let i = 0; i < 20; i += 1) {
-    if (calls.filter((c) => c.route === '/save').length >= 3) break;
+    if (existingSaves().length >= 4) break;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  const afterAdd = calls.filter((c) => c.route === '/save').slice(-1)[0].options.body;
+  const afterAdd = existingSaves().slice(-1)[0].options.body;
   assert.ok(afterAdd.models.some((m) => m.id === 'm4'));
   assert.equal(afterAdd.models.find((m) => m.id === 'm4').contextWindow, 16000);
 
@@ -235,10 +298,10 @@ test('providers-next：/state 取数、模型表与设为当前', async () => {
   assert.ok(removeModel);
   removeModel.dispatchEvent({ type: 'click' });
   for (let i = 0; i < 20; i += 1) {
-    if (calls.filter((c) => c.route === '/save').length >= 4) break;
+    if (existingSaves().length >= 5) break;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  const afterRemove = calls.filter((c) => c.route === '/save').slice(-1)[0].options.body;
+  const afterRemove = existingSaves().slice(-1)[0].options.body;
   assert.ok(!afterRemove.models.some((m) => m.id === 'm4'));
   assert.equal(afterRemove.models.length, 3);
 
@@ -276,10 +339,10 @@ test('providers-next：/state 取数、模型表与设为当前', async () => {
   assert.ok(saveButton, '编辑表单应提供保存按钮');
   saveButton.dispatchEvent({ type: 'click' });
   for (let i = 0; i < 20; i += 1) {
-    if (calls.filter((c) => c.route === '/save').length >= 3) break;
+    if (existingSaves().length >= 6) break;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  const savesAfterEdit = calls.filter((c) => c.route === '/save');
+  const savesAfterEdit = existingSaves();
   assert.ok(savesAfterEdit.length >= 3, '保存表单应调用 /save');
   const editSave = savesAfterEdit[savesAfterEdit.length - 1].options.body;
   assert.equal(editSave.name, '新名称');

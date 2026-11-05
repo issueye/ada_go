@@ -71,6 +71,8 @@ var providers_next_default = defineComponent({
       fetchError: "",
       editing: false,
       form: { name: "", protocol: "", baseUrl: "", proxy: "", headersText: "", apiKey: "" },
+      addingProvider: false,
+      newProvider: { name: "", protocol: "", baseUrl: "", proxy: "", headersText: "", apiKey: "" },
       editingModelId: "",
       addingModel: false,
       newModel: { id: "", displayName: "", contextWindow: "" },
@@ -300,6 +302,7 @@ var providers_next_default = defineComponent({
     startEdit() {
       const selected = this.selected;
       if (!selected) return;
+      this.addingProvider = false;
       const headers = selected.headers || {};
       const lines = [];
       Object.keys(headers).forEach((key) => {
@@ -356,6 +359,44 @@ var providers_next_default = defineComponent({
         this.load();
       }).catch((err) => {
         this.status = "保存失败：" + (err && err.message || String(err));
+      });
+    },
+    startAddProvider() {
+      this.addingProvider = true;
+      this.editing = false;
+      this.newProvider = { name: "", protocol: "", baseUrl: "", proxy: "", headersText: "", apiKey: "" };
+    },
+    cancelAddProvider() {
+      this.addingProvider = false;
+    },
+    createProvider() {
+      const api = window.adaAPI;
+      if (typeof api !== "function") {
+        this.status = "当前页面没有 adaAPI，无法新增供应商。";
+        return;
+      }
+      const body = {
+        name: String(this.newProvider.name || "").trim(),
+        protocol: String(this.newProvider.protocol || "").trim(),
+        baseUrl: String(this.newProvider.baseUrl || "").trim(),
+        proxy: String(this.newProvider.proxy || "").trim(),
+        headers: this.parseHeaders(this.newProvider.headersText),
+        disabled: false,
+        models: []
+      };
+      if (!body.name) {
+        this.status = "供应商名称不能为空。";
+        return;
+      }
+      const key = String(this.newProvider.apiKey || "").trim();
+      if (key) body.apiKey = key;
+      this.status = "正在新增供应商…";
+      api("provider-admin", "/save", { method: "POST", body }).then(() => {
+        this.status = "供应商已新增。";
+        this.addingProvider = false;
+        this.load();
+      }).catch((err) => {
+        this.status = "新增失败：" + (err && err.message || String(err));
       });
     },
     startEditModel(row) {
@@ -474,7 +515,7 @@ var providers_next_default = defineComponent({
   render(h2) {
     const selected = this.selected;
     const providers = this.providers || [];
-    return /* @__PURE__ */ h2("section", { class: "pm-page", "data-provider-admin-next": true }, /* @__PURE__ */ h2("div", { class: "pm-head" }, /* @__PURE__ */ h2("div", { class: "pm-head__text" }, /* @__PURE__ */ h2("h1", { class: "pm-title" }, "模型设置（组件化原型）"), /* @__PURE__ */ h2("p", { class: "pm-sub" }, "只读演示：数据经插件 route /state 读取；写入仍使用原页面。")), /* @__PURE__ */ h2("div", { class: "pm-head__actions" }, /* @__PURE__ */ h2(Badge, { tone: "brand", label: providers.length ? providers.length + " 个供应商" : "无供应商" }), /* @__PURE__ */ h2(Button, { variant: "secondary", size: "sm", onClick: this.load }, "刷新"))), this.error ? /* @__PURE__ */ h2("p", { class: "pm-status", "data-tone": "danger", role: "alert" }, this.error) : null, this.status ? /* @__PURE__ */ h2("p", { class: "pm-status", role: "status" }, this.status) : null, /* @__PURE__ */ h2("div", { class: "pm-layout" }, /* @__PURE__ */ h2("div", { class: "pm-list", "aria-label": "供应商列表" }, this.loading ? /* @__PURE__ */ h2("p", { class: "pm-empty" }, "正在读取供应商…") : providers.length ? providers.map((provider) => /* @__PURE__ */ h2(
+    return /* @__PURE__ */ h2("section", { class: "pm-page", "data-provider-admin-next": true }, /* @__PURE__ */ h2("div", { class: "pm-head" }, /* @__PURE__ */ h2("div", { class: "pm-head__text" }, /* @__PURE__ */ h2("h1", { class: "pm-title" }, "模型设置（组件化原型）"), /* @__PURE__ */ h2("p", { class: "pm-sub" }, "只读演示：数据经插件 route /state 读取；写入仍使用原页面。")), /* @__PURE__ */ h2("div", { class: "pm-head__actions" }, /* @__PURE__ */ h2(Badge, { tone: "brand", label: providers.length ? providers.length + " 个供应商" : "无供应商" }), /* @__PURE__ */ h2(Button, { variant: "primary", size: "sm", onClick: this.startAddProvider }, "添加供应商"), /* @__PURE__ */ h2(Button, { variant: "secondary", size: "sm", onClick: this.load }, "刷新"))), this.error ? /* @__PURE__ */ h2("p", { class: "pm-status", "data-tone": "danger", role: "alert" }, this.error) : null, this.status ? /* @__PURE__ */ h2("p", { class: "pm-status", role: "status" }, this.status) : null, /* @__PURE__ */ h2("div", { class: "pm-layout" }, /* @__PURE__ */ h2("div", { class: "pm-list", "aria-label": "供应商列表" }, this.loading ? /* @__PURE__ */ h2("p", { class: "pm-empty" }, "正在读取供应商…") : providers.length ? providers.map((provider) => /* @__PURE__ */ h2(
       "button",
       {
         key: provider.id,
@@ -485,7 +526,75 @@ var providers_next_default = defineComponent({
       },
       /* @__PURE__ */ h2("span", { class: "pm-item__name" }, provider.displayName || provider.id),
       /* @__PURE__ */ h2("span", { class: "pm-item__meta" }, provider.protocol || "未设置协议")
-    )) : /* @__PURE__ */ h2(Empty, { title: "还没有供应商", description: "到原「供应商」页添加一个供应商。" })), /* @__PURE__ */ h2("section", { class: "pm-detail", "aria-label": "供应商详情" }, selected ? /* @__PURE__ */ h2("div", null, /* @__PURE__ */ h2("div", { class: "pm-detail__head" }, /* @__PURE__ */ h2("h2", { class: "pm-detail__title" }, selected.displayName || selected.id), /* @__PURE__ */ h2(Badge, { tone: selected.disabled ? "neutral" : "success", label: selected.disabled ? "已停用" : "已启用" }), /* @__PURE__ */ h2(Badge, { tone: selected.hasApiKey ? "success" : "warn", label: selected.hasApiKey ? "密钥已保存" : "未配置密钥" }), /* @__PURE__ */ h2(
+    )) : /* @__PURE__ */ h2(Empty, { title: "还没有供应商", description: "到原「供应商」页添加一个供应商。" })), /* @__PURE__ */ h2("section", { class: "pm-detail", "aria-label": "供应商详情" }, this.addingProvider ? /* @__PURE__ */ h2("div", { class: "pm-info" }, /* @__PURE__ */ h2("h2", { class: "pm-detail__title" }, "新增供应商"), /* @__PURE__ */ h2(
+      Input,
+      {
+        id: "pm-new-provider-name",
+        label: "名称",
+        modelValue: this.newProvider.name,
+        placeholder: "例如 我的 OpenAI",
+        onInput: (value) => {
+          this.newProvider.name = String(value || "");
+        }
+      }
+    ), /* @__PURE__ */ h2(
+      Input,
+      {
+        id: "pm-new-provider-protocol",
+        label: "API 格式",
+        modelValue: this.newProvider.protocol,
+        placeholder: "openai-chat / openai-responses / anthropic-messages",
+        onInput: (value) => {
+          this.newProvider.protocol = String(value || "");
+        }
+      }
+    ), /* @__PURE__ */ h2(
+      Input,
+      {
+        id: "pm-new-provider-base-url",
+        label: "端点",
+        modelValue: this.newProvider.baseUrl,
+        placeholder: "https://api.example.com/v1",
+        onInput: (value) => {
+          this.newProvider.baseUrl = String(value || "");
+        }
+      }
+    ), /* @__PURE__ */ h2(
+      Input,
+      {
+        id: "pm-new-provider-proxy",
+        label: "代理",
+        modelValue: this.newProvider.proxy,
+        placeholder: "http://127.0.0.1:7890（可选）",
+        onInput: (value) => {
+          this.newProvider.proxy = String(value || "");
+        }
+      }
+    ), /* @__PURE__ */ h2(
+      Input,
+      {
+        id: "pm-new-provider-headers",
+        label: "请求头（每行 Key: Value）",
+        multiline: true,
+        rows: 4,
+        modelValue: this.newProvider.headersText,
+        onInput: (value) => {
+          this.newProvider.headersText = String(value || "");
+        }
+      }
+    ), /* @__PURE__ */ h2(
+      Input,
+      {
+        id: "pm-new-provider-api-key",
+        type: "password",
+        label: "API Key",
+        modelValue: this.newProvider.apiKey,
+        placeholder: "可后补；留空表示未配置",
+        onInput: (value) => {
+          this.newProvider.apiKey = String(value || "");
+        }
+      }
+    ), /* @__PURE__ */ h2("p", { class: "pm-info__actions" }, /* @__PURE__ */ h2(Button, { variant: "primary", size: "sm", onClick: this.createProvider }, "创建供应商"), /* @__PURE__ */ h2(Button, { variant: "secondary", size: "sm", onClick: this.cancelAddProvider }, "取消"))) : selected ? /* @__PURE__ */ h2("div", null, /* @__PURE__ */ h2("div", { class: "pm-detail__head" }, /* @__PURE__ */ h2("h2", { class: "pm-detail__title" }, selected.displayName || selected.id), /* @__PURE__ */ h2(Badge, { tone: selected.disabled ? "neutral" : "success", label: selected.disabled ? "已停用" : "已启用" }), /* @__PURE__ */ h2(Badge, { tone: selected.hasApiKey ? "success" : "warn", label: selected.hasApiKey ? "密钥已保存" : "未配置密钥" }), /* @__PURE__ */ h2(
       Button,
       {
         size: "sm",
