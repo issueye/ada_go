@@ -86,3 +86,58 @@ test('ada-ui-iso：Textarea 复用 Input 的 render，默认多行', () => {
   assert.equal(area.value, 'hello');
 });
 
+test('ada-ui-iso：Icon 通过 IconAdapter 输出与 Go 一致的内联 SVG', () => {
+  const root = global.document.createElement('div');
+  global.document.body.appendChild(root);
+  const app = globalThis.AdaRender.createApp({
+    components: { Icon: UI.components.IconAdapter },
+    render(h) {
+      return h(UI.components.Icon, { name: 'i-list', size: 12 });
+    },
+  });
+  app.mount(root);
+
+  const svg = root.querySelector('svg.ada-icon');
+  assert.ok(svg, '应输出 svg.ada-icon');
+  assert.equal(svg.getAttribute('width'), '12');
+  assert.equal(svg.getAttribute('height'), '12');
+  assert.equal(svg.getAttribute('stroke-width'), '1.75');
+  assert.equal(svg.querySelectorAll('path').length, 3);
+});
+
+test('ada-ui-iso：TodoList/Notice 通过 Icon 桥输出原生结构', () => {
+  const root = global.document.createElement('div');
+  global.document.body.appendChild(root);
+  const app = globalThis.AdaRender.createApp({
+    components: { Icon: UI.components.IconAdapter },
+    render(h) {
+      return h('div', null, [
+        h(UI.components.Notice, { tone: 'success' }, '已完成'),
+        h(UI.components.TodoList, {
+          notes: '备注',
+          steps: [
+            { step: '第一步', status: 'done' },
+            { step: '第二步', status: 'in_progress' },
+            { step: '第三步', status: 'pending' },
+          ],
+        }),
+      ]);
+    },
+  });
+  app.mount(root);
+
+  const notice = root.querySelector('.ada-notice--success');
+  assert.ok(notice, 'Notice 应输出 tone class');
+  assert.equal(notice.textContent, '已完成');
+  assert.ok(notice.querySelector('svg.ada-icon'));
+
+  const wrap = root.querySelector('.ada-todo__list-wrap');
+  assert.ok(wrap, 'TodoList 应输出 wrapper');
+  assert.equal(root.querySelector('.ada-todo__notes').textContent, '备注：备注');
+  assert.equal(root.querySelectorAll('.ada-todo__step').length, 3);
+  assert.ok(root.querySelector('.ada-todo__step.is-done'));
+  assert.ok(root.querySelector('.ada-todo__step.is-running'));
+  assert.ok(root.querySelector('.ada-todo__step.is-pending'));
+  assert.equal(root.querySelectorAll('.ada-todo__step svg.ada-icon').length, 3);
+});
+

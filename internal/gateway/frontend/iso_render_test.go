@@ -63,3 +63,64 @@ func TestIsoComponentsRenderThroughGo(t *testing.T) {
 		t.Fatalf("SSR HTML 不应包含 $C：%s", text)
 	}
 }
+
+const isoIconsSource = `import { h, defineComponent } from "ada:render";
+import { Icon, TodoList, Notice } from "ada:ui";
+
+export default defineComponent({
+  render(h) {
+    return (
+      <div class="iso-icons">
+        <Icon name="i-list" size={12} />
+        <Notice tone="success">已完成</Notice>
+        <TodoList notes="备注" steps={[
+          { step: "第一步", status: "done" },
+          { step: "第二步", status: "in_progress" },
+          { step: "第三步", status: "pending" },
+        ]} />
+      </div>
+    );
+  },
+});
+`
+
+func TestIsoIconTodoNoticeRenderThroughGo(t *testing.T) {
+	engine, err := os.ReadFile(filepath.Join("..", "web", "static", "ada-render.js"))
+	if err != nil {
+		t.Fatalf("读取 ada-render.js: %v", err)
+	}
+	iso, err := os.ReadFile(filepath.Join("..", "web", "static", "ada-ui-iso.js"))
+	if err != nil {
+		t.Fatalf("读取 ada-ui-iso.js: %v", err)
+	}
+	r := host.NewRenderer(
+		host.WithRenderEngineSource(string(engine)),
+		host.WithIsoComponentsSource(string(iso)),
+	)
+	vnode, err := r.RenderIsland(isoIconsSource, nil)
+	if err != nil {
+		t.Fatalf("RenderIsland: %v", err)
+	}
+	html, err := RenderHTML(vnode)
+	if err != nil {
+		t.Fatalf("RenderHTML: %v", err)
+	}
+	text := string(html)
+	for _, want := range []string{
+		`<svg class="ada-icon" width="12" height="12"`,
+		`<path d="m3 7 2 2 4-4"/>`,
+		`<div class="ada-notice ada-notice--success">`,
+		`<div class="ada-todo__list-wrap">`,
+		`class="ada-todo__step is-done"`,
+		`class="ada-todo__step is-running"`,
+		`class="ada-todo__step is-pending"`,
+		`备注：</span>备注`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("SSR HTML 缺少 %s\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "$C") {
+		t.Fatalf("SSR HTML 不应包含 $C：%s", text)
+	}
+}

@@ -43,6 +43,153 @@
     return self && self.label ? [self.label] : null;
   }
 
+  /* 图标：服务端保留 $C Icon（Go 渲染内联 SVG）；浏览器用 IconAdapter 输出
+     同一套内联 path。插件不能直接写 svg（VNode 白名单禁止），必须走这个桥。 */
+  var ICON_PATHS = {
+    'i-list': [
+      ['path', { d: 'm3 7 2 2 4-4' }],
+      ['path', { d: 'm3 17 2 2 4-4' }],
+      ['path', { d: 'M13 6h8M13 12h8M13 18h8' }],
+    ],
+    'i-copy': [
+      ['rect', { x: 9, y: 9, width: 12, height: 12, rx: 2 }],
+      ['path', { d: 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1' }],
+    ],
+    'i-chevron-up': [['path', { d: 'm6 15 6-6 6 6' }]],
+    'i-check-circle': [
+      ['circle', { cx: 12, cy: 12, r: 9 }],
+      ['path', { d: 'm8.5 12.5 2.5 2.5 4.5-5' }],
+    ],
+    'i-arrow-right': [
+      ['path', { d: 'M5 12h14' }],
+      ['path', { d: 'm12 5 7 7-7 7' }],
+    ],
+    'i-circle': [['circle', { cx: 12, cy: 12, r: 9 }]],
+  };
+
+  function iconSize(value) {
+    var size = Number(value || 14);
+    if (!isFinite(size)) size = 14;
+    size = Math.round(size);
+    if (size < 8) size = 8;
+    if (size > 32) size = 32;
+    return size;
+  }
+
+  function iconVNode(h, name, size) {
+    var children = [];
+    var shapes = ICON_PATHS[name] || [];
+    for (var i = 0; i < shapes.length; i += 1) {
+      children.push(h(shapes[i][0], shapes[i][1]));
+    }
+    var px = iconSize(size);
+    return h('svg', {
+      class: 'ada-icon',
+      width: px,
+      height: px,
+      viewBox: '0 0 24 24',
+      fill: 'none',
+      stroke: 'currentColor',
+      'stroke-width': '1.75',
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+      'aria-hidden': 'true',
+    }, children);
+  }
+
+  var IconAdapter = defineComponent({
+    name: 'IconAdapter',
+    props: { name: { default: '' }, size: { default: 14 } },
+    render: function (h) {
+      return iconVNode(h, this.name, this.size);
+    },
+  });
+  components.IconAdapter = IconAdapter;
+
+  var host = AdaRender.host;
+  var Icon = register('Icon', {
+    props: { name: { default: '' }, size: { default: 14 } },
+    render: function () {
+      // 服务端：保持 $C，由 Go 的 renderIcon 输出白名单内联 SVG；
+      // 浏览器：app 注册的 IconAdapter 负责同样的 DOM。
+      return host('Icon', { name: this.name, size: iconSize(this.size) });
+    },
+  });
+
+  var TODO_STATUS = {
+    done: { className: 'is-done', icon: 'i-check-circle' },
+    in_progress: { className: 'is-running', icon: 'i-arrow-right' },
+    pending: { className: 'is-pending', icon: 'i-circle' },
+  };
+
+  function todoStepTitle(step) {
+    var keys = ['step', 'text', 'title'];
+    for (var i = 0; i < keys.length; i += 1) {
+      var value = step[keys[i]];
+      if (typeof value === 'string' && value.trim()) return value;
+    }
+    return '';
+  }
+
+  function todoStatus(value) {
+    var text = typeof value === 'string' ? value.toLowerCase().trim() : '';
+    if (text === 'done' || text === 'completed') return TODO_STATUS.done;
+    if (text === 'in_progress' || text === 'in-progress' || text === 'active' || text === 'running') {
+      return TODO_STATUS.in_progress;
+    }
+    return TODO_STATUS.pending;
+  }
+
+  var TodoList = register('TodoList', {
+    props: {
+      steps: { default: function () { return []; } },
+      notes: { default: '' },
+    },
+    render: function (h) {
+      var steps = Array.isArray(this.steps) ? this.steps : [];
+      var children = [];
+      var notes = typeof this.notes === 'string' ? this.notes : '';
+      if (notes.trim()) {
+        children.push(h('p', { class: 'ada-todo__notes' }, [h('span', null, '备注：'), notes]));
+      }
+      children.push(h('ol', { class: 'ada-todo__list' }, steps.map(function (step) {
+        var item = step && typeof step === 'object' ? step : {};
+        var status = todoStatus(item.status);
+        return h('li', { class: 'ada-todo__step ' + status.className }, [
+          h(Icon, { name: status.icon, size: 12 }),
+          h('span', null, todoStepTitle(item)),
+        ]);
+      })));
+      return h('div', { class: 'ada-todo__list-wrap' }, children);
+    },
+  });
+
+  var NOTICE_ICON = {
+    neutral: 'i-circle',
+    info: 'i-circle',
+    brand: 'i-circle',
+    success: 'i-check-circle',
+    warn: 'i-circle',
+    danger: 'i-circle',
+  };
+
+  var Notice = register('Notice', {
+    props: {
+      tone: { default: 'neutral' },
+      icon: { default: '' },
+    },
+    render: function (h) {
+      var tone = this.tone || 'neutral';
+      var iconName = this.icon || NOTICE_ICON[tone] || 'i-circle';
+      return h('div', { class: ['ada-notice', 'ada-notice--' + tone] }, [
+        h('div', { class: 'ada-notice__row' }, [
+          h(Icon, { name: iconName, size: 14 }),
+          h('span', null, slot(this, 'default') || ''),
+        ]),
+      ]);
+    },
+  });
+
   var Badge = register('Badge', {
     props: {
       tone: { default: 'neutral' },

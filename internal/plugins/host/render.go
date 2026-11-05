@@ -384,6 +384,9 @@ export const Input = __UI.components.Input;
 export const TextField = __UI.components.TextField;
 export const Textarea = __UI.components.Textarea;
 export const Empty = __UI.components.Empty;
+export const Icon = __UI.components.Icon;
+export const TodoList = __UI.components.TodoList;
+export const Notice = __UI.components.Notice;
 `
 }
 

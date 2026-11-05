@@ -19,6 +19,7 @@
 
   var AdaRender = window.AdaRender;
   var AdaUI = window.AdaUI || null;
+  var AdaUIIso = window.AdaUIIso || null;
   var moduleCache = Object.create(null);
 
   function readProps(element) {
@@ -80,6 +81,11 @@
       var app = AdaUI && typeof AdaUI.createApp === 'function'
         ? AdaUI.createApp(options)
         : AdaRender.createApp(options);
+      // 插件 bundle 里的 $C Icon 在浏览器要落到与 Go renderIcon 相同的内联 SVG；
+      // 覆盖 app 级 Icon，不影响基座其它岛屿。
+      if (AdaUIIso && AdaUIIso.components && AdaUIIso.components.IconAdapter) {
+        app.component('Icon', AdaUIIso.components.IconAdapter);
+      }
       app.mount(element, { hydrate: true, rootElement: true });
       element.removeAttribute('data-ada-loading');
     }).catch(function (err) {
