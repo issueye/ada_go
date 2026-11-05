@@ -39,11 +39,12 @@ export default defineComponent({
       addingProvider: false,
       newProvider: { name: "", protocol: "", baseUrl: "", proxy: "", headersText: "", apiKey: "" },
       editingModelId: "",
-      addingModel: false,
-      newModel: { id: "", displayName: "", contextWindow: "" },
+      modelModalOpen: false,
+      modelModalMode: "add",
       levelDraft: "",
       levelInputOpen: false,
       modelForm: {
+        id: "",
         displayName: "",
         contextWindow: "",
         supportsTools: false,
@@ -96,7 +97,7 @@ export default defineComponent({
             h(Button, {
               size: "sm",
               variant: "ghost",
-              onClick: () => self.startEditModel(row),
+              onClick: () => self.openEditModel(row),
             }, "编辑"),
         },
       ];
@@ -375,12 +376,14 @@ export default defineComponent({
           this.status = "新增失败：" + ((err && err.message) || String(err));
         });
     },
-    startEditModel(row: any) {
+    openEditModel(row: any) {
       if (!row) return;
+      this.modelModalMode = "edit";
       this.editingModelId = row.id;
       this.levelInputOpen = false;
       this.levelDraft = "";
       this.modelForm = {
+        id: row.id,
         displayName: row.displayName || "",
         contextWindow: row.contextWindow === undefined || row.contextWindow === null ? "" : String(row.contextWindow),
         supportsTools: !!row.supportsTools,
@@ -388,11 +391,32 @@ export default defineComponent({
         thinkingLevels: Array.isArray(row.thinkingLevels) ? row.thinkingLevels.slice() : [],
         inputModes: Array.isArray(row.input) ? row.input.slice() : [],
       };
+      this.modelModalOpen = true;
     },
-    cancelModelEdit() {
+    openAddModel() {
+      this.modelModalMode = "add";
       this.editingModelId = "";
       this.levelInputOpen = false;
       this.levelDraft = "";
+      this.modelForm = {
+        id: "",
+        displayName: "",
+        contextWindow: "",
+        supportsTools: false,
+        disabled: false,
+        thinkingLevels: [],
+        inputModes: [],
+      };
+      this.modelModalOpen = true;
+    },
+    closeModelModal() {
+      this.modelModalOpen = false;
+      this.editingModelId = "";
+      this.levelInputOpen = false;
+      this.levelDraft = "";
+    },
+    cancelModelEdit() {
+      this.closeModelModal();
     },
     openLevelInput() {
       this.levelInputOpen = true;
@@ -455,65 +479,52 @@ export default defineComponent({
         .then(() => {
           this.status = message;
           this.editingModelId = "";
-          this.addingModel = false;
+          this.modelModalOpen = false;
           this.load();
         })
         .catch((err: any) => {
           this.status = "保存模型失败：" + ((err && err.message) || String(err));
         });
     },
+    modelFormPatch() {
+      const patch: any = {
+        displayName: String(this.modelForm.displayName || "").trim(),
+        supportsTools: !!this.modelForm.supportsTools,
+        disabled: !!this.modelForm.disabled,
+      };
+      const context = String(this.modelForm.contextWindow || "").trim();
+      if (context) patch.contextWindow = Number(context);
+      const levels = this.modelForm.thinkingLevels.slice();
+      if (levels.length) patch.thinkingLevels = levels;
+      const inputs = this.modelForm.inputModes.slice();
+      if (inputs.length) patch.input = inputs;
+      return patch;
+    },
     saveModel() {
       const selected = this.selected;
-      if (!selected || !this.editingModelId) return;
+      if (!selected) return;
+      if (this.modelModalMode === "add") {
+        const id = String(this.modelForm.id || "").trim();
+        if (!id) {
+          this.status = "模型 ID 不能为空。";
+          return;
+        }
+        if ((selected.models || []).some((m: any) => m && m.id === id)) {
+          this.status = "模型 ID 已存在。";
+          return;
+        }
+        const next: any = Object.assign({ id }, this.modelFormPatch());
+        if (!next.displayName) next.displayName = id;
+        this.persistModels((selected.models || []).concat(next), "模型已添加。");
+        return;
+      }
       const target = this.editingModelId;
+      if (!target) return;
       const models = (selected.models || []).map((m: any) => {
         if (!m || m.id !== target) return m;
-        const next: any = Object.assign({}, m, {
-          displayName: String(this.modelForm.displayName || "").trim(),
-          supportsTools: !!this.modelForm.supportsTools,
-          disabled: !!this.modelForm.disabled,
-        });
-        const context = String(this.modelForm.contextWindow || "").trim();
-        if (context) next.contextWindow = Number(context);
-        else delete next.contextWindow;
-        const levels = this.modelForm.thinkingLevels.slice();
-        if (levels.length) next.thinkingLevels = levels;
-        else delete next.thinkingLevels;
-        const inputs = this.modelForm.inputModes.slice();
-        if (inputs.length) next.input = inputs;
-        else delete next.input;
-        return next;
+        return Object.assign({}, m, this.modelFormPatch());
       });
       this.persistModels(models, "模型已保存。");
-    },
-    startAddModel() {
-      this.addingModel = true;
-      this.editingModelId = "";
-      this.newModel = { id: "", displayName: "", contextWindow: "" };
-    },
-    cancelAddModel() {
-      this.addingModel = false;
-    },
-    addModel() {
-      const selected = this.selected;
-      if (!selected) return;
-      const id = String(this.newModel.id || "").trim();
-      if (!id) {
-        this.status = "模型 ID 不能为空。";
-        return;
-      }
-      if ((selected.models || []).some((m: any) => m && m.id === id)) {
-        this.status = "模型 ID 已存在。";
-        return;
-      }
-      const next: any = {
-        id,
-        displayName: String(this.newModel.displayName || "").trim() || id,
-        supportsTools: false,
-      };
-      const context = String(this.newModel.contextWindow || "").trim();
-      if (context) next.contextWindow = Number(context);
-      this.persistModels((selected.models || []).concat(next), "模型已添加。");
     },
     removeModel() {
       const selected = this.selected;
@@ -742,121 +753,9 @@ export default defineComponent({
                   )
                 ) : (
                   <div>
-                    {this.addingModel ? (
-                      <div class="pm-info">
-                        <Input
-                          id="pm-new-model-id"
-                          label="模型 ID"
-                          modelValue={this.newModel.id}
-                          placeholder="例如 gpt-4.1"
-                          onInput={(value: any) => { this.newModel.id = String(value || ""); }}
-                        />
-                        <Input
-                          id="pm-new-model-name"
-                          label="显示名"
-                          modelValue={this.newModel.displayName}
-                          onInput={(value: any) => { this.newModel.displayName = String(value || ""); }}
-                        />
-                        <Input
-                          id="pm-new-model-context"
-                          type="number"
-                          label="上下文窗口"
-                          modelValue={this.newModel.contextWindow}
-                          placeholder="例如 128000"
-                          onInput={(value: any) => { this.newModel.contextWindow = String(value || ""); }}
-                        />
-                        <p class="pm-info__actions">
-                          <Button size="sm" variant="primary" onClick={this.addModel}>添加</Button>
-                          <Button size="sm" variant="secondary" onClick={this.cancelAddModel}>取消</Button>
-                        </p>
-                      </div>
-                    ) : (
-                      <p class="pm-info__actions">
-                        <Button size="sm" variant="secondary" onClick={this.startAddModel}>添加模型</Button>
-                      </p>
-                    )}
-                    {this.editingModelId ? (
-                      <div class="pm-info">
-                        <Input
-                          id="pm-model-name"
-                          label="显示名"
-                          modelValue={this.modelForm.displayName}
-                          onInput={(value: any) => { this.modelForm.displayName = String(value || ""); }}
-                        />
-                        <Input
-                          id="pm-model-context"
-                          type="number"
-                          label="上下文窗口"
-                          modelValue={this.modelForm.contextWindow}
-                          placeholder="例如 128000"
-                          onInput={(value: any) => { this.modelForm.contextWindow = String(value || ""); }}
-                        />
-                        <div class="pm-field">
-                          <span class="pm-field__label">推理等级</span>
-                          <div class="pm-levels">
-                            {this.modelForm.thinkingLevels.map((level: string, index: number) => (
-                              <span class="pm-level" key={level}>
-                                <span class="pm-level__name">{level}</span>
-                                <button
-                                  type="button"
-                                  class="pm-level__remove"
-                                  aria-label={"移除推理等级 " + level}
-                                  onClick={() => this.removeLevel(index)}
-                                >×</button>
-                              </span>
-                            ))}
-                            {this.levelInputOpen ? (
-                              <input
-                                id="pm-level-input"
-                                class="pm-level__input"
-                                value={this.levelDraft}
-                                placeholder="low / high"
-                                onInput={(event: any) => { this.levelDraft = event.target.value; }}
-                                onKeydown={this.onLevelKeydown}
-                              />
-                            ) : (
-                              <button
-                                type="button"
-                                class="pm-level__add"
-                                aria-label="添加推理等级"
-                                onClick={this.openLevelInput}
-                              >+</button>
-                            )}
-                          </div>
-                        </div>
-                        <div class="pm-field">
-                          <span class="pm-field__label">输入模态</span>
-                          <div class="pm-checks">
-                            {["text", "image", "audio", "video"].map((mode: string) => (
-                              <label class="checkbox-row" key={mode}>
-                                <input
-                                  id={"pm-mode-" + mode}
-                                  type="checkbox"
-                                  checked={this.modelForm.inputModes.indexOf(mode) >= 0}
-                                  onChange={(event: any) => this.toggleInputMode(mode, event.target.checked)}
-                                />
-                                {mode}
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                        <p class="pm-info__actions">
-                          <Button
-                            size="sm"
-                            variant={this.modelForm.supportsTools ? "primary" : "secondary"}
-                            onClick={() => { this.modelForm.supportsTools = !this.modelForm.supportsTools; }}
-                          >工具：{this.modelForm.supportsTools ? "支持" : "不支持"}</Button>
-                          <Button
-                            size="sm"
-                            variant={this.modelForm.disabled ? "secondary" : "ghost"}
-                            onClick={() => { this.modelForm.disabled = !this.modelForm.disabled; }}
-                          >状态：{this.modelForm.disabled ? "停用" : "启用"}</Button>
-                          <Button size="sm" variant="primary" onClick={this.saveModel}>保存模型</Button>
-                          <Button size="sm" variant="danger" onClick={this.removeModel}>删除模型</Button>
-                          <Button size="sm" variant="secondary" onClick={this.cancelModelEdit}>取消</Button>
-                        </p>
-                      </div>
-                    ) : null}
+                    <p class="pm-info__actions">
+                      <Button size="sm" variant="secondary" onClick={this.openAddModel}>添加模型</Button>
+                    </p>
                     <Table
                       caption={(selected.displayName || selected.id) + " 的模型"}
                       rowKey="id"
@@ -916,6 +815,114 @@ export default defineComponent({
                   disabled={this.selectedFetchCount === 0}
                   onClick={this.addSelectedModels}
                 >添加所选（{this.selectedFetchCount}）</Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {this.modelModalOpen ? (
+          <div class="pm-modal" role="dialog" aria-modal="true" aria-labelledby="pm-model-title">
+            <div class="pm-modal__backdrop" onClick={this.closeModelModal}></div>
+            <div class="pm-modal__panel pm-modal__panel--wide">
+              <div class="pm-modal__head">
+                <h2 id="pm-model-title" class="pm-modal__title">
+                  {this.modelModalMode === "add" ? "添加模型" : "编辑模型"}
+                </h2>
+                <Button size="sm" variant="ghost" onClick={this.closeModelModal}>关闭</Button>
+              </div>
+              <div class="pm-model-modal__body">
+                {this.modelModalMode === "add" ? (
+                  <Input
+                    id="pm-model-id"
+                    label="模型 ID"
+                    modelValue={this.modelForm.id}
+                    placeholder="例如 gpt-4.1"
+                    onInput={(value: any) => { this.modelForm.id = String(value || ""); }}
+                  />
+                ) : (
+                  <p class="pm-info__hint">ID：<code>{this.modelForm.id}</code></p>
+                )}
+                <Input
+                  id="pm-model-name"
+                  label="显示名"
+                  modelValue={this.modelForm.displayName}
+                  onInput={(value: any) => { this.modelForm.displayName = String(value || ""); }}
+                />
+                <Input
+                  id="pm-model-context"
+                  type="number"
+                  label="上下文窗口"
+                  modelValue={this.modelForm.contextWindow}
+                  placeholder="例如 128000"
+                  onInput={(value: any) => { this.modelForm.contextWindow = String(value || ""); }}
+                />
+                <div class="pm-field">
+                  <span class="pm-field__label">推理等级</span>
+                  <div class="pm-levels">
+                    {this.modelForm.thinkingLevels.map((level: string, index: number) => (
+                      <span class="pm-level" key={level}>
+                        <span class="pm-level__name">{level}</span>
+                        <button
+                          type="button"
+                          class="pm-level__remove"
+                          aria-label={"移除推理等级 " + level}
+                          onClick={() => this.removeLevel(index)}
+                        >×</button>
+                      </span>
+                    ))}
+                    {this.levelInputOpen ? (
+                      <input
+                        id="pm-level-input"
+                        class="pm-level__input"
+                        value={this.levelDraft}
+                        placeholder="low / high"
+                        onInput={(event: any) => { this.levelDraft = event.target.value; }}
+                        onKeydown={this.onLevelKeydown}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        class="pm-level__add"
+                        aria-label="添加推理等级"
+                        onClick={this.openLevelInput}
+                      >+</button>
+                    )}
+                  </div>
+                </div>
+                <div class="pm-field">
+                  <span class="pm-field__label">输入模态</span>
+                  <div class="pm-checks">
+                    {["text", "image", "audio", "video"].map((mode: string) => (
+                      <label class="checkbox-row" key={mode}>
+                        <input
+                          id={"pm-mode-" + mode}
+                          type="checkbox"
+                          checked={this.modelForm.inputModes.indexOf(mode) >= 0}
+                          onChange={(event: any) => this.toggleInputMode(mode, event.target.checked)}
+                        />
+                        {mode}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div class="pm-info__actions">
+                  <Button
+                    size="sm"
+                    variant={this.modelForm.supportsTools ? "primary" : "secondary"}
+                    onClick={() => { this.modelForm.supportsTools = !this.modelForm.supportsTools; }}
+                  >工具：{this.modelForm.supportsTools ? "支持" : "不支持"}</Button>
+                  <Button
+                    size="sm"
+                    variant={this.modelForm.disabled ? "secondary" : "ghost"}
+                    onClick={() => { this.modelForm.disabled = !this.modelForm.disabled; }}
+                  >状态：{this.modelForm.disabled ? "停用" : "启用"}</Button>
+                </div>
+              </div>
+              <div class="pm-modal__actions">
+                {this.modelModalMode === "edit" ? (
+                  <Button size="sm" variant="danger" onClick={this.removeModel}>删除模型</Button>
+                ) : null}
+                <Button size="sm" variant="secondary" onClick={this.closeModelModal}>取消</Button>
+                <Button size="sm" variant="primary" onClick={this.saveModel}>保存模型</Button>
               </div>
             </div>
           </div>

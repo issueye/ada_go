@@ -78,11 +78,12 @@ var providers_next_default = defineComponent({
       addingProvider: false,
       newProvider: { name: "", protocol: "", baseUrl: "", proxy: "", headersText: "", apiKey: "" },
       editingModelId: "",
-      addingModel: false,
-      newModel: { id: "", displayName: "", contextWindow: "" },
+      modelModalOpen: false,
+      modelModalMode: "add",
       levelDraft: "",
       levelInputOpen: false,
       modelForm: {
+        id: "",
         displayName: "",
         contextWindow: "",
         supportsTools: false,
@@ -133,7 +134,7 @@ var providers_next_default = defineComponent({
           render: (row, index, h2) => h2(Button, {
             size: "sm",
             variant: "ghost",
-            onClick: () => self.startEditModel(row)
+            onClick: () => self.openEditModel(row)
           }, "编辑")
         }
       ];
@@ -401,12 +402,14 @@ var providers_next_default = defineComponent({
         this.status = "新增失败：" + (err && err.message || String(err));
       });
     },
-    startEditModel(row) {
+    openEditModel(row) {
       if (!row) return;
+      this.modelModalMode = "edit";
       this.editingModelId = row.id;
       this.levelInputOpen = false;
       this.levelDraft = "";
       this.modelForm = {
+        id: row.id,
         displayName: row.displayName || "",
         contextWindow: row.contextWindow === void 0 || row.contextWindow === null ? "" : String(row.contextWindow),
         supportsTools: !!row.supportsTools,
@@ -414,11 +417,32 @@ var providers_next_default = defineComponent({
         thinkingLevels: Array.isArray(row.thinkingLevels) ? row.thinkingLevels.slice() : [],
         inputModes: Array.isArray(row.input) ? row.input.slice() : []
       };
+      this.modelModalOpen = true;
     },
-    cancelModelEdit() {
+    openAddModel() {
+      this.modelModalMode = "add";
       this.editingModelId = "";
       this.levelInputOpen = false;
       this.levelDraft = "";
+      this.modelForm = {
+        id: "",
+        displayName: "",
+        contextWindow: "",
+        supportsTools: false,
+        disabled: false,
+        thinkingLevels: [],
+        inputModes: []
+      };
+      this.modelModalOpen = true;
+    },
+    closeModelModal() {
+      this.modelModalOpen = false;
+      this.editingModelId = "";
+      this.levelInputOpen = false;
+      this.levelDraft = "";
+    },
+    cancelModelEdit() {
+      this.closeModelModal();
     },
     openLevelInput() {
       this.levelInputOpen = true;
@@ -480,64 +504,51 @@ var providers_next_default = defineComponent({
       }).then(() => {
         this.status = message;
         this.editingModelId = "";
-        this.addingModel = false;
+        this.modelModalOpen = false;
         this.load();
       }).catch((err) => {
         this.status = "保存模型失败：" + (err && err.message || String(err));
       });
     },
+    modelFormPatch() {
+      const patch = {
+        displayName: String(this.modelForm.displayName || "").trim(),
+        supportsTools: !!this.modelForm.supportsTools,
+        disabled: !!this.modelForm.disabled
+      };
+      const context = String(this.modelForm.contextWindow || "").trim();
+      if (context) patch.contextWindow = Number(context);
+      const levels = this.modelForm.thinkingLevels.slice();
+      if (levels.length) patch.thinkingLevels = levels;
+      const inputs = this.modelForm.inputModes.slice();
+      if (inputs.length) patch.input = inputs;
+      return patch;
+    },
     saveModel() {
       const selected = this.selected;
-      if (!selected || !this.editingModelId) return;
+      if (!selected) return;
+      if (this.modelModalMode === "add") {
+        const id = String(this.modelForm.id || "").trim();
+        if (!id) {
+          this.status = "模型 ID 不能为空。";
+          return;
+        }
+        if ((selected.models || []).some((m) => m && m.id === id)) {
+          this.status = "模型 ID 已存在。";
+          return;
+        }
+        const next = Object.assign({ id }, this.modelFormPatch());
+        if (!next.displayName) next.displayName = id;
+        this.persistModels((selected.models || []).concat(next), "模型已添加。");
+        return;
+      }
       const target = this.editingModelId;
+      if (!target) return;
       const models = (selected.models || []).map((m) => {
         if (!m || m.id !== target) return m;
-        const next = Object.assign({}, m, {
-          displayName: String(this.modelForm.displayName || "").trim(),
-          supportsTools: !!this.modelForm.supportsTools,
-          disabled: !!this.modelForm.disabled
-        });
-        const context = String(this.modelForm.contextWindow || "").trim();
-        if (context) next.contextWindow = Number(context);
-        else delete next.contextWindow;
-        const levels = this.modelForm.thinkingLevels.slice();
-        if (levels.length) next.thinkingLevels = levels;
-        else delete next.thinkingLevels;
-        const inputs = this.modelForm.inputModes.slice();
-        if (inputs.length) next.input = inputs;
-        else delete next.input;
-        return next;
+        return Object.assign({}, m, this.modelFormPatch());
       });
       this.persistModels(models, "模型已保存。");
-    },
-    startAddModel() {
-      this.addingModel = true;
-      this.editingModelId = "";
-      this.newModel = { id: "", displayName: "", contextWindow: "" };
-    },
-    cancelAddModel() {
-      this.addingModel = false;
-    },
-    addModel() {
-      const selected = this.selected;
-      if (!selected) return;
-      const id = String(this.newModel.id || "").trim();
-      if (!id) {
-        this.status = "模型 ID 不能为空。";
-        return;
-      }
-      if ((selected.models || []).some((m) => m && m.id === id)) {
-        this.status = "模型 ID 已存在。";
-        return;
-      }
-      const next = {
-        id,
-        displayName: String(this.newModel.displayName || "").trim() || id,
-        supportsTools: false
-      };
-      const context = String(this.newModel.contextWindow || "").trim();
-      if (context) next.contextWindow = Number(context);
-      this.persistModels((selected.models || []).concat(next), "模型已添加。");
     },
     removeModel() {
       const selected = this.selected;
@@ -751,40 +762,48 @@ var providers_next_default = defineComponent({
           this.form.apiKey = String(value || "");
         }
       }
-    ), /* @__PURE__ */ h2("p", { class: "pm-info__hint" }, "保存会整条替换供应商配置；API Key 留空表示保持原值，模型列表原样保留。"), /* @__PURE__ */ h2("div", { class: "pm-info__actions" }, /* @__PURE__ */ h2(Button, { variant: "primary", size: "sm", onClick: this.saveProvider }, "保存"), /* @__PURE__ */ h2(Button, { variant: "secondary", size: "sm", onClick: this.cancelEdit }, "取消"))) : /* @__PURE__ */ h2("div", { class: "pm-info" }, /* @__PURE__ */ h2("p", { "aria-label": "ID " + selected.id }, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "ID"), /* @__PURE__ */ h2("code", null, selected.id)), /* @__PURE__ */ h2("p", { "aria-label": "协议 " + (selected.protocol || "未设置") }, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "协议"), selected.protocol || "—"), /* @__PURE__ */ h2("p", { "aria-label": "端点 " + (selected.baseUrl || "未设置") }, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "端点"), /* @__PURE__ */ h2("code", null, selected.baseUrl || "—")), /* @__PURE__ */ h2("p", { "aria-label": "密钥 " + (selected.apiKeyHint ? "尾号 " + selected.apiKeyHint : "未保存") }, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "密钥"), selected.apiKeyHint ? "尾号 " + selected.apiKeyHint : "未保存"), /* @__PURE__ */ h2("div", { class: "pm-info__actions" }, /* @__PURE__ */ h2(Button, { variant: "secondary", size: "sm", onClick: this.startEdit }, "编辑"))) : /* @__PURE__ */ h2("div", null, this.addingModel ? /* @__PURE__ */ h2("div", { class: "pm-info" }, /* @__PURE__ */ h2(
+    ), /* @__PURE__ */ h2("p", { class: "pm-info__hint" }, "保存会整条替换供应商配置；API Key 留空表示保持原值，模型列表原样保留。"), /* @__PURE__ */ h2("div", { class: "pm-info__actions" }, /* @__PURE__ */ h2(Button, { variant: "primary", size: "sm", onClick: this.saveProvider }, "保存"), /* @__PURE__ */ h2(Button, { variant: "secondary", size: "sm", onClick: this.cancelEdit }, "取消"))) : /* @__PURE__ */ h2("div", { class: "pm-info" }, /* @__PURE__ */ h2("p", { "aria-label": "ID " + selected.id }, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "ID"), /* @__PURE__ */ h2("code", null, selected.id)), /* @__PURE__ */ h2("p", { "aria-label": "协议 " + (selected.protocol || "未设置") }, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "协议"), selected.protocol || "—"), /* @__PURE__ */ h2("p", { "aria-label": "端点 " + (selected.baseUrl || "未设置") }, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "端点"), /* @__PURE__ */ h2("code", null, selected.baseUrl || "—")), /* @__PURE__ */ h2("p", { "aria-label": "密钥 " + (selected.apiKeyHint ? "尾号 " + selected.apiKeyHint : "未保存") }, /* @__PURE__ */ h2("span", { class: "pm-info__label" }, "密钥"), selected.apiKeyHint ? "尾号 " + selected.apiKeyHint : "未保存"), /* @__PURE__ */ h2("div", { class: "pm-info__actions" }, /* @__PURE__ */ h2(Button, { variant: "secondary", size: "sm", onClick: this.startEdit }, "编辑"))) : /* @__PURE__ */ h2("div", null, /* @__PURE__ */ h2("p", { class: "pm-info__actions" }, /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.openAddModel }, "添加模型")), /* @__PURE__ */ h2(
+      Table,
+      {
+        caption: (selected.displayName || selected.id) + " 的模型",
+        rowKey: "id",
+        rows: selected.models || [],
+        columns: this.modelColumns
+      }
+    ))) : /* @__PURE__ */ h2(Empty, { title: "选择一个供应商", description: "从左侧列表选择，或点击右上角添加供应商。" }))), this.fetchOpen ? /* @__PURE__ */ h2("div", { class: "pm-modal", role: "dialog", "aria-modal": "true", "aria-labelledby": "pm-fetch-title" }, /* @__PURE__ */ h2("div", { class: "pm-modal__backdrop", onClick: this.closeFetch }), /* @__PURE__ */ h2("div", { class: "pm-modal__panel" }, /* @__PURE__ */ h2("div", { class: "pm-modal__head" }, /* @__PURE__ */ h2("h2", { id: "pm-fetch-title", class: "pm-modal__title" }, "从「", selected ? selected.displayName || selected.id : "", "」选择模型"), /* @__PURE__ */ h2(Button, { size: "sm", variant: "ghost", onClick: this.closeFetch }, "关闭")), /* @__PURE__ */ h2("p", { class: "pm-fetch__hint" }, "勾选要添加的模型；已添加的模型不可重复选择。"), this.fetching ? /* @__PURE__ */ h2("p", { class: "pm-fetch__state" }, "正在拉取模型…") : this.fetchError ? /* @__PURE__ */ h2("p", { class: "pm-fetch__state pm-fetch__state--error", role: "alert" }, this.fetchError) : this.fetchedModels.length === 0 ? /* @__PURE__ */ h2("p", { class: "pm-fetch__state" }, "没有拉取到模型。") : /* @__PURE__ */ h2("div", { class: "pm-fetch__list" }, this.fetchedModels.map((model) => {
+      const added = !!(selected && (selected.models || []).some((m) => m && m.id === model.id));
+      return /* @__PURE__ */ h2("label", { class: "pm-fetch__row" + (added ? " is-added" : ""), key: model.id }, /* @__PURE__ */ h2(
+        "input",
+        {
+          type: "checkbox",
+          checked: !!this.selectedFetch[model.id],
+          disabled: added,
+          onChange: (event) => this.toggleFetchModel(model.id, event.target.checked)
+        }
+      ), /* @__PURE__ */ h2("span", { class: "ada-remote__id" }, model.id), /* @__PURE__ */ h2("span", { class: "ada-remote__meta" }, model.displayName || ""), added ? /* @__PURE__ */ h2("span", { class: "badge badge-neutral" }, "已添加") : null);
+    })), /* @__PURE__ */ h2("div", { class: "pm-modal__actions" }, /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.closeFetch }, "取消"), /* @__PURE__ */ h2(
+      Button,
+      {
+        size: "sm",
+        variant: "primary",
+        disabled: this.selectedFetchCount === 0,
+        onClick: this.addSelectedModels
+      },
+      "添加所选（",
+      this.selectedFetchCount,
+      "）"
+    )))) : null, this.modelModalOpen ? /* @__PURE__ */ h2("div", { class: "pm-modal", role: "dialog", "aria-modal": "true", "aria-labelledby": "pm-model-title" }, /* @__PURE__ */ h2("div", { class: "pm-modal__backdrop", onClick: this.closeModelModal }), /* @__PURE__ */ h2("div", { class: "pm-modal__panel pm-modal__panel--wide" }, /* @__PURE__ */ h2("div", { class: "pm-modal__head" }, /* @__PURE__ */ h2("h2", { id: "pm-model-title", class: "pm-modal__title" }, this.modelModalMode === "add" ? "添加模型" : "编辑模型"), /* @__PURE__ */ h2(Button, { size: "sm", variant: "ghost", onClick: this.closeModelModal }, "关闭")), /* @__PURE__ */ h2("div", { class: "pm-model-modal__body" }, this.modelModalMode === "add" ? /* @__PURE__ */ h2(
       Input,
       {
-        id: "pm-new-model-id",
+        id: "pm-model-id",
         label: "模型 ID",
-        modelValue: this.newModel.id,
+        modelValue: this.modelForm.id,
         placeholder: "例如 gpt-4.1",
         onInput: (value) => {
-          this.newModel.id = String(value || "");
+          this.modelForm.id = String(value || "");
         }
       }
-    ), /* @__PURE__ */ h2(
-      Input,
-      {
-        id: "pm-new-model-name",
-        label: "显示名",
-        modelValue: this.newModel.displayName,
-        onInput: (value) => {
-          this.newModel.displayName = String(value || "");
-        }
-      }
-    ), /* @__PURE__ */ h2(
-      Input,
-      {
-        id: "pm-new-model-context",
-        type: "number",
-        label: "上下文窗口",
-        modelValue: this.newModel.contextWindow,
-        placeholder: "例如 128000",
-        onInput: (value) => {
-          this.newModel.contextWindow = String(value || "");
-        }
-      }
-    ), /* @__PURE__ */ h2("p", { class: "pm-info__actions" }, /* @__PURE__ */ h2(Button, { size: "sm", variant: "primary", onClick: this.addModel }, "添加"), /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.cancelAddModel }, "取消"))) : /* @__PURE__ */ h2("p", { class: "pm-info__actions" }, /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.startAddModel }, "添加模型")), this.editingModelId ? /* @__PURE__ */ h2("div", { class: "pm-info" }, /* @__PURE__ */ h2(
+    ) : /* @__PURE__ */ h2("p", { class: "pm-info__hint" }, "ID：", /* @__PURE__ */ h2("code", null, this.modelForm.id)), /* @__PURE__ */ h2(
       Input,
       {
         id: "pm-model-name",
@@ -844,7 +863,7 @@ var providers_next_default = defineComponent({
         checked: this.modelForm.inputModes.indexOf(mode) >= 0,
         onChange: (event) => this.toggleInputMode(mode, event.target.checked)
       }
-    ), mode)))), /* @__PURE__ */ h2("p", { class: "pm-info__actions" }, /* @__PURE__ */ h2(
+    ), mode)))), /* @__PURE__ */ h2("div", { class: "pm-info__actions" }, /* @__PURE__ */ h2(
       Button,
       {
         size: "sm",
@@ -866,37 +885,7 @@ var providers_next_default = defineComponent({
       },
       "状态：",
       this.modelForm.disabled ? "停用" : "启用"
-    ), /* @__PURE__ */ h2(Button, { size: "sm", variant: "primary", onClick: this.saveModel }, "保存模型"), /* @__PURE__ */ h2(Button, { size: "sm", variant: "danger", onClick: this.removeModel }, "删除模型"), /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.cancelModelEdit }, "取消"))) : null, /* @__PURE__ */ h2(
-      Table,
-      {
-        caption: (selected.displayName || selected.id) + " 的模型",
-        rowKey: "id",
-        rows: selected.models || [],
-        columns: this.modelColumns
-      }
-    ))) : /* @__PURE__ */ h2(Empty, { title: "选择一个供应商", description: "从左侧列表选择，或点击右上角添加供应商。" }))), this.fetchOpen ? /* @__PURE__ */ h2("div", { class: "pm-modal", role: "dialog", "aria-modal": "true", "aria-labelledby": "pm-fetch-title" }, /* @__PURE__ */ h2("div", { class: "pm-modal__backdrop", onClick: this.closeFetch }), /* @__PURE__ */ h2("div", { class: "pm-modal__panel" }, /* @__PURE__ */ h2("div", { class: "pm-modal__head" }, /* @__PURE__ */ h2("h2", { id: "pm-fetch-title", class: "pm-modal__title" }, "从「", selected ? selected.displayName || selected.id : "", "」选择模型"), /* @__PURE__ */ h2(Button, { size: "sm", variant: "ghost", onClick: this.closeFetch }, "关闭")), /* @__PURE__ */ h2("p", { class: "pm-fetch__hint" }, "勾选要添加的模型；已添加的模型不可重复选择。"), this.fetching ? /* @__PURE__ */ h2("p", { class: "pm-fetch__state" }, "正在拉取模型…") : this.fetchError ? /* @__PURE__ */ h2("p", { class: "pm-fetch__state pm-fetch__state--error", role: "alert" }, this.fetchError) : this.fetchedModels.length === 0 ? /* @__PURE__ */ h2("p", { class: "pm-fetch__state" }, "没有拉取到模型。") : /* @__PURE__ */ h2("div", { class: "pm-fetch__list" }, this.fetchedModels.map((model) => {
-      const added = !!(selected && (selected.models || []).some((m) => m && m.id === model.id));
-      return /* @__PURE__ */ h2("label", { class: "pm-fetch__row" + (added ? " is-added" : ""), key: model.id }, /* @__PURE__ */ h2(
-        "input",
-        {
-          type: "checkbox",
-          checked: !!this.selectedFetch[model.id],
-          disabled: added,
-          onChange: (event) => this.toggleFetchModel(model.id, event.target.checked)
-        }
-      ), /* @__PURE__ */ h2("span", { class: "ada-remote__id" }, model.id), /* @__PURE__ */ h2("span", { class: "ada-remote__meta" }, model.displayName || ""), added ? /* @__PURE__ */ h2("span", { class: "badge badge-neutral" }, "已添加") : null);
-    })), /* @__PURE__ */ h2("div", { class: "pm-modal__actions" }, /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.closeFetch }, "取消"), /* @__PURE__ */ h2(
-      Button,
-      {
-        size: "sm",
-        variant: "primary",
-        disabled: this.selectedFetchCount === 0,
-        onClick: this.addSelectedModels
-      },
-      "添加所选（",
-      this.selectedFetchCount,
-      "）"
-    )))) : null);
+    ))), /* @__PURE__ */ h2("div", { class: "pm-modal__actions" }, this.modelModalMode === "edit" ? /* @__PURE__ */ h2(Button, { size: "sm", variant: "danger", onClick: this.removeModel }, "删除模型") : null, /* @__PURE__ */ h2(Button, { size: "sm", variant: "secondary", onClick: this.closeModelModal }, "取消"), /* @__PURE__ */ h2(Button, { size: "sm", variant: "primary", onClick: this.saveModel }, "保存模型")))) : null);
   }
 });
 

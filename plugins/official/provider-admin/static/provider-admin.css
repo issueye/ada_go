@@ -673,6 +673,19 @@
   gap: 12px;
 }
 
+.pm-modal__panel--wide {
+  width: min(640px, calc(100vw - 2rem));
+}
+
+.pm-model-modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 .pm-modal__title {
   margin: 0;
   font-size: var(--ada-text-lg);

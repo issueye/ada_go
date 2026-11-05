@@ -219,6 +219,7 @@ test('providers-next：客户端 /state 取数与写操作', async () => {
   assert.ok(modelEdit, '模型行应提供编辑按钮');
   modelEdit.dispatchEvent({ type: 'click' });
   await globalThis.AdaRender.nextTick();
+  assert.ok(root.querySelector('.pm-modal'), '编辑模型应打开弹窗');
   const modelName = root.querySelector('#pm-model-name');
   const modelContext = root.querySelector('#pm-model-context');
   const levelAdd = root.querySelector('.pm-level__add');
@@ -295,6 +296,11 @@ test('providers-next：客户端 /state 取数与写操作', async () => {
   }
   const modal = root.querySelector('.pm-modal');
   assert.ok(modal, '拉取模型应打开弹窗');
+  for (let i = 0; i < 20; i += 1) {
+    if (modal.textContent.includes('m3')) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await globalThis.AdaRender.nextTick();
+  }
   assert.ok(modal.textContent.includes('m3'), '弹窗应列出远端模型');
 
   const fetchedCheckbox = modal.querySelector('input[type="checkbox"]');
@@ -319,9 +325,9 @@ test('providers-next：客户端 /state 取数与写操作', async () => {
   assert.ok(addModel, '模型页应提供添加模型');
   addModel.dispatchEvent({ type: 'click' });
   await globalThis.AdaRender.nextTick();
-  const newId = root.querySelector('#pm-new-model-id');
-  const newName = root.querySelector('#pm-new-model-name');
-  const newContext = root.querySelector('#pm-new-model-context');
+  const newId = root.querySelector('#pm-model-id');
+  const newName = root.querySelector('#pm-model-name');
+  const newContext = root.querySelector('#pm-model-context');
   assert.ok(newId && newName && newContext);
   newId.value = 'm4';
   newId.dispatchEvent({ type: 'input' });
@@ -330,7 +336,7 @@ test('providers-next：客户端 /state 取数与写操作', async () => {
   newContext.value = '16000';
   newContext.dispatchEvent({ type: 'input' });
   await globalThis.AdaRender.nextTick();
-  const addConfirm = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '添加');
+  const addConfirm = [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存模型');
   assert.ok(addConfirm);
   addConfirm.dispatchEvent({ type: 'click' });
   for (let i = 0; i < 20; i += 1) {
