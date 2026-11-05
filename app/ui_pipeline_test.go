@@ -197,6 +197,29 @@ func TestUIExtRoutes(t *testing.T) {
 	if rec := uiGet(t, srv, "/ext/ui-hello-tsx/missing"); rec.Code != http.StatusNotFound {
 		t.Fatalf("未知 slug = %d, want 404", rec.Code)
 	}
+	// P1-7 最小试点：同一份 TSX SSR + hydrate；页面带岛屿标记与引导脚本。
+	rec = uiGet(t, srv, "/ext/ui-hello-tsx/counter")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /ext/ui-hello-tsx/counter = %d\n%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{
+		`data-ada-plugin-island="ui-hello-tsx:page:counter"`,
+		`data-ada-module="/ext/ui-hello-tsx/static/client.js?v=`,
+		`data-ada-props="`,
+		`<strong>0</strong>`,
+		`plugin-islands.js`,
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("counter 岛缺少 %q\n%s", want, rec.Body.String())
+		}
+	}
+	rec = uiGet(t, srv, "/ext/ui-hello-tsx/static/client.js")
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/javascript; charset=utf-8" {
+		t.Fatalf("client bundle = %d %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if rec := uiGet(t, srv, "/ext/ui-hello-tsx/hello"); strings.Contains(rec.Body.String(), "plugin-islands.js") {
+		t.Fatal("legacy hello 页面没有岛屿，不应加载 plugin-islands.js")
+	}
 	if rec := uiGet(t, srv, "/ext/no-such-plugin/hello"); rec.Code != http.StatusNotFound {
 		t.Fatalf("未知插件 = %d, want 404", rec.Code)
 	}

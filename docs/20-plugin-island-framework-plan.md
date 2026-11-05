@@ -188,7 +188,7 @@ data-ada-props="<JSON>"
 | P1-4 | 标记与 props 注入 | Bridge 在根 VNode 注入 `data-ada-*`；过滤 CSRF/敏感字段；超限降级 |
 | P1-5 | 客户端引导 | `plugin-islands.js`：动态加载、hydrate、单岛错误隔离 |
 | P1-6 | 资源门禁 | `/ext` 页面设置 `NeedsUI`；按需加载客户端 bundle，不再全局加载所有插件脚本 |
-| P1-7 | `provider-admin` 试点 | 页面/插槽改成同构组件；保留纯 JS 路径作为回退对比 |
+| P1-7 | 最小试点 | `ui-hello-tsx/counter`：同一份 TSX SSR + hydrate + 客户端 bundle；`provider-admin` 的真实迁移留到 P2-4 |
 | P1-8 | 测试 | Go bridge/verify；Node hydrate；无 JS；CSP；动作桥 |
 
 ### P2 插槽级 + 状态/组件库（2–3 人周）
@@ -371,4 +371,5 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - **P1-4 已完成**：Bridge 对 `hydrate:true` 的插槽/页面在根 VNode 注入 `data-ada-plugin-island` / `data-ada-plugin` / `data-ada-module`（带内容哈希）/ `data-ada-props`；首帧 props 排除 CSRF，超 32KB 或根为 `$C`/文本时降级纯 SSR。非 hydrate 贡献完全保持原路径。测试：`bridge_island_test.go`。
 - **P1-5 已完成**：`plugin-islands.js` 扫描岛屿、按 URL 动态 import、读 `data-ada-props`、从页面 `csrf_token` 补 CSRF，并用 `mount(el, {hydrate:true, rootElement:true})` 接管根元素；单岛失败保留 SSR DOM。引擎新增 `rootElement` hydrate 入口。测试：`plugin-islands.test.js`、`iso-hydrate.test.js`。
 - **P1-6 已完成**：新增 `web.IslandDetector`，Bridge 按页面实际渲染的插槽/页面判断是否有 hydrate 贡献（`HasIslands`）；`base()` 据此设置 `NeedsUI`，空会话也不会覆盖该结果。没有岛屿的页面不加载 `ada-render`/`ada-ui`/`plugin-islands`；legacy `frontend.scripts` 行为暂不变。测试：`TestIslandDetectorGatesPluginIslandAssets`、`TestHasIslandsForChatSlot`。
-- **下一步**：P1-7 `provider-admin` 试点（同构组件重写模型设置页，保留无 JS 回退）。
+- **P1-7 已完成（最小试点）**：`ui-hello-tsx` 新增 `counter` 页面：`counter.tsx` 导出 `defineComponent`，服务端注入岛屿标记，`pluginbuild` 生成 `static/client.js`，浏览器用同一份组件 hydrate；`hello` 保持纯 SSR。端到端测试见 `app/ui_pipeline_test.go` 的 `TestUIExtRoutes`。`provider-admin` 的真实迁移留到 P2-4。
+- **下一步**：P1-8 收口测试（无 JS/CSP/动作桥回归），然后进入 P2-1 同构组件库。
