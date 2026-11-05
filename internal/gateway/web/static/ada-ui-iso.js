@@ -480,7 +480,135 @@
     },
   });
 
-  var Input = register('Input', {    props: {
+  var Tabs = register('Tabs', {
+    props: {
+      tabs: { default: function () { return []; } },
+      modelValue: { default: null },
+      id: { default: '' },
+    },
+    data: function () {
+      var initial = this.modelValue;
+      if (initial === null || initial === undefined) {
+        initial = this.tabs && this.tabs[0] ? this.tabs[0].key : null;
+      }
+      return { active: initial };
+    },
+    computed: {
+      rootId: function () {
+        // 不生成自增 id：SSR 与客户端各自计数会错位。多 Tabs 请显式传 id。
+        return this.id || 'ada-tabs';
+      },
+    },
+    methods: {
+      safe: function (key) {
+        return String(key).replace(/[^A-Za-z0-9_-]/g, '-');
+      },
+      tabId: function (key) {
+        return this.rootId + '-tab-' + this.safe(key);
+      },
+      panelId: function (key) {
+        return this.rootId + '-panel-' + this.safe(key);
+      },
+      select: function (key) {
+        var tabs = this.tabs || [];
+        for (var i = 0; i < tabs.length; i += 1) {
+          if (tabs[i].key === key) {
+            if (tabs[i].disabled) return;
+            this.active = key;
+            this.$emit('update:modelValue', key);
+            this.$emit('change', key);
+            return;
+          }
+        }
+      },
+      onKeydown: function (event) {
+        var keys = ['ArrowRight', 'ArrowLeft', 'Home', 'End'];
+        if (keys.indexOf(event.key) === -1) return;
+        var tabs = this.tabs || [];
+        if (!tabs.length) return;
+        event.preventDefault();
+        var current = -1;
+        for (var i = 0; i < tabs.length; i += 1) {
+          if (tabs[i].key === this.active) current = i;
+        }
+        if (current < 0) current = 0;
+        var next;
+        if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = tabs.length - 1;
+        else if (event.key === 'ArrowRight') next = (current + 1) % tabs.length;
+        else next = (current - 1 + tabs.length) % tabs.length;
+        var target = tabs[next];
+        if (!target || target.disabled) return;
+        this.select(target.key);
+        if (typeof document !== 'undefined') {
+          var button = document.getElementById(this.tabId(target.key));
+          if (button) button.focus();
+        }
+      },
+    },
+    updated: function () {
+      var tabs = this.tabs || [];
+      var hasModel = this.modelValue !== null && this.modelValue !== undefined;
+      var modelInTabs = false;
+      for (var i = 0; i < tabs.length; i += 1) {
+        if (tabs[i].key === this.modelValue) modelInTabs = true;
+      }
+      if (hasModel && modelInTabs && this.modelValue !== this.active) this.active = this.modelValue;
+      if (tabs.length) {
+        var found = false;
+        for (var j = 0; j < tabs.length; j += 1) {
+          if (tabs[j].key === this.active) found = true;
+        }
+        if (!found) this.active = tabs[0].key;
+      }
+    },
+    render: function (h) {
+      var self = this;
+      var tabs = this.tabs || [];
+      var list = [];
+      for (var i = 0; i < tabs.length; i += 1) {
+        (function (tab) {
+          var selected = self.active === tab.key;
+          var children = [];
+          if (tab.icon) children.push(h(Icon, { name: tab.icon, size: 14 }));
+          children.push(h('span', null, tab.label || tab.key));
+          if (tab.count !== undefined && tab.count !== null) {
+            children.push(h('span', { class: 'ada-tabs__count' }, tab.count));
+          }
+          list.push(h('button', {
+            id: self.tabId(tab.key),
+            class: 'ada-tabs__tab',
+            type: 'button',
+            role: 'tab',
+            'aria-selected': selected ? 'true' : 'false',
+            tabindex: selected ? 0 : -1,
+            'aria-controls': self.panelId(tab.key),
+            disabled: !!tab.disabled,
+            onClick: function () { self.select(tab.key); },
+          }, children));
+        })(tabs[i]);
+      }
+      var panels = [];
+      for (var j = 0; j < tabs.length; j += 1) {
+        (function (tab) {
+          panels.push(h('div', {
+            id: self.panelId(tab.key),
+            class: 'ada-tabs__panel',
+            role: 'tabpanel',
+            'aria-labelledby': self.tabId(tab.key),
+            hidden: self.active !== tab.key,
+          }, slot(self, tab.key) || []));
+        })(tabs[j]);
+      }
+      return h('div', { class: 'ada-tabs' }, [
+        h('div', { class: 'ada-tabs__list', role: 'tablist', onKeydown: this.onKeydown }, list),
+        panels,
+      ]);
+    },
+  });
+
+  var Input = register('Input', {
+    props: {
       modelValue: { default: '' },
       type: { default: 'text' },
       name: { default: '' },

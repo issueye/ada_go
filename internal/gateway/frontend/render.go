@@ -33,7 +33,7 @@ var voidElements = map[string]bool{"br": true, "hr": true, "input": true}
 
 // booleanAttrs 是以「存在与否」表达状态的属性（HTML 布尔属性语义）。
 var booleanAttrs = map[string]bool{
-	"required": true, "disabled": true, "readonly": true, "checked": true, "open": true,
+	"required": true, "disabled": true, "readonly": true, "checked": true, "open": true, "hidden": true,
 }
 
 // iconPaths 是 a_da 线性图标集的子集（来源 crates/agent-web/src/ui/icons.rs，

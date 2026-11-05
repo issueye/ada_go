@@ -196,6 +196,65 @@ func TestIsoSelectRenderThroughGo(t *testing.T) {
 	}
 }
 
+const isoTabsSource = `import { h, defineComponent } from "ada:render";
+import { Tabs } from "ada:ui";
+
+export default defineComponent({
+  render(h) {
+    return (
+      <Tabs
+        id="demo-tabs"
+        modelValue="b"
+        tabs={[
+          { key: "a", label: "甲" },
+          { key: "b", label: "乙", count: 2 },
+        ]}
+      />
+    );
+  },
+});
+`
+
+func TestIsoTabsRenderThroughGo(t *testing.T) {
+	engine, err := os.ReadFile(filepath.Join("..", "web", "static", "ada-render.js"))
+	if err != nil {
+		t.Fatalf("读取 ada-render.js: %v", err)
+	}
+	iso, err := os.ReadFile(filepath.Join("..", "web", "static", "ada-ui-iso.js"))
+	if err != nil {
+		t.Fatalf("读取 ada-ui-iso.js: %v", err)
+	}
+	r := host.NewRenderer(
+		host.WithRenderEngineSource(string(engine)),
+		host.WithIsoComponentsSource(string(iso)),
+	)
+	vnode, err := r.RenderIsland(isoTabsSource, nil)
+	if err != nil {
+		t.Fatalf("RenderIsland: %v", err)
+	}
+	html, err := RenderHTML(vnode)
+	if err != nil {
+		t.Fatalf("RenderHTML: %v", err)
+	}
+	text := string(html)
+	for _, want := range []string{
+		`<div class="ada-tabs">`,
+		`<div class="ada-tabs__list" role="tablist">`,
+		`id="demo-tabs-tab-a"`,
+		`aria-selected="false"`,
+		`tabindex="-1"`,
+		`aria-selected="true"`,
+		`tabindex="0"`,
+		`<span class="ada-tabs__count">2</span>`,
+		`<div aria-labelledby="demo-tabs-tab-a" class="ada-tabs__panel" hidden id="demo-tabs-panel-a" role="tabpanel">`,
+		`<div aria-labelledby="demo-tabs-tab-b" class="ada-tabs__panel" id="demo-tabs-panel-b" role="tabpanel">`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("SSR HTML 缺少 %s\n%s", want, text)
+		}
+	}
+}
+
 func TestIsoIconTodoNoticeRenderThroughGo(t *testing.T) {
 	engine, err := os.ReadFile(filepath.Join("..", "web", "static", "ada-render.js"))
 	if err != nil {

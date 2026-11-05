@@ -199,3 +199,36 @@ test('ada-ui-iso：Select 通过 SelectAdapter 输出 ada-select 结构', () => 
   assert.equal(hidden.getAttribute('value'), 'b');
 });
 
+test('ada-ui-iso：Tabs 输出 roving tabindex 与隐藏面板', () => {
+  const root = global.document.createElement('div');
+  global.document.body.appendChild(root);
+  const app = globalThis.AdaRender.createApp({
+    components: { Icon: UI.components.IconAdapter },
+    render(h) {
+      return h(UI.components.Tabs, {
+        id: 'demo-tabs',
+        modelValue: 'b',
+        tabs: [
+          { key: 'a', label: '甲' },
+          { key: 'b', label: '乙', count: 2 },
+        ],
+      });
+    },
+  });
+  app.mount(root);
+
+  const tabs = root.querySelectorAll('.ada-tabs__tab');
+  assert.equal(tabs.length, 2);
+  assert.equal(tabs[0].getAttribute('aria-selected'), 'false');
+  assert.equal(tabs[0].getAttribute('tabindex'), '-1');
+  assert.equal(tabs[1].getAttribute('aria-selected'), 'true');
+  assert.equal(tabs[1].getAttribute('tabindex'), '0');
+  assert.equal(tabs[1].querySelector('.ada-tabs__count').textContent, '2');
+
+  const panels = root.querySelectorAll('.ada-tabs__panel');
+  assert.equal(panels.length, 2);
+  assert.equal(panels[0].hidden, true);
+  assert.equal(panels[1].hidden, false);
+  assert.equal(panels[1].getAttribute('role'), 'tabpanel');
+});
+
