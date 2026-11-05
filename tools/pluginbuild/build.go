@@ -187,7 +187,7 @@ export const renderToJSON = R.renderToJSON;
 			"Spinner", "Switch", "Checkbox", "Radio",
 		}
 		var b strings.Builder
-		b.WriteString("const UI = globalThis.AdaUI;\nif (!UI) throw new Error(\"[pluginbuild] 请先加载 ada-ui.js\");\nconst C = UI.components || {};\n")
+		b.WriteString("const ISO = globalThis.AdaUIIso;\nconst UI = ISO && ISO.components ? ISO : globalThis.AdaUI;\nif (!UI) throw new Error(\"[pluginbuild] 请先加载 ada-ui-iso.js 或 ada-ui.js\");\nconst C = UI.components || {};\n")
 		for _, name := range names {
 			fmt.Fprintf(&b, "export const %s = C[%q];\n", name, name)
 		}

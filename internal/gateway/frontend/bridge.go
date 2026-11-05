@@ -149,9 +149,14 @@ func NewBridge(opts BridgeOptions) (*Bridge, error) {
 	if !ok {
 		return nil, fmt.Errorf("frontend: 内嵌静态资源缺少 ada-render.js（同构渲染不可用）")
 	}
+	iso, ok := web.StaticAsset("ada-ui-iso.js")
+	if !ok {
+		return nil, fmt.Errorf("frontend: 内嵌静态资源缺少 ada-ui-iso.js（同构组件不可用）")
+	}
 	b.renderer = host.NewRenderer(
 		host.WithComponentsModule(host.ComponentModuleSource(pairs)),
 		host.WithRenderEngineSource(string(engine)),
+		host.WithIsoComponentsSource(string(iso)),
 		// 注意毫秒换算：frontend 常量是 int 毫秒，Duration 直接传会变成纳秒。
 		host.WithRenderBudgets(SlotTimeoutMS*time.Millisecond, PageTimeoutMS*time.Millisecond),
 		host.WithIslandRenderBudget(PageTimeoutMS*time.Millisecond),

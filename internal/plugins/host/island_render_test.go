@@ -61,3 +61,42 @@ func TestRenderIslandRequiresEngineSource(t *testing.T) {
 		t.Fatalf("未配置引擎源时应 fail-closed，err = %v", err)
 	}
 }
+
+const isoComponentsSource = `import { h, defineComponent } from "ada:render";
+import { Badge, Card, Button } from "ada:ui";
+
+export default defineComponent({
+  render(h) {
+    return (
+      <Card title="同构卡片" subtitle="P2-1">
+        <Badge tone="brand" label="3/5" />
+        <Button variant="primary">保存</Button>
+      </Card>
+    );
+  },
+});
+`
+
+func TestRenderIslandWithIsoComponents(t *testing.T) {
+	iso, err := os.ReadFile(filepath.Join("..", "..", "gateway", "web", "static", "ada-ui-iso.js"))
+	if err != nil {
+		t.Fatalf("读取 ada-ui-iso.js: %v", err)
+	}
+	r := NewRenderer(
+		WithRenderEngineSource(islandEngineSource(t)),
+		WithIsoComponentsSource(string(iso)),
+	)
+	raw, err := r.RenderIsland(isoComponentsSource, nil)
+	if err != nil {
+		t.Fatalf("RenderIsland: %v", err)
+	}
+	text := string(raw)
+	for _, want := range []string{`"t":"section"`, `"class":"card"`, `"badge`, `"t":"button"`, `ada-btn--primary`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("同构组件 VNode 缺少 %s：%s", want, text)
+		}
+	}
+	if strings.Contains(text, `"$C"`) {
+		t.Fatalf("同构组件应展开为原生标签，不应残留 $C：%s", text)
+	}
+}

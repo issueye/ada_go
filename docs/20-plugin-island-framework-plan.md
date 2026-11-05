@@ -373,4 +373,6 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - **P1-6 已完成**：新增 `web.IslandDetector`，Bridge 按页面实际渲染的插槽/页面判断是否有 hydrate 贡献（`HasIslands`）；`base()` 据此设置 `NeedsUI`，空会话也不会覆盖该结果。没有岛屿的页面不加载 `ada-render`/`ada-ui`/`plugin-islands`；legacy `frontend.scripts` 行为暂不变。测试：`TestIslandDetectorGatesPluginIslandAssets`、`TestHasIslandsForChatSlot`。
 - **P1-7 已完成（最小试点）**：`ui-hello-tsx` 新增 `counter` 页面：`counter.tsx` 导出 `defineComponent`，服务端注入岛屿标记，`pluginbuild` 生成 `static/client.js`，浏览器用同一份组件 hydrate；`hello` 保持纯 SSR。端到端测试见 `app/ui_pipeline_test.go` 的 `TestUIExtRoutes`。`provider-admin` 的真实迁移留到 P2-4。
 - **P1-8 已完成**：`TestIslandAssetsHonorCSP` 守住 ada-render/ada-ui/plugin-islands 的 CSP；`TestClientBundlesHonorCSP` 守住随包 client bundle；无 JS 首屏由 `TestUIExtRoutes` 覆盖；动作桥/插槽回归沿用既有测试。
-- **P1 完成**。下一步：P2-1 同构组件库（`render(h)` 化），然后 P2-3 插槽级岛屿与 P2-4 `provider-admin` 迁移。
+- **P1 完成**。
+- **P2-1 基础版完成**：新增 `ada-ui-iso.js`（`render(h)`，无字符串模板）首批 Badge/Card/Button/Input/Textarea/TextField/Empty；服务端 `ada:render` 增加 `ada:ui` 虚拟模块，浏览器 `AdaUIIso` + pluginbuild shim 优先使用它；SSR 展开为原生标签，不残留 `$C`。测试：`TestRenderIslandWithIsoComponents`、`TestIsoComponentsRenderThroughGo`、`iso-components.test.js`。剩余 Select/Tabs/Table/Modal/Icon/TodoList/Notice 与逐组件 parity 留 P2-1 后续批次。
+- **下一步**：P2-2 状态管理（`defineStore` / `provide/inject` / effect scope / SSR 快照）。

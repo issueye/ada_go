@@ -127,6 +127,7 @@ type Renderer struct {
 	cache      map[string]string // 源内容 SHA-256 → transform 后的 ESM
 	compMod    string            // ssr:components 模块源码
 	engineSrc  string            // ada-render.js 源码（同构渲染模式）
+	isoSrc     string            // ada-ui-iso.js 源码（可服务端执行的组件子集）
 	slotTime   time.Duration
 	pageTime   time.Duration
 	blockTime  time.Duration
@@ -180,6 +181,16 @@ func WithIslandRenderBudget(d time.Duration) RendererOption {
 	return func(r *Renderer) {
 		if d > 0 {
 			r.islandTime = d
+		}
+	}
+}
+
+// WithIsoComponentsSource 提供 ada-ui-iso.js 源码，启用 `ada:ui` 同构组件模块。
+// 引擎与组件层使用同一份文件：服务端 moejs 与浏览器都执行 render(h) 定义。
+func WithIsoComponentsSource(src string) RendererOption {
+	return func(r *Renderer) {
+		if len(src) > 0 {
+			r.isoSrc = src
 		}
 	}
 }
@@ -316,11 +327,18 @@ export default function (props) { return renderToJSON(def, props); }
 		"ada:render": engine,
 		"adag:entry": plugin,
 	}
+	if len(r.isoSrc) > 0 {
+		iso, ierr := moejs.Compile("ada:ui", r.isoModuleSource())
+		if ierr != nil {
+			return nil, fmt.Errorf("host: ada-ui-iso 模块编译失败: %w", ierr)
+		}
+		modules["ada:ui"] = iso
+	}
 	resolver := moejs.Resolver(func(_ moejs.Referrer, spec string) (*moejs.Module, error) {
 		if m, ok := modules[spec]; ok {
 			return m, nil
 		}
-		return nil, fmt.Errorf("host: 同构模板 import %q 不可用：只允许 ada:render（原生标签可自由使用；同构组件库在后续阶段接入）", spec)
+		return nil, fmt.Errorf("host: 同构模板 import %q 不可用：只允许 ada:render 与 ada:ui（原生标签可自由使用）", spec)
 	})
 	linked, lerr := moejs.Link(entry, resolver)
 	if lerr != nil {
@@ -346,6 +364,22 @@ export const computed = __R.computed;
 export const watchEffect = __R.watchEffect;
 export const nextTick = __R.nextTick;
 export const renderToJSON = __R.renderToJSON;
+`
+}
+
+// isoModuleSource 把 UMD 组件层包成 ESM；先 import ada:render 保证引擎已执行。
+func (r *Renderer) isoModuleSource() string {
+	return `import "ada:render";
+` + r.isoSrc + `
+const __UI = globalThis.AdaUIIso;
+if (!__UI) throw new Error("ada-ui-iso 未加载");
+export const Badge = __UI.components.Badge;
+export const Card = __UI.components.Card;
+export const Button = __UI.components.Button;
+export const Input = __UI.components.Input;
+export const TextField = __UI.components.TextField;
+export const Textarea = __UI.components.Textarea;
+export const Empty = __UI.components.Empty;
 `
 }
 
