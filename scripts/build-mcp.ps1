@@ -1,17 +1,20 @@
 # build-mcp.ps1 - build the MCP-side binaries that ada-go can launch.
 #
-#   browser-use  -> mcp_projects/browser_use/bin/browser-use.exe
-#   computer-use -> mcp_projects/computer_use/bin/computer-use.exe
+#   browser-use   -> mcp_projects/browser_use/bin/browser-use.exe
+#   computer-use  -> mcp_projects/computer_use/bin/computer-use.exe
+#   adago-design  -> mcp_projects/adago_design/bin/adago-design.exe
 #
-# Both directories are self-contained Go modules (GOWORK=off). browser-use is a
-# Windows GUI app, so it is linked with the windowsgui subsystem; computer-use is
-# kept as a console binary because `computer-use mcp` speaks JSON-RPC on stdio.
+# These directories are self-contained Go modules (GOWORK=off). browser-use is a
+# Windows GUI app, so it is linked with the windowsgui subsystem; computer-use
+# and adago-design are kept as console binaries because `mcp` speaks JSON-RPC
+# on stdio.
 #
 # Usage (PowerShell 5.1+):
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-mcp.ps1
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-mcp.ps1 -Register
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-mcp.ps1 -Register -Scope global
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-mcp.ps1 -Register -IncludeBrowserUseMcp
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-mcp.ps1 -Register -IncludeAdagoDesignMcp
 #
 # -Register writes a stdio server entry into .adago/mcp.json (workspace by
 # default) so the official mcp-client plugin starts it. Without -Register the
@@ -21,14 +24,15 @@ param(
   [switch]$Register,
   [ValidateSet("workspace", "global")]
   [string]$Scope = "workspace",
-  [switch]$IncludeBrowserUseMcp
+  [switch]$IncludeBrowserUseMcp,
+  [switch]$IncludeAdagoDesignMcp
 )
 
 $ErrorActionPreference = "Stop"
 
 $repo = Split-Path -Parent $PSScriptRoot
-$isWindows = [System.IO.Path]::DirectorySeparatorChar -eq '\'
-$exeSuffix = if ($isWindows) { ".exe" } else { "" }
+$onWindows = [System.IO.Path]::DirectorySeparatorChar -eq '\'
+$exeSuffix = if ($onWindows) { ".exe" } else { "" }
 
 $go = Get-Command go -ErrorAction SilentlyContinue
 if (-not $go) {
@@ -47,6 +51,12 @@ $targets = @(
     Dir    = Join-Path $repo "mcp_projects\computer_use"
     Output = Join-Path $repo ("mcp_projects\computer_use\bin\computer-use" + $exeSuffix)
     Gui    = $false
+  },
+  [pscustomobject]@{
+    Name   = "adago-design"
+    Dir    = Join-Path $repo "mcp_projects\adago_design"
+    Output = Join-Path $repo ("mcp_projects\adago_design\bin\adago-design" + $exeSuffix)
+    Gui    = $false
   }
 )
 
@@ -64,7 +74,7 @@ try {
     Write-Host ("building {0} -> {1}" -f $target.Name, $target.Output)
 
     $buildArgs = @("-C", $target.Dir, "build", "-trimpath")
-    if ($target.Gui -and $isWindows) {
+    if ($target.Gui -and $onWindows) {
       $buildArgs += @("-ldflags", "-H windowsgui")
     }
     $buildArgs += @("-o", $target.Output, ".")
@@ -82,6 +92,7 @@ try {
 
 $browserUseExe = $targets[0].Output
 $computerUseExe = $targets[1].Output
+$adagoDesignExe = $targets[2].Output
 
 function Read-McpConfig([string]$Path) {
   $doc = [ordered]@{ version = 1; servers = @() }
@@ -154,6 +165,17 @@ if ($Register) {
     $servers = Upsert-Server $servers $browserEntry
   }
 
+  if ($IncludeAdagoDesignMcp) {
+    $designEntry = [ordered]@{
+      id        = "adago_design"
+      transport = "stdio"
+      command   = [System.IO.Path]::GetFullPath($adagoDesignExe)
+      args      = @("mcp")
+      enabled   = $true
+    }
+    $servers = Upsert-Server $servers $designEntry
+  }
+
   $doc.servers = @($servers)
   $json = ConvertTo-Json -InputObject $doc -Depth 10
   $json = $json + [Environment]::NewLine
@@ -164,6 +186,7 @@ if ($Register) {
   Write-Host ("registered MCP servers in {0}" -f $configPath)
 } else {
   $computerCommand = [System.IO.Path]::GetFullPath($computerUseExe)
+  $designCommand = [System.IO.Path]::GetFullPath($adagoDesignExe)
   Write-Host ""
   Write-Host "ada-go integration:"
   Write-Host ("  browser-use  : {0}" -f $browserUseExe)
@@ -171,4 +194,8 @@ if ($Register) {
   Write-Host ("  computer-use : {0}" -f $computerUseExe)
   Write-Host "                 add this to .adago/mcp.json (or rerun with -Register):"
   Write-Host ('                 {"id":"computer_use","transport":"stdio","command":"' + ($computerCommand -replace '\\', '\\') + '","args":["mcp","--spawn"],"enabled":true}')
+  Write-Host ("  adago-design : {0}" -f $adagoDesignExe)
+  Write-Host "                 add this to .adago/mcp.json (or rerun with -Register -IncludeAdagoDesignMcp):"
+  Write-Host ('                 {"id":"adago_design","transport":"stdio","command":"' + ($designCommand -replace '\\', '\\') + '","args":["mcp"],"enabled":true}')
 }
+

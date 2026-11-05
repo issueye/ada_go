@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>adago-design · 无限画布</title>
+<link rel="stylesheet" href="canvas.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='6' fill='%237C5CFF'/><text x='12' y='17' font-size='13' text-anchor='middle' fill='white' font-family='sans-serif'>D</text></svg>">
+</head>
+<body>
+  <div id="viewport">
+    <div id="grid-layer"></div>
+    <div id="world"></div>
+  </div>
+
+  <header id="toolbar">
+    <div class="tb-brand"><span class="tb-logo">D</span> adago-design</div>
+    <div class="tb-group">
+      <button id="btn-zoom-out" title="缩小">−</button>
+      <span id="zoom-label">100%</span>
+      <button id="btn-zoom-in" title="放大">+</button>
+      <button id="btn-fit" title="适配全部节点 (F)">适配</button>
+    </div>
+    <div class="tb-group">
+      <button id="btn-add-note" title="添加便签">＋便签</button>
+      <button id="btn-clear" title="清空画布">清空</button>
+    </div>
+    <div class="tb-spacer"></div>
+    <span id="conn" class="conn conn--ok" title="服务连接状态">● 已连接</span>
+    <button id="btn-theme" title="切换界面主题">🌗</button>
+  </header>
+
+  <aside id="sidebar">
+    <div class="sb-head">
+      <span>设计体系</span>
+      <button id="sb-toggle" title="收起/展开">‹</button>
+    </div>
+    <div id="sb-list"></div>
+    <div id="sb-detail" class="hidden">
+      <button id="sb-back">‹ 返回体系列表</button>
+      <div id="sb-detail-body"></div>
+    </div>
+  </aside>
+
+  <aside id="inspector" class="hidden">
+    <div class="sb-head"><span>检查器</span><button id="insp-close">✕</button></div>
+    <div id="insp-body"></div>
+  </aside>
+
+  <div id="toast" class="hidden"></div>
+  <script src="canvas.js"></script>
+</body>
+</html>
