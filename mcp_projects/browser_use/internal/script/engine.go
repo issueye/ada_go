@@ -39,6 +39,46 @@ func prelude() (*moejs.Script, error) {
 	return preludeMod, preludeErr
 }
 
+// pruneSourcesOnce 每进程只清一次:脚本源码按天分目录,首次脚本运行时清理
+// 保留期之外的旧目录即可,之后无需反复扫描。
+var pruneSourcesOnce sync.Once
+
+// PruneSources removes script source directories older than days. 目录名即
+// 日期(YYYYMMDD),字典序等于时间序。keep_sources 关掉后旧目录也照清,
+// 否则开关留下的历史文件会永远留在盘上。
+func PruneSources(days int) {
+	pruneSourcesOnce.Do(func() {
+		dir, err := config.Dir()
+		if err != nil {
+			return
+		}
+		pruneSourceDirs(filepath.Join(dir, "scripts"), days)
+	})
+}
+
+// pruneSourceDirs 只清理「目录名是日期且早于保留期」的目录;独立出来便于
+// 用临时目录测试,不碰真实配置目录。
+func pruneSourceDirs(root string, days int) {
+	if days <= 0 {
+		days = 7
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().AddDate(0, 0, -days).Format("20060102")
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() {
+			continue
+		}
+		if _, err := time.Parse("20060102", name); err != nil || name >= cutoff {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(root, name))
+	}
+}
+
 // Executor runs one tool call for a script.
 type Executor interface {
 	Call(ctx context.Context, clientID, name string, args json.RawMessage) (any, error)
@@ -266,6 +306,7 @@ func Run(ctx context.Context, exec Executor, cfg config.ScriptConfig, req Reques
 			_ = os.WriteFile(filepath.Join(dir, scriptID+ext), []byte(req.Source), 0o644)
 		}
 	}
+	PruneSources(cfg.KeepSourcesDays)
 	if req.ReleaseOnFinish {
 		defer func() {
 			cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)

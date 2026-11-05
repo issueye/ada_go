@@ -99,21 +99,77 @@ try {
   $urlWait = Invoke-Tool "wait" @{ for = "url"; value = "/smoke-route"; timeout_ms = 2000 }
   if (-not $urlWait.data.matched) { throw "wait for=url did not see pushState" }
 
+  # text= locator: the prefiltered rewrite must keep finding "Submit" by text.
+  Invoke-Tool "navigate" @{ url = "http://127.0.0.1:$FixturePort/form" } | Out-Null
+  $click = Invoke-Tool "click" @{ text = "Submit" }
+  if ("$($click.data.url)" -notmatch '/done') { throw "click by text did not reach /done: $($click.data.url)" }
+
+  # network capture + in-page wait: netRecord resolves waiters, no Go polling.
+  Invoke-Tool "navigate" @{ url = "http://127.0.0.1:$FixturePort/auto" } | Out-Null
+  $nwait = Invoke-Tool "network" @{ action = "wait"; url_contains = "/api/schedule"; timeout_ms = 5000 }
+  if (-not $nwait.data.entry -or [int]$nwait.data.entry.status -ne 200) { throw "network wait did not catch the auto fetch" }
+  $nlist = Invoke-Tool "network" @{ action = "list"; url_contains = "/api/" }
+  if (-not $nlist.data.entries -or $nlist.data.entries.Count -lt 1) { throw "network list lost the captured request" }
+
+  # read formats: tables render as markdown, links list anchors.
+  Invoke-Tool "navigate" @{ url = "http://127.0.0.1:$FixturePort/" } | Out-Null
+  $links = Invoke-Tool "read" @{ format = "links" }
+  if ("$($links.data.content)" -notmatch 'form') { throw "read format=links lost the form link" }
+
+  # full-page capture: 3200px page with a fixed top bar, stitched from tiles.
+  Invoke-Tool "navigate" @{ url = "http://127.0.0.1:$FixturePort/long" } | Out-Null
+  $full = Invoke-Tool "screenshot" @{ annotate = $false; inline = $false; full_page = $true }
+  if (-not (Test-Path -LiteralPath $full.data.path)) { throw "full-page screenshot file missing" }
+  if ([double]$full.data.css_height -lt 2500) { throw "full-page css_height too small: $($full.data.css_height)" }
+  if ([int]$full.data.tiles -lt 3) { throw "full-page tiles too few: $($full.data.tiles)" }
+
   $shot = Invoke-Tool "screenshot" @{ annotate = $false; inline = $false; format = "jpeg"; quality = 70 }
   if (-not (Test-Path -LiteralPath $shot.data.path)) { throw "screenshot file missing: $($shot.data.path)" }
 
+  # drag: HTML5 DnD onto the bin, then a mousemove-driven reorder.
+  Invoke-Tool "navigate" @{ url = "http://127.0.0.1:$FixturePort/drag" } | Out-Null
+  Invoke-Tool "drag" @{ from_text = "Draggable card"; to_text = "Drop bin"; payload = "card" } | Out-Null
+  $dnd = Invoke-Tool "eval" @{ expression = "document.getElementById('dnd-result').textContent" }
+  if ("$($dnd.data.result)" -notmatch 'dropped card') { throw "HTML5 drag did not drop: $($dnd.data.result)" }
+  Invoke-Tool "drag" @{ from_text = "Item A"; to_text = "Item B" } | Out-Null
+  $ptr = Invoke-Tool "eval" @{ expression = "document.getElementById('ptr-result').textContent" }
+  if ("$($ptr.data.result)" -notmatch 'item-b,item-a') { throw "pointer drag did not reorder: $($ptr.data.result)" }
+
+  # storage: set/get/list/clear on the current origin.
+  Invoke-Tool "storage" @{ action = "set"; key = "bu-smoke"; value = "hello" } | Out-Null
+  $sget = Invoke-Tool "storage" @{ action = "get"; key = "bu-smoke" }
+  if ("$($sget.data.value)" -notmatch 'hello') { throw "storage get lost the value" }
+  $slist = Invoke-Tool "storage" @{ action = "list" }
+  if ([int]$slist.data.count -lt 1) { throw "storage list empty" }
+  Invoke-Tool "storage" @{ action = "clear"; key = "bu-smoke" } | Out-Null
+
+  # nested frames: /nested embeds /frames which embeds /form (f1.1).
+  Invoke-Tool "navigate" @{ url = "http://127.0.0.1:$FixturePort/nested" } | Out-Null
+  $frames = Invoke-Tool "frames" @{ action = "list" }
+  $fids = ($frames.data.frames | ForEach-Object { $_.id }) -join ","
+  if ($fids -notmatch 'f1\.1') { throw "nested frame f1.1 missing: $fids" }
+
+  # fast path: PNG + no annotate + no scale, capture bytes hit disk as-is.
+  $shotFast = Invoke-Tool "screenshot" @{ annotate = $false; inline = $true; format = "png" }
+  if (-not $shotFast.data.data) { throw "fast-path inline screenshot has no data" }
+
   Write-Host "smoke-browser-use: ok (version $($rt.version), port $($rt.port))"
+  Set-Content -LiteralPath "$env:TEMP\smoke-result.txt" -Value "ok"
+} catch {
+  Set-Content -LiteralPath "$env:TEMP\smoke-result.txt" -Value ("FAIL: " + $_.Exception.Message)
+  throw
 } finally {
   if ($appPid -gt 0) { Stop-Process -Id $appPid -Force -ErrorAction SilentlyContinue }
-  if ($server) {
-    # Start-Process may launch a node shim; kill the whole tree so the child
-    # server does not keep port 8765 open after the smoke run.
-    if (Get-Command taskkill.exe -ErrorAction SilentlyContinue) {
-      & taskkill.exe /PID $server.Id /T /F 2>$null | Out-Null
-    } elseif (-not $server.HasExited) {
-      Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
-    }
+  if ($server -and -not $server.HasExited) {
+    Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
   }
+  # Start-Process node may be a shim that exits while its child keeps serving
+  # the fixture port; a stale server would shadow later runs with old routes.
+  # Kill whoever still listens on the fixture port.
+  try {
+    Get-NetTCPConnection -LocalPort $FixturePort -State Listen -ErrorAction SilentlyContinue |
+      ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+  } catch { }
   if ($oldAppName) { $env:BROWSER_USE_APP_NAME = $oldAppName } else { Remove-Item Env:BROWSER_USE_APP_NAME -ErrorAction SilentlyContinue }
   Start-Sleep -Milliseconds 300
   if ((Test-Path -LiteralPath $dataDir) -and ((Resolve-Path -LiteralPath $dataDir).Path -eq (Join-Path $env:APPDATA $appName))) {

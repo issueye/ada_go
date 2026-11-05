@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -58,6 +59,7 @@ type ScriptConfig struct {
 	MaxResultBytes   int  `json:"max_result_bytes"`
 	ReleaseOnFinish  bool `json:"release_on_finish"`
 	KeepSources      bool `json:"keep_sources"`
+	KeepSourcesDays  int  `json:"keep_sources_days"`
 	AllowDynamicCode bool `json:"allow_dynamic_code"`
 }
 
@@ -83,7 +85,8 @@ type ControlConfig struct {
 }
 
 type UIConfig struct {
-	Width, Height int
+	Width  int `json:"width"`
+	Height int `json:"height"`
 }
 
 // Default returns the built-in settings.
@@ -103,7 +106,7 @@ func Default() Config {
 		Script: ScriptConfig{
 			Enabled: true, MaxSourceBytes: 262144, TimeoutMS: 120000, MaxTimeoutMS: 300000,
 			MemoryLimitMB: 64, MaxOutputBytes: 32768, MaxActions: 200, MaxResultBytes: 65536,
-			ReleaseOnFinish: true, KeepSources: true,
+			ReleaseOnFinish: true, KeepSources: true, KeepSourcesDays: 7,
 		},
 		Session: SessionConfig{Restore: true, Save: true, MaxTabs: 20},
 		Security: SecurityConfig{
@@ -125,19 +128,37 @@ func defaultUploadDirs() []string {
 	}
 }
 
-// Load reads config.json over the defaults. A missing or broken file keeps
-// the defaults.
+// Load reads config.json over the defaults. A missing file keeps the defaults;
+// a broken file is logged and also keeps the defaults — a half-parsed config
+// would silently run the app on partial settings.
 func Load() Config {
-	cfg := Default()
+	base := Default()
 	dir, err := Dir()
 	if err != nil {
-		return cfg
+		return base
 	}
+	return loadFrom(dir, base)
+}
+
+// loadFrom applies <dir>/config.json over base. Split from Load so tests can
+// feed a temp directory instead of the user's real config.
+func loadFrom(dir string, base Config) Config {
 	b, err := os.ReadFile(filepath.Join(dir, "config.json"))
 	if err != nil {
-		return cfg
+		return base
 	}
-	_ = json.Unmarshal(b, &cfg)
+	cfg := base
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		log.Printf("browser-use: config.json 解析失败，使用默认配置: %v", err)
+		return base
+	}
+	normalize(&cfg)
+	return cfg
+}
+
+// normalize 把 <=0 的数值键补回默认值，避免 config.json 写 0 让标签页上限、
+// 脚本预算等悄悄失效。
+func normalize(cfg *Config) {
 	if cfg.Agent.MaxTabs <= 0 {
 		cfg.Agent.MaxTabs = 8
 	}
@@ -171,10 +192,18 @@ func Load() Config {
 	if cfg.Script.MaxResultBytes <= 0 {
 		cfg.Script.MaxResultBytes = 65536
 	}
+	if cfg.Script.KeepSourcesDays <= 0 {
+		cfg.Script.KeepSourcesDays = 7
+	}
 	if cfg.Session.MaxTabs <= 0 {
 		cfg.Session.MaxTabs = 20
 	}
-	return cfg
+	if cfg.UI.Width <= 0 {
+		cfg.UI.Width = 1280
+	}
+	if cfg.UI.Height <= 0 {
+		cfg.UI.Height = 860
+	}
 }
 
 // Dir returns the per-user data directory of browser-use.

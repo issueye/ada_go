@@ -48,6 +48,17 @@ const (
 	CodeInternal       = "internal"
 	CodeTooManyActions = "too_many_actions"
 
+	// Page-runtime codes (runtime.js) that only some actions produce. The
+	// contract test TestRuntimeErrorCodesAreKnown keeps this table and the JS
+	// side aligned; an unknown code means the agent cannot map it to a fix.
+	CodeNotEditable  = "not_editable"
+	CodeNotSelect    = "not_select"
+	CodeNoFileInput  = "no_file_input"
+	CodeNoFrame      = "no_frame"
+	CodeFrameTimeout = "frame_timeout"
+	CodeFrameError   = "frame_error"
+	CodeRuntimeError = "runtime_error"
+
 	CodeScriptSyntax      = "script_syntax"
 	CodeScriptError       = "script_error"
 	CodeScriptTimeout     = "script_timeout"

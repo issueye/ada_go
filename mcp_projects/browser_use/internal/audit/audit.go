@@ -164,5 +164,12 @@ func RedactArgs(tool string, raw json.RawMessage) any {
 			delete(m, "args")
 		}
 	}
+	if tool == "storage" {
+		// storage 的 value 与 cookie 一样敏感(登录态/session token)。
+		if v, ok := m["value"]; ok {
+			m["value_len"] = len(fmt.Sprint(v))
+			m["value"] = "***"
+		}
+	}
 	return m
 }

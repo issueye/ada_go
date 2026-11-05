@@ -151,13 +151,14 @@ func (s *Server) execute(ctx context.Context, client, name string, raw json.RawM
 		var req struct {
 			Tab      string `json:"tab"`
 			Selector string `json:"selector"`
+			Format   string `json:"format"`
 			MaxChars int    `json:"max_chars"`
 		}
 		if err := decodeArgs(raw, &req); err != nil {
 			return nil, bad(err)
 		}
 		id := s.tabID(req.Tab)
-		r, err := s.mgr.Read(ctx, id, client, req.Selector, req.MaxChars)
+		r, err := s.mgr.Read(ctx, id, client, req.Selector, req.Format, req.MaxChars)
 		if err != nil {
 			return nil, err
 		}
@@ -342,6 +343,7 @@ func (s *Server) execute(ctx context.Context, client, name string, raw json.RawM
 			Tab      string `json:"tab"`
 			Annotate *bool  `json:"annotate"`
 			Inline   bool   `json:"inline"`
+			FullPage bool   `json:"full_page"`
 			MaxWidth int    `json:"max_width"`
 			Ref      string `json:"ref"`
 			Selector string `json:"selector"`
@@ -353,8 +355,9 @@ func (s *Server) execute(ctx context.Context, client, name string, raw json.RawM
 		}
 		id := s.tabID(req.Tab)
 		res, err := s.mgr.Screenshot(ctx, id, client, browser.ScreenshotOptions{
-			Annotate: boolDefault(req.Annotate, true), Inline: req.Inline, MaxWidth: req.MaxWidth,
-			Ref: req.Ref, Selector: req.Selector, Format: req.Format, Quality: req.Quality,
+			Annotate: boolDefault(req.Annotate, true), Inline: req.Inline, FullPage: req.FullPage,
+			MaxWidth: req.MaxWidth,
+			Ref:      req.Ref, Selector: req.Selector, Format: req.Format, Quality: req.Quality,
 		})
 		if err != nil {
 			return nil, err
@@ -432,7 +435,59 @@ func (s *Server) execute(ctx context.Context, client, name string, raw json.RawM
 		if dls == nil {
 			dls = []browser.Download{}
 		}
-		return &outcome{Data: map[string]any{"downloads": dls, "dir": s.mgr.DownloadsDir()}, TabID: s.mgr.ActiveID()}, nil
+		inflight := s.mgr.PendingDownloads()
+		if inflight == nil {
+			inflight = []browser.PendingDownload{}
+		}
+		return &outcome{Data: map[string]any{"downloads": dls, "inflight": inflight, "dir": s.mgr.DownloadsDir()}, TabID: s.mgr.ActiveID()}, nil
+
+	case "drag":
+		var req struct {
+			Tab      string `json:"tab"`
+			FromRef  string `json:"from_ref"`
+			FromSel  string `json:"from_selector"`
+			FromText string `json:"from_text"`
+			ToRef    string `json:"to_ref"`
+			ToSel    string `json:"to_selector"`
+			ToText   string `json:"to_text"`
+			HTML5    bool   `json:"html5"`
+			Text     string `json:"payload"`
+			Steps    int    `json:"steps"`
+			WaitMS   int    `json:"wait_ms"`
+		}
+		if err := decodeArgs(raw, &req); err != nil {
+			return nil, bad(err)
+		}
+		id := s.tabID(req.Tab)
+		res, err := s.mgr.Drag(ctx, id, client,
+			browser.Target{Ref: req.FromRef, Selector: req.FromSel, Text: req.FromText},
+			browser.Target{Ref: req.ToRef, Selector: req.ToSel, Text: req.ToText},
+			browser.DragOptions{HTML5: req.HTML5, Text: req.Text, Steps: req.Steps, WaitMs: req.WaitMS},
+		)
+		if err != nil {
+			return nil, err
+		}
+		return &outcome{Data: res, TabID: id}, nil
+
+	case "storage":
+		var req struct {
+			Tab    string `json:"tab"`
+			Kind   string `json:"kind"`
+			Action string `json:"action"`
+			Key    string `json:"key"`
+			Value  string `json:"value"`
+		}
+		if err := decodeArgs(raw, &req); err != nil {
+			return nil, bad(err)
+		}
+		id := s.tabID(req.Tab)
+		res, err := s.mgr.Storage(ctx, id, client, browser.StorageOptions{
+			Kind: req.Kind, Action: req.Action, Key: req.Key, Value: req.Value,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return &outcome{Data: res, TabID: id}, nil
 
 	case "dialogs":
 		var req struct {

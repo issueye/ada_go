@@ -55,13 +55,14 @@ description: 用 browser-use 桌面浏览器完成网页任务：打开页面、
 | `browser_navigate` | write | `url`、`action`（goto/back/forward/reload/stop）、`wait_until` | 打开/前进/刷新 |
 | `browser_tab` | write | `action`（new/select/close）、`url`、`tab`、`force` | 标签页管理 |
 | `browser_snapshot` | read | `scope`、`filter`、`max_chars` | 拿 ref |
-| `browser_read` | read | `selector`、`max_chars` | 读正文 |
+| `browser_read` | read | `selector`、`format`（text/markdown/links/tables）、`max_chars` | 读正文/表格/链接 |
 | `browser_act` | write | `action`（click/dblclick/type/press/select/hover/scroll/wait） | 交互 |
-| `browser_screenshot` | read | `annotate`、`max_width`、`inline` | 看外观 |
+| `browser_screenshot` | read | `annotate`、`max_width`、`inline`、`full_page` | 看外观/整页 |
 | `browser_eval` | exec | `expression` | 读一个值/简单 DOM |
 | `browser_script` | exec | `source`、`args`、`timeout_ms` | 多步流程 |
 | `browser_network` | read | `action`（list/get/clear/wait）、`url_contains`、`include_body` | 抓接口 |
 | `browser_console` | read | `action`（list/get/clear/wait）、`level`、`text_contains`、`source` | 看页面控制台与报错 |
+| `browser_wait_event` | read | `kinds`、`after`、`timeout_ms` | 挂起等事件（新标签页/下载/接管） |
 | `browser_control` | write | `action`（release/state） | 交还控制权 |
 | `browser_call` | write | `tool`（cookies/files/frames/downloads/dialogs） | 长尾 |
 
@@ -98,10 +99,13 @@ viewport 1280x800  scroll=(0,0)  page=1280x2400  dpr=1  refs=42  nodes=512
 { "action": "click", "selector": "text=下一页" }
 { "action": "click", "text": "提交", "force": true }        // 被遮挡/动画中
 { "action": "click", "ref": "e9", "count": 2 }               // 双击等价于 action=dblclick
+{ "action": "click", "selector": "#row-3", "button": "right" }           // 右键菜单
+{ "action": "click", "ref": "e7", "modifiers": ["Control"] }             // Ctrl+点击
 
 // 输入：value 是要写的文本；submit 相当于按 Enter
 { "action": "type", "ref": "e12", "value": "webview", "submit": true }
 { "action": "type", "selector": "#email", "value": "a@b.c", "clear": false } // 追加而不是覆盖
+{ "action": "type", "ref": "e20", "value": "长文本", "slowly": true }        // 逐字符输入(触发逐键事件)
 
 // 按键：组合键写 Control+A / Shift+Tab
 { "action": "press", "key": "Enter" }
@@ -117,6 +121,10 @@ viewport 1280x800  scroll=(0,0)  page=1280x2400  dpr=1  refs=42  nodes=512
 // 悬停：悬停后通常要重新快照，因为菜单是新出现的元素
 { "action": "hover", "text": "更多" }
 
+// 拖拽：from_* 定起点、to_* 定终点（看板卡片/文件管理器/滑块）
+{ "action": "drag", "from_text": "卡片 A", "to_text": "回收站" }
+{ "action": "drag", "from_ref": "e31", "to_ref": "e40", "payload": "item-7" }  // payload 进 DataTransfer
+
 // 等待：优先等具体信号，不要盲等
 { "action": "wait", "for": "url", "value": "/results" }
 { "action": "wait", "for": "selector", "value": "text=加载完成" }
@@ -125,6 +133,12 @@ viewport 1280x800  scroll=(0,0)  page=1280x2400  dpr=1  refs=42  nodes=512
 { "action": "wait", "for": "control" }         // 等用户接管/释放
 { "action": "wait", "for": "dialog" }          // 等页面 alert/confirm/prompt
 { "action": "wait", "for": "load", "timeout_ms": 15000 }
+
+// browser_wait_event：挂起等浏览器事件,别轮询 status
+// 用 browser_wait_event {kinds:"tab.created"} 等弹窗开的新标签页,
+// {kinds:"download.started,download.finished"} 盯下载开始与完成,
+// {kinds:"control.takeover,control.human_active"} 等用户接管或想插手。
+// 超时是正常空结果;返回的 cursor 传给下一次的 after 可以继续等。
 ```
 
 `click` / `type` / `select` 默认最多等 5 秒元素可操作（出现、可见、可用、不被遮挡），
@@ -225,6 +239,8 @@ fetch/XHR（不记录文档本身、WebSocket、SSE 体）；请求体 ≤16KB�
   `max_width: 1600`，只要文件路径时 `inline: false`。
 - 只截某个元素用 `ref` 或 `selector`（图片会裁剪到视口内的部分）；图片太大时用
   `format:"jpeg"` + `quality:80` 可明显减小体积。
+- 长表单、长报告页用 `full_page: true`：应用分段滚动拼接整页高度（上限 20 段），
+  fixed/sticky 头部只在第一段出现；`details.tiles` 是分段数。
 - 截图里的 ref 标签与 `browser_snapshot` 的 ref 一致，可以"看图找元素 → 按 ref 点击"。
 - 截图文件也保存在 `%APPDATA%\browser-use\screenshots\`（状态里能看到下载目录）。
 - 判断"布局是否错位/样式是否生效/给用户看结果"用截图；判断"功能是否可用"用动作 + 快照。
@@ -241,8 +257,9 @@ fetch/XHR（不记录文档本身、WebSocket、SSE 体）；请求体 ≤16KB�
 { "tool": "files", "args": { "action": "upload", "ref": "e31", "paths": ["%USERPROFILE%\\Desktop\\report.pdf"] } }
 
 // iframe：先 list 再 use，动作作用在 frame 内；处理完回 main
+// 嵌套帧 id 形如 f2.1（f2 的第 1 个子帧），list 会逐层展开（深度上限 5）
 { "tool": "frames", "args": { "action": "list" } }
-{ "tool": "frames", "args": { "action": "use", "frame": "f2" } }
+{ "tool": "frames", "args": { "action": "use", "frame": "f2.1" } }
 { "tool": "frames", "args": { "action": "main" } }
 
 // 下载与弹框
@@ -250,6 +267,12 @@ fetch/XHR（不记录文档本身、WebSocket、SSE 体）；请求体 ≤16KB�
 { "tool": "dialogs", "args": {} }
 { "tool": "dialogs", "args": { "action": "accept", "text": "yes" } }
 { "tool": "dialogs", "args": { "action": "dismiss" } }
+
+// Web Storage：调试登录态/前端缓存（当前 origin）
+{ "tool": "storage", "args": { "kind": "local", "action": "list" } }
+{ "tool": "storage", "args": { "kind": "local", "action": "get", "key": "token" } }
+{ "tool": "storage", "args": { "kind": "session", "action": "set", "key": "k", "value": "v" } }
+{ "tool": "storage", "args": { "kind": "local", "action": "clear", "key": "k" } }
 ```
 
 - 上传单次 ≤20MiB；`files` 只支持 `upload`。默认只允许 `security.upload_dirs`

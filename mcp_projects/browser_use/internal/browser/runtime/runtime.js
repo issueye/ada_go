@@ -9,6 +9,7 @@
   const RELAY_OPS = new Set([
     "snapshot", "read", "click", "type", "press", "select", "scroll",
     "hover", "query", "info", "dialogs", "network", "console", "upload",
+    "drag", "storage",
   ]);
 
   const state = {
@@ -33,6 +34,12 @@
     consoleDropped: 0,
     consoleBytes: 0,
     consoleWaiters: new Set(),
+    netWaiters: new Set(),
+    refsSweptAt: 0,
+    fullPageHidden: null,
+    lastHumanBlockedAt: 0,
+    lastConsumedBlockedAt: 0,
+    lastHumanBlockedTick: 0,
     activeFrame: null,
     frameWindows: new Map(),
     framePongs: new Map(),
@@ -42,6 +49,9 @@
 
   const MAX_ELEMENTS = 8000;
   const MAX_NODES = 400;
+  // ref 表的硬上限:超限时从最旧开始淘汰(见 sweepRefs)。正常会话靠快照清扫
+  // 就能有界;上限只兜底「大量动作建 ref 却从不快照」的病态流程。
+  const REFS_MAX = 2000;
   const NET_MAX_ENTRIES = 300;
   const NET_MAX_REQUEST = 16 * 1024;
   const NET_MAX_RESPONSE = 128 * 1024;
@@ -177,6 +187,24 @@
       state.netBytes -= old.resBody.length + old.reqBody.length;
       state.netDropped++;
     }
+    if (state.netWaiters.size > 0) {
+      // Copy: each waiter removes itself from the set when it resolves.
+      Array.from(state.netWaiters).forEach((w) => {
+        if (w.done) return;
+        if (Number(e.id.slice(1)) <= w.baseline || !netMatch(e, w.args)) return;
+        w.done = true;
+        clearTimeout(w.timer);
+        state.netWaiters.delete(w);
+        w.resolve({
+          entry: netWaitEntry(e, w.args),
+          count: state.netEntries.length,
+          dropped: state.netDropped,
+          total_bytes: state.netBytes,
+          matched: true,
+          elapsed_ms: 0,
+        });
+      });
+    }
   }
 
   function netSummary(e, withBody) {
@@ -211,6 +239,7 @@
       state.netEntries = [];
       state.netDropped = 0;
       state.netBytes = 0;
+      state.netWaiters.clear(); // 缓冲清了,挂着的等待不会再有命中
       return { cleared: n, count: 0 };
     }
     if (action === "get") {
@@ -225,6 +254,7 @@
       }
       return { entry };
     }
+    if (action === "wait") return networkWait(args);
     if (action !== "list" && action !== "find") {
       throw err("bad_request", "unknown network action: " + action);
     }
@@ -253,6 +283,75 @@
       dropped: state.netDropped,
       total_bytes: state.netBytes,
     };
+  }
+
+  // netMatch 是 wait 的过滤:URL 子串、方法、状态码,与 list 一致。
+  function netMatch(e, args) {
+    if (args.url_contains) {
+      const s = String(args.url_contains).toLowerCase();
+      if (!e.url.toLowerCase().includes(s)) return false;
+    }
+    if (args.method) {
+      if (e.method !== String(args.method).toUpperCase()) return false;
+    }
+    if (args.status != null && args.status !== "") {
+      if (e.status !== Number(args.status)) return false;
+    }
+    return true;
+  }
+
+  function netWaitEntry(e, args) {
+    const entry = netSummary(e, true);
+    const max = Number(args.max_body) || 0;
+    if (max > 0) {
+      entry.req_body = sliceText(entry.req_body, max);
+      entry.res_body = sliceText(entry.res_body, max);
+    }
+    return entry;
+  }
+
+  // networkWait 在页面里等一条匹配的新请求:命中时由 netRecord 直接 resolve,
+  // 不再让 Go 侧每 100ms 轮询一次(与 console wait 同一套机制)。语义对齐旧
+  // Go 轮询:无显式 since 时接受最近 5 秒内的命中(触发请求的 click 通常先于
+  // wait 落地);显式 since 只认之后的新请求;超时返回 matched:false。
+  function networkWait(args) {
+    const timeout = Math.max(100, Math.min(120000, Number(args.wait_ms) || 5000));
+    const started = Date.now();
+    let baseline = Number(String(args.since || "").replace(/^n/, "")) || 0;
+    if (!args.since) {
+      const cutoff = started - 5000;
+      const recent = state.netEntries.filter((e) => e.ts >= cutoff && netMatch(e, args));
+      if (recent.length > 0) {
+        const e = recent[recent.length - 1];
+        return {
+          entry: netWaitEntry(e, args),
+          count: state.netEntries.length,
+          dropped: state.netDropped,
+          total_bytes: state.netBytes,
+          matched: true,
+          elapsed_ms: 0,
+        };
+      }
+      const last = state.netEntries[state.netEntries.length - 1];
+      baseline = last ? Number(last.id.slice(1)) : 0;
+    }
+    return new Promise((resolve) => {
+      const waiter = { args, baseline, done: false, resolve, timer: null };
+      waiter.timer = setTimeout(() => {
+        if (waiter.done) return;
+        waiter.done = true;
+        state.netWaiters.delete(waiter);
+        resolve({
+          entry: null,
+          count: state.netEntries.length,
+          dropped: state.netDropped,
+          total_bytes: state.netBytes,
+          matched: false,
+          elapsed_ms: Date.now() - started,
+        });
+      }, timeout);
+      state.netWaiters.add(waiter);
+    });
   }
 
   function installNetwork() {
@@ -846,14 +945,42 @@
     };
   }
 
+  // sweepRefs 清理 ref 表:元素已被 GC(WeakRef 死了)且自上轮清扫以来没被
+  // 用过的条目直接删除;最近用过的多留一轮,给 stale_ref 的指纹恢复留余地。
+  // 超过 REFS_MAX 时从最旧开始淘汰(Map 保持插入序=创建序),含活引用 ——
+  // 那是「从不快照」的病态流程的兜底,正常会话走不到。
+  function sweepRefs() {
+    const cutoff = state.refsSweptAt;
+    for (const [ref, rec] of state.refs) {
+      if (rec.el && rec.el.deref && rec.el.deref()) continue;
+      if ((rec.touchedAt || rec.createdAt) >= cutoff) continue;
+      state.refs.delete(ref);
+    }
+    state.refsSweptAt = Date.now();
+    while (state.refs.size > REFS_MAX) {
+      const oldest = state.refs.keys().next().value;
+      state.refs.delete(oldest);
+    }
+  }
+
   function refFor(el) {
     const old = state.byEl.get(el);
     if (old) {
       const rec = state.refs.get(old);
-      if (rec && (!rec.el || rec.el.deref() === el)) return old;
+      if (rec && (!rec.el || rec.el.deref() === el)) {
+        rec.touchedAt = Date.now();
+        return old;
+      }
     }
+    if (state.refs.size >= REFS_MAX) sweepRefs();
     const ref = "e" + (++state.seq);
-    const rec = { ref, el: typeof WeakRef === "function" ? new WeakRef(el) : { deref: () => el }, fp: fpOf(el) };
+    const rec = {
+      ref,
+      el: typeof WeakRef === "function" ? new WeakRef(el) : { deref: () => el },
+      fp: fpOf(el),
+      createdAt: Date.now(),
+      touchedAt: 0,
+    };
     state.refs.set(ref, rec);
     state.byEl.set(el, ref);
     return ref;
@@ -863,7 +990,10 @@
     const rec = state.refs.get(ref);
     if (!rec) return null;
     const el = rec.el && rec.el.deref ? rec.el.deref() : null;
-    if (el && el.isConnected) return el;
+    if (el && el.isConnected) {
+      rec.touchedAt = Date.now();
+      return el;
+    }
     return null;
   }
 
@@ -904,7 +1034,36 @@
     return out;
   }
 
-  function parseTextLocator(spec) {
+  // deepTextMatch 单次遍历收集 textContent 含 s 的元素(粗筛):旧实现
+  // deepQueryAll(document, "*") 对全 DOM 枚举两遍(选择器一遍 + shadow 检测
+  // 一遍),再对每个元素做样式计算和 innerText 布局;大页面上 text= 定位是
+  // O(N) 的重活。textContent 不触发布局,先粗筛再对命中者做精确检查。
+  function deepTextMatch(s, deadline) {
+    const out = [];
+    const visit = (root) => {
+      if (!root || Date.now() > deadline) return;
+      let walker;
+      try {
+        walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+      } catch (e) {
+        return;
+      }
+      const shadows = [];
+      for (let el = walker.nextNode(); el; el = walker.nextNode()) {
+        if (el.shadowRoot) shadows.push(el.shadowRoot);
+        const text = el.textContent;
+        // 超时降级:兆级 DOM 上单次遍历也可能慢,到点后停止收集 —— text=
+        // 在病态大页面上是 best-effort,正常页面远走不到这里。
+        if (Date.now() > deadline) break;
+        if (text && text.toLowerCase().includes(s)) out.push(el);
+      }
+      for (const sh of shadows) visit(sh);
+    };
+    visit(document);
+    return out;
+  }
+
+  function parseTextLocator(spec, requireClickable) {
     let s = spec;
     let exact = false;
     if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
@@ -912,11 +1071,14 @@
       s = s.slice(1, -1);
     }
     s = norm(s).toLowerCase();
-    const all = deepQueryAll(document, "*");
+    // textContent includes 是精确检查的超集,粗筛不改变语义;样式计算与
+    // innerText 布局只花在粗筛命中者上。
+    const candidates = deepTextMatch(s, Date.now() + 500);
     const hits = [];
     let exactHits = [];
-    for (const el of all) {
-      if (!isClickable(el, roleOf(el))) continue;
+    for (const el of candidates) {
+      if (requireClickable && !isClickable(el, roleOf(el))) continue;
+      if (!requireClickable && !isVisible(el)) continue;
       const text = norm(el.innerText || el.textContent || nameOf(el)).toLowerCase();
       if (exact ? text === s : text.includes(s)) {
         hits.push(el);
@@ -927,13 +1089,16 @@
     return exactHits.length > 0 ? exactHits : hits;
   }
 
-  function resolveLocator(spec) {
+  function resolveLocator(spec, opts) {
+    // textClickable:false 供 drag 等动作用——拖拽源不必是可点击元素,
+    // 只要可见且有文本即可。
+    const wantClickable = !(opts && opts.textClickable === false);
     if (spec == null) throw err("bad_request", "no target");
     if (typeof spec === "object") {
       if (spec.ref) return resolveRef(spec.ref);
       if (spec.selector) return resolveLocator(String(spec.selector));
       if (spec.text != null) {
-        const matches = parseTextLocator(String(spec.text));
+        const matches = parseTextLocator(String(spec.text), wantClickable);
         return unique(matches, "text=" + spec.text, true);
       }
       if (spec.point) {
@@ -948,7 +1113,7 @@
     if (s.startsWith("css=")) return unique(deepQueryAll(document, s.slice(4)), s);
     if (s.startsWith("loc=css:")) return unique(deepQueryAll(document, s.slice(8)), s);
     if (s.startsWith("text=")) {
-      const matches = parseTextLocator(s.slice(5));
+      const matches = parseTextLocator(s.slice(5), wantClickable);
       return unique(matches, s, true);
     }
     if (s.startsWith("role=")) {
@@ -1149,6 +1314,159 @@
     });
     if (restoreReveal) setTimeout(restoreReveal, 300);
     return { clicked: info, url: location.href, title: document.title, revealed: !!restoreReveal };
+  }
+
+  // drag 把元素从 from 拖到 to。两套事件序列都发:HTML5 DnD(源可拖或显式
+  // html5=true,携带 DataTransfer)与 pointer/mouse 步进序列(自绘拖拽、
+  // canvas 看板)。遮罩期里合成事件走 withBypass 穿透输入锁。
+  async function drag(args) {
+    args = args || {};
+    if (!args.from || !args.to) throw err("bad_request", "from and to targets are required");
+    const deadline = Date.now() + actionWaitMs(args);
+    let from = null;
+    let to = null;
+    for (;;) {
+      try {
+        from = resolveLocator(args.from, { textClickable: false });
+        to = resolveLocator(args.to, { textClickable: false });
+        from.el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+        to.el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+        await frames(1);
+        if (!isVisible(from.el)) throw err("not_visible", "drag source is not visible", "scroll or wait for it to show");
+        if (isDisabled(from.el)) throw err("not_enabled", "drag source is disabled", "wait for it to become enabled");
+        if (!isVisible(to.el)) throw err("not_visible", "drag target is not visible", "scroll or wait for it to show");
+        break;
+      } catch (e) {
+        if (!retryableActionError(e) || Date.now() >= deadline) throw e;
+        await pause(ACTION_RETRY_MS);
+      }
+    }
+    const fc = centerOf(from.el);
+    const tc = centerOf(to.el);
+    const text = String(args.text || "");
+    const html5 = args.html5 === true || from.el.draggable === true || !!text;
+    withBypass(() => {
+      if (html5) {
+        const dt = new DataTransfer();
+        if (text) dt.setData("text/plain", text);
+        const fire = (el, type, x, y) => {
+          // DragEvent 构造器在部分场景不可用:退回 MouseEvent + 手挂 dataTransfer。
+          let ev;
+          try {
+            ev = new DragEvent(type, { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, dataTransfer: dt });
+          } catch (e) {
+            ev = new MouseEvent(type, { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y });
+            try { Object.defineProperty(ev, "dataTransfer", { value: dt }); } catch (e2) { /* ignore */ }
+          }
+          el.dispatchEvent(ev);
+        };
+        fire(from.el, "dragstart", fc.x, fc.y);
+        fire(to.el, "dragenter", tc.x, tc.y);
+        fire(to.el, "dragover", tc.x, tc.y);
+        fire(to.el, "drop", tc.x, tc.y);
+        fire(from.el, "dragend", fc.x, fc.y);
+      }
+      const PE = typeof PointerEvent === "function" ? PointerEvent : MouseEvent;
+      const pe = (type, el, x, y, buttons) => new PE(type, {
+        bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y,
+        pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0, buttons,
+      });
+      const me = (type, x, y, buttons) => new MouseEvent(type, {
+        bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, button: 0, buttons,
+      });
+      from.el.dispatchEvent(pe("pointerdown", from.el, fc.x, fc.y, 1));
+      from.el.dispatchEvent(me("mousedown", fc.x, fc.y, 1));
+      const steps = Math.max(2, Math.min(16, Number(args.steps) || 8));
+      for (let i = 1; i <= steps; i++) {
+        const x = fc.x + ((tc.x - fc.x) * i) / steps;
+        const y = fc.y + ((tc.y - fc.y) * i) / steps;
+        const over = document.elementFromPoint(x, y) || to.el;
+        over.dispatchEvent(pe("pointermove", over, x, y, 1));
+        over.dispatchEvent(me("mousemove", x, y, 1));
+      }
+      to.el.dispatchEvent(pe("pointerup", to.el, tc.x, tc.y, 0));
+      to.el.dispatchEvent(me("mouseup", tc.x, tc.y, 0));
+    });
+    return {
+      dragged: true,
+      from: snapshotInfo(from.el, from.ref),
+      to: snapshotInfo(to.el, to.ref),
+      html5,
+      url: location.href,
+      title: document.title,
+    };
+  }
+
+  // storage 读写当前 origin 的 localStorage / sessionStorage(会话调试、
+  // 登录态检查)。set 上限 64 KiB,get 返回值截 16 KiB。
+  const STORAGE_MAX_SET = 64 * 1024;
+  const STORAGE_MAX_GET = 16 * 1024;
+
+  function storageArea(kind) {
+    const k = String(kind || "local").toLowerCase();
+    if (k !== "local" && k !== "session") throw err("bad_request", "kind must be local or session");
+    const area = k === "session" ? window.sessionStorage : window.localStorage;
+    if (!area) throw err("unsupported", "web storage is unavailable", "the page may block storage");
+    return { kind: k, area };
+  }
+
+  function storage(args) {
+    args = args || {};
+    const { kind, area } = storageArea(args.kind);
+    const action = String(args.action || "list");
+    if (action === "list") {
+      const keys = [];
+      let total = 0;
+      const n = area.length;
+      for (let i = 0; i < n && keys.length < 200; i++) {
+        const key = area.key(i);
+        if (key === null) continue;
+        const bytes = (area.getItem(key) || "").length;
+        total += key.length + bytes;
+        keys.push({ key, bytes });
+      }
+      return { kind, count: n, keys, total_bytes: total };
+    }
+    if (action === "get") {
+      const key = String(args.key || "");
+      if (!key) throw err("bad_request", "key is required for storage get");
+      const value = area.getItem(key);
+      if (value === null) return { kind, key, found: false, value: "" };
+      const truncated = value.length > STORAGE_MAX_GET;
+      return { kind, key, found: true, value: truncated ? value.slice(0, STORAGE_MAX_GET) : value, truncated };
+    }
+    if (action === "set") {
+      const key = String(args.key || "");
+      const value = String(args.value == null ? "" : args.value);
+      if (!key) throw err("bad_request", "key is required for storage set");
+      if (value.length > STORAGE_MAX_SET) throw err("bad_request", "value exceeds 64 KiB storage limit");
+      area.setItem(key, value);
+      return { kind, key, bytes: value.length };
+    }
+    if (action === "clear") {
+      const key = String(args.key || "");
+      if (key) {
+        const had = area.getItem(key) !== null;
+        area.removeItem(key);
+        return { kind, key, removed: had };
+      }
+      const cleared = area.length;
+      area.clear();
+      return { kind, cleared };
+    }
+    throw err("bad_request", "unknown storage action: " + action);
+  }
+
+  // humanBlocked 记录遮罩期被输入锁拦下的人类操作:agent 每次写动作前消费一次,
+  // 命中则发 control.human_active 事件(模型可据此释放租约让用户先操作)。
+  function humanBlocked(args) {
+    args = args || {};
+    if (String(args.action || "consume") !== "consume") {
+      throw err("bad_request", "unknown humanBlocked action");
+    }
+    const blocked = state.lastHumanBlockedAt > state.lastConsumedBlockedAt;
+    state.lastConsumedBlockedAt = Math.max(state.lastConsumedBlockedAt, state.lastHumanBlockedAt);
+    return { blocked };
   }
 
   function fileInputFor(el) {
@@ -1409,7 +1727,11 @@
 
   async function scroll(opts) {
     opts = opts || {};
-    if (opts.to) {
+    if (opts.xy) {
+      // 绝对滚动,整页截图的分段捕获用。
+      window.scrollTo({ left: Number(opts.xy.x) || 0, top: Number(opts.xy.y) || 0, behavior: "instant" });
+      await frames(1);
+    } else if (opts.to) {
       const el = resolveLocator(opts.to).el;
       el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
       await frames(1);
@@ -1463,6 +1785,9 @@
     const maxChars = Math.min(Math.max(Number(args.max_chars || 12000), 1000), 50000);
     const filter = norm(args.filter).toLowerCase();
     const scope = args.scope || "full";
+    // 快照是 ref 的主要产出点,也顺带做一次清扫:长驻 SPA 会话里 ref 表
+    // 不再随快照次数无界增长。
+    sweepRefs();
     const viewport = { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight };
     const nodes = [];
     let visited = 0;
@@ -1641,17 +1966,140 @@
       if (!matches.length) throw err("not_found", "no element matches " + args.selector);
       root = matches[0];
     }
-    const text = String(root ? root.innerText || root.textContent || "" : "")
-      .replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
     const max = Math.min(Math.max(Number(args.max_chars || 12000), 1000), 50000);
-    const truncated = text.length > max;
+    const format = String(args.format || "text").toLowerCase();
+    let content = "";
+    if (format === "links") {
+      content = readLinks(root, max);
+    } else if (format === "tables" || format === "markdown") {
+      const tables = readTables(root, max);
+      if (format === "tables") {
+        content = tables;
+      } else {
+        // markdown = 可读正文 + 表格转 markdown(innerText 会把 <table> 打平,
+        // 模型读不清行列关系)。
+        const text = String(root ? root.innerText || root.textContent || "" : "")
+          .replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+        content = tables ? (text ? text + "\n\n" + tables : tables) : text;
+      }
+    } else {
+      content = String(root ? root.innerText || root.textContent || "" : "")
+        .replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+    }
+    if (content.length > max) {
+      content = content.slice(0, max) + "\n… [truncated]";
+    }
     return {
-      content: truncated ? text.slice(0, max) + "\n… [truncated]" : text,
-      truncated,
+      content,
+      truncated: content.length > max,
+      format,
       url: location.href,
       title: document.title,
-      chars: text.length,
+      chars: content.length,
     };
+  }
+
+  // readLinks 抽取 root 里的链接(文本 + href),去重,常用于「这页有哪些入口」。
+  function readLinks(root, max) {
+    const seen = new Set();
+    const out = [];
+    const anchors = root ? root.querySelectorAll("a[href]") : [];
+    for (const a of anchors) {
+      if (out.length >= 200) break;
+      const href = String(a.getAttribute("href") || "");
+      if (!href || href.startsWith("javascript:")) continue;
+      const text = clip(a.innerText || a.textContent || href, 120);
+      const key = href + "\u0000" + text;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push("- " + text + " -> " + href);
+    }
+    if (out.length >= 200) out.push("[links truncated at 200]");
+    return out.join("\n");
+  }
+
+  // readTables 把 root 里的 <table> 渲染成 markdown,行/列对齐关系保得住,
+  // 而 innerText 会把表格打平。每表最多 40 行(超出标注),单元格截 120 字符。
+  function readTables(root, max) {
+    const tables = root ? root.querySelectorAll("table") : [];
+    const out = [];
+    for (let t = 0; t < tables.length && out.join("\n").length < max; t++) {
+      const table = tables[t];
+      if (out.length >= 20) { out.push("[tables truncated at 20]"); break; }
+      const rows = [];
+      for (const tr of table.querySelectorAll("tr")) {
+        const cells = [];
+        for (const cell of tr.querySelectorAll("th,td")) {
+          cells.push(clip(cell.innerText || cell.textContent || "", 120).replace(/\|/g, "\\|").replace(/\n/g, " "));
+        }
+        if (cells.length > 0) rows.push(cells);
+        if (rows.length >= 41) break;
+      }
+      if (rows.length === 0) continue;
+      const cols = Math.max(...rows.map((r) => r.length));
+      const md = [];
+      const head = rows[0];
+      md.push("| " + head.map((c) => c || " ").join(" | ") + " |");
+      md.push("|" + head.map(() => " --- ").join("|") + "|");
+      const body = rows.slice(1, 41);
+      for (const r of body) {
+        const padded = r.slice();
+        while (padded.length < cols) padded.push("");
+        md.push("| " + padded.join(" | ") + " |");
+      }
+      if (rows.length > 41) md.push("[table truncated at 40 rows]");
+      out.push(md.join("\n"));
+    }
+    return out.join("\n\n");
+  }
+
+  // fullPage 辅助整页截图:prepare 给出页面尺寸;hide 把 fixed/sticky 元素藏起来
+  // (它们会出现在每个分段里,只应在第一段出现一次);restore 恢复。
+  // 隐藏列表存在 state 里,restore 与 hide 不必是同一次调用。
+  function fullPage(args) {
+    args = args || {};
+    const action = String(args.action || "prepare");
+    if (action === "prepare") {
+      const de = document.documentElement;
+      return {
+        page_w: Math.round(de.scrollWidth),
+        page_h: Math.round(de.scrollHeight),
+        viewport_w: window.innerWidth,
+        viewport_h: window.innerHeight,
+        dpr: window.devicePixelRatio || 1,
+      };
+    }
+    if (action === "hide") {
+      if (state.fullPageHidden) return { hidden: state.fullPageHidden.length };
+      state.fullPageHidden = [];
+      const all = document.body ? document.body.querySelectorAll("*") : [];
+      const cap = Math.min(all.length, 4000);
+      for (let i = 0; i < cap && state.fullPageHidden.length < 60; i++) {
+        const el = all[i];
+        let cs;
+        try { cs = getComputedStyle(el); } catch (e) { continue; }
+        if (cs.position !== "fixed" && cs.position !== "sticky") continue;
+        if (!isVisible(el)) continue;
+        try {
+          el.__buPrevVisibility = el.style.visibility;
+          el.style.visibility = "hidden";
+          state.fullPageHidden.push(el);
+        } catch (e) { /* ignore */ }
+      }
+      return { hidden: state.fullPageHidden.length };
+    }
+    if (action === "restore") {
+      const hidden = state.fullPageHidden || [];
+      for (const el of hidden) {
+        try {
+          if (el && el.style) el.style.visibility = el.__buPrevVisibility || "";
+          delete el.__buPrevVisibility;
+        } catch (e) { /* element may be gone */ }
+      }
+      state.fullPageHidden = null;
+      return { restored: hidden.length };
+    }
+    throw err("bad_request", "unknown fullPage action: " + action);
   }
 
   function setInputLock(on) {
@@ -1662,6 +2110,12 @@
       if (!state.lockHandler) {
         state.lockHandler = (ev) => {
           if (!state.inputLocked || state.bypass) return;
+          // 记录「人类在遮罩期尝试操作」:agent 下一次写动作前会消费并上报。
+          const now = Date.now();
+          if (now - state.lastHumanBlockedTick > 500) {
+            state.lastHumanBlockedTick = now;
+            state.lastHumanBlockedAt = now;
+          }
           if (ev.cancelable) ev.preventDefault();
           ev.stopImmediatePropagation();
         };
@@ -1774,13 +2228,76 @@
     try { win.postMessage(msg, "*"); } catch (e) { /* frame gone */ }
   }
 
+  // ---- iframe relay（支持嵌套）-------------------------------------------
+  //
+  // 帧按层级编号：顶层直接子帧 f1/f2/…，f2 的子帧是 f2.1/f2.2，依此类推
+  // （深度上限 MAX_FRAME_DEPTH，索引路径天然无环）。命令沿索引路径逐跳下发
+  // （cmd 带 route，中继帧转发），结果/subpong 沿原路逐跳上传。中继帧只转发,
+  // 不缓存路由状态,跨域帧之间全部走 postMessage。
+
+  const MAX_FRAME_DEPTH = 5;
+  const FRAME_PING_MS = 250;
+
+  function isOwnFrame(win) {
+    // window.frames 就是 window 本身(legacy 别名):不能用 for...of,
+    // 用 window.length + 索引访问枚举直接子帧。
+    try {
+      const n = window.frames.length;
+      for (let i = 0; i < n; i++) {
+        if (window.frames[i] === win) return true;
+      }
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+
+  // routeOf 把帧 id 解成 0 基索引路径："f2.1" → [1, 0]。
+  function routeOf(id) {
+    const parts = String(id).replace(/^f/, "").split(".");
+    const out = [];
+    for (const p of parts) {
+      const n = Number(p);
+      if (!Number.isInteger(n) || n < 1) throw err("no_frame", "bad frame id " + id, "run frames list");
+      out.push(n - 1);
+    }
+    return out;
+  }
+
+  // collectChildren ping 本窗口的直接子帧并等 pong;pong 带 childCount,
+  // 父帧据此决定要不要继续递归。
+  async function collectChildren() {
+    const total = window.frames.length;
+    state.framePongs = new Map();
+    const tokens = [];
+    for (let i = 0; i < total; i++) {
+      const token = "f" + (++state.frameSeq);
+      tokens.push(token);
+      postFrame(window.frames[i], { __buFrame: "ping", token });
+    }
+    await new Promise((r) => setTimeout(r, FRAME_PING_MS));
+    const out = [];
+    for (let i = 0; i < tokens.length; i++) {
+      const info = state.framePongs.get(tokens[i]);
+      if (info) out.push({ index: i + 1, url: info.url, title: info.title, child_count: info.childCount || 0 });
+    }
+    state.framePongs = new Map();
+    return out;
+  }
+
   function installFrameRelay() {
     if (isTopFrame) {
       window.addEventListener("message", (ev) => {
         const d = ev.data;
-        if (!d || !d.__buFrame) return;
+        if (!d || !d.__buFrame || !isOwnFrame(ev.source)) return;
         if (d.__buFrame === "pong") {
-          state.framePongs.set(d.token, { url: d.url || "", title: d.title || "" });
+          state.framePongs.set(d.token, { url: d.url || "", title: d.title || "", childCount: d.child_count || 0 });
+          return;
+        }
+        if (d.__buFrame === "subpong") {
+          const p = state.frameSubPending.get(d.token);
+          if (!p) return;
+          clearTimeout(p.timer);
+          state.frameSubPending.delete(d.token);
+          p.resolve(Array.isArray(d.frames) ? d.frames : []);
           return;
         }
         if (d.__buFrame === "result") {
@@ -1795,17 +2312,53 @@
     }
     window.addEventListener("message", async (ev) => {
       const d = ev.data;
-      if (!d || !d.__buFrame || ev.source !== window.parent) return;
-      if (d.__buFrame === "ping") {
+      if (!d || !d.__buFrame) return;
+      // 消息来自父帧(命令下发)或本帧自己的子帧(结果/subpong 上传)。
+      const fromParent = ev.source === window.parent;
+      const fromChild = isOwnFrame(ev.source);
+      if (!fromParent && !fromChild) return;
+      if (d.__buFrame === "ping" && fromParent) {
         try {
           ev.source.postMessage({
             __buFrame: "pong", token: d.token,
             url: location.href, title: document.title,
+            child_count: window.frames.length,
           }, "*");
         } catch (e) { /* ignore */ }
         return;
       }
-      if (d.__buFrame === "cmd") {
+      if (d.__buFrame === "pong" && fromChild) {
+        // 本帧 collectChildren 的探针回包(嵌套收集时任意层级都会发生)。
+        state.framePongs.set(d.token, { url: d.url || "", title: d.title || "", childCount: d.child_count || 0 });
+        return;
+      }
+      if (d.__buFrame === "subping" && fromParent) {
+        // 父帧要我们收集直接子帧清单;收集完沿原路上传。
+        try {
+          const frames = await collectChildren();
+          ev.source.postMessage({ __buFrame: "subpong", token: d.token, frames }, "*");
+        } catch (e) {
+          ev.source.postMessage({ __buFrame: "subpong", token: d.token, frames: [] }, "*");
+        }
+        return;
+      }
+      if (d.__buFrame === "cmd" && fromParent) {
+        const route = Array.isArray(d.route) ? d.route : [];
+        if (route.length > 0) {
+          // 不是给本帧的:按索引转发一跳,结果由叶子沿原路上传。
+          const win = window.frames[Number(route[0])];
+          if (!win) {
+            try {
+              ev.source.postMessage({
+                __buFrame: "result", id: d.id,
+                payload: JSON.stringify({ ok: false, error: { code: "no_frame", message: "frame is gone; run frames list" } }),
+              }, "*");
+            } catch (e) { /* ignore */ }
+            return;
+          }
+          postFrame(win, { __buFrame: "cmd", id: d.id, route: route.slice(1), op: d.op, args: d.args || {} });
+          return;
+        }
         let payload;
         try {
           payload = await invoke({ op: d.op, args: d.args || {} });
@@ -1818,43 +2371,70 @@
         try {
           ev.source.postMessage({ __buFrame: "result", id: d.id, payload }, "*");
         } catch (e) { /* ignore */ }
+        return;
+      }
+      // result / subpong 来自子帧:原样转发给父帧(逐跳上传)。
+      if ((d.__buFrame === "result" || d.__buFrame === "subpong") && fromChild) {
+        try { window.parent.postMessage(d, "*"); } catch (e) { /* ignore */ }
       }
     });
   }
 
   async function listFrames() {
-    const total = window.frames.length;
-    state.framePongs = new Map();
-    const tokens = [];
-    for (let i = 0; i < total; i++) {
-      const token = "f" + (++state.frameSeq);
-      const win = window.frames[i];
-      tokens.push({ token, win });
-      state.frameWindows.set(token, win);
-      postFrame(win, { __buFrame: "ping", token });
-    }
-    await new Promise((r) => setTimeout(r, 250));
     const out = [];
-    for (const t of tokens) {
-      const info = state.framePongs.get(t.token);
-      if (info) out.push({ id: t.token, url: info.url, title: info.title });
-    }
-    return { frames: out, total, active: state.activeFrame };
+    const pendingSub = new Map();
+
+    // askSubtree 沿索引路径向某个后代帧要它自己的子帧清单;
+    // 中继帧逐跳转发 subping,subpong 沿原路上传。
+    const askSubtree = (route) => new Promise((resolve) => {
+      const token = "sub" + (++state.frameSeq);
+      const timer = setTimeout(() => {
+        pendingSub.delete(token);
+        resolve(null);
+      }, FRAME_PING_MS + 1500);
+      pendingSub.set(token, { resolve, timer });
+      postFrame(window.frames[route[0]], {
+        __buFrame: "subping", token, route: route.slice(1),
+      });
+    });
+    state.frameSubPending = pendingSub;
+
+    const walk = async (route, id, depth) => {
+      if (depth >= MAX_FRAME_DEPTH) return;
+      let children;
+      if (route.length === 0) {
+        children = await collectChildren();
+      } else {
+        children = await askSubtree(route);
+        if (!children) return;
+      }
+      for (const child of children) {
+        const cid = id ? id + "." + child.index : "f" + child.index;
+        out.push({ id: cid, url: child.url, title: child.title });
+        if (child.child_count > 0) {
+          await walk(route.concat(child.index - 1), cid, depth + 1);
+        }
+      }
+    };
+    await walk([], "", 0);
+    state.frameSubPending = new Map();
+    return { frames: out, total: out.length, active: state.activeFrame };
   }
 
   async function frameCommand(op, args) {
-    const token = state.activeFrame;
-    if (!token) throw err("no_frame", "no active frame");
-    const win = state.frameWindows.get(token);
+    const id = state.activeFrame;
+    if (!id) throw err("no_frame", "no active frame");
+    const route = routeOf(id);
+    const win = window.frames[route[0]];
     if (!win) throw err("no_frame", "frame is gone; run frames list");
-    const id = "r" + (++state.frameSeq);
+    const rid = "r" + (++state.frameSeq);
     return await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        state.framePending.delete(id);
+        state.framePending.delete(rid);
         reject(err("frame_timeout", "frame did not answer"));
       }, 30000);
-      state.framePending.set(id, { resolve, timer });
-      postFrame(win, { __buFrame: "cmd", id, token, op, args: args || {} });
+      state.framePending.set(rid, { resolve, timer });
+      postFrame(win, { __buFrame: "cmd", id: rid, route: route.slice(1), op, args: args || {} });
     });
   }
 
@@ -1865,7 +2445,8 @@
     if (action === "use") {
       const id = String(args.frame || args.id || "");
       if (!id) throw err("bad_request", "frame is required");
-      if (!state.frameWindows.has(id)) throw err("no_frame", "unknown frame " + id);
+      // 帧不再登记窗口表(嵌套后路由走索引路径):合法性由 id 形状决定。
+      routeOf(id);
       state.activeFrame = id;
       return { frames: [], active: id };
     }
@@ -1907,9 +2488,13 @@
         case "info": return JSON.stringify({ ok: true, url: location.href, title: document.title, readyState: document.readyState, nav: state.navCount, scroll: { x: window.scrollX, y: window.scrollY }, viewport: { w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio || 1 } });
         case "setInputLock": return JSON.stringify({ ok: true, ...setInputLock(args.on) });
         case "dialogs": return JSON.stringify({ ok: true, ...dialogQuery(args) });
-        case "network": return JSON.stringify({ ok: true, ...network(args) });
+        case "network": return JSON.stringify({ ok: true, ...(await network(args)) });
         case "console": return JSON.stringify({ ok: true, ...(await consoleQuery(args)) });
         case "upload": return JSON.stringify({ ok: true, ...(await upload(args)) });
+        case "fullPage": return JSON.stringify({ ok: true, ...fullPage(args) });
+        case "drag": return JSON.stringify({ ok: true, ...(await drag(args)) });
+        case "storage": return JSON.stringify({ ok: true, ...storage(args) });
+        case "humanBlocked": return JSON.stringify({ ok: true, ...humanBlocked(args) });
         default: throw err("bad_request", "unknown op: " + op);
       }
     } catch (e) {

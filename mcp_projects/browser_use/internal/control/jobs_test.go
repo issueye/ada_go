@@ -204,3 +204,52 @@ func TestAsyncCallSurvivesClientDisconnect(t *testing.T) {
 		t.Fatalf("断开后任务应正常完成：%v", job)
 	}
 }
+
+// TestJobStoreSweeperRemovesExpired 钉住 T2.5：定时 sweep 让已结束任务在
+// TTL 后被清理 —— 旧实现只在 create 时清理，不再创建新任务的会话里
+// 结果（含内联截图的大 JSON）会驻留内存到进程退出。
+func TestJobStoreSweeperRemovesExpired(t *testing.T) {
+	s := newJobStore()
+	s.ttl = 80 * time.Millisecond
+	stop := make(chan struct{})
+	defer close(stop)
+	s.startSweeper(20*time.Millisecond, stop)
+
+	j, err := s.create("script", "c1", time.Second)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	s.finish(j.id, callResult{OK: true}, jobDone)
+	if _, ok := s.get(j.id); !ok {
+		t.Fatal("TTL 内任务应可查询")
+	}
+	time.Sleep(250 * time.Millisecond)
+	if _, ok := s.get(j.id); ok {
+		t.Fatal("定时 sweep 应清理超过 TTL 的已结束任务")
+	}
+}
+
+// TestJobStoreEvictsMultiple 钉住 T2.5：容量满时逐出「所有」最老的已结束
+// 任务腾位，而不是只逐出一个就放弃。
+func TestJobStoreEvictsMultiple(t *testing.T) {
+	s := newJobStore()
+	s.max, s.maxRun = 5, 4
+	var created []*asyncJob
+	for i := 0; i < 4; i++ {
+		j, err := s.create("wait", "c", time.Second)
+		if err != nil {
+			t.Fatalf("create %d: %v", i, err)
+		}
+		created = append(created, j)
+	}
+	for _, j := range created[:3] {
+		s.finish(j.id, callResult{OK: true}, jobDone)
+	}
+	s.max = 3 // 收紧容量，制造「需要连续逐出多个」的场景
+	if _, err := s.create("status", "c", time.Second); err != nil {
+		t.Fatalf("create 应逐出多个已结束任务腾位: %v", err)
+	}
+	if len(s.order) != 3 {
+		t.Fatalf("len(order) = %d, 期望 3", len(s.order))
+	}
+}

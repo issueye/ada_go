@@ -429,14 +429,31 @@ go build -o bin/browser-use.exe .
 - Tools: `status`, `tabs`, `navigate`, `snapshot`, `read`, `screenshot`,
   `scroll`, `hover`, `eval`, `network`, `console`, `cookies`, `files`, `frames`,
   `downloads`, `dialogs`, `click`, `type`, `select`, `press`, `wait`,
-  `control`, `script`.
+  `control`, `script`, `drag`, `storage`.
+- Drag & drop between two elements: HTML5 DnD (draggable sources or with a
+  DataTransfer payload) plus a pointer step sequence for custom
+  mousemove-driven drag implementations.
+- `storage`: inspect/modify the current origin's localStorage/sessionStorage
+  (list/get/set/clear, values ≤ 64 KiB on set, redacted in the audit log).
+- Nested iframes: the relay walks the frame tree (depth ≤ 5), ids like `f2.1`,
+  `frames use f2.1` routes commands hop by hop through cross-origin frames.
+- Human-activity signal: input the mask intercepts while the agent holds the
+  page emits `control.human_active` on `/v1/events` (the model decides whether
+  to yield).
+- `download.started` events and an in-flight download list (`downloads`
+  returns both finished and pending entries; mygo exposes no progress/percent
+  and no mid-flight cancel).
 - Snapshot refs (`e12`), CSS/text/role locators, actionability checks,
   navigation waiting, `control_locked` after takeover.
 - Point clicks reveal `opacity: 0` hover-only wrappers (menu/card actions) for
   the click and restore them afterwards; `reveal: false` opts out.
 - Screenshots saved under `%APPDATA%\browser-use\screenshots\`, optionally
   annotated with refs, downscaled, clipped to a ref/selector, and encoded as
-  JPEG (`format:"jpeg"`, `quality`) for smaller images.
+  JPEG (`format:"jpeg"`, `quality`) for smaller images. `full_page: true`
+  scrolls the page viewport by viewport and stitches the whole height
+  (≤ 20 tiles; fixed/sticky elements stay in the first tile only).
+- `read` formats: `text` (default), `markdown` (text plus tables as markdown),
+  `tables` (`<table>` rendered as markdown), `links` (anchor list).
 - Downloads recorded in a dedicated directory; `wait --for download` returns
   the file path.
 - `alert`/`confirm`/`prompt` are intercepted and non-blocking; `dialogs`

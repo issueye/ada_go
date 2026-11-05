@@ -88,10 +88,14 @@ func (s *Service) Call(ctx context.Context, name string, args json.RawMessage) (
 	}
 	if name == "screenshot" {
 		var m map[string]any
-		if json.Unmarshal(args, &m) == nil {
-			m["inline"] = true
-			if b, err := json.Marshal(m); err == nil {
-				args = b
+		if json.Unmarshal(args, &m) == nil && m != nil {
+			// 默认 inline（MCP 需要 image 内容），但调用方显式给了 inline 就不再
+			// 覆盖：之前无条件覆盖，inline:false 被静默改回 true。
+			if _, ok := m["inline"]; !ok {
+				m["inline"] = true
+				if b, err := json.Marshal(m); err == nil {
+					args = b
+				}
 			}
 		}
 	}

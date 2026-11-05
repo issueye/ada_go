@@ -54,10 +54,11 @@ var Tools = []ToolSpec{
 	},
 	{
 		Name: "read", Phase: "M0.5",
-		Description: "Readable text of the page or of a selected element.",
+		Description: "Readable text of the page or of a selected element. format=links lists anchors, format=tables renders <table> elements as markdown, format=markdown returns the text plus tables as markdown (innerText flattens tables).",
 		Schema: schema(`{"type":"object","properties":{
 			"tab":{"type":"string"},
 			"selector":{"type":"string"},
+			"format":{"type":"string","enum":["text","markdown","links","tables"],"default":"text"},
 			"max_chars":{"type":"integer","minimum":1000,"maximum":50000,"default":12000}
 		},"additionalProperties":false}`),
 	},
@@ -146,11 +147,12 @@ var Tools = []ToolSpec{
 	},
 	{
 		Name: "screenshot", Phase: "M1",
-		Description: "PNG/JPEG screenshot of the page, optionally clipped to a ref/selector and annotated with snapshot refs. Saved under the app data directory.",
+		Description: "PNG/JPEG screenshot of the page, optionally clipped to a ref/selector and annotated with snapshot refs. full_page=true scrolls and stitches the whole page height (fixed/sticky elements stay in the first tile only). Saved under the app data directory.",
 		Schema: schema(`{"type":"object","properties":{
 			"tab":{"type":"string"},
 			"annotate":{"type":"boolean","default":true},
 			"inline":{"type":"boolean","default":false},
+			"full_page":{"type":"boolean","default":false,"description":"stitch the whole scrollable page height; not combinable with ref/selector"},
 			"max_width":{"type":"integer","minimum":320,"maximum":4096,"default":1600},
 			"ref":{"type":"string","description":"clip to this snapshot ref"},
 			"selector":{"type":"string","description":"clip to this CSS/text/role selector"},
@@ -275,5 +277,33 @@ var Tools = []ToolSpec{
 			"action":{"type":"string","enum":["release","state"],"default":"state"},
 			"tab":{"type":"string"}
 		},"required":["action"],"additionalProperties":false}`),
+	},
+	{
+		Name: "drag", Phase: "M3",
+		Description: "Drag one element onto another. Both an HTML5 DnD sequence (when the source is draggable or a payload is given) and a pointer step sequence are dispatched, so custom mousemove-driven drag implementations work too.",
+		Schema: schema(`{"type":"object","properties":{
+			"tab":{"type":"string"},
+			"from_ref":{"type":"string"},
+			"from_selector":{"type":"string"},
+			"from_text":{"type":"string"},
+			"to_ref":{"type":"string"},
+			"to_selector":{"type":"string"},
+			"to_text":{"type":"string"},
+			"html5":{"type":"boolean","default":false,"description":"force the HTML5 DnD sequence"},
+			"payload":{"type":"string","description":"text set on the DataTransfer for HTML5 drops"},
+			"steps":{"type":"integer","minimum":2,"maximum":16,"default":8,"description":"pointer move steps"},
+			"wait_ms":{"type":"integer","minimum":100,"maximum":30000,"default":5000,"description":"actionability wait for both endpoints"}
+		},"additionalProperties":false}`),
+	},
+	{
+		Name: "storage", Phase: "M3",
+		Description: "Inspect or modify the page origin's localStorage/sessionStorage: list keys, get/set one value, clear one key or the whole area. Values are capped at 64 KiB on set.",
+		Schema: schema(`{"type":"object","properties":{
+			"tab":{"type":"string"},
+			"kind":{"type":"string","enum":["local","session"],"default":"local"},
+			"action":{"type":"string","enum":["list","get","set","clear"],"default":"list"},
+			"key":{"type":"string"},
+			"value":{"type":"string","description":"action=set only, max 64 KiB"}
+		},"additionalProperties":false}`),
 	},
 }

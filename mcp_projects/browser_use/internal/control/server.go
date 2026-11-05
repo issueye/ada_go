@@ -41,6 +41,8 @@ type Server struct {
 	activityMu   sync.Mutex
 	activity     []audit.Entry
 	scriptActive atomic.Bool
+
+	sweepStop chan struct{}
 }
 
 // NewServer listens on 127.0.0.1 and prepares the API.
@@ -58,7 +60,8 @@ func NewServer(mgr *browser.Manager, cfg config.Config, log *audit.Log) (*Server
 		ln.Close()
 		return nil, err
 	}
-	s := &Server{mgr: mgr, cfg: cfg, token: token, ln: ln, audit: log, jobs: newJobStore()}
+	s := &Server{mgr: mgr, cfg: cfg, token: token, ln: ln, audit: log, jobs: newJobStore(), sweepStop: make(chan struct{})}
+	s.jobs.startSweeper(time.Minute, s.sweepStop)
 	s.info = config.NewRuntimeInfo(ln.Addr().(*net.TCPAddr).Port, token)
 	s.http = &http.Server{
 		Handler:           s,
@@ -92,6 +95,9 @@ func (s *Server) Start() error {
 
 // Close stops the server and removes its runtime file.
 func (s *Server) Close() {
+	if s.sweepStop != nil {
+		close(s.sweepStop)
+	}
 	if s.jobs != nil {
 		s.jobs.cancelAll()
 	}
@@ -251,12 +257,21 @@ const (
 // callTimeoutFor 计算一次调用的期限：script 用 MaxTimeoutMS；其余工具取
 // 顶层 timeout_ms / 默认值与工具参数 timeout_ms（加余量）的较大者。
 func (s *Server) callTimeoutFor(name string, args json.RawMessage, reqMS int) time.Duration {
+	return CallTimeout(name, args, reqMS, s.cfg)
+}
+
+// CallTimeout is the deadline budget of one tool call, shared by /v1/call and
+// the MCP layer. The MCP client cap must be derived from this same budget:
+// with an independent constant (5min) that equals Script.MaxTimeoutMS, a
+// maximal script hits both deadlines together and nobody can tell which side
+// timed out.
+func CallTimeout(name string, args json.RawMessage, reqMS int, cfg config.Config) time.Duration {
 	timeout := time.Duration(reqMS) * time.Millisecond
 	if timeout <= 0 {
-		timeout = time.Duration(s.cfg.Agent.DefaultTimeoutMS) * time.Millisecond
+		timeout = time.Duration(cfg.Agent.DefaultTimeoutMS) * time.Millisecond
 	}
 	if name == "script" {
-		timeout = time.Duration(s.cfg.Script.MaxTimeoutMS) * time.Millisecond
+		timeout = time.Duration(cfg.Script.MaxTimeoutMS) * time.Millisecond
 	} else if toolMS := timeoutFromArgs(args); toolMS > 0 {
 		// 工具参数里的 timeout_ms 是该工具自己的等待预算；外层 deadline 必须比它长，
 		// 否则 wait/click 还没到自己的超时就被 context 取消，错误归因也会变成 timeout。

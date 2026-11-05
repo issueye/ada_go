@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:608dc6ef5640e46f) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:bdb9f1792876329a) by plugins/official/build.mjs — do not edit
 // browser-use —— 官方插件：把 browser-use 桌面浏览器接入为模型可调用的工具。
 //
 // 传输方式（本插件不新开端口、不实现协议）：
@@ -21,10 +21,12 @@ const DEFAULT_CALL_TIMEOUT_MS = 60000;
 const MAX_CALL_TIMEOUT_MS = 110000;
 const START_TIMEOUT_MS = 45000;
 const HEALTH_TIMEOUT_MS = 2500;
+const HEALTH_CACHE_MS = 10000;
 const MAX_MODEL_TEXT = 24000;
 
 // 一次进程内只解析一次运行时信息；应用重启（token 轮换）时由 401/连接失败清空重读。
 let runtime = null;
+let runtimeHealthyAt = 0;
 let resolvedExe = "";
 let starting = null;
 
@@ -148,11 +150,20 @@ async function healthy(ctx, base) {
 }
 
 async function currentRuntime(ctx) {
-  if (runtime && (await healthy(ctx, runtime.base))) return runtime;
+  // 健康检查短路:HEALTH_CACHE_MS 内验证过的 runtime 直接复用。旧实现每次
+  // 工具调用都先 GET /v1/health(2.5s 超时),等于每次调用多一次本机往返。
+  // 缓存失效路径不变:过期后重新验证;调用撞 401/网络错时清缓存重读。
+  if (runtime && Date.now() - runtimeHealthyAt < HEALTH_CACHE_MS) return runtime;
+  if (runtime && (await healthy(ctx, runtime.base))) {
+    runtimeHealthyAt = Date.now();
+    return runtime;
+  }
   runtime = null;
+  runtimeHealthyAt = 0;
   const info = await readRuntimeFile(ctx);
   if (info && (await healthy(ctx, info.base))) {
     runtime = info;
+    runtimeHealthyAt = Date.now();
     return info;
   }
   return null;
@@ -169,6 +180,42 @@ async function waitForRuntime(ctx, budgetMs) {
     if (Date.now() >= deadline) return null;
     await sleep(250);
   }
+}
+
+// EVENT_ROUND_MS 是 browser_wait_event 单轮长轮询的时长:必须留在出网桥 15s
+// 响应头超时之内,总预算靠插件侧多轮(游标推进)拼出来。
+const EVENT_ROUND_MS = 10000;
+// uint64 上限作 after:应用侧只回最新游标与空事件,用来「从现在开始等」。
+const EVENT_ARM_CURSOR = "18446744073709551615";
+
+async function pollEventsOnce(ctx, rt, after, kinds, roundMs) {
+  let qs = "after=" + encodeURIComponent(String(after)) + "&timeout_ms=" + roundMs;
+  if (kinds) qs += "&kinds=" + encodeURIComponent(kinds);
+  const res = await ctx.fetch(rt.base + "/v1/events?" + qs, {
+    headers: {
+      Authorization: "Bearer " + rt.token,
+      "X-Client-Id": clientId(ctx),
+    },
+    timeoutMs: roundMs + 5000,
+  });
+  if (res.status === 401) {
+    const err = new Error("browser-use 拒绝了当前 token（应用可能重启过）");
+    err.code = "auth";
+    throw err;
+  }
+  if (!res.ok) {
+    throw new Error("browser-use /v1/events 返回 HTTP " + res.status + "：" + clip(res.text, 300));
+  }
+  let env = null;
+  try {
+    env = JSON.parse(res.text);
+  } catch (_err) {
+    throw new Error("browser-use /v1/events 返回了非 JSON 响应");
+  }
+  if (!env || env.ok !== true) {
+    throw new Error("browser-use /v1/events 调用失败：" + clip(JSON.stringify(env && env.error), 300));
+  }
+  return { cursor: Number(env.cursor) || 0, events: Array.isArray(env.events) ? env.events : [] };
 }
 
 // exeCandidates 给出 browser-use 可执行文件的查找顺序：
@@ -1088,6 +1135,12 @@ function screenshotText(env) {
     "尺寸：" + (data.width || 0) + "x" + (data.height || 0) +
       "（CSS " + (data.css_width || 0) + "x" + (data.css_height || 0) + "，dpr " + (data.dpr || 1) + "）",
   );
+  if (data.full_page) {
+    lines.push(
+      "整页拼接：" + (data.tiles || 0) + " 段" +
+        (data.fixed_hidden ? "，fixed/sticky 元素只在第一段出现" : ""),
+    );
+  }
   if (data.annotated) {
     const count = Array.isArray(data.nodes) ? data.nodes.length : 0;
     lines.push("已叠加 ref 标注" + (count ? "（" + count + " 个）" : ""));
@@ -1116,6 +1169,131 @@ function controlText(env) {
 function genericText(env, tool) {
   const data = (env && env.data) || {};
   return withMeta(["工具 " + tool + " 返回：", jsonBlock(data)], env);
+}
+
+// ---------- browser_call 各长尾工具的专用格式化 ----------
+// 参数 schema 以应用侧 spec.go 为唯一来源;这里只负责把返回拼成模型可读的文本。
+
+function cookiesText(env) {
+  const data = (env && env.data) || {};
+  const lines = [];
+  if (Array.isArray(data.cookies)) {
+    lines.push("会话 cookie " + (data.count != null ? data.count : data.cookies.length) + " 条：");
+    for (const c of data.cookies) {
+      const flags = [];
+      if (c.http_only) flags.push("httpOnly");
+      if (c.secure) flags.push("secure");
+      if (c.same_site) flags.push("sameSite=" + c.same_site);
+      lines.push(
+        "- " + (c.name || "?") + "（值" + (c.value ? "已设置，长度 " + String(c.value).length : "为空") + "）" +
+          " domain=" + (c.domain || "?") + " path=" + (c.path || "/") +
+          (flags.length ? " [" + flags.join(", ") + "]" : ""),
+      );
+    }
+  } else {
+    const parts = [];
+    if (data.changed != null) parts.push("变更 " + data.changed + " 条");
+    if (data.imported != null) parts.push("导入 " + data.imported + " 条");
+    if (data.cleared != null) parts.push("清空 " + data.cleared + " 条");
+    lines.push((parts.length ? parts.join("；") : "cookies 操作完成") + "（action=" + (data.action || "?") + "）");
+  }
+  return withMeta(lines, env);
+}
+
+function filesText(env) {
+  const data = (env && env.data) || {};
+  const up = data.uploaded || {};
+  const lines = [
+    "上传完成：" + (up.count != null ? up.count : "?") + " 个文件，共 " + (up.bytes || 0) + " 字节 → " +
+      (up.ref || "?") + (up.multiple ? "（multiple input）" : ""),
+  ];
+  if (Array.isArray(up.names) && up.names.length) {
+    lines.push("文件名：" + up.names.join("、"));
+  }
+  return withMeta(lines, env);
+}
+
+function framesText(env) {
+  const data = (env && env.data) || {};
+  const lines = [];
+  if (Array.isArray(data.frames)) {
+    lines.push("iframe " + (data.total != null ? data.total : data.frames.length) + " 个（只列直接子 frame）：");
+    for (const f of data.frames) {
+      lines.push("- [" + f.id + "] " + (f.title || "（无标题）") + " " + (f.url || "（无地址）"));
+    }
+  }
+  if (typeof data.active === "string") {
+    lines.push(data.active ? "当前动作作用域：frame " + data.active : "当前动作作用域：主文档");
+  }
+  if (!lines.length) lines.push("frames 返回：", jsonBlock(data));
+  return withMeta(lines, env);
+}
+
+function downloadsText(env) {
+  const data = (env && env.data) || {};
+  const list = Array.isArray(data.downloads) ? data.downloads : Array.isArray(data) ? data : [];
+  const lines = ["已完成下载 " + list.length + " 个："];
+  for (const d of list.slice(0, 50)) {
+    lines.push("- " + (d.path || "?") + "（" + (d.url || "?") + "）" + (d.err ? " 失败：" + d.err : ""));
+  }
+  const inflight = Array.isArray(data.inflight) ? data.inflight : [];
+  if (inflight.length > 0) {
+    lines.push("进行中 " + inflight.length + " 个（应用拿不到进度百分比，完成会发 download.finished 事件）：");
+    for (const p of inflight) {
+      lines.push("- " + (p.path || "?") + "（" + (p.url || "?") + "）");
+    }
+  }
+  return withMeta(lines, env);
+}
+
+function dialogsText(env) {
+  const data = (env && env.data) || {};
+  const lines = [];
+  if (Array.isArray(data.dialogs)) {
+    lines.push("页面弹窗记录 " + data.dialogs.length + " 条（已拦截，不阻塞页面）：");
+    for (const d of data.dialogs) {
+      const answer = d.answer === undefined || d.answer === null ? "" : " → " + JSON.stringify(d.answer);
+      lines.push("- [" + d.type + "] " + (d.message || "（无消息）") + answer);
+    }
+  } else {
+    lines.push("dialog 策略已设置（" + (data.policy ? JSON.stringify(data.policy) : "ok") + "）：下一次 confirm/prompt 按此应答。");
+  }
+  if (data.cleared != null) lines.push("已清空 " + data.cleared + " 条记录。");
+  return withMeta(lines, env);
+}
+
+function storageText(env) {
+  const data = (env && env.data) || {};
+  const label = data.kind === "session" ? "sessionStorage" : "localStorage";
+  const lines = [];
+  if (Array.isArray(data.keys)) {
+    lines.push(label + " 共 " + (data.count != null ? data.count : data.keys.length) + " 条，合计 " + (data.total_bytes || 0) + " 字节：");
+    for (const k of data.keys) {
+      lines.push("- " + k.key + "（" + (k.bytes || 0) + " 字节）");
+    }
+  } else if (data.found !== undefined) {
+    lines.push(label + "[" + data.key + "]：" + (data.found ? "有值" + (data.truncated ? "（已截断）" : "") : "（不存在）"));
+    if (data.found && data.value) lines.push(jsonBlock(data.value));
+  } else if (data.bytes != null) {
+    lines.push(label + "[" + data.key + "] 已写入 " + data.bytes + " 字节。");
+  } else if (data.removed !== undefined) {
+    lines.push(label + "[" + data.key + "] " + (data.removed ? "已删除" : "本来就不存在") + "。");
+  } else if (data.cleared != null) {
+    lines.push(label + " 已清空 " + data.cleared + " 条。");
+  } else {
+    lines.push("storage 返回：", jsonBlock(data));
+  }
+  return withMeta(lines, env);
+}
+
+function callText(env, tool) {
+  if (tool === "cookies") return cookiesText(env);
+  if (tool === "files") return filesText(env);
+  if (tool === "frames") return framesText(env);
+  if (tool === "downloads") return downloadsText(env);
+  if (tool === "dialogs") return dialogsText(env);
+  if (tool === "storage") return storageText(env);
+  return genericText(env, tool);
 }
 
 // ---------- 目标定位 ----------
@@ -1357,21 +1535,15 @@ export default function register(agent) {
         const created = (env.data && env.data.tab) || null;
         if (created && trimStr(created.id)) {
           try {
-            await rpc(ctx, "wait", { tab: created.id, for: "load", timeout_ms: 30000 }, 40000);
+            // 一次 RPC 同时等加载并带回刷新后的 URL/标题(wait 结果自带这两
+            // 个字段):旧实现 wait + status 两次调用,每次还各带一次健康检查。
+            const done = await rpc(ctx, "wait", { tab: created.id, for: "load", timeout_ms: 30000 }, 40000);
+            const d = (done && done.data) || {};
+            if (trimStr(d.url)) created.url = d.url;
+            if (trimStr(d.title) && d.title !== "New Tab") created.title = d.title;
+            env.data.tab = created;
           } catch (_err) {
             // 页面慢/被拦都不影响「标签页已建好」这个事实。
-          }
-          try {
-            const status = await rpc(ctx, "status", { include_tabs: true });
-            const tabs = (status.data && status.data.tabs) || [];
-            for (const tab of tabs) {
-              if (tab.id === created.id) {
-                env.data.tab = tab;
-                break;
-              }
-            }
-          } catch (_err) {
-            // 刷新信息失败就用创建时的信息。
           }
         }
       }
@@ -1427,13 +1599,18 @@ export default function register(agent) {
   agent.registerTool({
     name: "browser_read",
     description:
-      "读取页面（或某个元素）的可读正文，适合读文章、列表、表格文本。要的是接口 JSON 而不是页面文本时，用 browser_network 抓请求更准。",
+      "读取页面（或某个元素）的可读正文，适合读文章、列表、表格文本。format=links 列出全部链接；format=tables 把 <table> 渲染成 markdown（行列关系保得住）；format=markdown = 正文 + markdown 表格。要的是接口 JSON 而不是页面文本时，用 browser_network 抓请求更准。",
     access: "read",
     parameters: {
       type: "object",
       properties: {
         tab: { type: "string", description: "标签页 id（缺省用活动标签页）" },
         selector: { type: "string", description: "只读某个元素（CSS 选择器），缺省整页" },
+        format: {
+          type: "string",
+          enum: ["text", "markdown", "links", "tables"],
+          description: "缺省 text；表格页用 tables/markdown，导航页用 links",
+        },
         max_chars: { type: "integer", minimum: 1000, maximum: 50000, description: "缺省 12000" },
       },
       required: [],
@@ -1442,6 +1619,8 @@ export default function register(agent) {
       const params = { ...optionalTab(args) };
       const selector = trimStr(args.selector);
       if (selector) params.selector = selector;
+      const format = oneOf(args.format, ["text", "markdown", "links", "tables"], "");
+      if (format) params.format = format;
       if (args.max_chars != null) params.max_chars = intIn(args.max_chars, 1000, 50000, 12000);
       const env = await rpc(ctx, "read", params, callTimeout(args));
       const data = env.data || {};
@@ -1451,6 +1630,7 @@ export default function register(agent) {
         details: {
           url: trimStr(data.url),
           chars: data.chars || 0,
+          format: trimStr(data.format) || "text",
           truncated: data.truncated === true || view.clipped,
         },
       };
@@ -1460,14 +1640,14 @@ export default function register(agent) {
   agent.registerTool({
     name: "browser_act",
     description:
-      "对页面做一次交互：click / dblclick / type / press / select / hover / scroll / wait。目标用 ref（来自 browser_snapshot）或 selector；click/hover 还可用 text 按可见文本定位。type 要输入的内容放 value（text 是 click/hover 的可见文本定位）。click 后默认自动等待导航/加载。",
+      "对页面做一次交互：click / dblclick / type / press / select / hover / scroll / drag / wait。目标用 ref（来自 browser_snapshot）或 selector；click/hover 还可用 text 按可见文本定位。type 要输入的内容放 value（text 是 click/hover 的可见文本定位）。click 后默认自动等待导航/加载。drag 拖拽元素：from_* 定起点、to_* 定终点（看板/文件管理器/滑块用），源可拖拽或给了 payload 时会同时发 HTML5 DnD 事件序列。",
     access: "write",
     parameters: {
       type: "object",
       properties: {
         action: {
           type: "string",
-          enum: ["click", "dblclick", "type", "press", "select", "hover", "scroll", "wait"],
+          enum: ["click", "dblclick", "type", "press", "select", "hover", "scroll", "drag", "wait"],
         },
         tab: { type: "string", description: "标签页 id（缺省用活动标签页）" },
         ref: { type: "string", description: "元素 ref，如 e12（先 browser_snapshot）" },
@@ -1493,6 +1673,25 @@ export default function register(agent) {
         amount: { type: "number", description: "scroll 的像素数，缺省 600" },
         force: { type: "boolean", description: "跳过可点击性检查（元素被遮挡时）" },
         reveal: { type: "boolean", description: "点击前临时显示 opacity:0 的悬停容器，缺省 true" },
+        button: {
+          type: "string",
+          enum: ["left", "right", "middle"],
+          description: "click 的鼠标按键，缺省 left；right 弹出上下文菜单",
+        },
+        modifiers: {
+          type: "array",
+          items: { type: "string", enum: ["Alt", "Control", "Meta", "Shift"] },
+          description: "click 按住修饰键，如 [\"Control\"] 表示 Ctrl+点击",
+        },
+        slowly: { type: "boolean", description: "type 逐字符输入（触发逐键事件），缺省一次性设置" },
+        from_ref: { type: "string", description: "drag 的起点元素 ref" },
+        from_selector: { type: "string", description: "drag 的起点选择器（CSS/text=/role=）" },
+        from_text: { type: "string", description: "drag 的起点可见文本" },
+        to_ref: { type: "string", description: "drag 的终点元素 ref" },
+        to_selector: { type: "string", description: "drag 的终点选择器" },
+        to_text: { type: "string", description: "drag 的终点可见文本" },
+        html5: { type: "boolean", description: "drag 强制走 HTML5 DnD 事件序列" },
+        payload: { type: "string", description: "drag 放进 DataTransfer 的文本（HTML5 drop 读它）" },
         wait_after: {
           type: "string",
           enum: ["auto", "load", "none"],
@@ -1515,7 +1714,7 @@ export default function register(agent) {
     execute: async (args, ctx) => {
       const action = oneOf(
         args.action,
-        ["click", "dblclick", "type", "press", "select", "hover", "scroll", "wait"],
+        ["click", "dblclick", "type", "press", "select", "hover", "scroll", "drag", "wait"],
         "click",
       );
       const tab = optionalTab(args);
@@ -1538,6 +1737,12 @@ export default function register(agent) {
           ...pickClickTarget(args),
           count: action === "dblclick" ? 2 : 1,
         });
+        // 应用侧支持的鼠标细节:按键、修饰键(右键菜单/Control+点等)。
+        const button = oneOf(args.button, ["left", "right", "middle"], "");
+        if (button) params.button = button;
+        if (Array.isArray(args.modifiers) && args.modifiers.length) {
+          params.modifiers = args.modifiers.map((m) => String(m));
+        }
         if (args.force === true) params.force = true;
         if (typeof args.reveal === "boolean") params.reveal = args.reveal;
       } else if (action === "hover") {
@@ -1549,6 +1754,7 @@ export default function register(agent) {
         params = withTime({ ...tab, ...pickTarget(args), text: value });
         if (args.submit === true) params.submit = true;
         if (typeof args.clear === "boolean") params.clear = args.clear;
+        if (args.slowly === true) params.slowly = true;
       } else if (action === "press") {
         const key = trimStr(args.key);
         if (!key) throw new Error("press 需要 key，如 Enter、Control+A");
@@ -1571,6 +1777,25 @@ export default function register(agent) {
         if (ref && selector) throw new Error("scroll 的 ref 与 selector 只能给一个");
         if (ref) params.ref = ref;
         if (selector) params.selector = selector;
+      } else if (action === "drag") {
+        // 两个端点各自给一个定位;from_/to_ 前缀字段。
+        const one = (prefix, label) => {
+          const ref = trimStr(args[prefix + "_ref"]);
+          const selector = trimStr(args[prefix + "_selector"]);
+          const text = trimStr(args[prefix + "_text"]);
+          const n = (ref ? 1 : 0) + (selector ? 1 : 0) + (text ? 1 : 0);
+          if (n === 0) throw new Error("drag 的 " + label + " 需要 " + prefix + "_ref / " + prefix + "_selector / " + prefix + "_text 之一");
+          if (n > 1) throw new Error("drag 的 " + label + " 只能给一种定位");
+          if (ref) return { ref };
+          if (selector) return { selector };
+          return { text };
+        };
+        params = { ...tab, from: one("from", "起点"), to: one("to", "终点") };
+        if (args.html5 === true) params.html5 = true;
+        const payload = trimStr(args.payload);
+        if (payload) params.payload = payload;
+        if (args.steps != null) params.steps = intIn(args.steps, 2, 16, 8);
+        if (args.timeout_ms != null) params.wait_ms = intIn(args.timeout_ms, 100, 30000, 5000);
       } else {
         const condition = oneOf(
           args["for"],
@@ -1598,7 +1823,7 @@ export default function register(agent) {
   agent.registerTool({
     name: "browser_screenshot",
     description:
-      "给页面截图（默认叠加 ref 标注并直接返回图片）。可用 ref/selector 只截某个元素；format=jpeg + quality 可显著减小图片。只需要文件路径时把 inline 设为 false。",
+      "给页面截图（默认叠加 ref 标注并直接返回图片）。可用 ref/selector 只截某个元素；format=jpeg + quality 可显著减小图片；full_page=true 滚动拼接整页高度（fixed/sticky 只在第一段出现，与 ref/selector 互斥，上限 20 段）。只需要文件路径时把 inline 设为 false。",
     access: "read",
     parameters: {
       type: "object",
@@ -1607,6 +1832,10 @@ export default function register(agent) {
         annotate: { type: "boolean", description: "是否叠加 ref 标注，缺省 true" },
         max_width: { type: "integer", minimum: 320, maximum: 4096, description: "最大宽度，缺省 1280" },
         inline: { type: "boolean", description: "是否把图片返回给模型，缺省 true" },
+        full_page: {
+          type: "boolean",
+          description: "拼接整页高度（长表单/长报告页），缺省 false；与 ref/selector 互斥",
+        },
         ref: { type: "string", description: "只截这个 ref 对应的元素" },
         selector: { type: "string", description: "只截这个 CSS/text/role 选择器对应的元素" },
         format: { type: "string", enum: ["png", "jpeg"], description: "缺省 png" },
@@ -1620,6 +1849,7 @@ export default function register(agent) {
       params.max_width = intIn(args.max_width, 320, 4096, 1280);
       const inline = typeof args.inline === "boolean" ? args.inline : true;
       params.inline = inline;
+      if (args.full_page === true) params.full_page = true;
       const ref = trimStr(args.ref);
       const selector = trimStr(args.selector);
       if (ref && selector) throw new Error("screenshot 的 ref 与 selector 只能给一个");
@@ -1648,6 +1878,8 @@ export default function register(agent) {
           inline,
           format: trimStr(data.mime_type) || "image/png",
           clip: data.clip || null,
+          full_page: data.full_page === true,
+          tiles: data.tiles || 0,
           truncated: view.clipped,
         },
       };
@@ -1890,25 +2122,126 @@ export default function register(agent) {
   });
 
   agent.registerTool({
+    name: "browser_wait_event",
+    description:
+      "挂起等待浏览器事件（不轮询 status）：tab.created/closed/activated、nav.committed/finished/failed、" +
+      "download.finished、control.locked/released/takeover/resumed/paused。等弹出的新标签页、等下载完成、" +
+      "等用户接管/释放时用它，比反复 browser_status 省几十次调用。应用侧是 JSON 长轮询，插件把它按游标" +
+      "多轮拼出总预算；超时返回空事件列表（正常空结果，不是错误），cursor 可作 after 续等。",
+    access: "read",
+    parameters: {
+      type: "object",
+      properties: {
+        kinds: {
+          type: "string",
+          description:
+            "逗号分隔的事件类型过滤，如 control.takeover,download.finished；缺省全部类型",
+        },
+        after: {
+          type: "integer",
+          description: "事件游标（上次返回的 cursor）；缺省从调用时刻的新事件开始等",
+        },
+        timeout_ms: {
+          type: "integer",
+          minimum: 100,
+          maximum: 110000,
+          description: "总等待预算，缺省 30000",
+        },
+      },
+      required: [],
+    },
+    execute: async (args, ctx) => {
+      const budget = intIn(args.timeout_ms, 100, MAX_CALL_TIMEOUT_MS, 30000);
+      const kinds = trimStr(args.kinds).replace(/\s+/g, "").replace(/,+$/, "");
+      const deadline = Date.now() + budget;
+      let rt = await ensureRuntime(ctx);
+      let after = args.after != null
+        ? String(intIn(args.after, 0, Number.MAX_SAFE_INTEGER, 0))
+        : EVENT_ARM_CURSOR;
+      let events = [];
+      let cursor = 0;
+      let authRetried = false;
+      for (;;) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) break;
+        try {
+          const out = await pollEventsOnce(ctx, rt, after, kinds, Math.min(remaining, EVENT_ROUND_MS));
+          cursor = out.cursor;
+          if (out.events.length > 0) {
+            events = out.events;
+            break;
+          }
+          after = String(out.cursor);
+        } catch (err) {
+          if (err && err.code === "auth" && !authRetried) {
+            // 应用重启轮换 token:清缓存重读 runtime.json 再试一次。
+            authRetried = true;
+            runtime = null;
+            rt = await ensureRuntime(ctx);
+            continue;
+          }
+          throw err;
+        }
+      }
+      const env = { data: { events, cursor } };
+      const lines = [];
+      if (events.length === 0) {
+        lines.push(
+          "等待 " + budget + "ms 内没有出现匹配事件——这是正常空结果，不是错误。",
+        );
+        lines.push("继续等：再调一次并传 after=" + cursor + (kinds ? "（kinds 不变）" : "") + "。");
+      } else {
+        for (const e of events.slice(0, 20)) {
+          lines.push(
+            "[" + e.seq + "] " + (e.kind || "?") +
+              (e.tab ? " tab=" + e.tab : "") +
+              (e.message ? " " + e.message : ""),
+          );
+        }
+        if (events.length > 20) lines.push("…（共 " + events.length + " 条，details 里有完整列表）");
+        lines.push("cursor=" + cursor + "（下次可作为 after 续等）");
+      }
+      const view = withMeta(lines, env);
+      return {
+        content: [{ type: "text", text: view.text }],
+        details: {
+          matched: events.length > 0,
+          cursor,
+          count: events.length,
+          events,
+          truncated: view.clipped,
+        },
+      };
+    },
+  });
+
+  agent.registerTool({
     name: "browser_call",
     description:
-      "调用 browser-use 的长尾工具（参数原样透传）：cookies（读/写/导入登录态）、files（把本地文件塞进 input[type=file]）、frames（列 iframe / 切到某个 frame / 回主文档）、downloads（下载列表）、dialogs（页面 alert/confirm/prompt 记录）。注意：这是 write 级工具，只读用法（如 downloads）也会走审批。",
+      "调用 browser-use 的长尾工具（参数原样透传）。各工具的 args 对象字段：\n" +
+      "- cookies：{action:\"list|set|delete|clear|import|export\", url, name, value, domain, path, secure, http_only, same_site:\"lax|strict|none\", expires, cookies:[…]}\n" +
+      "- files：{paths:[\"本地文件路径\",…]}（1-10 个，必须在 security.upload_dirs 内；配合 ref/selector/text 定位 input[type=file]）\n" +
+      "- frames：{action:\"list|use|main|current\", frame:\"f2\"}（嵌套帧 id 形如 f2.1，先 list 再 use）\n" +
+      "- downloads：{}（无参数；返回已完成列表与进行中列表）\n" +
+      "- dialogs：{action:\"list|clear|accept|dismiss\", text:\"prompt 的应答\"}（页面 dialog 是同步调用，先设策略再触发弹窗）\n" +
+      "- storage：{kind:\"local|session\", action:\"list|get|set|clear\", key, value}（当前 origin 的 Web Storage，set 上限 64KiB）\n" +
+      "注意：这是 write 级工具，只读用法（如 downloads）也会走审批。",
     access: "write",
     parameters: {
       type: "object",
       properties: {
         tool: {
           type: "string",
-          enum: ["cookies", "files", "frames", "downloads", "dialogs"],
+          enum: ["cookies", "files", "frames", "downloads", "dialogs", "storage"],
           description: "要调用的 browser-use 工具名",
         },
-        args: { type: "object", description: "该工具的参数对象（见随包技能）" },
+        args: { type: "object", description: "该工具的参数对象（字段见本工具描述）" },
       },
       required: ["tool"],
     },
     execute: async (args, ctx) => {
       const tool = trimStr(args.tool);
-      const allowed = ["cookies", "files", "frames", "downloads", "dialogs"];
+      const allowed = ["cookies", "files", "frames", "downloads", "dialogs", "storage"];
       if (allowed.indexOf(tool) < 0) {
         throw new Error(
           "browser_call 只开放 " + allowed.join(" / ") + "；页面动作请用对应工具" +
@@ -1917,7 +2250,7 @@ export default function register(agent) {
       }
       const params = args.args && typeof args.args === "object" ? args.args : {};
       const env = await rpc(ctx, tool, params, callTimeout(args));
-      const view = genericText(env, tool);
+      const view = callText(env, tool);
       return {
         content: [{ type: "text", text: view.text }],
         details: { tool, truncated: view.clipped },

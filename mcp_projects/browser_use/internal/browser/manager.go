@@ -25,6 +25,16 @@ type Download struct {
 	At   time.Time `json:"at"`
 }
 
+// PendingDownload is one download in flight. mygo only reports start and end,
+// so progress/percent is not available; the pending list tells the agent a
+// download is running (and where it will land) before it finishes.
+type PendingDownload struct {
+	Tab  string    `json:"tab"`
+	URL  string    `json:"url"`
+	Path string    `json:"path"`
+	At   time.Time `json:"at"`
+}
+
 // ControlState is the agent/human control state of the browser.
 type ControlState struct {
 	State      string     `json:"state"` // idle | agent | user | paused
@@ -48,9 +58,11 @@ type Manager struct {
 	order     []string
 	active    string
 	nextID    int
-	downloads []Download
-	user      bool // human has taken over
-	paused    bool // agent writes paused; reads still work
+	pending   int               // tabs being created; reserved against MaxTabs
+	downloads []Download        // finished (or failed)
+	inflight  []PendingDownload // started, not finished yet
+	user      bool              // human has taken over
+	paused    bool              // agent writes paused; reads still work
 
 	// eventFields powers /v1/events and wait-for-tab/control.
 	eventFields
@@ -136,18 +148,36 @@ func (m *Manager) Close() {
 	m.stopped.Do(func() { close(m.stop) })
 }
 
+// reserveSlot reserves room for a tab that is about to be created. The slot is
+// committed when the tab joins m.tabs, or given back with releaseSlot when
+// creation fails. Reserving under the lock closes the window between the
+// capacity check and the WebView creation, where concurrent NewTab calls could
+// all pass the check and overshoot MaxTabs.
+func (m *Manager) reserveSlot() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.tabs)+m.pending >= m.cfg.Agent.MaxTabs {
+		return errorf(CodeTooManyTabs, "at most %d tabs", m.cfg.Agent.MaxTabs)
+	}
+	m.pending++
+	return nil
+}
+
+func (m *Manager) releaseSlot() {
+	m.mu.Lock()
+	m.pending--
+	m.mu.Unlock()
+}
+
 // NewTab creates a tab and its web view.
 func (m *Manager) NewTab(ctx context.Context, rawURL string, opts TabOptions) (*Tab, error) {
 	rawURL, err := NormalizeURL(rawURL)
 	if err != nil {
 		return nil, err
 	}
-	m.mu.Lock()
-	if len(m.tabs) >= m.cfg.Agent.MaxTabs {
-		m.mu.Unlock()
-		return nil, errorf(CodeTooManyTabs, "at most %d tabs", m.cfg.Agent.MaxTabs)
+	if err := m.reserveSlot(); err != nil {
+		return nil, err
 	}
-	m.mu.Unlock()
 
 	v, err := m.win.NewWebView(mygo.WebViewOptions{
 		URL: rawURL,
@@ -159,10 +189,12 @@ func (m *Manager) NewTab(ctx context.Context, rawURL string, opts TabOptions) (*
 		BackgroundColor: "#ffffff",
 	})
 	if err != nil {
+		m.releaseSlot()
 		return nil, &Error{Code: CodeInternal, Message: err.Error()}
 	}
 
 	m.mu.Lock()
+	m.pending--
 	m.nextID++
 	t := &Tab{
 		ID:    fmt.Sprintf("t%d", m.nextID),
@@ -356,6 +388,29 @@ func (m *Manager) Resume() ControlState {
 	return m.State()
 }
 
+// leaseDuration is how long one lease holds a tab without renewal.
+func (m *Manager) leaseDuration() time.Duration {
+	d := time.Duration(m.cfg.Control.IdleReleaseMS) * time.Millisecond
+	if d <= 0 {
+		d = 120 * time.Second
+	}
+	return d
+}
+
+// heartbeatInterval is how often an in-flight action renews its lease: well
+// inside leaseDuration, so the lease cannot expire while the action slot is
+// busy and the mask must stay up.
+func (m *Manager) heartbeatInterval() time.Duration {
+	d := m.leaseDuration() / 4
+	if d < time.Second {
+		d = time.Second
+	}
+	if d > 30*time.Second {
+		d = 30 * time.Second
+	}
+	return d
+}
+
 // Acquire gives the agent a lease on a tab.
 func (m *Manager) Acquire(tabID, client string) (*Tab, error) {
 	if m.UserControlled() {
@@ -365,11 +420,7 @@ func (m *Manager) Acquire(tabID, client string) (*Tab, error) {
 	if t == nil {
 		return nil, errorf(CodeInvalidTab, "no tab %q", tabID)
 	}
-	d := time.Duration(m.cfg.Control.IdleReleaseMS) * time.Millisecond
-	if d <= 0 {
-		d = 120 * time.Second
-	}
-	t.acquire(client, d)
+	t.acquire(client, m.leaseDuration())
 	m.notify()
 	m.emit("control.locked", tabID, client)
 	return t, nil
@@ -477,6 +528,31 @@ func (m *Manager) recordDownload(tabID string, d *mygo.Download) {
 	if len(m.downloads) > 50 {
 		m.downloads = m.downloads[len(m.downloads)-50:]
 	}
+	// 这条下载不再处于进行中。
+	for i, p := range m.inflight {
+		if p.Path == d.Path {
+			m.inflight = append(m.inflight[:i], m.inflight[i+1:]...)
+			break
+		}
+	}
+}
+
+// downloadStarted records an accepted download and emits download.started so
+// an agent can react before the file lands.
+func (m *Manager) downloadStarted(tabID, url, path string) {
+	m.mu.Lock()
+	m.inflight = append(m.inflight, PendingDownload{
+		Tab: tabID, URL: url, Path: path, At: time.Now(),
+	})
+	m.mu.Unlock()
+	m.emit("download.started", tabID, path)
+}
+
+// PendingDownloads returns the downloads currently in flight.
+func (m *Manager) PendingDownloads() []PendingDownload {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return append([]PendingDownload(nil), m.inflight...)
 }
 
 // Downloads returns the finished downloads.
@@ -522,15 +598,25 @@ func NormalizeURL(raw string) (string, error) {
 	return "", &Error{Code: CodeBlockedURL, Message: "scheme not allowed: " + u.Scheme, Hint: "use http or https"}
 }
 
+// allowScheme reports whether a navigation to scheme may proceed. The agent
+// (goto) is stricter than the page itself (links, redirects): pages create and
+// navigate blob: URLs of their own, but the agent must not. One table for both
+// callers, so the two policies cannot drift apart again.
+func allowScheme(scheme string, fromAgent bool) bool {
+	switch strings.ToLower(scheme) {
+	case "http", "https", "about":
+		return true
+	case "blob":
+		return !fromAgent
+	}
+	return false
+}
+
 // allowedNavigation reports whether a page may navigate there.
 func allowedNavigation(raw string) bool {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return false
 	}
-	switch strings.ToLower(u.Scheme) {
-	case "http", "https", "about", "blob":
-		return true
-	}
-	return false
+	return allowScheme(u.Scheme, false)
 }

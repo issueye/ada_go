@@ -321,6 +321,58 @@ func TestCallToolCompactTextAndErrorDetails(t *testing.T) {
 	})
 }
 
+// TestScreenshotRespectsExplicitInline 钉住 T1.6：MCP 只在调用方未传 inline 时
+// 默认 true（模型需要 image 内容）；显式 inline:false 不得被覆盖——旧实现
+// 无条件覆盖，调用方无法要回纯文本结果。
+func TestScreenshotRespectsExplicitInline(t *testing.T) {
+	svc, fake := newTestService(`{"ok":true,"data":{"path":"x.png","width":1,"height":1}}`)
+	c := newInProcessClient(t, svc)
+	req := mcpgo.CallToolRequest{}
+	req.Params.Name = "screenshot"
+	req.Params.Arguments = map[string]any{"inline": false, "ref": "e1"}
+	res, err := c.CallTool(t.Context(), req)
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("不应是错误: %+v", res)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(fake.lastArgs, &got); err != nil {
+		t.Fatalf("lastArgs: %v (%s)", err, fake.lastArgs)
+	}
+	if v, ok := got["inline"].(bool); !ok || v {
+		t.Fatalf("inline 应保持显式 false: %v", got["inline"])
+	}
+	if got["ref"] != "e1" {
+		t.Fatalf("其余参数应保留: %v", got)
+	}
+	for _, content := range res.Content {
+		if _, ok := content.(mcpgo.ImageContent); ok {
+			t.Fatal("inline:false 不得返回 image 内容")
+		}
+	}
+}
+
+// TestScreenshotDefaultsToInline:未传 inline 时默认 true,保持模型看到图的既有行为。
+func TestScreenshotDefaultsToInline(t *testing.T) {
+	svc, fake := newTestService(`{"ok":true,"data":{"path":"x.png","width":1,"height":1,"mime_type":"image/png","data":"QUJD"}}`)
+	c := newInProcessClient(t, svc)
+	req := mcpgo.CallToolRequest{}
+	req.Params.Name = "screenshot"
+	req.Params.Arguments = map[string]any{"ref": "e1"}
+	if _, err := c.CallTool(t.Context(), req); err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(fake.lastArgs, &got); err != nil {
+		t.Fatalf("lastArgs: %v (%s)", err, fake.lastArgs)
+	}
+	if v, ok := got["inline"].(bool); !ok || !v {
+		t.Fatalf("未传 inline 应默认 true: %v", got["inline"])
+	}
+}
+
 // parseRPCBody 同时接受 application/json 与 SSE（data: 行）。
 func parseRPCBody(t *testing.T, raw []byte) map[string]any {
 	t.Helper()

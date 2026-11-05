@@ -217,16 +217,44 @@ func (s *jobStore) sweepLocked(now time.Time) {
 	s.order = kept
 }
 
-// evictLocked 在容量满时先丢最老的已结束任务；调用方持锁。
+// evictLocked 在容量满时丢最老的已结束任务，直到腾出空位；调用方持锁。
+// 全部 running 时停手：并发上限交给 create 的检查。
 func (s *jobStore) evictLocked() {
-	for i, id := range s.order {
-		j := s.jobs[id]
-		if j == nil || j.status != jobRunning {
-			delete(s.jobs, id)
-			s.order = append(s.order[:i], s.order[i+1:]...)
+	for len(s.order) >= s.max {
+		removed := false
+		for i, id := range s.order {
+			j := s.jobs[id]
+			if j == nil || j.status != jobRunning {
+				delete(s.jobs, id)
+				s.order = append(s.order[:i], s.order[i+1:]...)
+				removed = true
+				break
+			}
+		}
+		if !removed {
 			return
 		}
 	}
+}
+
+// startSweeper 定时清理过期任务。sweep 只在 create 时触发的话，不再创建
+// 新任务的会话里，已结束任务（含内联截图 result 这类大 JSON）会驻留内存
+// 到进程退出。
+func (s *jobStore) startSweeper(every time.Duration, stop <-chan struct{}) {
+	go func() {
+		t := time.NewTicker(every)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case now := <-t.C:
+				s.mu.Lock()
+				s.sweepLocked(now)
+				s.mu.Unlock()
+			}
+		}
+	}()
 }
 
 func newJobID() (string, error) {

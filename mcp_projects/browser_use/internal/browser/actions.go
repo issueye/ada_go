@@ -135,6 +135,9 @@ type Receipt struct {
 	URL       string         `json:"url,omitempty"`
 	Title     string         `json:"title,omitempty"`
 	Submitted bool           `json:"submitted,omitempty"`
+	// Warnings collects non-fatal problems, e.g. an action result the page
+	// runtime returned in an unexpected shape.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 type clickWire struct {
@@ -263,19 +266,20 @@ func (t *Tab) dialogList(ctx context.Context) ([]Dialog, error) {
 type ReadResult struct {
 	Content   string `json:"content"`
 	Truncated bool   `json:"truncated"`
+	Format    string `json:"format,omitempty"`
 	URL       string `json:"url"`
 	Title     string `json:"title"`
 	Chars     int    `json:"chars"`
 }
 
-// Read returns the page's readable text.
-func (m *Manager) Read(ctx context.Context, tabID, client, selector string, maxChars int) (*ReadResult, error) {
+// Read returns the page's readable text, or links/tables/markdown views.
+func (m *Manager) Read(ctx context.Context, tabID, client, selector, format string, maxChars int) (*ReadResult, error) {
 	t, done, err := m.begin(ctx, tabID, client, "read", false)
 	if err != nil {
 		return nil, err
 	}
 	defer done()
-	raw, err := t.invoke(ctx, "read", map[string]any{"selector": selector, "max_chars": maxChars})
+	raw, err := t.invoke(ctx, "read", map[string]any{"selector": selector, "format": format, "max_chars": maxChars})
 	if err != nil {
 		return nil, err
 	}
@@ -338,22 +342,42 @@ func (m *Manager) begin(ctx context.Context, tabID, client, action string, mutat
 	}
 	t.actionMu.Lock()
 	t.setAction(action)
+	t.actionBusy.Store(true)
 	if err := t.ensureRuntime(ctx); err != nil {
 		t.actionMu.Unlock()
+		t.actionBusy.Store(false)
 		return nil, nil, err
 	}
 	if m.cfg.Control.Mask && !m.UserControlled() && !m.Paused() {
 		t.setInputLock(true)
 	}
+	if mutating && t.consumeHumanBlocked(ctx) {
+		// 遮罩期有人类输入被拦(用户在 agent 工作时试图点击页面)。发事件让
+		// 模型决定是否释放租约让用户先操作;不自动暂停——误触打断整个自动化
+		// 流程的代价比打断一次点击更高。
+		m.emit("control.human_active", t.ID, "")
+	}
 	m.notify()
+	// While the action holds the slot, keep its lease alive: expireLoop would
+	// otherwise release a lease whose idle window ended mid-action, drop the
+	// mask and unlock the page under a still-running click or wait.
+	stop := make(chan struct{})
+	if !m.UserControlled() && !m.Paused() {
+		go t.leaseHeartbeat(client, m.heartbeatInterval(), m.leaseDuration(), stop)
+	}
 	done := func() {
 		t.actionMu.Unlock()
+		t.actionBusy.Store(false)
+		close(stop)
 		m.notify()
 	}
 	return t, done, nil
 }
 
 func (t *Tab) ensureRuntime(ctx context.Context) error {
+	if t.closing.Load() {
+		return &Error{Code: CodeTabClosed, Message: "tab is closed"}
+	}
 	if t.runtimeReady.Load() {
 		return nil
 	}
@@ -378,6 +402,11 @@ func (t *Tab) ensureRuntime(ctx context.Context) error {
 }
 
 func (t *Tab) invoke(ctx context.Context, op string, args any) (json.RawMessage, error) {
+	// closing 先判:关闭中的 tab,Page 还没清(避免与读者数据竞争),但视图可能
+	// 已经 destroy,再 eval 只会拿到 mygo 内部错误,而不是这里的语义化码。
+	if t.closing.Load() {
+		return nil, &Error{Code: CodeTabClosed, Message: "tab is closed"}
+	}
 	if t.Page == nil {
 		return nil, &Error{Code: CodeTabClosed, Message: "tab has no page"}
 	}
@@ -407,6 +436,16 @@ func (t *Tab) invoke(ctx context.Context, op string, args any) (json.RawMessage,
 		return nil, &Error{Code: CodeInternal, Message: "runtime call failed"}
 	}
 	return json.RawMessage(raw), nil
+}
+
+// decodeWire unmarshals an action result into its wire shape and records a
+// warning on the receipt when the runtime returned something unreadable.
+// A silently dropped result (_ = json.Unmarshal) turned the receipt into zero
+// values that read like a successful no-op.
+func decodeWire(r *Receipt, raw json.RawMessage, v any) {
+	if err := json.Unmarshal(raw, v); err != nil {
+		r.Warnings = append(r.Warnings, "unreadable action result: "+err.Error())
+	}
 }
 
 func (t *Tab) evalString(ctx context.Context, code string) (string, error) {
@@ -478,9 +517,10 @@ func (m *Manager) Click(ctx context.Context, tabID, client string, target Target
 	if err != nil {
 		return nil, err
 	}
+	r := &Receipt{}
 	var w clickWire
-	_ = json.Unmarshal(raw, &w)
-	r := &Receipt{Clicked: w.Clicked, Revealed: w.Revealed}
+	decodeWire(r, raw, &w)
+	r.Clicked, r.Revealed = w.Clicked, w.Revealed
 	if o.WaitAfter != "none" {
 		grace := 800 * time.Millisecond
 		if o.WaitAfter == "load" {
@@ -525,9 +565,10 @@ func (m *Manager) Type(ctx context.Context, tabID, client string, target Target,
 	if err != nil {
 		return nil, err
 	}
+	r := &Receipt{}
 	var w typeWire
-	_ = json.Unmarshal(raw, &w)
-	r := &Receipt{Typed: w.Typed, Submitted: w.Submitted}
+	decodeWire(r, raw, &w)
+	r.Typed, r.Submitted = w.Typed, w.Submitted
 	// Typing alone rarely navigates: only wait when it may submit or the
 	// caller asked for a load.
 	if o.WaitAfter != "none" && (o.Submit || o.WaitAfter == "load") {
@@ -569,9 +610,10 @@ func (m *Manager) Press(ctx context.Context, tabID, client, key string, target *
 	if err != nil {
 		return nil, err
 	}
+	r := &Receipt{}
 	var w pressWire
-	_ = json.Unmarshal(raw, &w)
-	r := &Receipt{Pressed: w.Pressed}
+	decodeWire(r, raw, &w)
+	r.Pressed = w.Pressed
 	if t.waitCommit(ctx, before, 800*time.Millisecond) {
 		r.Navigated = true
 		if err := t.waitLoad(ctx, timeout); err != nil {
@@ -596,9 +638,12 @@ func (m *Manager) Select(ctx context.Context, tabID, client string, target Targe
 	if err != nil {
 		return nil, err
 	}
+	r := &Receipt{}
 	var w selectWire
-	_ = json.Unmarshal(raw, &w)
-	return &Receipt{Selected: w.Selected, URL: t.Page.URL()}, nil
+	decodeWire(r, raw, &w)
+	r.Selected = w.Selected
+	r.URL = t.Page.URL()
+	return r, nil
 }
 
 // Scroll scrolls the page or to an element.
@@ -619,7 +664,10 @@ func (m *Manager) Scroll(ctx context.Context, tabID, client, direction string, a
 	var w struct {
 		Scroll map[string]any `json:"scroll"`
 	}
-	_ = json.Unmarshal(raw, &w)
+	if err := json.Unmarshal(raw, &w); err != nil {
+		// 没有 Receipt 可挂 warning:滚动结果不可读时如实报 internal。
+		return nil, &Error{Code: CodeInternal, Message: "bad scroll result: " + err.Error()}
+	}
 	return w.Scroll, nil
 }
 
@@ -637,9 +685,163 @@ func (m *Manager) Hover(ctx context.Context, tabID, client string, target Target
 	if err != nil {
 		return nil, err
 	}
+	r := &Receipt{}
 	var w hoverWire
-	_ = json.Unmarshal(raw, &w)
-	return &Receipt{Hovered: w.Hovered, URL: t.Page.URL()}, nil
+	decodeWire(r, raw, &w)
+	r.Hovered = w.Hovered
+	r.URL = t.Page.URL()
+	return r, nil
+}
+
+// DragOptions configure a drag between two elements.
+type DragOptions struct {
+	HTML5  bool   // force the HTML5 DnD event sequence
+	Text   string // payload for the HTML5 DataTransfer
+	Steps  int    // pointer-segment steps between source and target
+	WaitMs int    // actionability wait override (ms)
+}
+
+// DragResult reports a completed drag.
+type DragResult struct {
+	Dragged bool          `json:"dragged"`
+	From    *SnapshotNode `json:"from,omitempty"`
+	To      *SnapshotNode `json:"to,omitempty"`
+	HTML5   bool          `json:"html5"`
+	URL     string        `json:"url,omitempty"`
+	Title   string        `json:"title,omitempty"`
+}
+
+type dragWire struct {
+	Dragged bool          `json:"dragged"`
+	From    *SnapshotNode `json:"from"`
+	To      *SnapshotNode `json:"to"`
+	HTML5   bool          `json:"html5"`
+	URL     string        `json:"url"`
+	Title   string        `json:"title"`
+}
+
+// Drag drags from one element to another: the HTML5 DnD sequence
+// (dragstart/dragover/drop) runs when the source is draggable or a text
+// payload is given, and the pointer step sequence always runs so custom
+// (mousemove-driven) drag implementations see it too.
+func (m *Manager) Drag(ctx context.Context, tabID, client string, from, to Target, o DragOptions) (*DragResult, error) {
+	if err := from.Validate(); err != nil {
+		return nil, wrapTargetErr(err, "from")
+	}
+	if err := to.Validate(); err != nil {
+		return nil, wrapTargetErr(err, "to")
+	}
+	t, done, err := m.begin(ctx, tabID, client, "drag", true)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	args := map[string]any{
+		"from": from.toJS(),
+		"to":   to.toJS(),
+	}
+	if o.HTML5 {
+		args["html5"] = true
+	}
+	if o.Text != "" {
+		args["text"] = o.Text
+	}
+	if o.Steps > 0 {
+		args["steps"] = o.Steps
+	}
+	if o.WaitMs > 0 {
+		args["wait_ms"] = o.WaitMs
+	}
+	raw, err := t.invoke(ctx, "drag", args)
+	if err != nil {
+		return nil, err
+	}
+	var w dragWire
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return nil, &Error{Code: CodeInternal, Message: "bad drag result: " + err.Error()}
+	}
+	return &DragResult{
+		Dragged: w.Dragged, From: w.From, To: w.To, HTML5: w.HTML5,
+		URL: w.URL, Title: w.Title,
+	}, nil
+}
+
+// wrapTargetErr marks which of the two drag targets failed validation.
+func wrapTargetErr(err error, which string) error {
+	if be, ok := err.(*Error); ok {
+		return &Error{Code: be.Code, Message: which + ": " + be.Message, Hint: be.Hint, Details: be.Details}
+	}
+	return err
+}
+
+// StorageOptions select a web-storage action.
+type StorageOptions struct {
+	Kind   string `json:"kind"`   // local (default) or session
+	Action string `json:"action"` // list (default) | get | set | clear
+	Key    string `json:"key"`
+	Value  string `json:"value"`
+}
+
+// StorageResult is a web-storage list/get/set/clear result.
+type StorageResult struct {
+	Kind      string         `json:"kind"`
+	Count     int            `json:"count,omitempty"`
+	Keys      []StorageEntry `json:"keys,omitempty"`
+	Total     int            `json:"total_bytes,omitempty"`
+	Key       string         `json:"key,omitempty"`
+	Found     bool           `json:"found,omitempty"`
+	Value     string         `json:"value,omitempty"`
+	Truncated bool           `json:"truncated,omitempty"`
+	Bytes     int            `json:"bytes,omitempty"`
+	Removed   bool           `json:"removed,omitempty"`
+	Cleared   int            `json:"cleared,omitempty"`
+}
+
+// StorageEntry is one storage key with its value size.
+type StorageEntry struct {
+	Key   string `json:"key"`
+	Bytes int    `json:"bytes"`
+}
+
+// Storage reads or writes the page origin's localStorage/sessionStorage.
+// set/clear mutate the page and are gated like other write actions.
+func (m *Manager) Storage(ctx context.Context, tabID, client string, opts StorageOptions) (*StorageResult, error) {
+	mutating := opts.Action == "set" || opts.Action == "clear"
+	t, done, err := m.begin(ctx, tabID, client, "storage:"+opts.Action, mutating)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	args := map[string]any{"kind": opts.Kind, "action": opts.Action}
+	if opts.Key != "" {
+		args["key"] = opts.Key
+	}
+	if opts.Value != "" {
+		args["value"] = opts.Value
+	}
+	raw, err := t.invoke(ctx, "storage", args)
+	if err != nil {
+		return nil, err
+	}
+	var out StorageResult
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, &Error{Code: CodeInternal, Message: "bad storage result: " + err.Error()}
+	}
+	return &out, nil
+}
+
+// consumeHumanBlocked reports (and resets) whether the input lock intercepted
+// human input since the last action. Non-fatal on failure: a page without the
+// runtime answer is treated as "no human activity".
+func (t *Tab) consumeHumanBlocked(ctx context.Context) bool {
+	raw, err := t.invoke(ctx, "humanBlocked", map[string]any{"action": "consume"})
+	if err != nil {
+		return false
+	}
+	var out struct {
+		Blocked bool `json:"blocked"`
+	}
+	return json.Unmarshal(raw, &out) == nil && out.Blocked
 }
 
 // NavigateOptions configure navigation.
@@ -966,7 +1168,7 @@ type NetworkEntry struct {
 	ResBody     string            `json:"res_body,omitempty"`
 }
 
-// NetworkResult is a network list/get/clear result.
+// NetworkResult is a network list/get/clear/wait result.
 type NetworkResult struct {
 	Entries    []NetworkEntry `json:"entries,omitempty"`
 	Entry      *NetworkEntry  `json:"entry,omitempty"`
@@ -974,6 +1176,8 @@ type NetworkResult struct {
 	Dropped    int            `json:"dropped"`
 	TotalBytes int            `json:"total_bytes"`
 	Cleared    int            `json:"cleared,omitempty"`
+	Matched    bool           `json:"matched,omitempty"`
+	ElapsedMS  int64          `json:"elapsed_ms,omitempty"`
 }
 
 // Network returns requests captured by the page runtime.
@@ -1013,6 +1217,10 @@ func (m *Manager) Network(ctx context.Context, tabID, client string, opts Networ
 	return &res, nil
 }
 
+// waitNetwork 等一条匹配的请求。等待在页面里做(一个挂起 promise,由
+// netRecord 直接 resolve),不再 100ms 轮询 —— 与 console wait 同一套机制;
+// 页面定时器/人类点击触发的请求照样命中。超时是 matched:false,这里转成
+// 与旧轮询相同的 timeout 错误(工具契约不变)。
 func (t *Tab) waitNetwork(ctx context.Context, opts NetworkOptions) (*NetworkResult, error) {
 	wait := time.Duration(opts.WaitMS) * time.Millisecond
 	if wait <= 0 {
@@ -1021,98 +1229,37 @@ func (t *Tab) waitNetwork(ctx context.Context, opts NetworkOptions) (*NetworkRes
 	if wait > 120*time.Second {
 		wait = 120 * time.Second
 	}
-	started := time.Now()
-	deadline := started.Add(wait)
-	baseline := opts.Since
-	if baseline == "" {
-		raw, err := t.invoke(ctx, "network", map[string]any{"action": "list", "limit": 1})
-		if err != nil {
-			return nil, err
-		}
-		var page NetworkResult
-		if err := json.Unmarshal(raw, &page); err != nil {
-			return nil, &Error{Code: CodeInternal, Message: err.Error()}
-		}
-		if len(page.Entries) > 0 {
-			baseline = page.Entries[len(page.Entries)-1].ID
-		}
+	args := map[string]any{
+		"action":  "wait",
+		"wait_ms": wait.Milliseconds(),
 	}
-	fetch := func(id string, page *NetworkResult) (*NetworkResult, error) {
-		getArgs := map[string]any{"action": "get", "id": id}
-		if opts.MaxBody > 0 {
-			getArgs["max_body"] = opts.MaxBody
-		}
-		raw, err := t.invoke(ctx, "network", getArgs)
-		if err != nil {
-			return nil, err
-		}
-		var got NetworkResult
-		if err := json.Unmarshal(raw, &got); err != nil {
-			return nil, &Error{Code: CodeInternal, Message: err.Error()}
-		}
-		if page != nil {
-			got.Count = page.Count
-			got.Dropped = page.Dropped
-			got.TotalBytes = page.TotalBytes
-		}
-		return &got, nil
+	if opts.URLContains != "" {
+		args["url_contains"] = opts.URLContains
 	}
-	// A click that triggered the request usually completes before the caller
-	// can issue network wait. Without an explicit since, accept a match from
-	// the last five seconds.
-	if opts.Since == "" {
-		args := map[string]any{
-			"action": "list", "limit": 20,
-			"url_contains": opts.URLContains, "method": opts.Method,
-		}
-		if opts.Status > 0 {
-			args["status"] = opts.Status
-		}
-		raw, err := t.invoke(ctx, "network", args)
-		if err == nil {
-			var page NetworkResult
-			if json.Unmarshal(raw, &page) == nil {
-				cutoff := started.UnixMilli() - 5000
-				var recent *NetworkEntry
-				for i := range page.Entries {
-					if page.Entries[i].TS >= cutoff {
-						recent = &page.Entries[i]
-					}
-				}
-				if recent != nil {
-					return fetch(recent.ID, &page)
-				}
-			}
-		}
+	if opts.Method != "" {
+		args["method"] = opts.Method
 	}
-	for {
-		args := map[string]any{
-			"action": "list", "since": baseline, "limit": 20,
-			"url_contains": opts.URLContains, "method": opts.Method,
-		}
-		if opts.Status > 0 {
-			args["status"] = opts.Status
-		}
-		raw, err := t.invoke(ctx, "network", args)
-		if err != nil {
-			return nil, err
-		}
-		var page NetworkResult
-		if err := json.Unmarshal(raw, &page); err != nil {
-			return nil, &Error{Code: CodeInternal, Message: err.Error()}
-		}
-		if len(page.Entries) > 0 {
-			return fetch(page.Entries[0].ID, &page)
-		}
-		if time.Now().After(deadline) {
-			return nil, &Error{Code: CodeTimeout, Message: "no matching request within " + wait.String(), Hint: "check the URL filter or increase timeout_ms"}
-		}
-		select {
-		case <-ctx.Done():
-			return nil, &Error{Code: CodeTimeout, Message: "request wait canceled"}
-		case <-time.After(100 * time.Millisecond):
-		}
+	if opts.Since != "" {
+		args["since"] = opts.Since
 	}
+	if opts.Status > 0 {
+		args["status"] = opts.Status
+	}
+	if opts.MaxBody > 0 {
+		args["max_body"] = opts.MaxBody
+	}
+	raw, err := t.invoke(ctx, "network", args)
+	if err != nil {
+		return nil, err
+	}
+	var page NetworkResult
+	if err := json.Unmarshal(raw, &page); err != nil {
+		return nil, &Error{Code: CodeInternal, Message: err.Error()}
+	}
+	if !page.Matched {
+		return nil, &Error{Code: CodeTimeout, Message: "no matching request within " + wait.String(), Hint: "check the URL filter or increase timeout_ms"}
+	}
+	return &page, nil
 }
 
 // ConsoleOptions filters console output captured by the page runtime.

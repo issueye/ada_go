@@ -47,6 +47,7 @@ type Tab struct {
 	navSeq       atomic.Uint64
 	runtimeReady atomic.Bool
 	closing      atomic.Bool
+	actionBusy   atomic.Bool
 
 	leaseUntil  time.Time
 	leaseClient string
@@ -110,8 +111,47 @@ func (t *Tab) releaseLease(client string) bool {
 	return true
 }
 
-// expire clears an expired lease and reports whether it did.
+// renewLease extends the lease if client still owns it. A lease that was
+// cleared (takeover, pause, release) or taken by another client is not revived.
+func (t *Tab) renewLease(client string, d time.Duration) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.leaseUntil.IsZero() || (t.leaseClient != "" && t.leaseClient != client) {
+		return false
+	}
+	t.leaseUntil = time.Now().Add(d)
+	return true
+}
+
+// leaseHeartbeat renews the lease while an action holds the action slot, so a
+// long action (a 120s wait, a slow script step) is not stripped of its lease
+// and its input lock mid-flight. It stops when stop closes (the action's done)
+// or the lease no longer belongs to client.
+func (t *Tab) leaseHeartbeat(client string, every, d time.Duration, stop <-chan struct{}) {
+	if every <= 0 {
+		return
+	}
+	tk := time.NewTicker(every)
+	defer tk.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-tk.C:
+			if !t.renewLease(client, d) {
+				return
+			}
+		}
+	}
+}
+
+// expire clears an expired lease and reports whether it did. A tab with an
+// action in flight keeps its lease: the action's heartbeat renews it, and
+// expiring here would unlock the page under a running action.
 func (t *Tab) expire(now time.Time) bool {
+	if t.actionBusy.Load() {
+		return false
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if !t.leaseUntil.IsZero() && !now.Before(t.leaseUntil) {
@@ -304,6 +344,7 @@ func (t *Tab) attachHandlers(m *Manager) {
 			return
 		}
 		e.Path = filepath.Join(dir, time.Now().Format("20060102-150405")+"-"+name)
+		m.downloadStarted(t.ID, e.URL, e.Path)
 	})
 	p.OnDownloadDone(func(d *mygo.Download) {
 		m.recordDownload(t.ID, d)
