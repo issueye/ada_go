@@ -269,6 +269,24 @@ func TestUIExtRoutes(t *testing.T) {
 			t.Fatalf("provider-admin 岛缺少 %q\n%s", want, rec.Body.String())
 		}
 	}
+
+	// P2-4b-2 组件化原型：真实 route 数据 + 本地状态，读写仍在原页面。
+	rec = uiGet(t, srv, "/ext/provider-admin/providers-next")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /ext/provider-admin/providers-next = %d\n%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{
+		`data-ada-entry="page:providers-next"`,
+		`data-ada-module="/ext/provider-admin/static/client.js?v=`,
+		`data-provider-admin-next="true"`,
+		`模型设置（组件化原型）`,
+		`正在读取供应商`,
+		`plugin-islands.js`,
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("providers-next 岛缺少 %q\n%s", want, rec.Body.String())
+		}
+	}
 	if rec := uiGet(t, srv, "/ext/no-such-plugin/hello"); rec.Code != http.StatusNotFound {
 		t.Fatalf("未知插件 = %d, want 404", rec.Code)
 	}

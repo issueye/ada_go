@@ -1,2 +1,10 @@
-// 浏览器 bundle 入口：与 page.tsx 同源，便于统一用 client.tsx 做 `--check`。
-export { default } from "./page.tsx";
+// 浏览器 bundle 入口：page.tsx 与组件化原型共用一份 bundle。
+import Page from "./page.tsx";
+import ProvidersNext from "./providers-next.tsx";
+
+export const islands = {
+  "page:providers": Page,
+  "page:providers-next": ProvidersNext,
+};
+
+export default Page;

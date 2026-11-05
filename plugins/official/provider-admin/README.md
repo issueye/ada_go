@@ -20,6 +20,7 @@
 | --- | --- |
 | 插槽 | `composer.left`（`slot.tsx`，order 10）：模型选择器旁的「模型设置」入口 |
 | 导航 / 页面 | 导航「供应商」→ 页面 `/ext/provider-admin/providers`（`page.tsx`，SSR + hydrate） |
+| 原型页 | `/ext/provider-admin/providers-next`（`providers-next.tsx`，只读组件化原型，经 `/state` 取数） |
 | 脚本 / 样式 | `provider-admin.js`、`provider-admin.css`（`static/`） |
 | 浏览器 bundle | `static/client.js`（`pluginbuild` 从 `page.tsx` 生成） |
 

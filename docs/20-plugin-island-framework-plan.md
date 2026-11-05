@@ -385,7 +385,8 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - **P2-4a 完成**：`token-usage` 页面迁移为 `defineComponent`，服务端 SSR + 浏览器 hydrate；「显示缓存命中率」是本地状态；`pluginbuild` 生成 `static/client.js`。`TestUIExtRoutes` 覆盖页面标记、bundle 与 NeedsUI。`provider-admin` 等交互页留 P2-4b。
 - **P2-5 客户端适配完成**：`keyed(vnode,key)` 与 `applyVNodePatches(items, patches)` 支持 `{key,mode:"upsert"|"remove",vnode}` 信封；`ada-patch.test.js` 验证按 key 复用 DOM、文本就地更新、删除不重建其它行。Gateway SSE 的 VNode 帧接入留 P2-5b。
 - **P2-5b 客户端流适配完成**：新增 `ada-patch-stream.js`，订阅 SSE `patch` 帧（`{patches:[...]}`）并驱动 keyed 列表；`source` 可注入，便于测试与自定义 EventSource。测试：`ada-patch-stream.test.js`。服务端具体 route 的帧格式仍由插件自行发送。
-- **P2-4b-1 完成**：`provider-admin` 首屏骨架改为同构组件（SSR + hydrate），交互仍由 legacy `provider-admin.js` 在 `DOMContentLoaded` 后接管；`pluginbuild` 生成 `static/client.js`。`TestUIExtRoutes` 覆盖页面标记、legacy 脚本与 island 引导共存。列表/详情/弹窗的组件化留 P2-4b-2。
+- **P2-4b-1 完成**：`provider-admin` 首屏骨架改为同构组件（SSR + hydrate），交互仍由 legacy `provider-admin.js` 在 `DOMContentLoaded` 后接管；`pluginbuild` 生成 `static/client.js`。`TestUIExtRoutes` 覆盖页面标记、legacy 脚本与 island 引导共存。
+- **P2-4b-2a 完成**：新增只读组件化原型页 `/ext/provider-admin/providers-next`：`providers-next.tsx` 经插件 route `/state` 取数，用 `Badge/Button/Empty/Table` 渲染列表、详情、模型表与本地页签状态；与原 `providers` 页并存，写入仍走 legacy 页。真实 Chromium 验证 `data-ada-mounted=1`、无错误、空态与刷新按钮。完整交互迁移仍留 P2-4b-2b。
 - **P3-1 客户端 bundle 门禁完成**：`ui-hello-tsx` / `token-usage` / `provider-admin` 统一从 `client.tsx` 构建；`TestOfficialClientBundlesInSync` 在 `go test ./app` 里跑 `pluginbuild --check`，阻止提交产物漂移。
 - **下一步**：P2-4b-2 `provider-admin` 交互组件化，或 P2 验收清单/文档收口。
 
@@ -451,5 +452,10 @@ go test ./plugins/official -run TestClientBundleSizes -v
    - `[data-provider-admin][data-ada-mounted="1"]`；
    - 无 `data-ada-error`；
    - legacy `provider-admin.js` 已加载并接管列表，空态显示「还没有供应商，点击右上角「添加供应商」。」。
+5. `/ext/provider-admin/providers-next`：
+   - `[data-provider-admin-next][data-ada-mounted="1"]`；
+   - 无 `data-ada-error`；
+   - 初始「正在读取供应商…」被 `/state` 结果替换，空态显示「还没有供应商」；
+   - 刷新按钮存在；页面没有 `[data-provider-admin]`，legacy 脚本不会接管该原型页。
 
-结论：同构 hydration、客户端本地状态、插槽/页面标记与 legacy 脚本共存均在真实浏览器成立。遗留：该冒烟尚未自动化，token/端口是本地临时值，不进入仓库。
+结论：同构 hydration、客户端本地状态、页面标记、真实 route 取数、插槽/页面标记与 legacy 脚本共存均在真实浏览器成立。遗留：该冒烟尚未自动化，token/端口是本地临时值，不进入仓库。
