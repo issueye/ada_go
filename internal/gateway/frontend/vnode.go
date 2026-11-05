@@ -58,6 +58,7 @@ var componentAliases = map[string]string{
 var AllowedAttributes = []string{
 	"class", "id", "href", "title", "for", "name", "value", "type", "placeholder",
 	"required", "disabled", "readonly", "checked", "open", "min", "max", "step",
+	"hidden", "tabindex",
 	"minlength", "maxlength", "cols", "rows", "action", "method", "start", "scope",
 	"colspan", "rowspan", "role",
 }

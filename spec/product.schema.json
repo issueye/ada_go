@@ -37,8 +37,8 @@
     "capabilities": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["skills", "images", "subagents", "markdownBlocks"],
-      "description": "功能开关容器（§8.6：四个布尔，全部必须有消费者：技能装配、图片输入门、子智能体装配、Markdown 动态块）。",
+      "required": ["skills", "images", "subagents", "markdownBlocks", "pluginIslands"],
+      "description": "功能开关容器（§8.6：五个布尔，全部必须有消费者：技能装配、图片输入门、子智能体装配、Markdown 动态块、插件客户端岛屿）。",
       "x-consumer": "coreapp: 按开关裁剪装配路径（技能注入、图片输入、子智能体、Markdown 动态块）；关闭后对应工具、块渲染与 UI 入口消失",
       "properties": {
         "skills": {
@@ -60,6 +60,11 @@
           "type": "boolean",
           "description": "Markdown 动态块开关：产品启用后，Markdown 中的 ```adag-ui fence 才会解析并交给插件 Render Runtime。",
           "x-consumer": "gateway: 决定 Markdown 渲染是否处理 adag-ui fence；false 时按普通代码块降级"
+        },
+        "pluginIslands": {
+          "type": "boolean",
+          "description": "插件客户端岛屿开关：false 时 Bridge 仍输出同构 SSR，但不注入 data-ada-*、不加载 plugin-islands；作为产品级回滚。",
+          "x-consumer": "gateway: 传给 frontend.Bridge.DisableIslands；false 时 HasIslands 恒 false，页面不加载客户端岛屿资源"
         }
       }
     },

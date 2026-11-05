@@ -20,7 +20,8 @@
     "skills": true,
     "images": true,
     "subagents": false,
-    "markdownBlocks": true
+    "markdownBlocks": true,
+    "pluginIslands": true
   },
   "identity": {
     "name": "ada-go",

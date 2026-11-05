@@ -536,7 +536,8 @@ func TestBridgeSlotFailureIsolation(t *testing.T) {
 		t.Fatalf("好插件的贡献应照常渲染 (count=%d): %s", count, html)
 	}
 	// 全部贡献都失败时才报错给 web（回退基座占位）。
-	html2, count2, err2 := b.Slot("sidebar.top", request(t, "/"))
+	// 用 topbar.right 做空插槽：sidebar.top 现在由 ui-hello-tsx 的 P2-3 试点占用。
+	html2, count2, err2 := b.Slot("topbar.right", request(t, "/"))
 	if err2 != nil || count2 != 0 || html2 != "" {
 		t.Fatalf("无贡献插槽应为空: (%q, %d, %v)", html2, count2, err2)
 	}

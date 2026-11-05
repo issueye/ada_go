@@ -133,13 +133,25 @@ const {
 |---|---|
 | `createApp(options)` | `options` 即根组件：`data` / `props` / `computed` / `methods` / `template` / `render` / `setup` / `components` / `allowHTML` |
 | `app.mount(el, { hydrate })` | `el` 可以是选择器或元素；普通 mount 会先清空容器再接管，`hydrate: true` 保留服务端 DOM |
+| `app.mount(el, { hydrate: true, rootElement: true })` | `el` 是服务端已经输出的根元素本身（插件岛屿标记在根上）；hydrate 从该元素开始，卸载只移除子树，不清空父容器 |
 | `app.unmount()` | 停止 effect、移除 DOM |
 | `app.component(name, def)` | 全局注册组件；支持 `ui-my-card` / `my-card` / `myCard` / `MyCard` 解析 |
 | `h(tagOrComponent, props, ...children)` | 元素或组件 VNode；`onClick` 自动转事件绑定 |
 | `host(name, props, ...children)` | 显式构造宿主组件 `{t:'$C', n:name}`，用于 Icon 等 Go 组件 |
 | `defineComponent(def)` | 标记并规范化组件定义 |
 | `renderToJSON(defOrVNode, props?, {components})` | 完全展开 JS 组件，输出 spec 线格式 |
+| `watch(source, cb, { immediate })` | 监听 getter/ref；浅比较，值不变不触发；返回 stop |
+| `watchEffect(fn)` | 立即执行并收集依赖；组件 setup/data 中创建时随卸载自动停止 |
+| `provide(key, value)` / `inject(key, default?)` | 组件级依赖注入；`app.provide(key, value)` 提供 app 级默认值 |
+| `defineStore(id, { state, getters, actions })` | 轻量模块级 store；返回 `useStore(initialState?)`，同一 id 单例 |
+| `store.$snapshot()` / `store.$hydrate(data)` | 显式导出/恢复 store 状态；岛屿渲染会自动收集快照进 `data-ada-props.stores`，客户端挂载前恢复 |
+| `collectStoreSnapshots()` / `hydrateStores(data)` | 服务端收集本次渲染的 store 快照；客户端在 store 创建前暂存、首次实例化时恢复 |
+| `keyed(vnode, key)` | 给 VNode 挂稳定 key；线格式没有 `k`，客户端按业务 key 重新挂 |
+| `applyVNodePatches(items, patches)` | 应用 `{key, mode:"upsert"|"remove", vnode}` 列表，返回新 `[{key,vnode}]`，由响应式数组驱动 keyed patch |
+| `AdaPatchStream.create({element, url, initial})` | 订阅 SSE `patch` 帧并驱动 keyed 列表；`source` 可注入测试；返回 `{app, proxy, close}` |
 | `evaluate(expr, scope)` | 单独执行模板表达式，便于测试/调试 |
+
+组件 `setup`/`data` 中创建的 `watch`/`watchEffect` 会登记到实例作用域，卸载时自动 `stop`；组件 `unmounted` 钩子现在也会被调用。`defineStore` 是同一 bundle 内的单例，跨插件不共享可变状态。
 
 ## 5. 模板语法
 

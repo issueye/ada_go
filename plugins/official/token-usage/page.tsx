@@ -4,7 +4,11 @@
  * 数据来自 Core usage.get 的只读投影 props.data.usage：
  *   { thread: {provider,model,inputTokens,outputTokens,cacheTokens,costMicros}, workspace: {...} }
  * 插件只做展示与换算，不自己统计 token。
+ *
+ * P2-4 首个真实页面迁移：同一份 defineComponent 服务端 renderToJSON + 浏览器
+ * hydrate；「显示缓存命中率」是客户端本地状态，不重新请求数据。
  */
+import { defineComponent } from "ada:render";
 
 function formatNumber(value: any): string {
   const n = Number(value || 0);
@@ -29,7 +33,14 @@ function totalOf(usage: any): number {
   return Number(usage.inputTokens || 0) + Number(usage.outputTokens || 0);
 }
 
-function UsageCard(title: string, usage: any, hint: string) {
+function cacheRate(usage: any): string {
+  const input = Number((usage && usage.inputTokens) || 0);
+  const cache = Number((usage && usage.cacheTokens) || 0);
+  if (!isFinite(input) || input <= 0) return "—";
+  return Math.round((cache * 100) / input) + "%";
+}
+
+function UsageCard(h: any, title: string, usage: any, hint: string) {
   const total = totalOf(usage);
   return (
     <section class="card tu-card">
@@ -66,19 +77,44 @@ function UsageCard(title: string, usage: any, hint: string) {
   );
 }
 
-export default function Page(props: any) {
-  const data = props && props.data ? props.data : null;
-  const usage = data && data.usage ? data.usage : null;
-  return (
-    <div class="tu-page">
-      <div class="tu-head">
-        <h1 class="tu-title">Token 用量</h1>
-        <p class="tu-sub">工作区聚合与当前会话累计；数据来自 Core 的 usage.get。</p>
+export default defineComponent({
+  props: { data: { default: {} } },
+  data() {
+    return { showCache: false };
+  },
+  methods: {
+    toggleCache() {
+      this.showCache = !this.showCache;
+    },
+  },
+  render(h) {
+    const usage = this.data && this.data.usage ? this.data.usage : null;
+    return (
+      <div class="tu-page">
+        <div class="tu-head">
+          <div>
+            <h1 class="tu-title">Token 用量</h1>
+            <p class="tu-sub">工作区聚合与当前会话累计；数据来自 Core 的 usage.get。</p>
+          </div>
+          <button
+            class="ada-btn ada-btn--secondary ada-btn--sm"
+            type="button"
+            aria-pressed={this.showCache ? "true" : "false"}
+            onClick={this.toggleCache}
+          >
+            {this.showCache ? "隐藏缓存命中率" : "显示缓存命中率"}
+          </button>
+        </div>
+        <div class="tu-grid">
+          {UsageCard(h, "工作区", usage && usage.workspace, "所有会话的累计用量")}
+          {UsageCard(h, "当前会话", usage && usage.thread, "本条线程的累计用量")}
+        </div>
+        {this.showCache ? (
+          <p class="tu-card__model">
+            缓存命中率：工作区 {cacheRate(usage && usage.workspace)}，当前会话 {cacheRate(usage && usage.thread)}
+          </p>
+        ) : null}
       </div>
-      <div class="tu-grid">
-        {UsageCard("工作区", usage && usage.workspace, "所有会话的累计用量")}
-        {UsageCard("当前会话", usage && usage.thread, "本条线程的累计用量")}
-      </div>
-    </div>
-  );
-}
+    );
+  },
+});

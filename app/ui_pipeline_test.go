@@ -177,7 +177,18 @@ func TestProviderAdminSlotInComposer(t *testing.T) {
 
 // /ext 页面：hello 页 200，未知页面 404，静态资源 allowlist。
 func TestUIExtRoutes(t *testing.T) {
-	core := &uiFakeCore{}
+	core := &uiFakeCore{invokeOK: true, result: json.RawMessage(`{
+		"providers": [{
+			"id": "p_ui",
+			"displayName": "UI 供应商",
+			"protocol": "openai-chat",
+			"baseUrl": "https://ui.example/v1",
+			"hasApiKey": true,
+			"apiKeyHint": "1234",
+			"models": [{ "id": "m_ui", "displayName": "UI 模型", "supportsTools": true }]
+		}],
+		"current": { "providerId": "p_ui", "modelId": "m_ui" }
+	}`)}
 	srv := newUIServer(t, core)
 
 	rec := uiGet(t, srv, "/ext/ui-hello-tsx/hello")
@@ -196,6 +207,87 @@ func TestUIExtRoutes(t *testing.T) {
 
 	if rec := uiGet(t, srv, "/ext/ui-hello-tsx/missing"); rec.Code != http.StatusNotFound {
 		t.Fatalf("未知 slug = %d, want 404", rec.Code)
+	}
+	// P1-7 最小试点：同一份 TSX SSR + hydrate；页面带岛屿标记与引导脚本。
+	rec = uiGet(t, srv, "/ext/ui-hello-tsx/counter")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /ext/ui-hello-tsx/counter = %d\n%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{
+		`data-ada-plugin-island="ui-hello-tsx:page:counter"`,
+		`data-ada-entry="page:counter"`,
+		`data-ada-module="/ext/ui-hello-tsx/static/client.js?v=`,
+		`data-ada-props="`,
+		`<strong>0</strong>`,
+		`plugin-islands.js`,
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("counter 岛缺少 %q\n%s", want, rec.Body.String())
+		}
+	}
+	rec = uiGet(t, srv, "/ext/ui-hello-tsx/static/client.js")
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/javascript; charset=utf-8" {
+		t.Fatalf("client bundle = %d %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	// sidebar.top 是插槽级岛屿：hello 页虽然没有页面 hydrate，也应出现插槽标记。
+	rec = uiGet(t, srv, "/ext/ui-hello-tsx/hello")
+	for _, want := range []string{
+		`data-ada-entry="slot:sidebar.top"`,
+		`class="ext-hello-slot"`,
+		`badge-brand`,
+		`plugin-islands.js`,
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("sidebar 插槽岛缺少 %q\n%s", want, rec.Body.String())
+		}
+	}
+
+	// P2-4 首个真实业务页面：Token 用量（只读投影 + 本地状态按钮）。
+	rec = uiGet(t, srv, "/ext/token-usage/usage")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /ext/token-usage/usage = %d\n%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{
+		`data-ada-entry="page:usage"`,
+		`data-ada-module="/ext/token-usage/static/client.js?v=`,
+		`tu-title`,
+		`显示缓存命中率`,
+		`plugin-islands.js`,
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("token-usage 岛缺少 %q\n%s", want, rec.Body.String())
+		}
+	}
+	rec = uiGet(t, srv, "/ext/token-usage/static/client.js")
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/javascript; charset=utf-8" {
+		t.Fatalf("token-usage client bundle = %d %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+
+	// P2-4b-2b：providers 页已替换为组件化实现，legacy provider-admin.js 不再加载。
+	rec = uiGet(t, srv, "/ext/provider-admin/providers")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /ext/provider-admin/providers = %d\n%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{
+		`data-ada-entry="page:providers"`,
+		`data-ada-module="/ext/provider-admin/static/client.js?v=`,
+		`data-provider-admin-next="true"`,
+		`模型设置`,
+		`UI 供应商`,
+		`plugin-islands.js`,
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("provider-admin 岛缺少 %q\n%s", want, rec.Body.String())
+		}
+	}
+	if strings.Contains(rec.Body.String(), "/ext/provider-admin/static/provider-admin.js") {
+		t.Fatal("provider-admin.js 不应再被加载")
+	}
+	if strings.Contains(rec.Body.String(), `data-provider-admin="true"`) {
+		t.Fatal("legacy provider-admin 骨架不应再渲染")
+	}
+	if rec := uiGet(t, srv, "/ext/provider-admin/providers-next"); rec.Code != http.StatusNotFound {
+		t.Fatalf("providers-next 过渡页应已移除，got %d", rec.Code)
 	}
 	if rec := uiGet(t, srv, "/ext/no-such-plugin/hello"); rec.Code != http.StatusNotFound {
 		t.Fatalf("未知插件 = %d, want 404", rec.Code)

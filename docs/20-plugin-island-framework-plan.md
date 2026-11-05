@@ -188,7 +188,7 @@ data-ada-props="<JSON>"
 | P1-4 | 标记与 props 注入 | Bridge 在根 VNode 注入 `data-ada-*`；过滤 CSRF/敏感字段；超限降级 |
 | P1-5 | 客户端引导 | `plugin-islands.js`：动态加载、hydrate、单岛错误隔离 |
 | P1-6 | 资源门禁 | `/ext` 页面设置 `NeedsUI`；按需加载客户端 bundle，不再全局加载所有插件脚本 |
-| P1-7 | `provider-admin` 试点 | 页面/插槽改成同构组件；保留纯 JS 路径作为回退对比 |
+| P1-7 | 最小试点 | `ui-hello-tsx/counter`：同一份 TSX SSR + hydrate + 客户端 bundle；`provider-admin` 的真实迁移留到 P2-4 |
 | P1-8 | 测试 | Go bridge/verify；Node hydrate；无 JS；CSP；动作桥 |
 
 ### P2 插槽级 + 状态/组件库（2–3 人周）
@@ -198,7 +198,7 @@ data-ada-props="<JSON>"
 | P2-1 | 同构组件库 | `ada-ui-iso`（或给 `ada-ui` 增加 `render(h)` 实现）：Button/Input/Select/Card/Tabs/Table/Modal/Icon/TodoList/Notice/Empty；逐组件 parity 测试 |
 | P2-2 | 状态管理 | `defineStore`、`provide/inject`、effect scope、`watch`；SSR 状态快照 |
 | P2-3 | 插槽岛屿 | 根属性注入/包裹层策略；`chat.corner`、`thread.tray`、`composer.*` 布局回归 |
-| P2-4 | 迁移 | `tools-plan`、`tools-ask`、`token-usage`、`ui-charts` 按优先级迁移 |
+| P2-4 | 真实页面迁移 | 先迁移只读真实页 `token-usage`（P2-4a）；`provider-admin` 交互页留 P2-4b |
 | P2-5 | 服务端 VNode patch | key 信封（`{key,vnode,mode}`）、SSE 增量、客户端 patch 适配器 |
 | P2-6 | 开发诊断 | hydrate 不一致警告；SSR/CSR 首帧差异日志；严格模式 |
 
@@ -206,11 +206,11 @@ data-ada-props="<JSON>"
 
 | ID | 任务 | 产物 |
 |---|---|---|
-| P3-1 | 安全测试 | T3 拒绝、CSRF 不进入 props、CSP 无 eval、Electron 主世界风险复查 |
-| P3-2 | 性能 | 12 插槽全开、页面 300ms/插槽 100ms；bundle 大小与首屏 |
-| P3-3 | 文档 | 07/14/15/05、plugin-helper SPEC/manual、decisions；新增本计划索引 |
-| P3-4 | 特性开关与回滚 | 产品/插件级开关；关闭后完全回到 SSR 路径 |
-| P3-5 | 验收 | 无 JS、键盘/焦点、视觉回归、真实浏览器冒烟 |
+| P3-1 | 构建与 CSP 门禁 | client.tsx ↔ static/client.js 同步；bundle 无 eval/new Function；512KB 上限 |
+| P3-2 | 真实浏览器冒烟 | hydration、客户端状态、插槽/页面标记、legacy 脚本共存 |
+| P3-3 | 性能基线 | 岛屿 SSR 墙钟/分配、12 插槽加法成本、bundle 体积 |
+| P3-4 | 文档与安全复查 | 07/14/15/05、plugin-helper SPEC/manual、T3 拒绝、CSRF 不进入 props、Electron 主世界风险 |
+| P3-5 | 特性开关、回滚与验收 | 产品/插件级开关；无 JS、键盘/焦点、视觉回归 |
 
 ## 6. 关键接口草案
 
@@ -359,3 +359,158 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - [ ] `provider-admin` 页面与至少一个插槽完成迁移，行为等价。
 - [ ] 文档、`adag verify`、Go/Node 测试全部通过。
 - [ ] 关闭特性开关后完全回到现有 SSR 路径。
+
+## 14. 当前进展（2026-11-05）
+
+- **P0-1 已完成**：`internal/plugins/host/iso_render_test.go` 证明 `ada-render.js` 可在 moejs 中无 DOM 运行，`renderToJSON` 输出 VNode，事件函数不进入线格式。
+- **P0-2 已完成**：`internal/gateway/web/testdata/iso-hydrate.test.js` 覆盖 `renderToJSON → 服务端 HTML → hydrate → 点击更新`；同时发现并修复嵌套组件 hydrate 后首次更新丢失 DOM 引用的 bug（`ada-render.js` 的 `hydrateNode` 首跑不再替换已接管的 `subTree`）。
+- **P0-3 已完成**：`iso-parity.js` 归一化比较工具 + `internal/gateway/frontend/testdata/iso/` 共享 fixture；Go `TestIsoParityGolden` 与 Node `iso-parity.test.js` 对同一份 VNode 比较 SSR golden 与客户端 mount 结构。
+- **P1-1 已完成**：`frontend.client`、`slots[].hydrate`、`pages[].hydrate` 进入清单 Schema 与 Go 结构；装配期校验 client 路径、`frontend.script` 能力、builtin/verified 信任与静态资源存在性（`newUnit`），旧插件缺省行为不变。测试：`manifest_islands_test.go`、`bridge_client_test.go`。
+- **P1-2 已完成**：`tools/pluginbuild` 用 Go esbuild 把 `client.tsx` 打成单文件 ESM；`ada:render`/`ada:ui` 由 shim 从 `globalThis` 取，产物带内容指纹、512KB 上限、CSP 扫描与 `--check`。测试：`tools/pluginbuild/build_test.go`。
+- **P1-3 已完成**：`host.Renderer.RenderIsland` 走正式 API：`ada:render` 虚拟模块 + 同一份 `ada-render.js` + `renderToJSON`，复用编译缓存与预算；引擎源由 `web.StaticAsset` 提供，Bridge 装配时注入。测试：`island_render_test.go`、`static_asset_test.go`。
+- **P1-4 已完成**：Bridge 对 `hydrate:true` 的插槽/页面在根 VNode 注入 `data-ada-plugin-island` / `data-ada-plugin` / `data-ada-module`（带内容哈希）/ `data-ada-props`；首帧 props 排除 CSRF，超 32KB 或根为 `$C`/文本时降级纯 SSR。非 hydrate 贡献完全保持原路径。测试：`bridge_island_test.go`。
+- **P1-5 已完成**：`plugin-islands.js` 扫描岛屿、按 URL 动态 import、读 `data-ada-props`、从页面 `csrf_token` 补 CSRF，并用 `mount(el, {hydrate:true, rootElement:true})` 接管根元素；单岛失败保留 SSR DOM。引擎新增 `rootElement` hydrate 入口。测试：`plugin-islands.test.js`、`iso-hydrate.test.js`。
+- **P1-6 已完成**：新增 `web.IslandDetector`，Bridge 按页面实际渲染的插槽/页面判断是否有 hydrate 贡献（`HasIslands`）；`base()` 据此设置 `NeedsUI`，空会话也不会覆盖该结果。没有岛屿的页面不加载 `ada-render`/`ada-ui`/`plugin-islands`；legacy `frontend.scripts` 行为暂不变。测试：`TestIslandDetectorGatesPluginIslandAssets`、`TestHasIslandsForChatSlot`。
+- **P1-7 已完成（最小试点）**：`ui-hello-tsx` 新增 `counter` 页面：`counter.tsx` 导出 `defineComponent`，服务端注入岛屿标记，`pluginbuild` 生成 `static/client.js`，浏览器用同一份组件 hydrate；`hello` 保持纯 SSR。端到端测试见 `app/ui_pipeline_test.go` 的 `TestUIExtRoutes`。`provider-admin` 的真实迁移留到 P2-4。
+- **P1-8 已完成**：`TestIslandAssetsHonorCSP` 守住 ada-render/ada-ui/plugin-islands 的 CSP；`TestClientBundlesHonorCSP` 守住随包 client bundle；无 JS 首屏由 `TestUIExtRoutes` 覆盖；动作桥/插槽回归沿用既有测试。
+- **P1 完成**。
+- **P2-1 基础版完成**：新增 `ada-ui-iso.js`（`render(h)`，无字符串模板）首批 Badge/Card/Button/Input/Textarea/TextField/Empty；服务端 `ada:render` 增加 `ada:ui` 虚拟模块，浏览器 `AdaUIIso` + pluginbuild shim 优先使用它；SSR 展开为原生标签，不残留 `$C`。测试：`TestRenderIslandWithIsoComponents`、`TestIsoComponentsRenderThroughGo`、`iso-components.test.js`。
+- **P2-1 图标桥接**：`Icon` 在服务端保留 `$C`（Go `renderIcon` 输出内联 SVG），浏览器用 `IconAdapter` 输出同一套 path；`plugin-islands.js` 在 app 级覆盖 `Icon`。`TodoList`/`Notice` 复用该桥。测试：`TestIsoIconTodoNoticeRenderThroughGo`、`iso-components.test.js`。
+- **P2-1 表格**：`Table`（别名 `DataTable`）用原生 table/thead/tbody/tr/th/td 输出，支持 columns/rows/rowKey/empty/loading/caption/striped/hover；服务端与浏览器同构。测试：`TestIsoTableRenderThroughGo`、`iso-components.test.js`。
+- **P2-1 Select**：`Select` 服务端保留 `$C Select`（Go `renderSelect` 输出 `ada-select` DOM），浏览器 `SelectAdapter` 输出同一结构并复用 `ada-select.js`；`plugin-islands` 在 app 级覆盖 `Select`。同时修复 `renderToJSON` 丢失 `$C` 数组/对象 props 的问题（`cleanComponentProps`）。测试：`TestIsoSelectRenderThroughGo`、`iso-components.test.js`。
+- **P2-1 Tabs**：`Tabs` 输出 roving tabindex、`role=tab/tablist/tabpanel`、`hidden` 面板与具名 slot；VNode 白名单补充 `hidden`/`tabindex`（Go + Schema 同步）。测试：`TestIsoTabsRenderThroughGo`、`iso-components.test.js`。
+- **P2-1 Modal**：`Modal` 服务端保留 `$C Modal`（Go `renderModal` 输出 `<ada-modal>` 骨架），浏览器 `ModalAdapter` 输出同一结构并接 `ada-modal.js`；支持 id/title/body/wide/confirm/cancel/confirmVariant/closeOnConfirm。同构 Modal 用 `body` 文本而非任意 slot。测试：`TestIsoModalRenderThroughGo`、`iso-components.test.js`。**P2-1 基础组件集完成**。
+- **P2-2 基础版完成**：`provide`/`inject`（组件级 + `app.provide`）、`watch`、`watchEffect` 实例作用域与卸载自动停止、`unmounted` 钩子、`defineStore`（state/getters/actions/单例）与 `$snapshot`/`$hydrate`；`renderToJSON` 保留组件 parent 链，SSR 的 provide/inject 与浏览器一致。**自动快照**：`collectStoreSnapshots` → `data-ada-props.stores` → 客户端 `hydrateStores` 在 store 创建前暂存。测试：`ada-state.test.js`、`TestRenderIslandStateAndProvide`、`TestRenderIslandWithStoreSnapshots`、`TestHydrateSlotCarriesStoreSnapshots`。
+- **P2-3 基础版完成**：岛屿标记新增 `data-ada-entry`，`plugin-islands.js` 支持 bundle 的 `islands` 映射（一个 bundle 多 page/slot entry，default 兜底）；插槽标记仍落在根元素上、不额外包裹，`TestHydrateSlotKeepsRootsUnwrapped` 守住布局。`ui-hello-tsx` 增加 `sidebar.top` 插槽岛与 `client.tsx` 多 entry bundle，`TestUIExtRoutes` 端到端覆盖。
+- **P2-4a 完成**：`token-usage` 页面迁移为 `defineComponent`，服务端 SSR + 浏览器 hydrate；「显示缓存命中率」是本地状态；`pluginbuild` 生成 `static/client.js`。`TestUIExtRoutes` 覆盖页面标记、bundle 与 NeedsUI。`provider-admin` 等交互页留 P2-4b。
+- **P2-5 客户端适配完成**：`keyed(vnode,key)` 与 `applyVNodePatches(items, patches)` 支持 `{key,mode:"upsert"|"remove",vnode}` 信封；`ada-patch.test.js` 验证按 key 复用 DOM、文本就地更新、删除不重建其它行。Gateway SSE 的 VNode 帧接入留 P2-5b。
+- **P2-5b 客户端流适配完成**：新增 `ada-patch-stream.js`，订阅 SSE `patch` 帧（`{patches:[...]}`）并驱动 keyed 列表；`source` 可注入，便于测试与自定义 EventSource。测试：`ada-patch-stream.test.js`。服务端具体 route 的帧格式仍由插件自行发送。
+- **P2-4b-1 完成**：`provider-admin` 首屏骨架改为同构组件（SSR + hydrate），交互仍由 legacy `provider-admin.js` 在 `DOMContentLoaded` 后接管；`pluginbuild` 生成 `static/client.js`。`TestUIExtRoutes` 覆盖页面标记、legacy 脚本与 island 引导共存。
+- **P2-4b-2b 完成**：`providers` 页已替换为 `providers-next.tsx` 组件化实现；新增供应商、设为当前、启用/停用、删除、拉取/添加模型、模型新增/删除/编辑（显示名/上下文/推理等级/输入模态/工具/启停）与供应商信息/代理/请求头/API Key 编辑全部走组件状态。拉取模型改为勾选弹窗，只添加选中的模型；模型的添加/编辑也通过弹窗完成；推理等级为动态标签，输入模态为复选框。`provider-admin.js` 不再由清单加载；`page.tsx`/legacy 脚本保留作历史参考。页面通过 `backend.read` 动作 `state` 预取目录，SSR/无 JS 可显示供应商。`TestUIExtRoutes` 断言旧脚本不加载、SSR 预取生效、过渡页 404；`provider-next.test.js` 覆盖 SSR props、勾选弹窗、等级标签/模态复选框与全部写操作。
+- **P3-1 客户端 bundle 门禁完成**：`ui-hello-tsx` / `token-usage` / `provider-admin` 统一从 `client.tsx` 构建；`TestOfficialClientBundlesInSync` 在 `go test ./app` 里跑 `pluginbuild --check`，阻止提交产物漂移。
+- **下一步**：P3-4 文档/安全复查、P3-5 特性开关/回滚/无 JS 验收。
+
+## 15. P2 验收结果（2026-11-05）
+
+| 项 | 状态 | 证据 |
+|---|---|---|
+| P2-1 同构组件集 | ✅ 基础集 | Badge/Card/Button/Input/Textarea/Table/Select/Tabs/Modal/Icon/TodoList/Notice/Empty；Select/Modal/Icon 用 `$C` 桥，Tabs 扩展 `hidden`/`tabindex` |
+| P2-2 状态管理 | ✅ | `provide/inject`、`watch`、effect scope、`defineStore`、自动快照注入 |
+| P2-3 插槽级岛屿 | ✅ 基础版 | `data-ada-entry`、`islands` 映射、根元素不包裹、sidebar 试点 |
+| P2-4a 只读真实页面 | ✅ | `token-usage` SSR + hydrate |
+| P2-4b-1 provider-admin 骨架 | ✅ | 同构骨架 + legacy JS 共存 |
+| P2-4b-2 provider-admin 交互 | ✅ | `providers` 已替换为组件化页；legacy JS 不再加载 |
+| P2-5 keyed VNode patch | ✅ 客户端 | `keyed` + `applyVNodePatches` + `AdaPatchStream` |
+| P3-1 bundle 同步/CSP 门禁 | ✅ | `TestOfficialClientBundlesInSync`、`TestClientBundlesHonorCSP` |
+| P3-2 浏览器冒烟 | ✅ 手工 | 真实 Chromium 验证 hydration、SSR 预取与页面标记（见 §17） |
+| P3-3 性能基线 | ✅ | 见 §16 |
+| P3-4 安全复查 | ⚠️ 部分手工 | T3/CSRF/CSP/Electron 静态配置有自动化；Electron 运行时与第三方隔离仍待手工（见 §20） |
+| P3-5 回滚/验收 | ✅ 回滚；⚠️ 手工项 | `capabilities.pluginIslands` / `ADAG_DISABLE_ISLANDS`；无 JS 表单、读屏/视觉仍待手工（见 §18/§19） |
+
+**已知未完成/风险：**
+
+- legacy `page.tsx` / `provider-admin.js` 仍留在仓库作历史参考，但清单不再加载。
+- `Modal` 同构版本用 `body` 文本，不支持任意 slot 内容。
+- 第三方插件仍不能使用客户端岛屿；决策与后续 iframe 方案见 [21-third-party-islands.md](21-third-party-islands.md)。
+- 没有自动化真实浏览器回归（hydration/DOM parity 靠 Node harness + Go golden；冒烟为手工）。
+- 无 JS 时 provider 页可看目录/详情，但表单写入依赖 JS/CSRF；读屏/缩放/视觉回归未做。
+- 12 插槽全开的 SSR 已有基线（45.9ms），真实浏览器 hydration 本地冒烟约 12-15ms；CI/多设备/低端机仍未测。
+
+## 16. P3-3 性能基线（2026-11-05）
+
+环境：Windows / amd64，Intel i5-10500 3.10GHz，Go 1.27.1，`go test -benchtime=10x -benchmem`。
+
+| 场景 | 墙钟/次 | 分配/次 |
+|---|---|---|
+| `RenderIsland`（原生标签） | 7.53ms | 3.29MB / 37,168 allocs |
+| `RenderIsland` + `ada:ui`（Card/Badge/Button） | 9.57ms | 4.49MB / 49,350 allocs |
+| 12 插槽全开（每个 hydrate，仅 SSR） | 45.86ms | 21.16MB / 234,100 allocs |
+
+- 每次渲染仍新建 moejs Runtime 并加载约 97KB 引擎；编译结果按源码哈希缓存。
+- 12 插槽 SSR 合计约 45.9ms，低于页面 300ms 预算；但浏览器 hydration、HTTP 与首屏绘制未计入。
+- 后续仍需要真实浏览器性能记录与按需 island/Runtime 池评估。
+
+真实 Chromium（本地 fake 网关，ego lite）：
+
+| 页面 | DOMContentLoaded | load | 岛屿 hydration |
+|---|---|---|---|
+| `/ext/token-usage/usage` | 102ms | 106ms | 11.6ms |
+| `/ext/provider-admin/providers` | 77ms | 77ms | 15.1ms |
+
+`plugin-islands.js` 暴露 `window.AdaIslandsDiagnostics`：`total/hydrated/failed/pending/durationMs` 与每个岛的 `entry/ok/durationMs`，用于本地和线上排查 hydration 降级。
+- 随包浏览器 bundle：`provider-admin` 2,079B、`ui-hello-tsx` 2,642B、`token-usage` 4,226B（含 banner，远低于 512KB 上限）。
+
+命令：
+
+```sh
+go test ./internal/plugins/host -run '^$' -bench 'BenchmarkRenderIsland' -benchtime=10x -benchmem
+go test ./internal/gateway/frontend -run '^$' -bench BenchmarkRenderAllSlots -benchtime=5x -benchmem
+go test ./plugins/official -run TestClientBundleSizes -v
+```
+
+## 17. P3-2 浏览器冒烟（2026-11-05）
+
+真实 Chromium（ego lite）手工验证，非 CI：
+
+1. 构建 `bin/adag.exe`，启动：
+   ```sh
+   bin/adag.exe gateway --fake --product products/coding.agent.json \
+     --workspace . --addr 127.0.0.1:52353 --data-dir %TEMP%\adag-e2e-data
+   ```
+2. 用网关 stdout 的 `token` 登录 `/?token=…`。
+3. `/ext/token-usage/usage`：
+   - `.tu-page[data-ada-mounted="1"]`；
+   - 无 `data-ada-error`；
+   - 点击「显示缓存命中率」后 `aria-pressed="true"`，正文出现「缓存命中率：」。
+4. `/ext/provider-admin/providers`（组件化页替换后）：
+   - `[data-provider-admin-next][data-ada-mounted="1"]`；
+   - 标题「模型设置」，无 `data-ada-error`；
+   - 初始「正在读取供应商…」被 `/state` 结果替换，空态显示「还没有供应商」；
+   - 页面没有 `[data-provider-admin]`，也不再加载 `provider-admin.js`。
+
+结论：同构 hydration、客户端本地状态、页面标记、真实 route 取数、插槽/页面标记与组件化 provider 页均在真实浏览器成立。遗留：该冒烟尚未自动化，token/端口是本地临时值，不进入仓库。
+
+## 18. P3-5 回滚开关（2026-11-05）
+
+两层开关：
+
+1. 产品级：`capabilities.pluginIslands`（`products/*.agent.json`）；
+2. 运维级：环境变量 `ADAG_DISABLE_ISLANDS=1`，优先级高于产品声明。
+
+行为（任一关闭）：
+
+- Bridge 仍用同构组件输出 SSR（页面内容不丢）；
+- 不注入 `data-ada-plugin-island` / `data-ada-module` / `data-ada-props`；
+- `HasIslands` 返回 false，页面不加载 `ada-render` / `ada-ui-iso` / `plugin-islands`；
+- 用于线上快速回滚客户端 hydration，不需要改插件清单或回退二进制。
+
+测试：`TestDisableIslandsKeepsSSRWithoutMarkers`、`TestProductPluginIslandsCapability`。
+
+剩余 P3-5：无 JS/键盘/视觉回归清单。
+
+## 19. P3-5 无 JS / 键盘 / 视觉清单
+
+| 项 | 状态 | 证据/说明 |
+|---|---|---|
+| 无 JS 首屏 | ✅ 基础页 | `token-usage` SSR 数据；`ui-hello-tsx` 纯 SSR；`provider-admin` 经 `backend.read` 动作预取 `/state`，`TestUIExtRoutes` 断言供应商名出现在 HTML |
+| 无 JS 表单 | ⚠️ 只读 | 供应商页无 JS 可看目录/详情，但不能保存；写入依赖客户端状态与 CSRF 注入 |
+| 键盘焦点 | ✅ 基础 | `Tabs` roving tabindex 有测试；Button/Input 是原生控件；真实 Chromium 中聚焦「显示缓存命中率」后 Enter 可切换，`aria-pressed=true` |
+| 视觉 token | ✅ 门禁 | `adag verify ui`：a_da token/CSS/DOM 基线一致，无硬编码色与奇数尺寸 |
+| 视觉回归 | ⚠️ 手工 | 修复供应商空态「原页面」文案、详情标签/长 ID 粘连与详情头 badge/按钮被 `space-between` 拉散；当前详情头为「标题 + badge 组 + 操作组」三组，尚无截图基线 |
+| 读屏/缩放 | ⚠️ 未做 | 需要人工验收 |
+
+结论：无 JS 与键盘有基础覆盖，但**表单写入、读屏、缩放与视觉回归**仍是手工验收项，不能宣称 P3-5 全部完成。
+
+## 20. P3-4 安全复查（2026-11-05）
+
+| 边界 | 状态 | 证据 |
+|---|---|---|
+| T3 `frontend.client` 信任 | ✅ | `TestManifestIslandValidation`：builtin/verified 允许，third-party 拒绝 |
+| `hydrate` 必须有 client + `frontend.script` | ✅ | 同上，缺一即装配期拒绝 |
+| CSRF 不进入 props | ✅ | `TestHydrateSlotInjectsIslandMarkers` 断言 `csrf-secret` 不出现在 `data-ada-props` |
+| props 上限 | ✅ | 32KB 超限降级纯 SSR（P1-4） |
+| CSP 无 eval/new Function | ✅ | `TestClientBundlesHonorCSP` 覆盖全部随包 client bundle；`pluginbuild` 构建期扫描 |
+| 第三方插件隔离 | ⚠️ 不支持 | 第三方不能用客户端岛屿；方案取舍见 [21-third-party-islands.md](21-third-party-islands.md) |
+| Electron 主世界 | ⚠️ 静态门禁 ✅ / 运行时手工 | `desktop/security.test.js` 钉住 contextIsolation/nodeIntegration/webSecurity/allowRunningInsecureContent 与外部导航拦截；真实 Electron 仍待手工 |
+
+结论：装配期与浏览器 bundle 边界有自动化门禁；Electron 静态配置已收紧，真实 Electron 运行时与第三方隔离仍是发布前手工复查项。

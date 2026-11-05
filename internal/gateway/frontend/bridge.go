@@ -59,6 +59,9 @@ type BridgeOptions struct {
 	InvalidateEnabled func(workspace string)
 	// MarkdownBlocks 是产品 capabilities.markdownBlocks：false 时 Block 渲染入口关闭。
 	MarkdownBlocks bool
+	// DisableIslands 关闭客户端岛屿接管：服务端仍用同构组件输出 SSR，
+	// 但不注入 data-ada-* 标记、不加载 plugin-islands，作为回滚开关。
+	DisableIslands bool
 	// BlockAudit 接收块渲染失败审计（不包含 data 原文）。
 	BlockAudit func(BlockAuditEvent)
 }
@@ -118,9 +121,11 @@ type Bridge struct {
 	blockCache     map[string]blockCacheEntry
 	markdownBlocks bool
 	blockAudit     func(BlockAuditEvent)
+	disableIslands bool
 }
 
 var _ web.PluginUI = (*Bridge)(nil)
+var _ web.IslandDetector = (*Bridge)(nil)
 
 // NewBridge 登记全部前端插件并构建索引。任何单元缺模板/样式都算装配错误
 // （不静默丢弃贡献，INV-2）。
@@ -138,16 +143,28 @@ func NewBridge(opts BridgeOptions) (*Bridge, error) {
 		invalidate:     opts.InvalidateEnabled,
 		markdownBlocks: opts.MarkdownBlocks,
 		blockAudit:     opts.BlockAudit,
+		disableIslands: opts.DisableIslands,
 	}
 	pairs := make([]host.ComponentPair, 0, len(AllowedComponents)+1)
 	for _, name := range AllowedComponents {
 		pairs = append(pairs, host.ComponentPair{Export: name, Canonical: name})
 	}
 	pairs = append(pairs, host.ComponentPair{Export: "Todo", Canonical: "TodoList"})
+	engine, ok := web.StaticAsset("ada-render.js")
+	if !ok {
+		return nil, fmt.Errorf("frontend: 内嵌静态资源缺少 ada-render.js（同构渲染不可用）")
+	}
+	iso, ok := web.StaticAsset("ada-ui-iso.js")
+	if !ok {
+		return nil, fmt.Errorf("frontend: 内嵌静态资源缺少 ada-ui-iso.js（同构组件不可用）")
+	}
 	b.renderer = host.NewRenderer(
 		host.WithComponentsModule(host.ComponentModuleSource(pairs)),
+		host.WithRenderEngineSource(string(engine)),
+		host.WithIsoComponentsSource(string(iso)),
 		// 注意毫秒换算：frontend 常量是 int 毫秒，Duration 直接传会变成纳秒。
 		host.WithRenderBudgets(SlotTimeoutMS*time.Millisecond, PageTimeoutMS*time.Millisecond),
+		host.WithIslandRenderBudget(PageTimeoutMS*time.Millisecond),
 		// 动态块用独立预算：Schema 的 x-limits.renderTimeoutMs 与这里必须同源，
 		// 否则门禁比对的不是真正生效的值。
 		host.WithBlockRenderBudget(web.MarkdownBlockRenderTimeoutMS*time.Millisecond),
@@ -265,6 +282,11 @@ func newUnit(s host.Script) (*unit, error) {
 			return nil, fmt.Errorf("frontend: 插件 %s 的样式 %q 不在静态资源里", u.manifest.ID, style)
 		}
 	}
+	if client := strings.TrimSpace(u.manifest.Frontend.Client); client != "" {
+		if _, ok := s.StaticAssets[client]; !ok {
+			return nil, fmt.Errorf("frontend: 插件 %s 的 client %q 不在静态资源里", u.manifest.ID, client)
+		}
+	}
 	for _, script := range u.manifest.Frontend.Scripts {
 		if _, ok := s.StaticAssets[script]; !ok {
 			return nil, fmt.Errorf("frontend: 插件 %s 的脚本 %q 不在静态资源里", u.manifest.ID, script)
@@ -316,7 +338,13 @@ func (b *Bridge) Slot(name string, r *http.Request) (template.HTML, int, error) 
 		if !b.isEnabled(r, e.u.manifest.ID) {
 			continue
 		}
-		html, err := b.renderEntry(e.u, e.contrib.Template, "slot", name, r, b.renderer.RenderTemplate)
+		var html template.HTML
+		var err error
+		if e.contrib.Hydrate {
+			html, err = b.renderIslandEntry(e.u, e.contrib.Template, "slot", name, r)
+		} else {
+			html, err = b.renderEntry(e.u, e.contrib.Template, "slot", name, r, b.renderer.RenderTemplate)
+		}
 		if err != nil {
 			failures++
 			log.Printf("frontend: 插件 %s 的插槽 %s 渲染失败（跳过该贡献）: %v", e.u.manifest.ID, name, err)
@@ -344,7 +372,13 @@ func (b *Bridge) Page(pluginID, slug string, r *http.Request) (template.HTML, er
 		if pc.Slug != slug {
 			continue
 		}
-		html, err := b.renderEntry(u, pc.Template, "page", slug, r, b.renderer.RenderPage)
+		var html template.HTML
+		var err error
+		if pc.Hydrate {
+			html, err = b.renderIslandEntry(u, pc.Template, "page", slug, r)
+		} else {
+			html, err = b.renderEntry(u, pc.Template, "page", slug, r, b.renderer.RenderPage)
+		}
 		if err != nil {
 			return "", err
 		}
@@ -644,6 +678,171 @@ func (b *Bridge) renderEntry(u *unit, templateName, kind, name string, r *http.R
 		return "", err
 	}
 	return RenderHTML(vnode)
+}
+
+// renderIslandEntry 渲染一个 hydrate 贡献（docs/20 P1-4）：
+// 同一份 props 先交给 RenderIsland 得到 VNode，再在根节点注入岛屿标记与
+// 首帧 props。注入失败时退回纯 SSR，不让整页因为 hydration 元数据而消失。
+func (b *Bridge) renderIslandEntry(u *unit, templateName, kind, name string, r *http.Request) (template.HTML, error) {
+	src, ok := u.templates[templateName]
+	if !ok {
+		return "", fmt.Errorf("frontend: 插件 %s 缺少模板 %q", u.manifest.ID, templateName)
+	}
+	props, err := b.buildProps(u, r, kind, name)
+	if err != nil {
+		return "", err
+	}
+	vnode, stores, err := b.renderer.RenderIslandWithStores(src, props)
+	if err != nil {
+		return "", err
+	}
+	if b.disableIslands {
+		// 回滚开关：保留同构 SSR，但不注入标记、不加载客户端岛。
+		return RenderHTML(vnode)
+	}
+	return b.wrapIslandHTML(u, vnode, stores, kind, name, props)
+}
+
+// wrapIslandHTML 给根元素加 data-ada-* 标记；根是 $C/文本/null 时不加标记，
+// 保持纯 SSR（没有可挂载的宿主元素，硬包一层会破坏插槽布局）。
+func (b *Bridge) wrapIslandHTML(u *unit, vnode, stores json.RawMessage, kind, name string, props json.RawMessage) (template.HTML, error) {
+	trimmed := bytes.TrimSpace(vnode)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return "", nil
+	}
+	var root Node
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	dec.UseNumber()
+	if err := dec.Decode(&root); err != nil {
+		return "", fmt.Errorf("frontend: 插件 %s 的同构 VNode 非法: %w", u.manifest.ID, err)
+	}
+	if root.T == "" || root.T == ComponentTag || root.T == "#text" {
+		return RenderHTML(vnode)
+	}
+
+	public, err := publicIslandProps(props, stores)
+	if err != nil {
+		return RenderHTML(vnode)
+	}
+	if len(public) > MaxStringBytes {
+		log.Printf("frontend: 插件 %s 的 %s:%s 首帧 props %d 字节超过 %d，降级为纯 SSR", u.manifest.ID, kind, name, len(public), MaxStringBytes)
+		return RenderHTML(vnode)
+	}
+	client := b.clientURL(u)
+	if client == "" {
+		return RenderHTML(vnode)
+	}
+	if root.P == nil {
+		root.P = map[string]any{}
+	}
+	root.P["data-ada-plugin-island"] = u.manifest.ID + ":" + kind + ":" + name
+	root.P["data-ada-plugin"] = u.manifest.ID
+	root.P["data-ada-entry"] = kind + ":" + name
+	root.P["data-ada-module"] = client
+	root.P["data-ada-props"] = string(public)
+
+	raw, err := json.Marshal(root)
+	if err != nil {
+		return RenderHTML(vnode)
+	}
+	out, err := RenderHTML(raw)
+	if err != nil {
+		log.Printf("frontend: 插件 %s 的 %s:%s 标记注入失败（降级纯 SSR）: %v", u.manifest.ID, kind, name, err)
+		return RenderHTML(vnode)
+	}
+	return out, nil
+}
+
+// publicIslandProps 去掉 CSRF：它已经存在于页面隐藏字段，不能复制进
+// data-ada-props。客户端 loader 会在 hydrate 前从页面读取同一份 token。
+// stores 是服务端 defineStore 的快照，客户端挂载前用 hydrateStores 恢复。
+func publicIslandProps(raw, stores json.RawMessage) (json.RawMessage, error) {
+	var p map[string]any
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, err
+	}
+	if app, ok := p["app"].(map[string]any); ok {
+		delete(app, "csrf")
+	}
+	if s := bytes.TrimSpace(stores); len(s) > 0 && string(s) != "{}" && string(s) != "null" {
+		p["stores"] = json.RawMessage(append([]byte(nil), s...))
+	}
+	return json.Marshal(p)
+}
+
+// clientURL 返回插件浏览器 bundle 的 /ext URL（带内容指纹）；没有声明时为空。
+func (b *Bridge) clientURL(u *unit) string {
+	if u == nil || u.manifest.Frontend == nil {
+		return ""
+	}
+	client := strings.TrimSpace(u.manifest.Frontend.Client)
+	if client == "" {
+		return ""
+	}
+	base := "/ext/" + url.PathEscape(u.manifest.ID) + "/static/" + url.PathEscape(client)
+	if data, ok := u.script.StaticAssets[client]; ok {
+		sum := sha256.Sum256(data)
+		base += "?v=" + hex.EncodeToString(sum[:4])
+	}
+	return base
+}
+
+// pageIslandSlots 列出各页面实际会渲染的插槽；用于决定是否加载客户端引擎。
+// 未知页面只按侧栏/顶栏判断，避免为了一个 chat.corner 给所有页面下载引擎。
+var pageIslandSlots = map[string][]string{
+	"chat": {
+		"sidebar.top", "sidebar.bottom", "topbar.right",
+		"chat.corner", "composer.left", "composer.right", "composer.footer",
+		"composer.above", "thread.tray", "transcript.after",
+	},
+	"overview":   {"sidebar.top", "sidebar.bottom", "topbar.right", "dashboard.widgets"},
+	"extensions": {"sidebar.top", "sidebar.bottom", "topbar.right", "extensions.list"},
+	"workspaces": {"sidebar.top", "sidebar.bottom", "topbar.right"},
+}
+
+var shellIslandSlots = []string{"sidebar.top", "sidebar.bottom", "topbar.right"}
+
+// HasIslands 实现 web.IslandDetector：报告当前页面是否有启用的 hydrate 贡献。
+func (b *Bridge) HasIslands(page string, r *http.Request) bool {
+	if b == nil || b.disableIslands {
+		return false
+	}
+	if strings.HasPrefix(page, "ext:") {
+		id := strings.TrimPrefix(page, "ext:")
+		slug := extSlugFromPath(r.URL.Path)
+		if u, ok := b.byID[id]; ok && b.isEnabled(r, id) && u.manifest.Frontend != nil {
+			for _, pc := range u.manifest.Frontend.Pages {
+				if pc.Slug == slug && pc.Hydrate {
+					return true
+				}
+			}
+		}
+		return b.anyHydrateSlot(r, shellIslandSlots)
+	}
+	slots, ok := pageIslandSlots[page]
+	if !ok {
+		slots = shellIslandSlots
+	}
+	return b.anyHydrateSlot(r, slots)
+}
+
+func (b *Bridge) anyHydrateSlot(r *http.Request, names []string) bool {
+	for _, name := range names {
+		for _, e := range b.slotIndex[name] {
+			if e.contrib.Hydrate && b.isEnabled(r, e.u.manifest.ID) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func extSlugFromPath(urlPath string) string {
+	parts := strings.Split(strings.Trim(urlPath, "/"), "/")
+	if len(parts) == 3 && parts[0] == "ext" {
+		return parts[2]
+	}
+	return ""
 }
 
 // renderProps 是传给 TSX 的 props 形状（7.5 的投影；插件不能借 props 读别的线程或文件）。

@@ -82,6 +82,7 @@ plugins/my-plugin/
 - `id` 必须匹配 `^[a-z][a-z0-9-]{1,63}$`，且等于目录名。
 - `trust`：`builtin`（预编译后随 resources 发布，只能启用/禁用）、`verified`（签名有效）、`third-party`（默认，受限）。
 - 后端 `capabilities` 是**可安装能力**的白名单；前端 `capabilities` 控制预取、脚本、静态资源等。
+- 前端可选 `client` 与贡献级 `hydrate`：`client` 是 `assets` 目录内的浏览器 bundle，`slots[].hydrate` / `pages[].hydrate` 声明该贡献在浏览器接管；缺省不启用，旧插件行为不变。声明 `client` 或 `hydrate` 需要 `frontend.script` 能力且 trust 为 builtin/verified（third-party 声明即装配失败）。字段与分阶段落地见 [20-plugin-island-framework-plan.md](20-plugin-island-framework-plan.md)。
 - 动作绑定的 `backend` 可以指向另一个插件的后端动作；目标插件/动作必须存在，跨插件只传 JSON 结果，不共享内存。
 - 清单的每个字段都必须有真实消费者；`adag verify` 逐字段核对，否则构建失败。
 

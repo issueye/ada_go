@@ -41,16 +41,19 @@ type Backend struct {
 
 // Frontend 是前端清单段（7.5）。
 type Frontend struct {
-	Capabilities []Capability             `json:"capabilities"`
-	Slots        []SlotContribution       `json:"slots"`
-	Pages        []PageContribution       `json:"pages"`
-	Blocks       []BlockContribution      `json:"blocks"`
-	Nav          []NavContribution        `json:"nav"`
-	Dashboard    []DashboardContribution  `json:"dashboard"`
-	Actions      map[string]ActionBinding `json:"actions"`
-	Styles       []string                 `json:"styles"`
-	Scripts      []string                 `json:"scripts"`
-	Assets       string                   `json:"assets"`
+	Capabilities []Capability `json:"capabilities"`
+	// Client 是浏览器 bundle 的静态资源名（assets 目录内）；声明后 slots/pages
+	// 可用 hydrate:true 在客户端接管。仅 builtin/verified 且需 frontend.script。
+	Client    string                   `json:"client,omitempty"`
+	Slots     []SlotContribution       `json:"slots"`
+	Pages     []PageContribution       `json:"pages"`
+	Blocks    []BlockContribution      `json:"blocks"`
+	Nav       []NavContribution        `json:"nav"`
+	Dashboard []DashboardContribution  `json:"dashboard"`
+	Actions   map[string]ActionBinding `json:"actions"`
+	Styles    []string                 `json:"styles"`
+	Scripts   []string                 `json:"scripts"`
+	Assets    string                   `json:"assets"`
 }
 
 // BlockContribution 是 Markdown 内联动态块的渲染器（adag-ui fence）。
@@ -71,6 +74,8 @@ type SlotContribution struct {
 	Slot     string `json:"slot"`
 	Template string `json:"template"`
 	Order    int    `json:"order"`
+	// Hydrate 为 true 时，该插槽贡献在浏览器用 frontend.client hydrate。
+	Hydrate bool `json:"hydrate,omitempty"`
 }
 
 // PageContribution 是 /ext/{id}/{slug} 独立页面。
@@ -78,6 +83,8 @@ type PageContribution struct {
 	Slug     string `json:"slug"`
 	Template string `json:"template"`
 	Title    string `json:"title"`
+	// Hydrate 为 true 时，该页面在浏览器用 frontend.client hydrate。
+	Hydrate bool `json:"hydrate,omitempty"`
 }
 
 // NavContribution 是侧栏导航项。
@@ -232,6 +239,18 @@ func (m *Manifest) validateFrontend() error {
 	if m.Trust != TrustBuiltin && m.Trust != TrustVerified && len(f.Scripts) > 0 {
 		return fmt.Errorf("plugins: %s 是 %s，不加载插件 JS（7.5、6.9）", m.ID, m.Trust)
 	}
+	client := strings.TrimSpace(f.Client)
+	if client != "" {
+		if !validEntryPath(client) || !strings.HasSuffix(client, ".js") {
+			return fmt.Errorf("plugins: %s 的 frontend.client %q 必须是 assets 内的 .js 相对路径", m.ID, client)
+		}
+		if !hasCap(f.Capabilities, CapFrontendScript) {
+			return fmt.Errorf("plugins: %s 声明了 frontend.client 但没有 frontend.script 能力（7.5）", m.ID)
+		}
+		if m.Trust != TrustBuiltin && m.Trust != TrustVerified {
+			return fmt.Errorf("plugins: %s 是 %s，不允许前端 client bundle（7.5、6.9）", m.ID, m.Trust)
+		}
+	}
 	seenSlot := make(map[string]bool, len(f.Slots))
 	for _, s := range f.Slots {
 		if !IsSlotName(s.Slot) {
@@ -239,6 +258,9 @@ func (m *Manifest) validateFrontend() error {
 		}
 		if strings.TrimSpace(s.Template) == "" {
 			return fmt.Errorf("plugins: %s 在插槽 %s 上没有 template", m.ID, s.Slot)
+		}
+		if s.Hydrate && client == "" {
+			return fmt.Errorf("plugins: %s 的插槽 %s 声明了 hydrate 但没有 frontend.client", m.ID, s.Slot)
 		}
 		key := s.Slot + "\x00" + s.Template
 		if seenSlot[key] {
@@ -271,6 +293,9 @@ func (m *Manifest) validateFrontend() error {
 	for _, p := range f.Pages {
 		if strings.TrimSpace(p.Slug) == "" || strings.TrimSpace(p.Template) == "" {
 			return fmt.Errorf("plugins: %s 的页面贡献缺少 slug 或 template", m.ID)
+		}
+		if p.Hydrate && client == "" {
+			return fmt.Errorf("plugins: %s 的页面 %s 声明了 hydrate 但没有 frontend.client", m.ID, p.Slug)
 		}
 	}
 	seenBlock := make(map[string]bool, len(f.Blocks))

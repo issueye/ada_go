@@ -142,7 +142,9 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 	}
 	base := s.base(r, "chat", title, threads, id, true)
 	base.TopbarActions = threadTopbarActions(id, run.Active, s.csrf(r))
-	base.NeedsUI = len(transcript) > 0
+	// 对话流岛需要引擎；但插件 hydrate 插槽也可能在空会话里出现，不能把
+	// base() 里 IslandDetector 的结果覆盖掉。
+	base.NeedsUI = base.NeedsUI || len(transcript) > 0
 	s.attachPartHTML(r, transcript, newBlockBudget())
 	picker := s.modelOptions(r, id)
 	models, modelLabel, modelValue := picker.Models, picker.Label, picker.Value
@@ -2575,6 +2577,20 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = w.Write(data)
+}
+
+// StaticAsset 返回内嵌静态资源的字节。宿主渲染器需要复用与浏览器同一份
+// ada-render.js，避免服务端与客户端两套引擎源；路径规则与 /static/ 一致。
+func StaticAsset(name string) ([]byte, bool) {
+	clean, ok := staticAssetName(staticPrefix + strings.TrimSpace(name))
+	if !ok {
+		return nil, false
+	}
+	data, err := fs.ReadFile(staticFS, "static/"+clean)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
 }
 
 // staticAssetName 把 /static/ 之后的路径规范化；只接受规范相对路径。

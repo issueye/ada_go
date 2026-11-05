@@ -10,11 +10,16 @@
     "capabilities": ["model.admin"]
   },
   "frontend": {
-    "capabilities": ["frontend.script"],
+    "capabilities": ["frontend.script", "backend.read"],
+    "client": "client.js",
     "slots": [{ "slot": "composer.left", "template": "slot.tsx", "order": 10 }],
     "nav": [{ "label": "供应商", "slug": "providers" }],
-    "pages": [{ "slug": "providers", "title": "供应商", "template": "page.tsx" }],
-    "scripts": ["provider-admin.js"],
+    "pages": [
+      { "slug": "providers", "title": "供应商", "template": "providers-next.tsx", "hydrate": true }
+    ],
+    "actions": {
+      "page_providers": { "action": "state", "read": true, "backend": "provider-admin" }
+    },
     "styles": ["provider-admin.css"],
     "assets": "static"
   }

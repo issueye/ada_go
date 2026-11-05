@@ -56,6 +56,48 @@ func TestScriptsFromRepoDir(t *testing.T) {
 	}
 }
 
+// TestClientBundlesHonorCSP 钉住随包浏览器 bundle：pluginbuild 产物不能含
+// eval/new Function；client.tsx 与 static/client.js 的同步由 pluginbuild --check
+// 在发布流程里校验（这里至少守住已提交产物）。
+func TestClientBundlesHonorCSP(t *testing.T) {
+	matches, err := filepath.Glob(filepath.Join("*", "static", "client.js"))
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+	if len(matches) < 3 {
+		t.Fatalf("随包 client bundle 数量 = %d，期望至少 3（ui-hello-tsx/token-usage/provider-admin）", len(matches))
+	}
+	danger := regexp.MustCompile(`\beval\s*\(|new\s+Function\s*\(`)
+	for _, name := range matches {
+		data, rerr := os.ReadFile(name)
+		if rerr != nil {
+			t.Fatalf("读取 %s: %v", name, rerr)
+		}
+		if loc := danger.FindIndex(data); loc != nil {
+			t.Fatalf("%s 含 CSP 禁止的 eval/new Function（字节 %d 附近）", name, loc[0])
+		}
+	}
+}
+
+// TestClientBundleSizes 记录随包 bundle 体积并守住 512KB 上限（与 extAssetMaxBytes 同口径）。
+func TestClientBundleSizes(t *testing.T) {
+	matches, err := filepath.Glob(filepath.Join("*", "static", "client.js"))
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+	const maxBytes = 512 << 10
+	for _, name := range matches {
+		info, serr := os.Stat(name)
+		if serr != nil {
+			t.Fatalf("Stat %s: %v", name, serr)
+		}
+		t.Logf("%s = %d bytes", name, info.Size())
+		if info.Size() > maxBytes {
+			t.Fatalf("%s = %d bytes，超过 %d 上限", name, info.Size(), maxBytes)
+		}
+	}
+}
+
 // TestMCPSkillPackaged 钉住 mcp-client 随包技能：插件目录里要真的有
 // skills/mcp-tools/SKILL.md，并能被宿主解析成 name/description。
 func TestMCPSkillPackaged(t *testing.T) {

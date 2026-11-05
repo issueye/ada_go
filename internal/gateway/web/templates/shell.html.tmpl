@@ -34,8 +34,11 @@
 <script src="{{asset "components.js"}}" defer></script>
 <script src="{{asset "api.js"}}" defer></script>
 {{if .NeedsUI}}<script src="{{asset "ada-render.js"}}" defer></script>
+<script src="{{asset "ada-patch-stream.js"}}" defer></script>
 <script src="{{asset "ada-ui.js"}}" defer></script>
+<script src="{{asset "ada-ui-iso.js"}}" defer></script>
 <script src="{{asset "islands.js"}}" defer></script>
+<script src="{{asset "plugin-islands.js"}}" defer></script>
 {{end}}{{range .PluginScripts}}<script src="{{.}}" defer></script>
 {{end}}</head>
 <body class="ada-body">

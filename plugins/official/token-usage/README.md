@@ -11,16 +11,26 @@
 | 版本 | 0.2.0 |
 | 信任级别 | `builtin`：随二进制发布，只能启用/禁用 |
 | 形态 | 纯前端 |
-| 前端能力 | `backend.read` |
+| 前端能力 | `backend.read`、`frontend.script` |
 
 ## 前端贡献
 
 | 类型 | 内容 |
 | --- | --- |
-| 导航 / 页面 | 导航「Token 用量」→ 页面 `/ext/token-usage/usage`（`page.tsx`） |
+| 导航 / 页面 | 导航「Token 用量」→ 页面 `/ext/token-usage/usage`（`page.tsx`，SSR + hydrate） |
 | 仪表盘 | 概览页卡片 `usage`（`dashboard.tsx`，order 10） |
 | Markdown 动态块 | `usage-card`（`blocks/usage-card.tsx` + `schemas/usage-card.json`） |
 | 样式 | `usage.css`（`static/`） |
+| 浏览器 bundle | `static/client.js`（由 `pluginbuild` 从 `page.tsx` 生成） |
+
+页面是 P2-4 首个真实业务迁移：服务端 `renderToJSON` 输出首屏，浏览器用同一份 `defineComponent` hydrate；「显示缓存命中率」是本地状态，不额外请求数据。
+
+## 构建
+
+```sh
+go run ./tools/pluginbuild -dir plugins/official/token-usage -entry client.tsx -out static/client.js
+go run ./tools/pluginbuild -dir plugins/official/token-usage -entry client.tsx -out static/client.js -check
+```
 
 ## 数据形状
 

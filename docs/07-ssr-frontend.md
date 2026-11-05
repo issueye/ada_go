@@ -153,6 +153,7 @@ data: {"threadId":"th_...","seq":128,"baseSeq":120,"ops":[
 
 - `slots`：插槽 + TSX 模板 + 排序；
 - `pages`：`/ext/{id}/{slug}` 独立页面；
+- `client` / `hydrate`（可选，P1）：插件浏览器 bundle 与贡献级 hydrate 开关；缺省仍是服务端渲染，旧插件不受影响；需要 `frontend.script` 能力且 trust 为 builtin/verified。框架目标与阶段见 [20-plugin-island-framework-plan.md](20-plugin-island-framework-plan.md)；
 - `nav`：侧栏导航项；
 - `dashboard`：概览页卡片；
 - `actions`：读/写后端动作绑定；

@@ -87,6 +87,8 @@
         "readonly": { "type": "boolean" },
         "checked": { "type": "boolean" },
         "open": { "type": "boolean", "description": "details 展开态（展开/收起用 <details>/<summary>，无 JS 也能用，§7.7.5）。" },
+        "hidden": { "type": "boolean", "description": "隐藏态（Tabs 非当前面板等）；布尔属性，true 输出存在形。" },
+        "tabindex": { "type": "integer", "minimum": -1, "maximum": 32767, "description": "键盘焦点顺序；Tabs/roving tabindex 使用。" },
         "min": { "type": ["string", "number"] },
         "max": { "type": ["string", "number"] },
         "step": { "type": ["string", "number"] },

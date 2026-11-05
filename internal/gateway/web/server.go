@@ -316,6 +316,10 @@ func (s *Server) base(r *http.Request, page, title string, threads []threadSumma
 	conn := connected
 	csrf := s.csrf(r)
 	pluginNav := s.pluginNavLinks(r)
+	needsUI := false
+	if detector, ok := s.cfg.PluginUI.(IslandDetector); ok {
+		needsUI = detector.HasIslands(page, r)
+	}
 	badge := productBadge(s.cfg.BrandName, s.cfg.ProductName)
 	sidebar := renderSidebar(sidebarData{
 		Active:             page,
@@ -356,6 +360,7 @@ func (s *Server) base(r *http.Request, page, title string, threads []threadSumma
 		Gateway:             gateway,
 		ActiveThreadID:      activeThreadID,
 		Connected:           connected,
+		NeedsUI:             needsUI,
 		PluginNav:           pluginNav,
 		Sidebar:             sidebar,
 		Icons:               iconSprite(),
