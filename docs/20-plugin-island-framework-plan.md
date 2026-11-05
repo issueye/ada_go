@@ -370,4 +370,5 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - **P1-3 已完成**：`host.Renderer.RenderIsland` 走正式 API：`ada:render` 虚拟模块 + 同一份 `ada-render.js` + `renderToJSON`，复用编译缓存与预算；引擎源由 `web.StaticAsset` 提供，Bridge 装配时注入。测试：`island_render_test.go`、`static_asset_test.go`。
 - **P1-4 已完成**：Bridge 对 `hydrate:true` 的插槽/页面在根 VNode 注入 `data-ada-plugin-island` / `data-ada-plugin` / `data-ada-module`（带内容哈希）/ `data-ada-props`；首帧 props 排除 CSRF，超 32KB 或根为 `$C`/文本时降级纯 SSR。非 hydrate 贡献完全保持原路径。测试：`bridge_island_test.go`。
 - **P1-5 已完成**：`plugin-islands.js` 扫描岛屿、按 URL 动态 import、读 `data-ada-props`、从页面 `csrf_token` 补 CSRF，并用 `mount(el, {hydrate:true, rootElement:true})` 接管根元素；单岛失败保留 SSR DOM。引擎新增 `rootElement` hydrate 入口。测试：`plugin-islands.test.js`、`iso-hydrate.test.js`。
-- **下一步**：P1-6 资源门禁（`/ext` 页面设置 `NeedsUI`、按需加载客户端 bundle，不再全局加载所有插件脚本）。
+- **P1-6 已完成**：新增 `web.IslandDetector`，Bridge 按页面实际渲染的插槽/页面判断是否有 hydrate 贡献（`HasIslands`）；`base()` 据此设置 `NeedsUI`，空会话也不会覆盖该结果。没有岛屿的页面不加载 `ada-render`/`ada-ui`/`plugin-islands`；legacy `frontend.scripts` 行为暂不变。测试：`TestIslandDetectorGatesPluginIslandAssets`、`TestHasIslandsForChatSlot`。
+- **下一步**：P1-7 `provider-admin` 试点（同构组件重写模型设置页，保留无 JS 回退）。

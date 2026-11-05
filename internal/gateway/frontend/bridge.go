@@ -121,6 +121,7 @@ type Bridge struct {
 }
 
 var _ web.PluginUI = (*Bridge)(nil)
+var _ web.IslandDetector = (*Bridge)(nil)
 
 // NewBridge 登记全部前端插件并构建索引。任何单元缺模板/样式都算装配错误
 // （不静默丢弃贡献，INV-2）。
@@ -763,6 +764,64 @@ func (b *Bridge) clientURL(u *unit) string {
 		base += "?v=" + hex.EncodeToString(sum[:4])
 	}
 	return base
+}
+
+// pageIslandSlots 列出各页面实际会渲染的插槽；用于决定是否加载客户端引擎。
+// 未知页面只按侧栏/顶栏判断，避免为了一个 chat.corner 给所有页面下载引擎。
+var pageIslandSlots = map[string][]string{
+	"chat": {
+		"sidebar.top", "sidebar.bottom", "topbar.right",
+		"chat.corner", "composer.left", "composer.right", "composer.footer",
+		"composer.above", "thread.tray", "transcript.after",
+	},
+	"overview":   {"sidebar.top", "sidebar.bottom", "topbar.right", "dashboard.widgets"},
+	"extensions": {"sidebar.top", "sidebar.bottom", "topbar.right", "extensions.list"},
+	"workspaces": {"sidebar.top", "sidebar.bottom", "topbar.right"},
+}
+
+var shellIslandSlots = []string{"sidebar.top", "sidebar.bottom", "topbar.right"}
+
+// HasIslands 实现 web.IslandDetector：报告当前页面是否有启用的 hydrate 贡献。
+func (b *Bridge) HasIslands(page string, r *http.Request) bool {
+	if b == nil {
+		return false
+	}
+	if strings.HasPrefix(page, "ext:") {
+		id := strings.TrimPrefix(page, "ext:")
+		slug := extSlugFromPath(r.URL.Path)
+		if u, ok := b.byID[id]; ok && b.isEnabled(r, id) && u.manifest.Frontend != nil {
+			for _, pc := range u.manifest.Frontend.Pages {
+				if pc.Slug == slug && pc.Hydrate {
+					return true
+				}
+			}
+		}
+		return b.anyHydrateSlot(r, shellIslandSlots)
+	}
+	slots, ok := pageIslandSlots[page]
+	if !ok {
+		slots = shellIslandSlots
+	}
+	return b.anyHydrateSlot(r, slots)
+}
+
+func (b *Bridge) anyHydrateSlot(r *http.Request, names []string) bool {
+	for _, name := range names {
+		for _, e := range b.slotIndex[name] {
+			if e.contrib.Hydrate && b.isEnabled(r, e.u.manifest.ID) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func extSlugFromPath(urlPath string) string {
+	parts := strings.Split(strings.Trim(urlPath, "/"), "/")
+	if len(parts) == 3 && parts[0] == "ext" {
+		return parts[2]
+	}
+	return ""
 }
 
 // renderProps 是传给 TSX 的 props 形状（7.5 的投影；插件不能借 props 读别的线程或文件）。

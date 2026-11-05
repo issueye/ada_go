@@ -71,6 +71,13 @@ type PluginLister interface {
 	List(r *http.Request) []FrontendPluginInfo
 }
 
+// IslandDetector 由渲染宿主可选实现：报告某个页面是否有需要客户端接管的
+// hydrate 贡献（docs/20 P1-6）。web 据此决定是否加载 ada-render/ada-ui/
+// plugin-islands 等资源；没有实现时保持原有 NeedsUI 行为。
+type IslandDetector interface {
+	HasIslands(page string, r *http.Request) bool
+}
+
 // ActionBinding 是动作桥解析出的一条绑定：binding 名 → 目标后端动作。
 type ActionBinding struct {
 	// BackendID 是提供动作的插件 id（ActionEnvelope.pluginId）。

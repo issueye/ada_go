@@ -117,4 +117,43 @@ export default defineComponent({
 	if !strings.Contains(string(html), `data-ada-plugin-island="demo:page:providers"`) {
 		t.Fatalf("页面缺少岛屿标记：%s", html)
 	}
+	if !b.HasIslands("ext:demo", httptest.NewRequest(http.MethodGet, "/ext/demo/providers", nil)) {
+		t.Fatal("hydrate 页面应报告 HasIslands")
+	}
+	if b.HasIslands("ext:demo", httptest.NewRequest(http.MethodGet, "/ext/demo/other", nil)) {
+		t.Fatal("非 hydrate 页面不应报告 HasIslands")
+	}
+}
+
+func TestHasIslandsForChatSlot(t *testing.T) {
+	m := &plugins.Manifest{
+		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
+		Trust: plugins.TrustBuiltin,
+		Frontend: &plugins.Frontend{
+			Capabilities: []plugins.Capability{plugins.CapFrontendScript},
+			Client:       "client.js",
+			Slots: []plugins.SlotContribution{{
+				Slot: "chat.corner", Template: "slot.tsx", Hydrate: true,
+			}},
+		},
+	}
+	b, err := NewBridge(BridgeOptions{
+		Scripts: []host.Script{{
+			Manifest: m,
+			Bundle: map[string]string{"slot.tsx": `import { h, defineComponent } from "ada:render";
+export default defineComponent({ render(h) { return <div class="corner">x</div>; } });
+`},
+			StaticAssets: map[string][]byte{"client.js": []byte("export default {}")},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewBridge: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/threads/th_1", nil)
+	if !b.HasIslands("chat", req) {
+		t.Fatal("chat 页面有 hydrate 的 chat.corner，应报告 HasIslands")
+	}
+	if b.HasIslands("overview", req) {
+		t.Fatal("overview 不渲染 chat.corner，不应报告 HasIslands")
+	}
 }

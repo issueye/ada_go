@@ -32,6 +32,8 @@ type stubUI struct {
 	bindings map[string]web.ActionBinding
 	// list：PluginLister 的前端插件清单（扩展页用）。
 	list []web.FrontendPluginInfo
+	// hasIslands：IslandDetector 的返回值（P1-6 资源门禁）。
+	hasIslands bool
 }
 
 func (s *stubUI) Slot(name string, r *http.Request) (template.HTML, int, error) {
@@ -57,6 +59,8 @@ func (s *stubUI) Page(pluginID, slug string, r *http.Request) (template.HTML, er
 
 func (s *stubUI) Styles() []string  { return s.styles }
 func (s *stubUI) Scripts() []string { return s.scripts }
+
+func (s *stubUI) HasIslands(string, *http.Request) bool { return s.hasIslands }
 
 func (s *stubUI) List(_ *http.Request) []web.FrontendPluginInfo {
 	out := append([]web.FrontendPluginInfo(nil), s.list...)
@@ -339,6 +343,30 @@ func TestPluginStylesAndScriptsInHead(t *testing.T) {
 	rec := serve(t, srv, "GET", "/", nil)
 	wantContains(t, rec.Body.String(), `<link rel="stylesheet" href="/ext/p1/static/style.css">`)
 	wantContains(t, rec.Body.String(), `<script src="/ext/p1/static/app.js" defer></script>`)
+}
+
+// IslandDetector 为 true 的页面才加载插件岛屿引导；没有 hydrate 贡献的页面
+// 不额外下载引擎/引导脚本。
+func TestIslandDetectorGatesPluginIslandAssets(t *testing.T) {
+	withIslands := &stubUI{hasIslands: true}
+	srv, _ := newServerWithUI(t, newFakeCore(), withIslands)
+	rec := serve(t, srv, "GET", "/", nil)
+	wantContains(t, rec.Body.String(), `plugin-islands.js`)
+
+	// 空会话也要保留 base() 的 NeedsUI：hydrate 插槽不依赖 transcript。
+	core := newFakeCore().
+		on("thread.get", threadGetIdle).
+		on("thread.entries", `{"entries":[],"hasMore":false}`)
+	srv, _ = newServerWithUI(t, core, withIslands)
+	rec = serve(t, srv, "GET", "/threads/th_1", nil)
+	wantContains(t, rec.Body.String(), `plugin-islands.js`)
+
+	withoutIslands := &stubUI{}
+	srv, _ = newServerWithUI(t, newFakeCore(), withoutIslands)
+	rec = serve(t, srv, "GET", "/", nil)
+	if strings.Contains(rec.Body.String(), "plugin-islands.js") {
+		t.Fatal("没有 hydrate 贡献的页面不应加载 plugin-islands.js")
+	}
 }
 
 // PluginUI 为 nil：插槽保持 0 贡献，/ext 404（现状不回归）。

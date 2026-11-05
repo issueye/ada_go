@@ -142,7 +142,9 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 	}
 	base := s.base(r, "chat", title, threads, id, true)
 	base.TopbarActions = threadTopbarActions(id, run.Active, s.csrf(r))
-	base.NeedsUI = len(transcript) > 0
+	// 对话流岛需要引擎；但插件 hydrate 插槽也可能在空会话里出现，不能把
+	// base() 里 IslandDetector 的结果覆盖掉。
+	base.NeedsUI = base.NeedsUI || len(transcript) > 0
 	s.attachPartHTML(r, transcript, newBlockBudget())
 	picker := s.modelOptions(r, id)
 	models, modelLabel, modelValue := picker.Models, picker.Label, picker.Value
