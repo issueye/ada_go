@@ -401,21 +401,22 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 | P2-4b-1 provider-admin 骨架 | ✅ | 同构骨架 + legacy JS 共存 |
 | P2-4b-2 provider-admin 交互 | ✅ | `providers` 已替换为组件化页；legacy JS 不再加载 |
 | P2-5 keyed VNode patch | ✅ 客户端 | `keyed` + `applyVNodePatches` + `AdaPatchStream` |
-| P3-1 bundle 同步门禁 | ✅ | `TestOfficialClientBundlesInSync` |
-| P3-2 CSP bundle 门禁 | ✅ | `TestClientBundlesHonorCSP` 覆盖全部随包 `static/client.js` |
-| P3-3 浏览器冒烟 | ✅ 手工 | 真实 Chromium 验证 hydration 与 legacy 共存（见 §17） |
-| P3-4 性能基线 | ✅ | 见 §16 |
-| P3-5 回滚开关 | ✅ 产品级 + 环境变量 | `capabilities.pluginIslands` / `ADAG_DISABLE_ISLANDS`，见 §18 |
+| P3-1 bundle 同步/CSP 门禁 | ✅ | `TestOfficialClientBundlesInSync`、`TestClientBundlesHonorCSP` |
+| P3-2 浏览器冒烟 | ✅ 手工 | 真实 Chromium 验证 hydration、SSR 预取与页面标记（见 §17） |
+| P3-3 性能基线 | ✅ | 见 §16 |
+| P3-4 安全复查 | ⚠️ 部分手工 | T3/CSRF/CSP 有自动化；Electron 主世界待手工复查（见 §20） |
+| P3-5 回滚/验收 | ✅ 回滚；⚠️ 手工项 | `capabilities.pluginIslands` / `ADAG_DISABLE_ISLANDS`；无 JS 表单、读屏/视觉仍待手工（见 §18/§19） |
 
 **已知未完成/风险：**
 
-- `provider-admin` 交互仍是 legacy DOM 操作；组件化前不能宣称「真实交互页已迁移」。
+- legacy `page.tsx` / `provider-admin.js` 仍留在仓库作历史参考，但清单不再加载。
 - `Modal` 同构版本用 `body` 文本，不支持任意 slot 内容。
-- 第三方插件仍不能使用客户端岛屿；需要服务端驱动或 iframe 隔离方案。
-- 没有真实浏览器自动化（hydration/DOM parity 目前靠 Node harness + Go golden）。
+- 第三方插件仍不能使用客户端岛屿；决策与后续 iframe 方案见 [21-third-party-islands.md](21-third-party-islands.md)。
+- 没有自动化真实浏览器回归（hydration/DOM parity 靠 Node harness + Go golden；冒烟为手工）。
+- 无 JS 时 provider 页可看目录/详情，但表单写入依赖 JS/CSRF；读屏/缩放/视觉回归未做。
 - 12 插槽全开的性能、bundle 体积、首屏预算尚未做专项基准。
 
-## 16. P3-4 性能基线（2026-11-05）
+## 16. P3-3 性能基线（2026-11-05）
 
 环境：Windows / amd64，Intel i5-10500 3.10GHz，Go 1.27.1，`go test -benchtime=10x -benchmem`。
 
@@ -435,7 +436,7 @@ go test ./internal/plugins/host -run '^$' -bench 'BenchmarkRenderIsland' -bencht
 go test ./plugins/official -run TestClientBundleSizes -v
 ```
 
-## 17. P3-3 浏览器冒烟（2026-11-05）
+## 17. P3-2 浏览器冒烟（2026-11-05）
 
 真实 Chromium（ego lite）手工验证，非 CI：
 
