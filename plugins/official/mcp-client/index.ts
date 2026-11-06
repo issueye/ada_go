@@ -72,6 +72,13 @@ interface ToolDef {
 interface AgentAPI {
   registerTool(def: ToolDef): void;
   route(method: "GET" | "POST", path: string, handler: (req: RouteRequest, ctx: ToolContext) => unknown): void;
+  // registerAction 给渲染桥的 SSR 预取用（7.5）：只读动作的结果会落在
+  // props.data.backend["mcp-client"].page_servers，首屏不依赖浏览器脚本。
+  registerAction(def: {
+    name: string;
+    mode: "read" | "write";
+    execute: (input: unknown, ctx: AssemblyContext) => unknown;
+  }): void;
 }
 
 interface ServerConfig {
@@ -1276,6 +1283,16 @@ export default async function (agent: AgentAPI, ctx: AssemblyContext): Promise<v
 
   // 管理页数据面：状态列表 + 工作区配置的读写/启停。
   // 配置写在宿主 fs 的工作区 scope 内（固定路径，不接受用户传入路径）。
+  agent.registerAction({
+    name: "state",
+    mode: "read",
+    execute: () => ({
+      servers: statuses,
+      configPath: CONFIG_DISPLAY_PATH,
+      userConfigPath: USER_CONFIG_DISPLAY_PATH,
+    }),
+  });
+
   agent.route("GET", "/servers", () => ({
     servers: statuses,
     configPath: CONFIG_DISPLAY_PATH,

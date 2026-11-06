@@ -1689,6 +1689,10 @@ func TestOverviewIslandAndDashboardJSON(t *testing.T) {
 		`islands.js`,
 		`ada-ui.css`,
 		`第一个会话`,
+		`ov-kpis`,
+		`ov-contrib`,
+		`dashboard.widgets`,
+		`ov-status`,
 	} {
 		wantContains(t, body, want)
 	}
@@ -1741,6 +1745,9 @@ func TestExtensionsIslandAndJSON(t *testing.T) {
 		`data-ada-island="extensions"`,
 		`data-ada-state=`,
 		`文件工具`,
+		`ex-toolbar`,
+		`ex-row--head`,
+		`ex-seg`,
 		`ada-render.js`,
 		`ada-ui.js`,
 		`islands.js`,
@@ -2002,11 +2009,19 @@ func TestPluginDetailShowsReadmeAndFiles(t *testing.T) {
 
 	body := serve(t, srv, "GET", "/extensions/tools-fs", nil).Body.String()
 	for _, want := range []string{
-		`class="ada-plugin-detail"`,
-		"插件信息",
+		`class="pd-root"`,
+		// 元数据从页面底部提到首屏信息条：字段、能力徽章、路径复制都在岛容器内。
+		`class="pd-meta"`,
+		`aria-label="插件信息"`,
+		`pd-field__label">状态`,
+		`pd-field__label">信任级别`,
+		`pd-field__label">来源`,
 		"插件目录",
-		`ada-plugin-stat__value">2`, // 页面
-		`ada-plugin-stat__value">3`, // 插槽
+		"1 工具", // 能力徽章（原来挤在三个 stat 里）
+		"2 页面",
+		"3 插槽",
+		`data-pd-copy="path"`,
+		`class="pd-doc__head"`,
 		"README",
 		"<h1>文件工具</h1>",
 		"/tmp/plugins/tools-fs",
@@ -2028,7 +2043,11 @@ func TestPluginDetailShowsReadmeAndFiles(t *testing.T) {
 	}
 	head := body[:islandAt]
 	for _, want := range []string{
-		`class="ada-section-head__actions"`,
+		`class="pd-head__title"`,
+		`class="pd-chip pd-chip--mono"`,
+		`class="pd-state`,
+		`data-tip=`,
+		`ada-section-head__actions pd-head__actions`,
 		`action="/extensions/tools-fs/disable"`,
 		`href="/extensions"`,
 	} {
@@ -2088,11 +2107,11 @@ func TestPluginFilePreview(t *testing.T) {
 	// 默认选中 README，服务端直接渲染内容；左侧文件树保留所有路径。
 	page := serve(t, srv, "GET", "/extensions/demo-plugin", nil).Body.String()
 	for _, want := range []string{
-		`class="ada-plugin-tree"`,
+		`class="pd-tree__list"`,
 		`data-plugin-file-path="index.ts"`,
 		`data-plugin-file-content`,
 		"hello plugin",
-		`class="ada-plugin-tree__item is-active"`,
+		`class="pd-tree__item is-active"`,
 	} {
 		wantContains(t, page, want)
 	}
@@ -2101,24 +2120,24 @@ func TestPluginFilePreview(t *testing.T) {
 	indexPage := serve(t, srv, "GET", "/extensions/demo-plugin?file=index.ts", nil).Body.String()
 	wantContains(t, indexPage, "export const answer = 42;")
 
-	// Markdown 文件带「预览 / 源码」开关：源码态只多一个按钮，正文仍是高亮代码块。
-	wantContains(t, page, `class="ada-plugin-viewer__toggle"`)
-	wantContains(t, page, `class="ada-plugin-viewer__code`)
-	if strings.Contains(page, "ada-plugin-file-preview") {
+	// Markdown 文件带「预览 / 源码」分段；源码态正文仍是高亮代码块。
+	wantContains(t, page, `class="pd-seg"`)
+	wantContains(t, page, `class="pd-doc__code`)
+	if strings.Contains(page, "pd-doc__preview") {
 		t.Fatal("默认应是源码态，不应直接渲染预览")
 	}
 	// ?view=md 是无 JS 的预览入口：同一份 README 由服务端渲染成 HTML。
 	preview := serve(t, srv, "GET", "/extensions/demo-plugin?file=README.md&view=md", nil).Body.String()
 	for _, want := range []string{
-		`class="markdown-body ada-markdown ada-plugin-file-preview"`,
+		`class="markdown-body ada-markdown pd-doc__preview"`,
 		"<h1>Demo</h1>",
 		"切换到源码",
 	} {
 		wantContains(t, preview, want)
 	}
-	// 非 Markdown 文件没有这个开关。
-	if strings.Contains(indexPage, "ada-plugin-viewer__toggle") {
-		t.Fatal("index.ts 不是 Markdown，不应出现预览/源码开关")
+	// 非 Markdown 文件没有这个分段控件。
+	if strings.Contains(indexPage, `class="pd-seg"`) {
+		t.Fatal("index.ts 不是 Markdown，不应出现预览/源码分段")
 	}
 
 	res := serve(t, srv, "GET", "/extensions/demo-plugin/file?path=index.ts", nil)

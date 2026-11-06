@@ -1319,63 +1319,90 @@ body.ada-sidebar-resizing .ada-sidebar {
   /* 底部留出插件悬浮区 + 「回到最新」的高度：它们是覆盖层，不占流式布局。 */
   padding: 18px 28px 52px;
 }
-/* Flash 是浮动 toast，不占主布局空间；位置固定在顶栏下方居中。 */
-.ada-flash {
+/* Flash / notify 统一成「底部居中的一次性 toast」：与 Token 用量、MCP、
+   供应商、环境变量、插件详情等页面的 toast 同一套观感（近黑胶囊 + 危险色错误态）。
+   服务端渲染的 HTML 与 data-flash 属性保持不变，无 JS 时仍可见；app.js 负责
+   自动消失与关闭。选择器带 [data-flash] 提高特异性，压过 app.css 的
+   .alert-success / .alert-danger / .alert-info 浅色背景。 */
+.ada-flash.alert[data-flash] {
   position: fixed;
-  top: 66px;
+  top: auto;
   left: 50%;
-  z-index: 90;
-  width: min(560px, calc(100vw - 32px));
+  bottom: 28px;
+  z-index: 80;
+  display: block;
+  width: max-content;
+  max-width: min(460px, calc(100vw - 40px));
   margin: 0;
-  transform: translateX(-50%);
-  border: 1px solid color-mix(in srgb, var(--ph-line-strong) 55%, transparent);
-  box-shadow:
-    0 18px 42px -18px rgba(15, 23, 42, 0.32),
-    0 4px 14px -8px rgba(15, 23, 42, 0.2);
-  animation: ada-flash-in 180ms ease-out;
+  padding: 9px 14px;
+  border: 0;
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-ink);
+  color: var(--ph-canvas);
+  font-size: var(--ada-text-sm);
+  line-height: 1.5;
+  text-align: center;
+  box-shadow: 0 10px 28px -14px rgba(22, 23, 26, 0.55);
+  transform: translate(-50%, 0);
+  animation: ada-flash-in 160ms ease-out;
 }
+
+.ada-flash.alert[data-flash] .alert-message {
+  margin: 0;
+  color: inherit;
+  line-height: 1.5;
+}
+
+.ada-flash.alert[data-flash="error"] {
+  background: var(--ph-danger-ink);
+  color: #ffffff;
+}
+
+/* 动画只动 transform，不碰 opacity：动画时钟暂停时 toast 仍然可见。 */
 @keyframes ada-flash-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -6px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
+  from { transform: translate(-50%, 10px); }
+  to { transform: translate(-50%, 0); }
 }
+
 @media (max-width: 640px) {
-  .ada-flash {
-    top: 60px;
-    width: calc(100vw - 24px);
-  }
+  .ada-flash.alert[data-flash] { max-width: calc(100vw - 24px); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ada-flash {
-    animation: none;
-  }
+  .ada-flash.alert[data-flash] { animation: none; }
 }
-.ada-flash__close {
-  display: grid;
-  align-items: center;
-  align-content: center;
-  justify-content: center;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  flex-shrink: 0;
-  margin-left: auto;
+
+/* 关闭按钮视觉收起（toast 是纯文字胶囊），但保留 DOM 与键盘可达性；
+   聚焦时重新显现，不会成为「看不见的焦点」。 */
+.ada-flash .ada-flash__close {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
   border: 0;
   border-radius: var(--ada-radius-sm);
   background: transparent;
   color: inherit;
-  opacity: 0.6;
+  opacity: 0;
   cursor: pointer;
 }
-.ada-flash__close:hover {
-  opacity: 1;
-  background: rgba(24, 24, 27, 0.08);
+
+.ada-flash .ada-flash__close:focus-visible {
+  top: 50%;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  overflow: visible;
+  clip: auto;
+  opacity: 0.85;
+  outline: 2px solid var(--ph-canvas);
+  outline-offset: 1px;
+  transform: translateY(-50%);
 }
+
+.ada-flash .ada-flash__close:hover { opacity: 1; }
 /* 浮层（审批 / 排队 / 提问）
    提问卡（.ada-tray--question）是 absolute 浮在对话流上的——不占布局空间。
    因此容器**不能自滚动**：overflow 会把浮出去的卡片整个裁掉，

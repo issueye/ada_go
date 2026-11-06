@@ -34,15 +34,15 @@ func TestMCPClientAdminPageRenders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Page: %v", err)
 	}
+	// 页面已改成岛屿组件：这里只钉住 SSR 骨架与首屏文案，
+	// 卡片列表与编辑弹窗由 client.tsx 的组件在浏览器接管。
 	for _, want := range []string{
 		"data-mcp-page",
 		"MCP 服务端",
-		"data-mcp-servers",
-		"data-mcp-editor",
-		"data-mcp-highlight-code",
-		"data-mcp-format",
-		"data-mcp-config-status",
-		"data-mcp-save",
+		"mc-summary",
+		"mc-seg__item",
+		"mc-loading",
+		"data-ada-entry=\"page:servers\"",
 	} {
 		if !strings.Contains(string(html), want) {
 			t.Fatalf("管理页缺少 %q:\n%s", want, html)
@@ -67,9 +67,9 @@ func TestMCPClientAdminPageRenders(t *testing.T) {
 		t.Fatal("前端插件列表里没有 mcp-client")
 	}
 
-	// 静态资源要真实可加载：页面脚本与样式都已随包声明。
-	if _, ok := bridge.StaticAsset("mcp-client", "mcp-client.js"); !ok {
-		t.Fatal("缺少 static/mcp-client.js")
+	// 静态资源要真实可加载：岛屿 bundle 与样式都已随包声明。
+	if _, ok := bridge.StaticAsset("mcp-client", "client.js"); !ok {
+		t.Fatal("缺少 static/client.js（岛屿 bundle）")
 	}
 	if _, ok := bridge.StaticAsset("mcp-client", "mcp-client.css"); !ok {
 		t.Fatal("缺少 static/mcp-client.css")

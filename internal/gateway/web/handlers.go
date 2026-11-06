@@ -1858,15 +1858,30 @@ func (s *Server) overviewDashboard(r *http.Request, threads []threadSummaryDTO) 
 		lastActivity = relativeTime(newest)
 	}
 	pluginCount := len(s.collectPlugins(r, ""))
-	return dashboardState{
-		Stats: []overviewStat{
-			{Label: "会话", Value: strconv.Itoa(len(threads)), Hint: "本地会话总数", Tone: "brand"},
-			{Label: "最近活动", Value: lastActivity, Hint: "最后一个会话的更新时间", Tone: "neutral"},
-			{Label: "工作区", Value: strconv.Itoa(len(s.workspaceList())), Hint: "配置与本次打开的工作区", Tone: "neutral"},
-			{Label: "插件", Value: strconv.Itoa(pluginCount), Hint: "前端与后端插件总数", Tone: "brand"},
-		},
-		Recent: recent,
+	stats := []overviewStat{
+		{Label: "会话", Value: strconv.Itoa(len(threads)), Hint: "本地会话总数", Tone: "brand"},
+		{Label: "最近活动", Value: lastActivity, Hint: "最后一个会话的更新时间", Tone: "neutral"},
+		{Label: "工作区", Value: strconv.Itoa(len(s.workspaceList())), Hint: "配置与本次打开的工作区", Tone: "neutral"},
+		{Label: "插件", Value: strconv.Itoa(pluginCount), Hint: "前端与后端插件总数", Tone: "brand"},
 	}
+	// 纯数字才用等宽字体；「1 天前」这类相对时间改用界面字重，避免中英混排出现大空隙。
+	for i := range stats {
+		stats[i].Numeric = numericLabel(stats[i].Value)
+	}
+	return dashboardState{Stats: stats, Recent: recent}
+}
+
+// numericLabel 只允许数字与千分位逗号。
+func numericLabel(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if (r < '0' || r > '9') && r != ',' {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) overviewData(r *http.Request, threads []threadSummaryDTO) overviewData {
@@ -1910,11 +1925,21 @@ func (s *Server) handleExtensions(w http.ResponseWriter, r *http.Request) {
 	}
 	base := s.base(r, "extensions", "插件", threads, "", err == nil)
 	base.NeedsUI = true
+	enabled, disabled := 0, 0
+	for _, p := range state.Plugins {
+		if p.Enabled {
+			enabled++
+		} else {
+			disabled++
+		}
+	}
 	data := extensionsData{
-		baseData:    base,
-		Plugins:     state.Plugins,
-		PluginCount: state.Count,
-		StateJSON:   string(raw),
+		baseData:      base,
+		Plugins:       state.Plugins,
+		PluginCount:   state.Count,
+		EnabledCount:  enabled,
+		DisabledCount: disabled,
+		StateJSON:     string(raw),
 	}
 	s.render(w, http.StatusOK, "extensions", data)
 }

@@ -1,7 +1,7 @@
 {
   "id": "env-manager",
   "name": "环境变量",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "apiVersion": 1,
   "description": "管理全局与工作区环境变量（注入插件启动的子进程；配置在 ~/.adago/env.json 与 .adago/env.json）",
   "trust": "builtin",
@@ -10,10 +10,15 @@
     "capabilities": ["env.admin"]
   },
   "frontend": {
-    "capabilities": ["frontend.script"],
+    "capabilities": ["frontend.script", "backend.read"],
+    "client": "client.js",
     "nav": [{ "label": "环境变量", "slug": "settings" }],
-    "pages": [{ "slug": "settings", "title": "环境变量", "template": "page.tsx" }],
-    "scripts": ["env-manager.js"],
+    "pages": [
+      { "slug": "settings", "title": "环境变量", "template": "env-page.tsx", "hydrate": true }
+    ],
+    "actions": {
+      "page_settings": { "action": "state", "read": true, "backend": "env-manager" }
+    },
     "styles": ["env-manager.css"],
     "assets": "static"
   }

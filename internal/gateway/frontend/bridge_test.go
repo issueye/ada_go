@@ -567,11 +567,10 @@ func TestBridgeAssetsAndBindings(t *testing.T) {
 		t.Fatalf("Styles 缺少计划卡样式（带内容指纹）: %v", styles)
 	}
 	scripts := b.Scripts()
+	// provider-admin / env-manager / mcp-client 都已改成岛屿（client.js），
+	// 不再注册 legacy 脚本，因此这里只剩一个仍在用 legacy 运行时的插件。
 	wantScripts := []string{
 		"/ext/cron-manager/static/cron-manager.js?v=",
-		"/ext/env-manager/static/env-manager.js?v=",
-		"/ext/mcp-client/static/mcp-client.js?v=",
-		"/ext/provider-admin/static/provider-admin.js?v=",
 	}
 	if len(scripts) != len(wantScripts) {
 		t.Fatalf("Scripts 应含 %v，got %v", wantScripts, scripts)
@@ -669,7 +668,7 @@ func TestBridgeAskUserSlotUsesInteractionProjection(t *testing.T) {
 	}
 }
 
-// provider-admin：页面是 Master-Detail 骨架，数据由插件 route（provider-admin.js）加载。
+// provider-admin：页面是 Master-Detail 骨架，数据由插件 route（/state）加载。
 func TestBridgeProviderAdminPageRendersSkeleton(t *testing.T) {
 	core := newFakeCore()
 	b := bridgeWithOnly(t, core, "provider-admin", "csrf-y")
@@ -678,12 +677,91 @@ func TestBridgeProviderAdminPageRendersSkeleton(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Page(provider-admin): %v", err)
 	}
+	// SSR 只保证骨架与首屏文案：详情内容依赖 /state 预取，不在断言范围。
 	for _, want := range []string{
-		`data-provider-admin`, "模型设置", "管理自定义模型供应商", "添加供应商",
-		`data-pm-refresh`, `data-pm-list`, `data-pm-detail`, `data-pm-status`,
+		`data-provider-admin-next`, "模型供应商", "添加供应商",
+		`pm-layout`, `pm-list`, `pm-detail`,
 	} {
 		if !strings.Contains(string(html), want) {
 			t.Fatalf("供应商页缺少 %q\n%s", want, html)
+		}
+	}
+}
+
+// provider-admin 详情分支：有供应商数据时，详情头、字段表、危险区都要能 SSR 出来
+// （SSR 的 VNode 白名单不含 svg / 未登记组件，这里顺带守住那条边界）。
+func TestBridgeProviderAdminDetailRenders(t *testing.T) {
+	catalog := `{
+		"providers": [{
+			"id": "unisound",
+			"displayName": "unisound",
+			"protocol": "openai-chat",
+			"baseUrl": "https://maas-api.unisound.com/v1",
+			"proxy": "",
+			"headers": {"X-Api-Version": "2024-01-01"},
+			"disabled": false,
+			"hasApiKey": true,
+			"apiKeyHint": "594b",
+			"models": [
+				{"id": "unisound-chat", "contextWindow": 128000, "supportsTools": true,
+				 "thinkingLevels": ["low", "medium", "high"], "input": ["text"]},
+				{"id": "unisound-embed", "supportsTools": false}
+			]
+		}],
+		"current": {"providerId": "unisound", "modelId": "unisound-chat"}
+	}`
+	core := newFakeCore().on("action.invoke", `{"ok":true,"result":`+catalog+`}`)
+	b := bridgeWithOnly(t, core, "provider-admin", "csrf-y")
+
+	html, err := b.Page("provider-admin", "providers", request(t, "/ext/provider-admin/providers"))
+	if err != nil {
+		t.Fatalf("Page(provider-admin): %v", err)
+	}
+	for _, want := range []string{
+		"unisound", "已启用", "密钥已保存",
+		"供应商 ID", "端点", "危险操作", "供应商信息", "模型列表",
+		"2 个模型", "查看全部",
+	} {
+		if !strings.Contains(string(html), want) {
+			t.Fatalf("供应商详情缺少 %q\n%s", want, html)
+		}
+	}
+}
+
+// mcp-client 页面 SSR 预取：动作结果按绑定名 page_servers 落到 props.data.backend，
+// 首屏就要能看到两张 server 卡、状态徽章与工具表，而不是空占位。
+func TestBridgeMCPClientPageRenders(t *testing.T) {
+	state := `{
+		"configPath": ".adago/mcp.json",
+		"userConfigPath": "~/.adago/mcp.json",
+		"servers": [
+			{"id":"computer_use","transport":"stdio","url":"E:/mcp/computer_use.exe mcp",
+			 "source":".adago/mcp.json","enabled":false,"status":"disabled","tools":0,"items":[],
+			 "toolPrefix":"","error":""},
+			{"id":"browser_use","transport":"stdio","url":"E:/mcp/browser-use.exe mcp",
+			 "source":".adago/mcp.json","enabled":true,"status":"ready","tools":2,
+			 "toolPrefix":"browser_",
+			 "items":[
+				{"name":"browser_open","mcpName":"browser_open","access":"read","schemaSimplified":false},
+				{"name":"browser_act","mcpName":"browser_act","access":"write","schemaSimplified":true}
+			 ]}
+		]
+	}`
+	core := newFakeCore().on("action.invoke", `{"ok":true,"result":`+state+`}`)
+	b := bridgeWithOnly(t, core, "mcp-client", "csrf-y")
+
+	html, err := b.Page("mcp-client", "servers", request(t, "/ext/mcp-client/servers"))
+	if err != nil {
+		t.Fatalf("Page(mcp-client): %v", err)
+	}
+	for _, want := range []string{
+		"computer_use", "browser_use", "已停用", "已连接",
+		"共 2 个 server", "已连接 1", "已停用 1",
+		"工具", "browser_open", "只读", "写入", "Schema 已简化",
+		"data-ada-entry=\"page:servers\"",
+	} {
+		if !strings.Contains(string(html), want) {
+			t.Fatalf("MCP 页面缺少 %q\n%s", want, html)
 		}
 	}
 }

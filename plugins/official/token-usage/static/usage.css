@@ -1,99 +1,415 @@
-/* Token 用量（token-usage 插件）：颜色/尺寸只引用 --ph-* / --ada-* 令牌。 */
+/* Token 用量（token-usage 插件）：颜色/尺寸只引用 --ph-* / --ada-* 令牌。
+   页面用 tu-* 类；概览页的 dashboard 片段沿用 tu-widget__*。 */
 
 .tu-page {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
+  max-width: 1040px;
 }
 
 .tu-head {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.tu-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .tu-title {
   margin: 0;
-  font-size: var(--ada-text-lg);
+  font-size: var(--ada-text-xl);
   font-weight: 600;
   color: var(--ph-ink);
 }
 
-.tu-sub {
-  margin: 0;
+.tu-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.tu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 13px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-surface);
+  color: var(--ph-ink);
+  font: inherit;
   font-size: var(--ada-text-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tu-btn:hover {
+  border-color: var(--ph-line-strong);
+  background: var(--ph-subtle);
+}
+
+.tu-btn--primary {
+  border-color: transparent;
+  background: var(--ph-ink);
+  color: var(--ph-canvas);
+  font-weight: 500;
+}
+
+.tu-btn--primary:hover {
+  background: var(--ph-brand-strong);
+}
+
+/* ── ⓘ tooltip ──────────────────────────────────────────────────────── */
+
+.tu-tip {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  color: var(--ph-faint);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: help;
+}
+
+.tu-tip:hover,
+.tu-tip:focus-visible {
+  color: var(--ph-ink);
+  outline: none;
+}
+
+.tu-tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: -3px;
+  top: calc(100% + 7px);
+  z-index: 60;
+  width: max-content;
+  max-width: 300px;
+  padding: 7px 10px;
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-ink);
+  color: var(--ph-canvas);
+  font-size: var(--ada-text-xs);
+  font-weight: 400;
+  line-height: 1.6;
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  transform: translateY(-2px);
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.tu-tip:hover::after,
+.tu-tip:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── 汇总行 / 视图分段 ──────────────────────────────────────────────── */
+
+.tu-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 26px;
+  font-size: var(--ada-text-xs);
   color: var(--ph-muted);
 }
 
-.tu-grid {
+.tu-meta__right {
+  margin-left: auto;
+  color: var(--ph-faint);
+}
+
+.tu-seg {
+  display: flex;
+  gap: 2px;
+  height: 26px;
+  padding: 3px;
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-subtle);
+}
+
+.tu-seg__item {
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--ada-radius-sm);
+  background: transparent;
+  color: var(--ph-muted);
+  font: inherit;
+  font-size: var(--ada-text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tu-seg__item:hover {
+  color: var(--ph-ink);
+}
+
+.tu-seg__item.is-active {
+  border-color: var(--ph-line);
+  background: var(--ph-surface);
+  color: var(--ph-ink);
+  font-weight: 500;
+}
+
+/* ── 四项速览 ───────────────────────────────────────────────────────── */
+
+.tu-kpis {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
 }
 
-.tu-card {
-  padding: 14px 16px;
+.tu-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-surface);
 }
 
-.tu-card__head {
+.tu-kpi__label {
+  font-size: var(--ada-text-xs);
+  color: var(--ph-muted);
+}
+
+.tu-kpi__value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ph-ink);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: 21px;
+  font-weight: 500;
+}
+
+.tu-kpi__note {
+  font-size: var(--ada-text-xs);
+  color: var(--ph-faint);
+}
+
+/* ── 下排卡片 ───────────────────────────────────────────────────────── */
+
+.tu-lower {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 10px;
+}
+
+.tu-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-surface);
+}
+
+.tu-panel__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
 }
 
-.tu-card__title {
+.tu-panel__title {
   font-size: var(--ada-text-sm);
   font-weight: 600;
   color: var(--ph-ink);
 }
 
-.tu-card__total {
-  font-family: var(--mono-font, Consolas, monospace);
-  font-size: var(--ada-text-lg);
-  font-weight: 600;
-  color: var(--ph-ink);
-}
-
-.tu-card__hint {
-  margin: 4px 0 0;
+.tu-panel__hint,
+.tu-panel__note,
+.tu-panel__empty {
+  margin: 0;
   font-size: var(--ada-text-xs);
-  color: var(--ph-muted);
+  color: var(--ph-faint);
+  line-height: 1.6;
 }
 
-.tu-stats {
+.tu-panel__empty {
+  padding: 10px 0;
+}
+
+.tu-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tu-row {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  margin: 12px 0 0;
+  grid-template-columns: 48px minmax(0, 1fr) 96px 44px;
+  align-items: center;
+  gap: 10px;
 }
 
-.tu-stat__label {
-  display: block;
+.tu-row__label {
   font-size: var(--ada-text-xs);
   color: var(--ph-muted);
 }
 
-.tu-stat__value {
-  display: block;
-  margin-top: 2px;
-  font-family: var(--mono-font, Consolas, monospace);
-  font-size: var(--ada-text-sm);
+.tu-row__value {
+  text-align: right;
   color: var(--ph-ink);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
 }
 
-.tu-card__model {
-  margin: 12px 0 0;
+.tu-row__pct {
+  text-align: right;
+  color: var(--ph-faint);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+}
+
+/* 计量条：SSR VNode 白名单不含 style，宽度用 10% 一档的类名表达。 */
+.tu-meter {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--ph-subtle);
+  overflow: hidden;
+}
+
+.tu-meter__fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+}
+
+.tu-meter__tone--ink { background: var(--ph-ink); }
+.tu-meter__tone--mid { background: var(--ph-muted); }
+.tu-meter__tone--soft { background: var(--ph-success-ink); }
+
+.tu-meter__fill--p0 { width: 0; }
+.tu-meter__fill--p10 { width: 10%; }
+.tu-meter__fill--p20 { width: 20%; }
+.tu-meter__fill--p30 { width: 30%; }
+.tu-meter__fill--p40 { width: 40%; }
+.tu-meter__fill--p50 { width: 50%; }
+.tu-meter__fill--p60 { width: 60%; }
+.tu-meter__fill--p70 { width: 70%; }
+.tu-meter__fill--p80 { width: 80%; }
+.tu-meter__fill--p90 { width: 90%; }
+.tu-meter__fill--p100 { width: 100%; }
+
+.tu-detail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 24px;
+}
+
+.tu-detail__label {
   font-size: var(--ada-text-xs);
   color: var(--ph-muted);
-  word-break: break-all;
+}
+
+.tu-detail__value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ph-ink);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+}
+
+.tu-detail__value--mono {
+  max-width: 200px;
+}
+
+/* ── 底注 / toast ───────────────────────────────────────────────────── */
+
+.tu-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--ada-text-xs);
+  color: var(--ph-faint);
+}
+
+.tu-foot__left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tu-foot__right {
+  white-space: nowrap;
+}
+
+.tu-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 80;
+  max-width: min(460px, calc(100vw - 40px));
+  padding: 9px 14px;
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-ink);
+  color: var(--ph-canvas);
+  font-size: var(--ada-text-sm);
+  line-height: 1.5;
+  text-align: center;
+  box-shadow: 0 10px 28px -14px rgba(22, 23, 26, 0.55);
+  pointer-events: none;
+  transform: translate(-50%, 0);
+  animation: tu-toast-in 160ms ease-out;
+}
+
+.tu-toast[data-tone="error"] {
+  background: var(--ph-danger-ink);
+  color: #ffffff;
+}
+
+@keyframes tu-toast-in {
+  from { transform: translate(-50%, 10px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tu-toast { animation: none; }
+}
+
+/* ── 概览页 dashboard 片段 ─────────────────────────────────────────── */
+
+.tu-widget {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px 14px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-surface);
 }
 
 .tu-widget__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
 }
 
 .tu-widget__title {
@@ -110,8 +426,17 @@
 }
 
 .tu-widget__meta {
-  margin: 6px 0 0;
+  margin: 0;
   font-size: var(--ada-text-xs);
   color: var(--ph-muted);
   line-height: 1.6;
+}
+
+/* ── 窄屏 ───────────────────────────────────────────────────────────── */
+
+@media (max-width: 860px) {
+  .tu-head { flex-direction: column; align-items: flex-start; }
+  .tu-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tu-lower { grid-template-columns: minmax(0, 1fr); }
+  .tu-meta__right { display: none; }
 }

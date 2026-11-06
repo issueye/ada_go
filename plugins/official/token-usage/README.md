@@ -23,7 +23,15 @@
 | 样式 | `usage.css`（`static/`） |
 | 浏览器 bundle | `static/client.js`（由 `pluginbuild` 从 `page.tsx` 生成） |
 
-页面是 P2-4 首个真实业务迁移：服务端 `renderToJSON` 输出首屏，浏览器用同一份 `defineComponent` hydrate；「显示缓存命中率」是本地状态，不额外请求数据。
+页面是 P2-4 首个真实业务迁移：服务端 `renderToJSON` 输出首屏，浏览器用同一份 `defineComponent` hydrate。重设计后：
+
+- 头部 `ⓘ` tooltip 承载口径说明，操作是「复制汇总」「导出 CSV」（都在浏览器本地生成，不发请求）；一次性反馈走底部 toast（`showToast` 方法名与 `toast` 数据字段不同名，避免单 Proxy 遮蔽）。
+- 「工作区 / 当前会话」分段切换四张 KPI 卡的数据源（累计 Token / 输入 / 输出 / 缓存命中率）。
+- 「用量构成」用三条计量条展示 输入、输出、缓存占输入的比例；计量条宽度用 10% 一档的类名表达（SSR VNode 白名单不含 `style`）。
+- 「模型与成本」显示 `costMicros` 与单组 `provider/model`；多分组被后端折叠时如实标注，不编造拆分。
+- **不做**近 7 天趋势、按模型拆分、环比：`usage.get` 只返回两个标量聚合，没有日期分桶、分组明细或上期值。
+
+`dashboard.tsx` 仍是概览页的 SSR 插槽片段，样式复用 `usage.css` 的 `tu-widget__*`。
 
 ## 构建
 
@@ -43,8 +51,9 @@ go run ./tools/pluginbuild -dir plugins/official/token-usage -entry client.tsx -
 }
 ```
 
-- 页面并排展示「工作区」（所有会话累计）与「当前会话」两张卡片。
+- 四张 KPI 卡显示选中范围（工作区或当前会话）的累计 / 输入 / 输出 / 缓存命中率；缓存命中率 = `cacheTokens / inputTokens`。
 - 数量按千分位格式化；成本由 `costMicros / 1_000_000` 转成美元，无成本时显示 `—`。
+- 累计 = 输入 + 输出；缓存是输入的一部分，**不重复计入**。
 - 仪表盘只展示工作区汇总与当前会话明细；两者都没有数据时返回 `null`，概览页不留空卡。
 
 ## Markdown 用法

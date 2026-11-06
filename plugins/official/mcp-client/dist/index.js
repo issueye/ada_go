@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:be074d0d150153cc) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:e4a5a9be5ada5e7f) by plugins/official/build.mjs — do not edit
 // mcp-client —— 官方插件：把 MCP server 的工具接入为普通工具（v2 设计见 docs/18）。
 //
 // 范围：
@@ -73,6 +73,13 @@
                     
                                    
                                                                                                                
+                                                 
+                                                              
+                       
+                 
+                           
+                                                               
+           
  
 
                         
@@ -1277,6 +1284,16 @@ export default async function (agent          , ctx                 )           
 
   // 管理页数据面：状态列表 + 工作区配置的读写/启停。
   // 配置写在宿主 fs 的工作区 scope 内（固定路径，不接受用户传入路径）。
+  agent.registerAction({
+    name: "state",
+    mode: "read",
+    execute: () => ({
+      servers: statuses,
+      configPath: CONFIG_DISPLAY_PATH,
+      userConfigPath: USER_CONFIG_DISPLAY_PATH,
+    }),
+  });
+
   agent.route("GET", "/servers", () => ({
     servers: statuses,
     configPath: CONFIG_DISPLAY_PATH,

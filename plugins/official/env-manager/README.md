@@ -7,12 +7,28 @@
 
 ## 页面
 
-启用插件后，侧栏「环境变量」或 `/ext/env-manager/settings`：
+启用插件后，侧栏「环境变量」或 `/ext/env-manager/settings`。
 
-- 列表分「工作区 / 全局」两段；工作区同名项标注「覆盖全局」；
-- 值默认打码，点「显示」展开；行内「编辑」输入新值后回车保存；
-- 「删除」需确认；「添加 / 更新」按范围 + 变量名 + 值写入；
+0.2.0 起页面改为岛屿组件（`env-page.tsx`，SSR + hydrate），结构与交互：
+
+| 区域 | 现状 |
+| --- | --- |
+| 页面头部 | 标题 + 「!」说明图标（两层覆盖关系收进 tooltip）+ 刷新 / 重载插件 |
+| 环境变量卡片 | 头部：数量 + 范围筛选（全部/工作区/全局）；表单一行：范围分段 + 变量名 + 值 + 添加/更新；行列表：等宽变量名、打码值、范围徽章、被覆盖标记、行内 显示/隐藏·复制·删除；底注：打码与命名规则 |
+| 服务程序目录 | 两个目录块（范围 + 已创建状态 + 等宽路径 + 复制路径）+ 程序清单（名称 / 范围 / 大小 / 修改时间） |
+
+约定：
+
+- 工作区同名项优先展示并标注「覆盖全局」，全局同名项弱化显示，避免看成一式两份；
+- 值默认打码（保留尾 4 位），逐行「显示 / 隐藏」，「复制」取原文；
+- **变量名在前端就按 `^[A-Za-z_][A-Za-z0-9_]*$` 校验**，非法或 `ADAG_` 前缀时禁用提交并给出原因，不用等后端 400；
+- 一次性反馈统一走底部 toast（方法名 `showToast`，`data` 里同名字段叫 `toast`——两者同名会被 data 遮住）；
 - 「重载插件」重新装配，新的子进程才会拿到新环境。
+- 旧目录兼容、读取失败这类提示放在列表**下方**，用左侧色标的窄条（`.em-notes`），不是满宽告警横幅——
+  它们解释的是「读写落在哪」，不是页面出错；用量少时窄条只占文字宽度。
+
+legacy `page.tsx` 与 `static/env-manager.js` 保留在仓库作历史参考，清单不再加载它们，
+新的 `env-manager.css` 也不包含旧页面所需的类。
 
 ## 数据面
 
@@ -50,6 +66,16 @@ Windows 看 `.exe/.cmd/.bat/.com/.ps1`），非可执行文件不列出。页面
 ## 构建
 
 `index.ts` 是源码，`dist/index.js` 由 `node plugins/official/build.mjs` 生成；不要手改
-`dist/`。`page.tsx` 与 `static/` 由 Gateway 渲染桥在运行时加载，不进 `dist/`。
+`dist/`。`env-page.tsx` 由 Gateway 渲染桥在运行时编译，`static/` 原样嵌入。
+
+浏览器 bundle（岛屿）由 pluginbuild 生成，改完 `client.tsx` / `env-page.tsx` 要重新构建：
+
+```sh
+go run ./tools/pluginbuild -dir plugins/official/env-manager -entry client.tsx -out static/client.js
+go run ./tools/pluginbuild -dir plugins/official/env-manager -entry client.tsx -out static/client.js -check
+```
+
+页面通过只读动作 state 预取 `/state`（落在 `props.data.backend["env-manager"].page_settings`），
+SSR 与无 JS 时也能看到两层变量与服务程序目录。
 
 

@@ -466,10 +466,11 @@ type dashboardState struct {
 }
 
 type overviewStat struct {
-	Label string `json:"label"`
-	Value string `json:"value"`
-	Hint  string `json:"hint"`
-	Tone  string `json:"tone"` // neutral | brand | warn
+	Label   string `json:"label"`
+	Value   string `json:"value"`
+	Hint    string `json:"hint"`
+	Tone    string `json:"tone"` // neutral | brand | warn
+	Numeric bool   `json:"numeric,omitempty"`
 }
 
 type overviewThread struct {
@@ -541,6 +542,9 @@ type extensionsData struct {
 	baseData
 	Plugins     []pluginRow
 	PluginCount int
+	// EnabledCount / DisabledCount 给 SSR 的筛选分段用；客户端岛从 plugins 自行统计。
+	EnabledCount  int
+	DisabledCount int
 	// StateJSON 是给浏览器岛的初始状态；无 JS 时仍渲染 Plugins。
 	StateJSON string
 }

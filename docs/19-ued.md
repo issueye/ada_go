@@ -114,6 +114,7 @@ ada 词根统一，四种写法各有边界，**不得混用**：
 - 类名 `ada-` 前缀；状态用 `data-*` 属性或 `is-*` 类表达，不拼条件 class 串；Web Component 刻意不挂 shadow root（SSR 同树样式）。
 - **标题层级**：一篇页面只有顶栏一个 `<h1>`（页面标识）；正文页面标题用 `<h2 class="ada-page-title">`，节标题 `<h2 class="ada-section-title">`。二级页历史上有过「顶栏 h1 + 正文 h1」并列，读屏按标题跳读会听到两遍同一页名，已统一。
 - 二级页（overview/extensions/workspaces/login/plugin_detail）已统一到 `ada-*` 组件方言（批次 D 完成）：页面骨架用 `ada-page-title/ada-section-head/ada-panel/ada-chip/ada-table/ada-empty-card/ada-link`（app-local.css）。`app.css` 里的基线类与工具类是**冻结的存量**：不许新增使用；新页面一律走 ada-* 方言。
+- **重设计批次的例外**：Token 用量 / 插件 / 概览 / 插件详情四页在 `static/ui/pages.css` 用页面专属前缀（`tu-* / ex-* / ov-* / pd-*`）。原因是 `app-local.css` 里存量的页面级规则（`ada-plugin-*` 等）加载在 `pages.css` **之后**、特异性更高，沿用旧类名会被静默覆盖（搜索框「框中框」就是一个实例）。新前缀只用于页面局部结构，颜色仍只取 `--ph-*` 令牌、尺寸/圆角仍只取 `--ada-*` 令牌；宿主内置页的 Go 模板与 `static/islands.js` 客户端岛必须共用同一套类，保证 SSR 与 hydrate 前后是同一棵 DOM。
 - **焦点环**：2px 品牌描边 + 3px 半透明光环（`.ada-focusable` 语义）；`button/a/[tabindex]` 有兜底，但**每个新增可聚焦元素（尤其 `<summary>` 触发器）必须显式进入焦点清单**——键盘 Tab 可达且可见。
 - CSP `style-src 'self'`：模板与 JS 禁止内联 style 属性（`adag verify` 把守）；动态预览色一律走 CSS 变量类（如 `.ada-swatch--moss`）。
 - 表单：Enter 提交必须处理 IME（`isComposing` 必拦）；破坏性操作必须走 `data-confirm`，后果句见 19.2.3。
@@ -148,8 +149,9 @@ ada 词根统一，四种写法各有边界，**不得混用**：
 
 ### 19.5.3 通知与错误
 
-- 三种形态的分工：**toast/flash** = 页面级操作结果（自动消失，错误 9s/普通 6s）；**inline** = 弹窗/表单内部错误（不消失，带修复动作）；**流内错误卡**（`.ada-run-error`）= 轮次终态失败（含错误码详情）。
+- 三种形态的分工：**toast/flash** = 页面级操作结果（自动消失，错误 4.2s / 普通 2.4s）；**inline** = 弹窗/表单内部错误（不消失，带修复动作）；**流内错误卡**（`.ada-run-error`）= 轮次终态失败（含错误码详情）。
 - 全局通知只有一条实现路径：app.js `notify()`（经 window.AdaApp.notify 供模块复用）+ 服务端 flash；`AdaUI.toast` 已移除（批次 B）。
+- **反馈观感统一**：宿主 flash（`.ada-flash[data-flash]`）与各插件页 toast（`tu-/mc-/pm-/em-/pd-toast`）是同一套「底部居中深色胶囊」——`bottom:28px`、`--ph-ink` 底 / `--ph-canvas` 字、错误态 `--ph-danger-ink`、`--ada-radius-md` 圆角、`min(460px, 100vw-40px)` 宽度、160ms 由下往上。服务端 flash HTML 与 `data-flash` 属性不变（无 JS 时仍可见），只由 CSS 决定观感；`app.js` 退出动画必须保留 `translateX(-50%)`，否则淡出瞬间会水平跳位。关闭按钮视觉收起但保留 DOM，`:focus-visible` 时重新显现，保证键盘可达。
 - 连接类提示必须带动作按钮（「重新连接」），不得只说「请刷新页面」。
 
 ### 19.5.4 加载与空态

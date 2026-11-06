@@ -273,7 +273,8 @@
   vertical-align: -2px;
 }
 
-/* Toast 样式已随 AdaUI.toast 移除（19-ued §19.5.3：全局通知走 app.js notify + flash）。 */
+/* Toast 样式已随 AdaUI.toast 移除（19-ued §19.5.3：全局通知走 app.js notify + flash）。
+   flash 本身现在就是底部居中的深色 toast，样式在 ui/shell.css。 */
 @media (prefers-reduced-motion: reduce) {
   .ada-switch__track,
   .ada-switch__thumb {

@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:4328739e9e2e7db1) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:904cafe1b003acbf) by plugins/official/build.mjs — do not edit
 // provider-admin 后端：供应商配置的增删改查、模型拉取与当前模型切换。
 //
 // 数据面经宿主能力 model.admin 提供（ctx.providers）：
@@ -75,6 +75,11 @@
                  
                                                                
           
+                       
+                 
+                           
+                                                            
+           
  
 
 function bodyOf(req              )                          {
@@ -93,6 +98,13 @@ function idOf(body                         )         {
 
 export default function (agent          )       {
   agent.route("GET", "/state", (_req, ctx) => ctx.providers.list());
+
+  // 只读动作 state：供页面 SSR 预取，首屏/无 JS 也能看到供应商目录。
+  agent.registerAction({
+    name: "state",
+    mode: "read",
+    execute: async (_input, ctx) => ctx.providers.list(),
+  });
 
   agent.route("POST", "/save", (req, ctx) => {
     const body = bodyOf(req);

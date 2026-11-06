@@ -19,19 +19,25 @@
   function dismiss(target) {
     if (!target) return;
     // 160ms = --ada-duration-fast（app-local.css :root）；JS 里读令牌不值当，字面量跟令牌同步。
+    // flash 现在是底部居中 toast（left:50% + translateX(-50%)），退出时也必须保留
+    // -50% 水平偏移，否则淡出瞬间会跳到左边。
     target.style.transition = 'opacity 160ms cubic-bezier(0.4, 0, 0.2, 1), transform 160ms cubic-bezier(0.4, 0, 0.2, 1)';
     target.style.opacity = '0';
-    target.style.transform = 'translateY(-2px)';
+    target.style.transform = 'translate(-50%, 8px)';
     window.setTimeout(function () {
       target.remove();
       syncFlashClass();
     }, 180);
   }
 
-  // flash 在场标记：右上角 corner-dock 等浮层据此临时避让（19-ued §19.5.3），
-  // 免得窄屏提示条压住 todo 卡 6-9 秒且不可穿透。
+  // flash 在场标记保留给需要避让的浮层；toast 在底部，不再遮右上角。
   function syncFlashClass() {
     document.body.classList.toggle('ada-flash-open', !!document.querySelector('.ada-flash'));
+  }
+
+  // 与各插件页 toast 同一节奏：普通 2.4s、错误 4.2s。
+  function toastDelay(kind) {
+    return kind === 'error' ? 4200 : 2400;
   }
 
   function autoDismissFlashes() {
@@ -39,7 +45,7 @@
     syncFlashClass();
     for (var i = 0; i < flashes.length; i += 1) {
       (function (flash) {
-        var delay = flash.getAttribute('data-flash') === 'error' ? 9000 : 6000;
+        var delay = toastDelay(flash.getAttribute('data-flash'));
         window.setTimeout(function () {
           if (flash.isConnected) dismiss(flash);
         }, delay);
@@ -75,7 +81,7 @@
     syncFlashClass();
     window.setTimeout(function () {
       if (box.isConnected) dismiss(box);
-    }, kind === 'error' ? 9000 : 6000);
+    }, toastDelay(kind));
   }
 
   // 全局通知唯一入口（19-ued §19.5.3）：chat-live 等模块复用它出提示，

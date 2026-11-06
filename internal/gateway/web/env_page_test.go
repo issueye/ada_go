@@ -33,16 +33,16 @@ func TestEnvManagerPageRenders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Page: %v", err)
 	}
+	// 页面已改成岛屿组件：这里只钉住 SSR 骨架与首屏文案，
+	// 交互行为由 client.tsx 的组件负责（服务端不渲染弹窗/列表数据）。
 	for _, want := range []string{
-		"data-em-page",
+		"data-env-page",
 		"环境变量",
-		"data-em-add",
-		"data-em-rows",
-		"data-em-scope",
-		"data-em-value",
-		"data-em-bins",
-		"data-em-bins-list",
-		"服务程序",
+		"服务程序目录",
+		"em-form",
+		"em-list",
+		"em-bins",
+		"em-prog-head",
 	} {
 		if !strings.Contains(string(html), want) {
 			t.Fatalf("管理页缺少 %q:\n%s", want, html)
@@ -66,8 +66,8 @@ func TestEnvManagerPageRenders(t *testing.T) {
 		t.Fatal("前端插件列表里没有 env-manager")
 	}
 
-	if _, ok := bridge.StaticAsset("env-manager", "env-manager.js"); !ok {
-		t.Fatal("缺少 static/env-manager.js")
+	if _, ok := bridge.StaticAsset("env-manager", "client.js"); !ok {
+		t.Fatal("缺少 static/client.js（岛屿 bundle）")
 	}
 	if _, ok := bridge.StaticAsset("env-manager", "env-manager.css"); !ok {
 		t.Fatal("缺少 static/env-manager.css")

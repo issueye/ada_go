@@ -242,7 +242,7 @@ func TestUIExtRoutes(t *testing.T) {
 		}
 	}
 
-	// P2-4 首个真实业务页面：Token 用量（只读投影 + 本地状态按钮）。
+	// P2-4 首个真实业务页面：Token 用量（只读投影 + 视图切换 / 用量构成）。
 	rec = uiGet(t, srv, "/ext/token-usage/usage")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /ext/token-usage/usage = %d\n%s", rec.Code, rec.Body.String())
@@ -250,8 +250,10 @@ func TestUIExtRoutes(t *testing.T) {
 	for _, want := range []string{
 		`data-ada-entry="page:usage"`,
 		`data-ada-module="/ext/token-usage/static/client.js?v=`,
+		`data-token-page`,
 		`tu-title`,
-		`显示缓存命中率`,
+		`tu-kpi`,
+		`用量构成`,
 		`plugin-islands.js`,
 	} {
 		if !strings.Contains(rec.Body.String(), want) {
@@ -272,7 +274,7 @@ func TestUIExtRoutes(t *testing.T) {
 		`data-ada-entry="page:providers"`,
 		`data-ada-module="/ext/provider-admin/static/client.js?v=`,
 		`data-provider-admin-next="true"`,
-		`模型设置`,
+		`模型供应商`,
 		`UI 供应商`,
 		`plugin-islands.js`,
 	} {

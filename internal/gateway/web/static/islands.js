@@ -48,35 +48,27 @@
         };
       },
       computed: {
-        /* 行数据先规整成展示形态：与会话列表（ui.go 侧栏 / overview_partial）
-           同一套「标题兜底 + 相对链接」，模板里不再写表达式树。 */
+        /* 与 templates/overview.html.tmpl 的 overview_partial 逐类对齐：
+           ov-kpis / ov-recent / ov-thread；改一处必须改另一处。 */
         recentRows: function () {
-          return (this.recent || []).map(function (row) {
+          return (this.recent || []).slice(0, 5).map(function (row) {
             return {
               id: row.id || '',
               title: row.title || '新会话',
               workspace: row.workspace || '',
               running: !!row.running,
+              updatedLabel: row.updatedLabel || '',
               href: '/threads/' + encodeURIComponent(row.id || '')
             };
           });
-        }
+        },
+        recentCount: function () { return (this.recent || []).length; }
       },
       methods: {
-        /* 概览的 DOM 形态以模板（overview_partial）为准，岛屿只刷新数据：
-           两套标记一旦分叉，挂载瞬间整块重排，空态还会同时出现
-           「暂无数据」与「还没有会话」两种说法，且 ada-* 方言被换回
-           app.css 的 .card/.badge 存量类（19-ued §19.4）。 */
-        chipClass: function (tone) {
-          if (tone === 'brand') return 'ada-chip ada-chip--brand';
-          if (tone === 'warn') return 'ada-chip ada-chip--warn';
-          return 'ada-chip';
-        },
         refresh: function () {
           if (this.loading) return;
           if (typeof document !== 'undefined' && document.hidden) return;
-          // 用户焦点或指针落在岛内时跳过本轮：整岛重渲染会打断选区与悬停
-          // （19-ued §19.5.4）。下一轮 5s 间隔会再试。
+          // 焦点或指针落在岛内时跳过本轮：整岛重渲染会打断选区与悬停。
           if (element && (element.contains(document.activeElement) || hoverMatch(element))) return;
           if (typeof window.fetch !== 'function') return;
           var self = this;
@@ -100,8 +92,7 @@
                 stats: Array.isArray(data.stats) ? data.stats : [],
                 recent: Array.isArray(data.recent) ? data.recent : []
               };
-              // 数据没变就不赋值：5s 一轮的整岛重渲染会把用户的选区/悬停打断，
-              // 也会白白重排一次（CLS）。比较用序列化结果，字段少、代价可忽略。
+              // 数据没变就不赋值：5s 一轮的整岛重渲染会打断选区/悬停。
               if (JSON.stringify(next) === JSON.stringify({ stats: self.stats, recent: self.recent })) return;
               self.stats = next.stats;
               self.recent = next.recent;
@@ -126,38 +117,33 @@
         }
       },
       template:
-        '<div>' +
+        '<div class="ov-island-root">' +
         '<ui-message v-if="error" tone="error" title="概览刷新失败">{{ error }}</ui-message>' +
-        // 与 templates/overview.html.tmpl 的 overview_partial 逐类对齐：ada-panel /
-        // ada-chip / ada-section-head / 链接行列表 / 一句空态。改一处必须改另一处。
-        '<div class="ada-stat-grid">' +
-        '<div v-for="stat in stats" :key="stat.label" class="ada-panel p-4">' +
-        '<span :class="chipClass(stat.tone)">{{ stat.label }}</span>' +
-        '<p class="mt-3 text-2xl font-semibold tracking-tight text-ink">{{ stat.value }}</p>' +
-        '<p class="mt-1 text-xs leading-4 text-muted">{{ stat.hint }}</p>' +
+        '<div class="ov-kpis">' +
+        '<div v-for="stat in stats" :key="stat.label" class="ov-kpi" :data-tone="stat.tone">' +
+        '<span class="ov-kpi__label">{{ stat.label }}</span>' +
+        '<span :class="stat.numeric ? \'ov-kpi__value\' : \'ov-kpi__value ov-kpi__value--text\'">{{ stat.value }}</span>' +
+        '<span class="ov-kpi__note">{{ stat.hint }}</span>' +
         '</div>' +
         '</div>' +
-        '<div class="ada-panel mt-4 overflow-hidden">' +
-        '<div class="ada-section-head border-b border-line px-4 py-3">' +
-        '<div>' +
-        '<h2 class="ada-section-title">最近会话</h2>' +
-        '<p class="ada-section-sub">点击进入会话详情并发送消息</p>' +
+        '<section class="ov-recent" aria-label="最近会话">' +
+        '<div class="ov-recent__head">' +
+        '<div class="ov-recent__title"><span>最近会话</span><span class="ov-count">{{ recentCount }}</span></div>' +
+        '<a class="ov-link" href="/">全部会话 →</a>' +
         '</div>' +
-        '<a class="ada-link text-xs" href="/">全部会话</a>' +
-        '</div>' +
-        '<div v-if="recentRows.length" class="divide-y divide-line">' +
-        '<a v-for="row in recentRows" :key="row.id" class="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-subtle" :href="row.href">' +
-        '<div class="min-w-0 flex-1">' +
-        '<div class="flex items-center gap-2">' +
-        '<span class="truncate text-xs font-medium text-ink">{{ row.title }}</span>' +
-        '<span v-if="row.running" class="ada-chip ada-chip--warn">运行中</span>' +
-        '</div>' +
-        '<p class="mt-1 truncate text-xs text-muted">{{ row.workspace }}</p>' +
-        '</div>' +
+        '<div v-if="recentRows.length" class="ov-recent__list">' +
+        '<a v-for="row in recentRows" :key="row.id" class="ov-thread" :href="row.href">' +
+        '<span class="ov-thread__main">' +
+        '<span class="ov-thread__title">{{ row.title }}' +
+        '<span v-if="row.running" class="ov-chip ov-chip--warn">运行中</span></span>' +
+        '<span class="ov-thread__path">{{ row.workspace }}</span>' +
+        '</span>' +
+        '<span class="ov-thread__time">{{ row.updatedLabel }}</span>' +
         '</a>' +
         '</div>' +
-        '<div v-else class="px-4 py-8 text-center text-xs text-faint">还没有会话。去「对话」页新建一个。</div>' +
-        '</div>' +
+        '<div v-else class="ov-recent__empty">还没有会话。去「对话」页新建一个。</div>' +
+        '<a class="ov-recent__more" href="/">查看全部会话 →</a>' +
+        '</section>' +
         '</div>'
     });
 
@@ -173,93 +159,108 @@
       data: function () {
         return {
           plugins: Array.isArray(initial.plugins) ? initial.plugins : [],
-          csrf: typeof initial.csrf === 'string' ? initial.csrf : ''
+          csrf: typeof initial.csrf === 'string' ? initial.csrf : '',
+          query: '',
+          filter: 'all'
         };
       },
       computed: {
-        columns: function () {
-          var h = AdaRender.h;
-          var self = this;
-          return [
-            {
-              label: '插件',
-              render: function (row) {
-                var nodes = [
-                  h('a', {
-                    class: 'font-medium text-ink',
-                    href: '/extensions/' + encodeURIComponent(row.id || '')
-                  }, row.name || row.id),
-                  h('p', { class: 'mt-1 font-mono text-xs text-faint' }, row.id)
-                ];
-                if (row.error) nodes.push(h('p', { class: 'mt-1 text-xs text-danger-ink' }, row.error));
-                return h('div', null, nodes);
-              }
-            },
-            {
-              label: '版本',
-              render: function (row) {
-                if (!row.version) return h('span', { class: 'text-xs text-faint' }, '—');
-                return h(AdaUI.components.Badge, { tone: 'neutral', mono: true, label: 'v' + row.version });
-              }
-            },
-            {
-              label: '状态',
-              render: function (row) {
-                return h(AdaUI.components.Badge, {
-                  tone: row.statusTone || 'neutral',
-                  label: row.statusLabel || row.status || '—'
-                });
-              }
-            },
-            {
-              label: '能力',
-              render: function (row) {
-                var parts = [];
-                if (row.tools) parts.push(h('span', { class: 'mr-3' }, row.tools + ' 工具'));
-                if (row.pages) parts.push(h('span', { class: 'mr-3' }, row.pages + ' 页面'));
-                if (row.slots) parts.push(h('span', { class: 'mr-3' }, row.slots + ' 插槽'));
-                if (row.hasDashboard) parts.push(h(AdaUI.components.Badge, { tone: 'neutral', label: 'dashboard' }));
-                if (!parts.length) parts.push(h('span', { class: 'text-faint' }, '—'));
-                return h('div', { class: 'text-xs text-muted' }, parts);
-              }
-            },
-            {
-              label: '操作',
-              render: function (row) { return self.actions(h, row); }
-            }
-          ];
+        /* 分段计数与筛选全部在客户端算，SSR 与这里用同一套 ex-* 类。 */
+        counts: function () {
+          var enabled = 0;
+          var list = this.plugins || [];
+          list.forEach(function (p) { if (p.enabled) enabled += 1; });
+          return { all: list.length, enabled: enabled, disabled: list.length - enabled };
+        },
+        visibleRows: function () {
+          var q = String(this.query || '').trim().toLowerCase();
+          var filter = this.filter;
+          var csrf = this.csrf;
+          return (this.plugins || []).filter(function (p) {
+            if (filter === 'enabled' && !p.enabled) return false;
+            if (filter === 'disabled' && p.enabled) return false;
+            if (!q) return true;
+            return String(p.name || '').toLowerCase().indexOf(q) >= 0 ||
+              String(p.id || '').toLowerCase().indexOf(q) >= 0;
+          }).map(function (p) {
+            var chips = [];
+            if (p.tools) chips.push({ label: p.tools + ' 工具', className: 'ex-chip' });
+            if (p.pages) chips.push({ label: p.pages + ' 页面', className: 'ex-chip' });
+            if (p.slots) chips.push({ label: p.slots + ' 插槽', className: 'ex-chip' });
+            if (p.hasDashboard) chips.push({ label: 'dashboard', className: 'ex-chip ex-chip--ok' });
+            if (!chips.length) chips.push({ label: '—', className: 'ex-row__dash' });
+            var id = String(p.id || '');
+            return {
+              id: id,
+              name: p.name || id,
+              versionLabel: p.version ? 'v' + p.version : '—',
+              statusLabel: p.statusLabel || p.status || '—',
+              tone: p.statusTone || 'neutral',
+              error: p.error || '',
+              enabled: !!p.enabled,
+              chips: chips,
+              detailHref: '/extensions/' + encodeURIComponent(id),
+              action: '/extensions/' + encodeURIComponent(id) + (p.enabled ? '/disable' : '/enable'),
+              actionLabel: p.enabled ? '停用' : '启用',
+              actionClass: p.enabled ? 'ex-action' : 'ex-action ex-action--primary',
+              csrf: csrf
+            };
+          });
         }
       },
       methods: {
-        actions: function (h, row) {
-          var parts = [];
-          var enable = !row.enabled;
-          parts.push(h('form', {
-            method: 'post',
-            action: '/extensions/' + encodeURIComponent(row.id || '') + (enable ? '/enable' : '/disable')
-          },
-            h('input', { type: 'hidden', name: 'csrf_token', value: this.csrf || '' }),
-            h('input', { type: 'hidden', name: 'next', value: '/extensions' }),
-            h(AdaUI.components.Button, {
-              type: 'submit',
-              size: 'sm',
-              variant: enable ? 'primary' : 'secondary'
-            }, enable ? '启用' : '停用')
-          ));
-          parts.push(h('a', {
-            class: 'link text-xs',
-            href: '/extensions/' + encodeURIComponent(row.id || '')
-          }, '详情'));
-          return h('div', { class: 'flex items-center gap-2' }, parts);
-        }
+        onSearch: function (event) {
+          this.query = event && event.target ? event.target.value : '';
+        },
+        setFilter: function (value) { this.filter = value; }
       },
       template:
-        '<div>' +
-        '<ui-card v-if="plugins.length" class="overflow-hidden" :padding="false">' +
-        '<ui-table :columns="columns" :rows="plugins" row-key="id"></ui-table>' +
-        '</ui-card>' +
-        '<ui-empty v-else icon="i-plug" title="没有插件" ' +
-        'description="插件可能尚未装配，或网关暂时不可用。查看服务端日志确认。"></ui-empty>' +
+        '<div class="ex-island-root">' +
+        '<div class="ex-toolbar">' +
+        '<label class="ex-search">' +
+        '<input class="ex-search__input" type="text" placeholder="搜索插件名 / ID" ' +
+        'aria-label="搜索插件" :value="query" @input="onSearch($event)">' +
+        '<span class="ex-search__kbd">⌘K</span>' +
+        '</label>' +
+        '<div class="ex-seg" role="group" aria-label="按状态筛选">' +
+        '<button type="button" class="ex-seg__item" :class="{\'is-active\': filter === \'all\'}" ' +
+        ':aria-pressed="filter === \'all\' ? \'true\' : \'false\'" @click="setFilter(\'all\')">全部 {{ counts.all }}</button>' +
+        '<button type="button" class="ex-seg__item" :class="{\'is-active\': filter === \'enabled\'}" ' +
+        ':aria-pressed="filter === \'enabled\' ? \'true\' : \'false\'" @click="setFilter(\'enabled\')">已启用 {{ counts.enabled }}</button>' +
+        '<button type="button" class="ex-seg__item" :class="{\'is-active\': filter === \'disabled\'}" ' +
+        ':aria-pressed="filter === \'disabled\' ? \'true\' : \'false\'" @click="setFilter(\'disabled\')">未启用 {{ counts.disabled }}</button>' +
+        '</div>' +
+        '<span class="ex-toolbar__meta">{{ counts.all }} 个已安装</span>' +
+        '</div>' +
+        '<div v-if="visibleRows.length" class="ex-list">' +
+        '<div class="ex-row ex-row--head">' +
+        '<span>插件</span><span>版本</span><span>状态</span><span>能力</span><span>操作</span>' +
+        '</div>' +
+        '<div v-for="row in visibleRows" :key="row.id" class="ex-row" :data-enabled="row.enabled">' +
+        '<div class="ex-row__main">' +
+        '<a class="ex-row__name" :href="row.detailHref">{{ row.name }}</a>' +
+        '<span class="ex-row__id">{{ row.id }}</span>' +
+        '<span v-if="row.error" class="ex-row__error">{{ row.error }}</span>' +
+        '</div>' +
+        '<span class="ex-row__version">{{ row.versionLabel }}</span>' +
+        '<span class="ex-row__status" :data-tone="row.tone"><span class="ex-dot"></span>{{ row.statusLabel }}</span>' +
+        '<div class="ex-row__caps">' +
+        '<span v-for="chip in row.chips" :key="chip.label" :class="chip.className">{{ chip.label }}</span>' +
+        '</div>' +
+        '<div class="ex-row__actions">' +
+        '<form method="post" :action="row.action">' +
+        '<input type="hidden" name="csrf_token" :value="row.csrf">' +
+        '<input type="hidden" name="next" value="/extensions">' +
+        '<button type="submit" :class="row.actionClass">{{ row.actionLabel }}</button>' +
+        '</form>' +
+        '<a class="ex-link" :href="row.detailHref">详情</a>' +
+        '</div>' +
+        '</div>' +
+        '</div>' +
+        '<div v-else class="ex-empty">' +
+        '<p class="ex-empty__title">没有匹配的插件</p>' +
+        '<p class="ex-empty__desc">换个关键词，或切回「全部」查看已安装的插件。</p>' +
+        '</div>' +
         '</div>'
     });
 
@@ -473,14 +474,10 @@
     if (!initial.plugin || !initial.plugin.id) return;
     element.setAttribute('data-ada-mounted', '1');
     var plugin = initial.plugin;
-    plugin.versionLabel = plugin.version ? 'v' + plugin.version : '—';
-    plugin.apiVersionLabel = plugin.apiVersion ? String(plugin.apiVersion) : '—';
-    plugin.trustLabel = plugin.trust || '—';
-    plugin.sourceLabel = plugin.source || '随包';
-    plugin.pathLabel = plugin.path || '—';
-    plugin.showDescription = !!plugin.description && plugin.description !== plugin.readme;
-    plugin.readmeNodes = Array.isArray(plugin.readmeNodes) ? plugin.readmeNodes : [];
     plugin.files = Array.isArray(plugin.files) ? plugin.files : [];
+    plugin.readmeNodes = Array.isArray(plugin.readmeNodes) ? plugin.readmeNodes : [];
+    // 一次性反馈用底部 toast；计时器留在闭包里，不进响应式 data。
+    var toastTimer = null;
 
     var app = AdaUI.createApp({
       allowHTML: true,
@@ -490,14 +487,70 @@
           file: initial.file && typeof initial.file === 'object' ? initial.file : null,
           loading: false,
           fileError: '',
-          showInfo: false,
           // Markdown 文件的「预览 / 源码」开关；初始值与无 JS 路径的 ?view=md 一致。
           preview: !!(initial.file && initial.file.showPreview),
           csrf: typeof initial.csrf === 'string' ? initial.csrf : '',
-          fileSeq: 0
+          fileSeq: 0,
+          // 注意：data 里有 toast 字段，反馈方法必须叫 showToast，
+          // 否则运行时 get 里 data 优先会遮蔽同名方法（点击无反应）。
+          toast: { text: '', tone: 'ok', seq: 0 }
         };
       },
+      computed: {
+        /* 与 templates/plugin_detail.html.tmpl 的 pd-* 结构逐类对齐：
+           服务端渲染的首屏和 hydrate 后的岛必须是同一套 DOM，挂载时不重排。 */
+        statusText: function () {
+          return this.plugin.enabled ? '已启用' : (this.plugin.statusLabel || this.plugin.status || '未启用');
+        },
+        statusValueClass: function () {
+          return 'pd-field__value pd-field__value--' + (this.plugin.statusTone || 'neutral');
+        },
+        ownership: function () {
+          if (this.plugin.frontend && this.plugin.backend) return '前端 + 后端';
+          if (this.plugin.frontend) return '前端插件';
+          if (this.plugin.backend) return '后端插件';
+          return '—';
+        },
+        trustLabel: function () { return this.plugin.trust || '—'; },
+        sourceLabel: function () { return this.plugin.source || '随包'; },
+        pathLabel: function () { return this.plugin.path || '—'; },
+        showDescription: function () {
+          return !!this.plugin.description && this.plugin.description !== this.plugin.readme;
+        },
+        caps: function () {
+          var p = this.plugin, out = [];
+          if (p.tools) out.push({ label: p.tools + ' 工具', cls: 'pd-cap' });
+          if (p.pages) out.push({ label: p.pages + ' 页面', cls: 'pd-cap' });
+          if (p.slots) out.push({ label: p.slots + ' 插槽', cls: 'pd-cap' });
+          if (p.hooks) out.push({ label: p.hooks + ' 钩子', cls: 'pd-cap' });
+          if (p.skills) out.push({ label: p.skills + ' 技能', cls: 'pd-cap' });
+          if (p.nav) out.push({ label: p.nav + ' 导航', cls: 'pd-cap' });
+          if (p.hasDashboard) out.push({ label: 'dashboard', cls: 'pd-cap pd-cap--ok' });
+          if (!out.length) out.push({ label: '—', cls: 'pd-cap pd-cap--empty' });
+          return out;
+        },
+        fileBaseHref: function () {
+          return '/extensions/' + encodeURIComponent(this.plugin.id) + '?file=' +
+            encodeURIComponent(this.file ? this.file.path : '');
+        },
+        previewHref: function () { return this.fileBaseHref + '&view=md'; },
+        sourceHref: function () { return this.fileBaseHref; },
+        docFoot: function () {
+          if (!this.file) return 'README · 渲染预览';
+          var parts = [
+            this.file.sizeLabel || '',
+            this.file.markdown ? 'Markdown' : (this.file.language || '文本'),
+            this.preview ? '渲染预览' : '源码'
+          ];
+          var out = [];
+          parts.forEach(function (v) { if (v) out.push(v); });
+          return out.join(' · ');
+        }
+      },
       methods: {
+        fileHref: function (path) {
+          return '/extensions/' + encodeURIComponent(this.plugin.id) + '?file=' + encodeURIComponent(path);
+        },
         openFile: function (path) {
           var self = this;
           if (!path || typeof window.fetch !== 'function') return;
@@ -505,7 +558,6 @@
           var seq = self.fileSeq;
           self.loading = true;
           self.fileError = '';
-          self.showInfo = false;
           window
             .fetch('/extensions/' + encodeURIComponent(self.plugin.id) + '/file?path=' + encodeURIComponent(path), {
               credentials: 'same-origin',
@@ -530,98 +582,153 @@
               self.fileError = (error && error.message) || '读取文件失败';
             });
         },
-        toggleInfo: function () {
-          this.showInfo = !this.showInfo;
-        },
-        // Markdown 文件在源码与渲染预览之间切换（预览 HTML 由服务端渲染并清洗）。
-        togglePreview: function () {
+        setPreview: function (value) {
           if (!this.file || !this.file.markdown) return;
-          this.preview = !this.preview;
+          this.preview = !!value;
+        },
+        showToast: function (text, tone) {
+          var self = this;
+          this.toast = { text: text, tone: tone || 'ok', seq: (this.toast.seq || 0) + 1 };
+          if (toastTimer) window.clearTimeout(toastTimer);
+          toastTimer = window.setTimeout(function () {
+            self.toast = { text: '', tone: 'ok', seq: (self.toast.seq || 0) + 1 };
+          }, tone === 'error' ? 4200 : 2400);
+        },
+        fallbackCopy: function (text, done) {
+          var self = this;
+          try {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.setAttribute('readonly', '');
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            var copied = document.execCommand('copy');
+            document.body.removeChild(ta);
+            if (copied) { done(); return; }
+          } catch (e) { /* 权限或环境不支持时给出手动兜底提示 */ }
+          self.showToast('复制失败，请手动选中文本。', 'error');
+        },
+        copy: function (kind) {
+          var self = this;
+          var text = kind === 'path'
+            ? (this.plugin.path || '')
+            : (this.file && typeof this.file.content === 'string' ? this.file.content : '');
+          if (!text) { this.showToast('没有可复制的内容。', 'error'); return; }
+          var done = function () {
+            self.showToast(kind === 'path' ? '已复制插件路径。' : '已复制文件内容。');
+          };
+          var fail = function () { self.fallbackCopy(text, done); };
+          if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+            try {
+              navigator.clipboard.writeText(text).then(done).catch(fail);
+            } catch (e) { fail(); }
+          } else { fail(); }
         }
       },
       template:
-        '<div class="ada-plugin-detail">' +
-        '<aside class="ada-plugin-detail__side">' +
-        '<section class="card ada-plugin-tree-card" aria-label="插件目录">' +
-        '<div class="ada-plugin-tree-card__head">' +
-        '<h2 class="ada-plugin-section__title">插件目录 <span class="ada-plugin-section__meta">{{ plugin.files.length }} 个文件</span></h2>' +
+        '<div class="pd-root">' +
+        '<section class="pd-meta" aria-label="插件信息" id="plugin-info">' +
+        '<div class="pd-meta__row">' +
+        '<div class="pd-field"><span class="pd-field__label">状态</span>' +
+        '<span :class="statusValueClass">{{ statusText }}</span></div>' +
+        '<div class="pd-field"><span class="pd-field__label">归属</span>' +
+        '<span class="pd-field__value">{{ ownership }}</span></div>' +
+        '<div class="pd-field"><span class="pd-field__label">信任级别</span>' +
+        '<span class="pd-field__value">{{ trustLabel }}</span></div>' +
+        '<div class="pd-field"><span class="pd-field__label">来源</span>' +
+        '<span class="pd-field__value">{{ sourceLabel }}</span></div>' +
+        '<div class="pd-field pd-field--grow"><span class="pd-field__label">能力</span>' +
+        '<span class="pd-caps">' +
+        '<span v-for="cap in caps" :key="cap.label" :class="cap.cls">{{ cap.label }}</span>' +
+        '</span></div>' +
         '</div>' +
-        '<ul v-if="plugin.files.length" class="ada-plugin-tree">' +
-        '<li v-for="f in plugin.files" :key="f.path" class="ada-plugin-tree__row" :class="f.depthClass || \'ada-plugin-file--d0\'">' +
-        '<span v-if="f.dir" class="ada-plugin-tree__item is-dir" :title="f.path">' +
-        '<span class="ada-plugin-tree__icon"><ui-icon name="i-folder" :size="13"></ui-icon></span>' +
-        '<code class="ada-plugin-tree__path">{{ f.path }}</code></span>' +
-        '<button v-else type="button" class="ada-plugin-tree__item" ' +
-        ':class="{ \'is-active\': file && file.path === f.path }" :title="f.path" @click="openFile(f.path)">' +
-        '<span class="ada-plugin-tree__icon"><ui-icon name="i-file" :size="13"></ui-icon></span>' +
-        '<code class="ada-plugin-tree__path">{{ f.path }}</code>' +
-        '<span class="ada-plugin-tree__size">{{ f.sizeLabel }}</span>' +
-        '</button></li>' +
+        '<div class="pd-meta__path">' +
+        '<span class="pd-field__label">路径</span>' +
+        '<code class="pd-path">{{ pathLabel }}</code>' +
+        '<button type="button" class="pd-link" data-pd-copy="path" @click="copy(\'path\')">复制</button>' +
+        '<span v-if="plugin.apiVersion" class="pd-meta__api">API v{{ plugin.apiVersion }}</span>' +
+        '</div>' +
+        '<p v-if="plugin.status === \'unused\'" class="pd-note">当前产品没有默认启用这个插件；可在插件列表或本页手动启用。</p>' +
+        '<p v-if="showDescription" class="pd-note">{{ plugin.description }}</p>' +
+        '<p v-if="plugin.error" class="pd-error">{{ plugin.error }}</p>' +
+        '</section>' +
+
+        '<div class="pd-main">' +
+        '<aside class="pd-tree" aria-label="插件目录">' +
+        '<div class="pd-tree__head">' +
+        '<span class="pd-card__title">插件目录</span>' +
+        '<span class="pd-count">{{ plugin.files.length }} 个文件</span>' +
+        '</div>' +
+        '<ul v-if="plugin.files.length" class="pd-tree__list">' +
+        '<li v-for="f in plugin.files" :key="f.path" class="pd-tree__row" :class="f.depthClass">' +
+        '<span v-if="f.dir" class="pd-tree__item is-dir" :title="f.path">' +
+        '<span class="pd-tree__bar"></span><span class="pd-tree__bullet"></span>' +
+        '<code class="pd-tree__name">{{ f.path }}</code></span>' +
+        '<a v-else class="pd-tree__item" :class="{ \'is-active\': file && file.path === f.path }" ' +
+        ':title="f.path" :href="fileHref(f.path)" :data-plugin-file-path="f.path" ' +
+        '@click.prevent="openFile(f.path)">' +
+        '<span class="pd-tree__bar"></span><span class="pd-tree__bullet"></span>' +
+        '<code class="pd-tree__name">{{ f.path }}</code>' +
+        '<span class="pd-tree__size">{{ f.sizeLabel }}</span></a>' +
+        '</li>' +
         '</ul>' +
-        '<p v-else class="ada-plugin-tree__empty">这个插件没有可展示的包内文件。</p>' +
-        '<button type="button" class="ada-plugin-tree-card__info" @click="toggleInfo">' +
-        '{{ showInfo ? \'返回文件\' : \'插件信息\' }}</button>' +
-        '</section>' +
+        '<p v-else class="pd-tree__empty">这个插件没有可展示的包内文件。</p>' +
+        '<p class="pd-tree__hint">点击文件查看内容；Markdown 可切换渲染 / 源码。</p>' +
         '</aside>' +
-        '<div class="ada-plugin-detail__main">' +
 
-        '<section v-if="!showInfo" class="card ada-plugin-viewer" aria-label="文件内容">' +
-        '<header v-if="file" class="ada-plugin-viewer__head">' +
-        '<code class="ada-plugin-viewer__path">{{ file.path }}</code>' +
-        '<div class="ada-plugin-viewer__actions">' +
-        '<span class="ada-plugin-viewer__meta">{{ file.sizeLabel }}<span v-if="file.truncated"> · 已截断</span></span>' +
-        '<button v-if="file.markdown" type="button" class="ada-plugin-viewer__toggle" @click="togglePreview" ' +
-        ':title="preview ? \'切换到源码\' : \'切换到渲染预览\'">{{ preview ? \'源码\' : \'预览\' }}</button>' +
+        '<section class="pd-doc" aria-label="文件内容">' +
+        '<div class="pd-doc__head">' +
+        '<code class="pd-doc__name">{{ file ? file.path : \'README.md\' }}</code>' +
+        '<span v-if="file" class="pd-doc__size">{{ file.sizeLabel }}' +
+        '<span v-if="file.truncated"> · 已截断</span></span>' +
+        '<div v-if="file && file.markdown" class="pd-seg" role="group" aria-label="视图切换">' +
+        '<a class="pd-seg__item" :class="{ \'is-active\': preview }" rel="nofollow" ' +
+        ':href="previewHref" title="切换到渲染预览" @click.prevent="setPreview(true)">预览</a>' +
+        '<a class="pd-seg__item" :class="{ \'is-active\': !preview }" rel="nofollow" ' +
+        ':href="sourceHref" title="切换到源码" @click.prevent="setPreview(false)">源码</a>' +
         '</div>' +
-        '</header>' +
-        '<p v-if="loading" class="ada-plugin-viewer__empty">正在读取文件…</p>' +
-        '<p v-else-if="fileError" class="ada-plugin-viewer__empty">{{ fileError }}</p>' +
-        '<p v-else-if="file && file.error" class="ada-plugin-viewer__empty">{{ file.error }}</p>' +
-        '<p v-else-if="file && file.binary" class="ada-plugin-viewer__empty">这是二进制文件，暂不展示内容。</p>' +
-        '<div v-else-if="file && preview" class="markdown-body ada-markdown ada-plugin-file-preview" v-html="file.previewHtml"></div>' +
-        '<pre v-else-if="file" class="ada-plugin-viewer__code chroma"><code v-html="file.html"></code></pre>' +
-        '<p v-else class="ada-plugin-viewer__empty">这个插件没有可展示的包内文件。</p>' +
+        '<button type="button" class="pd-link pd-doc__copy" data-pd-copy="file" ' +
+        '@click="copy(\'file\')">复制</button>' +
+        '</div>' +
+        '<div class="pd-doc__body">' +
+        '<p v-if="loading" class="pd-doc__empty">正在读取文件…</p>' +
+        '<p v-else-if="fileError" class="pd-doc__empty">{{ fileError }}</p>' +
+        '<div v-else-if="file && file.error" class="pd-doc__fallback">' +
+        '<p class="pd-doc__error-line">{{ file.error }}</p>' +
+        '<div v-if="plugin.readmeNodes.length || plugin.readme" class="pd-doc__fallback-body">' +
+        '<span class="pd-doc__fallback-label">无法读取所选文件，以下为插件 README</span>' +
+        '<div class="markdown-body ada-markdown pd-doc__preview">' +
+        '<ui-markdown v-if="plugin.readmeNodes.length" :nodes="plugin.readmeNodes"></ui-markdown>' +
+        '<ui-markdown v-else :text="plugin.readme"></ui-markdown>' +
+        '</div></div></div>' +
+        '<p v-else-if="file && file.binary" class="pd-doc__empty">这是二进制文件，暂不展示内容。</p>' +
+        '<div v-else-if="file && preview" class="markdown-body ada-markdown pd-doc__preview" ' +
+        'v-html="file.previewHtml"></div>' +
+        '<pre v-else-if="file" class="pd-doc__code chroma" data-plugin-file-content>' +
+        '<code v-html="file.html"></code></pre>' +
+        '<div v-else-if="plugin.readmeNodes.length" class="markdown-body ada-markdown pd-doc__preview">' +
+        '<ui-markdown :nodes="plugin.readmeNodes"></ui-markdown></div>' +
+        '<div v-else-if="plugin.readme" class="markdown-body ada-markdown pd-doc__preview">' +
+        '<ui-markdown :text="plugin.readme"></ui-markdown></div>' +
+        '<p v-else class="pd-doc__empty">这个插件没有提供 README。</p>' +
+        '</div>' +
+        '<div class="pd-doc__foot"><span>{{ docFoot }}</span><span>只读</span></div>' +
         '</section>' +
+        '</div>' +
 
-        '<section v-else class="card p-4 ada-plugin-panel">' +
-        '<div class="flex flex-wrap items-center gap-2">' +
-        '<ui-badge v-if="plugin.frontend" tone="brand" label="前端插件"></ui-badge>' +
-        '<ui-badge v-if="plugin.backend" tone="neutral" label="后端插件"></ui-badge>' +
-        '<ui-badge :tone="plugin.statusTone || \'neutral\'" :label="plugin.statusLabel || plugin.status || \'—\'"></ui-badge>' +
-        '<ui-badge v-if="plugin.status" tone="neutral" mono :label="plugin.status"></ui-badge>' +
+        '<div class="pd-foot">' +
+        '<div class="pd-foot__left">' +
+        '<span class="pd-tip pd-tip--sm" ' +
+        'data-tip="第三方插件的入口与能力以插件清单为准；停用后不再贡献工具与页面。" ' +
+        'tabindex="0" role="img">i</span>' +
+        '<span>第三方插件的入口与能力以插件清单为准；停用后不再贡献工具与页面。</span>' +
         '</div>' +
-        '<p v-if="plugin.status === \'unused\'" class="mt-2 text-xs text-muted">当前产品没有默认启用这个插件；可在插件列表或本页手动启用。</p>' +
-        '<p v-if="plugin.showDescription" class="mt-2 text-sm leading-6 text-muted">{{ plugin.description }}</p>' +
-        '<div class="ada-plugin-stats">' +
-        '<div class="ada-plugin-stat"><span class="ada-plugin-stat__value">{{ plugin.pages }}</span><span class="ada-plugin-stat__label">页面</span></div>' +
-        '<div class="ada-plugin-stat"><span class="ada-plugin-stat__value">{{ plugin.tools }}</span><span class="ada-plugin-stat__label">工具</span></div>' +
-        '<div class="ada-plugin-stat"><span class="ada-plugin-stat__value">{{ plugin.slots }}</span><span class="ada-plugin-stat__label">插槽</span></div>' +
+        '<span class="pd-foot__right">状态来自插件清单</span>' +
         '</div>' +
-        '<dl class="ada-plugin-meta">' +
-        '<div><dt>版本</dt><dd>{{ plugin.versionLabel }}</dd></div>' +
-        '<div><dt>API 版本</dt><dd>{{ plugin.apiVersionLabel }}</dd></div>' +
-        '<div><dt>信任级别</dt><dd>{{ plugin.trustLabel }}</dd></div>' +
-        '<div><dt>来源</dt><dd>{{ plugin.sourceLabel }}</dd></div>' +
-        '<div class="ada-plugin-meta__wide"><dt>插件路径</dt><dd class="ada-plugin-meta__mono">{{ plugin.pathLabel }}</dd></div>' +
-        '<div v-if="plugin.hooks"><dt>钩子</dt><dd>{{ plugin.hooks }}</dd></div>' +
-        '<div v-if="plugin.skills"><dt>技能</dt><dd>{{ plugin.skills }}</dd></div>' +
-        '<div v-if="plugin.nav"><dt>导航</dt><dd>{{ plugin.nav }}</dd></div>' +
-        '<div class="ada-plugin-meta__wide"><dt>插件 ID</dt><dd class="ada-plugin-meta__mono">{{ plugin.id }}</dd></div>' +
-        '</dl>' +
-        '<div class="ada-plugin-section">' +
-        '<h2 class="ada-plugin-section__title">README</h2>' +
-        '<div v-if="plugin.readmeNodes.length" class="markdown-body ada-markdown ada-plugin-readme">' +
-        '<ui-markdown :nodes="plugin.readmeNodes"></ui-markdown>' +
-        '</div>' +
-        '<div v-else-if="plugin.readme" class="markdown-body ada-markdown ada-plugin-readme">' +
-        '<ui-markdown :text="plugin.readme"></ui-markdown>' +
-        '</div>' +
-        '<p v-else class="text-sm text-muted">这个插件没有提供 README。</p>' +
-        '</div>' +
-        '<p v-if="plugin.error" class="mt-3 text-xs text-danger-ink">{{ plugin.error }}</p>' +
-        '</section>' +
-
-        '</div>' +
+        '<div v-if="toast.text" :key="toast.seq" class="pd-toast" :data-tone="toast.tone">' +
+        '{{ toast.text }}</div>' +
         '</div>'
     });
 
@@ -639,6 +746,11 @@
     for (var l = 0; l < detail.length; l += 1) mountPluginDetail(detail[l]);
     var transcript = document.querySelectorAll('[data-ada-island="transcript"]');
     for (var m = 0; m < transcript.length; m += 1) mountTranscript(transcript[m]);
+    // 服务地址来自当前页面的 host，不在模板里写死（本地端口会变）。
+    var status = document.querySelectorAll('[data-ov-status]');
+    for (var n = 0; n < status.length; n += 1) {
+      status[n].textContent = '服务已连接 · ' + window.location.host;
+    }
   }
 
   if (document.readyState === 'loading') {

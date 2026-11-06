@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:411fee04745d0791) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:5127541506176cd1) by plugins/official/build.mjs — do not edit
 // env-manager 后端：环境变量管理页的数据面。
 //
 // 能力位 env.admin（仅 builtin）提供 ctx.env：
@@ -8,11 +8,29 @@
 // 宿主只接受固定路径（不接收脚本传路径），键名校验、大小上限、0600 原子写在
 // internal/envstore 里完成；页面通过本插件 route 调用，写操作受 CSRF 约束。
 //
-// 布局：页面骨架在 page.tsx，交互在 static/env-manager.js。
+// 布局与交互都在 env-page.tsx（岛屿组件，SSR + hydrate）。
 
                     
                
                                
+ 
+
+                      
+                
+               
+                  
+ 
+
+                         
+                
+               
+               
+                   
+ 
+
+                   
+                      
+                            
  
 
                     
@@ -20,6 +38,7 @@
                       
                                  
                      
+                
  
 
                         
@@ -57,6 +76,11 @@
                  
                                                                
           
+                       
+                 
+                           
+                                                            
+           
  
 
 function fail(message        )        {
@@ -89,6 +113,14 @@ function keyOf(body                         )         {
 
 export default function (agent          )       {
   agent.route("GET", "/state", (_req, ctx) => ctx.env.list());
+
+  // 只读动作 state：供页面 SSR 预取（props.data.backend["env-manager"].page_settings），
+  // 首屏与无 JS 时也能看到两层变量与服务程序目录。
+  agent.registerAction({
+    name: "state",
+    mode: "read",
+    execute: (_input, ctx) => ctx.env.list(),
+  });
 
   agent.route("POST", "/set", (req, ctx) => {
     const body = bodyOf(req);

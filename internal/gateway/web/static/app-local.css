@@ -2282,13 +2282,10 @@ summary:focus-visible {
   outline-offset: 2px;
 }
 
-/* ── flash 在场避让（批次 B #18）──────────────────────────────────────
-   app.js 在有提示条时给 body 挂 ada-flash-open：右上角 corner-dock（todo 卡）
-   临时下移，不再被窄屏 flash 压住 6-9 秒且不可穿透；flash 消失即回位。 */
-body.ada-flash-open .ada-corner-dock {
-  top: 132px;
-  transition: top var(--ada-transition);
-}
+/* ── flash 在场标记（批次 B #18，现已不再需要避让）────────────────────
+   早期 flash 固定在顶栏下方居中，会压住右上角 corner-dock（todo 卡），
+   所以 ada-flash-open 时把它临时下移。flash 统一成底部 toast 后不再遮挡，
+   app.js 仍挂这个 class 供后续浮层按需使用，但这里不再做位移。 */
 
 /* ── SSE 重连按钮（批次 B #9）：挂在 #live-status 的错误态里。 ──────── */
 .ada-live-retry {

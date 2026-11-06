@@ -2,67 +2,75 @@
   <div class="ada-scroll">
     <div class="ada-wrap ada-wrap--page">
       {{template "flash" .}}
-      <div class="ada-section-head">
-        <div>
+      <div class="ov-head">
+        <div class="ov-head__title">
           <h2 class="ada-page-title">概览</h2>
-          <p class="ada-page-sub">agent 状态、最近会话与插件贡献。</p>
+          <span class="ov-tip" data-tip="agent 状态、最近会话与插件贡献；统计来自本地会话、工作区与插件清单，插件贡献来自 dashboard 插槽。" tabindex="0" role="img">!</span>
         </div>
-        <a class="ada-btn ada-btn--secondary ada-btn--sm" href="/">去对话</a>
+        <div class="ov-actions">
+          <a class="ov-btn" href="/">新建任务</a>
+          <a class="ov-btn ov-btn--primary" href="/">去对话</a>
+        </div>
       </div>
 
-      <div id="dashboard-live" data-ada-island="overview" data-ada-state="{{.StateJSON}}">
-        {{template "overview_partial" .}}
-      </div>
+      <div class="ov-grid">
+        <div id="dashboard-live" class="ov-island" data-ada-island="overview" data-ada-state="{{.StateJSON}}">
+          {{template "overview_partial" .}}
+        </div>
 
-      <div class="mt-4">
-        <div class="ada-section-head">
-          <div>
-            <h2 class="ada-section-title">插件贡献</h2>
-            <p class="ada-section-sub">来自插件的 dashboard 片段</p>
+        <section class="ov-contrib" aria-label="插件贡献">
+          <div class="ov-contrib__head">
+            <span class="ov-contrib__title">插件贡献</span>
+            <span class="ov-tip ov-tip--sm" data-tip="插件通过 dashboard.widgets 插槽贡献的片段，随插件启停变化。" tabindex="0" role="img">!</span>
           </div>
-          <a class="ada-link text-xs" href="/extensions">管理扩展</a>
-        </div>
-        <div class="ada-slot-host">{{slot "dashboard.widgets" .Slots.DashboardWidgets .SlotCounts.DashboardWidgets ""}}</div>
+          <p class="ov-contrib__desc">来自插件的 dashboard 片段</p>
+          <div class="ov-contrib__slot">{{slot "dashboard.widgets" .Slots.DashboardWidgets .SlotCounts.DashboardWidgets ""}}</div>
+          <a class="ov-contrib__more" href="/extensions">管理扩展 →</a>
+        </section>
+      </div>
+
+      <div class="ov-status">
+        <span class="ov-status__left"><span class="ov-status__dot"></span><span data-ov-status>服务已连接</span></span>
+        <span class="ov-status__right">本地 · Headless</span>
       </div>
     </div>
   </div>
 {{template "shell_end" .}}{{end}}
 
 {{define "overview_partial"}}
-<div class="ada-stat-grid">
+<div class="ov-kpis">
   {{range .Stats}}
-  <div class="ada-panel p-4">
-    <span class="ada-chip {{if eq .Tone "warn"}}ada-chip--warn{{else if eq .Tone "brand"}}ada-chip--brand{{end}}">{{.Label}}</span>
-    <p class="mt-3 text-2xl font-semibold tracking-tight text-ink">{{.Value}}</p>
-    <p class="mt-1 text-xs leading-4 text-muted">{{.Hint}}</p>
+  <div class="ov-kpi" data-tone="{{.Tone}}">
+    <span class="ov-kpi__label">{{.Label}}</span>
+    <span class="ov-kpi__value{{if not .Numeric}} ov-kpi__value--text{{end}}">{{.Value}}</span>
+    <span class="ov-kpi__note">{{.Hint}}</span>
   </div>
   {{end}}
 </div>
 
-<div class="ada-panel mt-4 overflow-hidden">
-  <div class="ada-section-head border-b border-line px-4 py-3">
-    <div>
-      <h2 class="ada-section-title">最近会话</h2>
-      <p class="ada-section-sub">点击进入会话详情并发送消息</p>
+<section class="ov-recent" aria-label="最近会话">
+  <div class="ov-recent__head">
+    <div class="ov-recent__title">
+      <span>最近会话</span>
+      <span class="ov-count">{{len .Recent}}</span>
     </div>
-    <a class="ada-link text-xs" href="/">全部会话</a>
+    <a class="ov-link" href="/">全部会话 →</a>
   </div>
   {{if .Recent}}
-  <div class="divide-y divide-line">
-    {{range .Recent}}
-    <a class="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-subtle" href="/threads/{{.ID}}">
-      <div class="min-w-0 flex-1">
-        <div class="flex items-center gap-2">
-          <span class="truncate text-xs font-medium text-ink">{{if .Title}}{{.Title}}{{else}}新会话{{end}}</span>
-          {{if .Running}}<span class="ada-chip ada-chip--warn">运行中</span>{{end}}
-        </div>
-        <p class="mt-1 truncate text-xs text-muted">{{.Workspace}}</p>
-      </div>
+  <div class="ov-recent__list">
+    {{range $i, $r := .Recent}}{{if lt $i 5}}
+    <a class="ov-thread" href="/threads/{{$r.ID}}">
+      <span class="ov-thread__main">
+        <span class="ov-thread__title">{{if $r.Title}}{{$r.Title}}{{else}}新会话{{end}}{{if $r.Running}}<span class="ov-chip ov-chip--warn">运行中</span>{{end}}</span>
+        <span class="ov-thread__path">{{$r.Workspace}}</span>
+      </span>
+      <span class="ov-thread__time">{{$r.UpdatedLabel}}</span>
     </a>
-    {{end}}
+    {{end}}{{end}}
   </div>
   {{else}}
-  <div class="px-4 py-8 text-center text-xs text-faint">还没有会话。去「对话」页新建一个。</div>
+  <div class="ov-recent__empty">还没有会话。去「对话」页新建一个。</div>
   {{end}}
-</div>
+  <a class="ov-recent__more" href="/">查看全部会话 →</a>
+</section>
 {{end}}
