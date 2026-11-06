@@ -3,7 +3,7 @@ module mem_go
 go 1.25.1
 
 require (
-	github.com/DotNetAge/govector v0.0.0
+	github.com/DotNetAge/govector v0.1.10
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 )
 
@@ -23,5 +23,3 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/protobuf v1.32.0 // indirect
 )
-
-replace github.com/DotNetAge/govector => ../govector

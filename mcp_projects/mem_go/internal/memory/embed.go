@@ -31,6 +31,14 @@ type DedupThresholdAware interface {
 	DefaultDedupThreshold() float64
 }
 
+// ForgetThresholdAware 是 Embedder 的可选扩展接口：
+// 由提供者声明语义遗忘（memory_forget）的默认相似度阈值。
+// 词面哈希下改述文本的相似度普遍在 0.5~0.7，
+// 沿用密集模型的 0.8 默认值几乎无法命中。
+type ForgetThresholdAware interface {
+	DefaultForgetThreshold() float64
+}
+
 // ---------------------------------------------------------------
 // OpenAI 兼容嵌入器
 // ---------------------------------------------------------------
@@ -99,6 +107,9 @@ func (e *OpenAIEmbedder) Dim() int { return e.dim }
 // DefaultDedupThreshold 实现 DedupThresholdAware：密集嵌入的近重复通常 >0.9。
 func (e *OpenAIEmbedder) DefaultDedupThreshold() float64 { return 0.93 }
 
+// DefaultForgetThreshold 实现 ForgetThresholdAware。
+func (e *OpenAIEmbedder) DefaultForgetThreshold() float64 { return 0.8 }
+
 // Embed 实现 Embedder，按批调用 /embeddings 并按 index 还原顺序。
 func (e *OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
@@ -160,10 +171,11 @@ type HashEmbedder struct {
 // DefaultHashDim 是 HashEmbedder 的默认维度。
 const DefaultHashDim = 512
 
-// NewHashEmbedder 创建离线哈希嵌入器，dim 最小为 64。
+// NewHashEmbedder 创建离线哈希嵌入器，dim 最小为 64（更小的维度会导致
+// 特征哈希碰撞过密，相似度失去区分度）。
 func NewHashEmbedder(dim int) *HashEmbedder {
 	if dim < 64 {
-		dim = DefaultHashDim
+		dim = 64
 	}
 	return &HashEmbedder{dim: dim}
 }
@@ -174,8 +186,17 @@ func (e *HashEmbedder) Name() string { return fmt.Sprintf("hash:%d", e.dim) }
 // Dim 实现 Embedder。
 func (e *HashEmbedder) Dim() int { return e.dim }
 
-// DefaultDedupThreshold 实现 DedupThresholdAware：词面哈希对近重复文本约 0.6。
-func (e *HashEmbedder) DefaultDedupThreshold() float64 { return 0.60 }
+// DefaultDedupThreshold 实现 DedupThresholdAware。
+// 词面哈希的相似度分布与语义无关：实测"仅末尾标点不同"的近重复约 0.95+，
+// 而仅一个数字不同的两条真实记忆（如两个不同环境地址）也能到 0.92+，
+// 分布完全重叠、无法靠阈值区分语义异同——因此只把阈值定在近逐字重复处
+// （0.95），宁可少合并（fail-safe 方向：新增而非覆盖），也不静默丢失记忆。
+// 合并时的旧内容始终通过 StoreResult.Previous 返回，供调用方审计。
+func (e *HashEmbedder) DefaultDedupThreshold() float64 { return 0.95 }
+
+// DefaultForgetThreshold 实现 ForgetThresholdAware：
+// 词面哈希下改述文本的相似度普遍在 0.5~0.7，默认阈值需显著低于密集模型。
+func (e *HashEmbedder) DefaultForgetThreshold() float64 { return 0.5 }
 
 // ngramWeight 不同长度 n-gram 的特征权重：越长越具区分度。
 func ngramWeight(n int) float32 {

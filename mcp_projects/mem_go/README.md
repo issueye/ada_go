@@ -23,7 +23,7 @@ MCP 客户端（ZCode / Claude / Cursor）
 ## 功能特性
 
 - **7 个 MCP 工具**：`memory_store` / `memory_search` / `memory_list` / `memory_get` / `memory_delete` / `memory_forget` / `memory_stats`
-- **语义去重合并**：同命名空间下相似内容自动合并为一条（内容更新、标签并集、重要度取大、强化计数 +1），阈值由嵌入提供者自适应
+- **语义去重合并**：同命名空间下相似内容自动合并为一条（内容更新、标签并集、重要度取大、强化计数 +1），阈值由嵌入提供者自适应；合并结果携带被覆盖的旧内容（`previous`），误合并可审计
 - **三维综合排序**：`得分 = 向量相似度 × 重要度权重 × 时间衰减（半衰期默认 30 天）`
 - **多级过滤**：命名空间（scope）隔离多用户/多项目、类型（fact/preference/event/knowledge/procedure）、标签
 - **维度安全**：集合按嵌入维度命名（`memories_1536`），切换嵌入模型不会污染旧数据
@@ -65,8 +65,8 @@ export MEM_EMBEDDING_MODEL="text-embedding-3-small"
 {
   "mcpServers": {
     "mem-go": {
-      "command": "E:\\codes\\go_projects\\mem_go\\bin\\memmcp.exe",
-      "args": ["-db", "E:\\codes\\go_projects\\mem_go\\mem_go.db"],
+      "command": "E:\\codes\\go_projects\\ada_go\\mcp_projects\\mem_go\\bin\\memmcp.exe",
+      "args": ["-db", "E:\\codes\\go_projects\\ada_go\\mcp_projects\\mem_go\\mem_go.db"],
       "env": {
         "MEM_EMBEDDING_API_KEY": "sk-...",
         "MEM_EMBEDDING_BASE_URL": "https://api.openai.com/v1",
@@ -85,8 +85,8 @@ export MEM_EMBEDDING_MODEL="text-embedding-3-small"
 {
   "mcpServers": {
     "mem-go": {
-      "command": "E:\\codes\\go_projects\\mem_go\\bin\\memmcp.exe",
-      "args": ["-db", "E:\\codes\\go_projects\\mem_go\\mem_go.db"]
+      "command": "E:\\codes\\go_projects\\ada_go\\mcp_projects\\mem_go\\bin\\memmcp.exe",
+      "args": ["-db", "E:\\codes\\go_projects\\ada_go\\mcp_projects\\mem_go\\mem_go.db"]
     }
   }
 }
@@ -122,7 +122,11 @@ export MEM_EMBEDDING_MODEL="text-embedding-3-small"
 
 **去重策略**：`Store` 时先在同 `scope` 内做近邻检索，相似度达到阈值即视为同一记忆的"强化"——
 以新内容覆盖、标签取并集、重要度取较大值、强化计数 +1。
-阈值默认由嵌入提供者声明（密集嵌入模型 0.93，离线哈希 0.60），可用 `Config.DedupThreshold` 覆盖。
+合并会覆盖旧内容，因此结果始终携带被覆盖的旧记忆（`previous`）供调用方审计。
+阈值默认由嵌入提供者声明（密集嵌入模型 0.93，离线哈希 0.95），可用 `Config.DedupThreshold` 覆盖。
+离线哈希只刻画词面相似度：实测"仅末位数字不同"的两条真实记忆相似度可达 0.92+，与真正的近重复
+分布完全重叠，无法靠阈值区分语义异同——故哈希阈值收紧到近逐字重复处（0.95），
+宁可少合并（新增成独立条目）也不静默覆盖丢失记忆。
 
 **检索重排**：候选取 `max(20, 4×limit)` 条，按
 `相似度 × (0.7 + 0.3×重要度) × 0.5^(天数/半衰期)` 重排后截断，
@@ -137,8 +141,9 @@ export MEM_EMBEDDING_MODEL="text-embedding-3-small"
 go test ./...
 ```
 
-覆盖：存储/检索、去重合并、scope 隔离、类型/标签过滤、时间排序、按 ID 读写删、语义遗忘、
-重启持久化往返（含 payload 类型还原）、维度隔离、参数校验、
+覆盖：存储/检索、去重合并（含被覆盖旧内容审计与并发写入去重）、scope 隔离、类型/标签过滤、
+时间排序与 limit 截断、按 ID 读写删、语义遗忘（含提供者自适应默认阈值）、
+重启持久化往返（含 payload 类型还原与合并落盘）、维度隔离、参数校验、
 嵌入器（确定性/归一化/相似度序/OpenAI 请求形状）、以及 **MCP 全工具集成测试**（内存传输 + 真实协议会话）。
 
 ## 目录结构
@@ -148,5 +153,5 @@ mem_go/
 ├── cmd/memmcp/           # 入口：环境解析、嵌入器装配、stdio 服务
 ├── internal/memory/      # 记忆引擎（类型 / 嵌入器 / 引擎）
 ├── internal/mcpserver/   # MCP 工具注册与装配
-└── go.mod                # 依赖 govector（本地 replace ../govector）与官方 MCP SDK
+└── go.mod                # 依赖 govector v0.1.10 与官方 MCP SDK
 ```

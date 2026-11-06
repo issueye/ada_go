@@ -114,9 +114,17 @@ func TestDedupOverMCP(t *testing.T) {
 	defer sess.Close()
 
 	callTool(t, sess, "memory_store", map[string]any{"content": "部署前必须跑完整测试"})
-	second := callTool(t, sess, "memory_store", map[string]any{"content": "部署之前必须跑完整的测试"})
+	second := callTool(t, sess, "memory_store", map[string]any{"content": "部署前必须跑完整测试!"})
 	if second["action"] != "updated" {
-		t.Fatalf("重复内容应合并为 updated: %s", second["_text"])
+		t.Fatalf("近重复内容应合并为 updated: %s", second["_text"])
+	}
+	// 合并可审计：结构化输出携带被覆盖的旧记忆
+	prev, ok := second["previous"].(map[string]any)
+	if !ok {
+		t.Fatalf("updated 应携带 previous: %v", second)
+	}
+	if prev["content"] != "部署前必须跑完整测试" {
+		t.Fatalf("previous.content 应为被覆盖的旧内容: %v", prev["content"])
 	}
 	stats := callTool(t, sess, "memory_stats", map[string]any{})
 	if stats["total"] != float64(1) {
@@ -129,7 +137,8 @@ func TestForgetAndDeleteOverMCP(t *testing.T) {
 	defer sess.Close()
 
 	callTool(t, sess, "memory_store", map[string]any{"content": "临时密钥 sk-temp-111 已失效"})
-	forgetOut := callTool(t, sess, "memory_forget", map[string]any{"query": "临时密钥 sk-temp-111 已经失效", "threshold": 0.5})
+	// 不传 threshold，验证哈希提供者的自适应默认阈值（0.5）
+	forgetOut := callTool(t, sess, "memory_forget", map[string]any{"query": "临时密钥 sk-temp-111 已经失效"})
 	if forgetOut["deleted"] != float64(1) {
 		t.Fatalf("遗忘应删除 1 条: %s", forgetOut["_text"])
 	}
@@ -147,8 +156,8 @@ func TestListGetStatsOverMCP(t *testing.T) {
 	defer sess.Close()
 
 	stored := callTool(t, sess, "memory_store", map[string]any{"content": "列出并读取我", "kind": "fact"})
-	if stored["status"] != "ok" {
-		t.Fatalf("存储应成功: %s", stored["_text"])
+	if stored["action"] != "created" {
+		t.Fatalf("存储应为 created: %s", stored["_text"])
 	}
 	memID := stored["memory"].(map[string]any)["id"].(string)
 

@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -36,13 +37,13 @@ func (c *stubClock) Advance(d time.Duration) { c.now = c.now.Add(d) }
 
 func mustStore(t *testing.T, e *Engine, content, kind string, importance float64, scope string, tags ...string) (Memory, StoreAction) {
 	t.Helper()
-	mem, action, err := e.Store(context.Background(), StoreInput{
+	res, err := e.Store(context.Background(), StoreInput{
 		Content: content, Kind: kind, Importance: importance, Scope: scope, Tags: tags,
 	})
 	if err != nil {
 		t.Fatalf("Store(%q) 失败: %v", content, err)
 	}
-	return mem, action
+	return res.Memory, res.Action
 }
 
 func TestStoreAndSearch(t *testing.T) {
@@ -79,26 +80,34 @@ func TestStoreDedupMerge(t *testing.T) {
 	e, _ := newTestEngine(t)
 	ctx := context.Background()
 
-	m1, _ := mustStore(t, e, "用户偏好使用 Vim 编辑器", "preference", 0.5, "", "editor")
-	// 相同语义内容再次存储 → 合并更新
-	m2, action, err := e.Store(ctx, StoreInput{Content: "用户偏好使用 Vim 编辑器写代码", Importance: 0.9, Tags: []string{"工具"}})
+	oldContent := "用户偏好使用 Vim 编辑器"
+	m1, _ := mustStore(t, e, oldContent, "preference", 0.5, "", "editor")
+	// 近逐字重复（仅标点差异）再次存储 → 合并更新
+	m2, err := e.Store(ctx, StoreInput{Content: "用户偏好使用 Vim 编辑器。", Importance: 0.9, Tags: []string{"工具"}})
 	if err != nil {
 		t.Fatalf("重复存储失败: %v", err)
 	}
-	if action != ActionUpdated {
-		t.Fatalf("重复内容应触发 updated，得到 %s", action)
+	if m2.Action != ActionUpdated {
+		t.Fatalf("重复内容应触发 updated，得到 %s", m2.Action)
 	}
-	if m2.ID != m1.ID {
-		t.Fatalf("更新应保持原 ID: %s != %s", m2.ID, m1.ID)
+	if m2.Memory.ID != m1.ID {
+		t.Fatalf("更新应保持原 ID: %s != %s", m2.Memory.ID, m1.ID)
 	}
-	if m2.Importance != 0.9 {
-		t.Fatalf("重要度应取较大值 0.9，得到 %f", m2.Importance)
+	if m2.Memory.Importance != 0.9 {
+		t.Fatalf("重要度应取较大值 0.9，得到 %f", m2.Memory.Importance)
 	}
-	if len(m2.Tags) != 2 {
-		t.Fatalf("标签应合并为 2 个，得到 %v", m2.Tags)
+	if len(m2.Memory.Tags) != 2 {
+		t.Fatalf("标签应合并为 2 个，得到 %v", m2.Memory.Tags)
 	}
-	if m2.AccessCount != 1 {
-		t.Fatalf("强化次数应为 1，得到 %d", m2.AccessCount)
+	if m2.Memory.AccessCount != 1 {
+		t.Fatalf("强化次数应为 1，得到 %d", m2.Memory.AccessCount)
+	}
+	// 合并必须可审计：Previous 返回被覆盖的旧内容
+	if m2.Previous == nil {
+		t.Fatal("合并更新必须返回被覆盖的旧记忆（Previous）")
+	}
+	if m2.Previous.Content != oldContent || m2.Previous.ID != m1.ID {
+		t.Fatalf("Previous 应为旧记忆: %+v", m2.Previous)
 	}
 	// 库里仍只有 1 条
 	st, err := e.Stats(ctx)
@@ -107,6 +116,117 @@ func TestStoreDedupMerge(t *testing.T) {
 	}
 	if st.Total != 1 {
 		t.Fatalf("去重后总数应为 1，得到 %d", st.Total)
+	}
+}
+
+// TestStoreDistinctFactsNotMerged 是数据丢失回归测试：
+// 词面哈希下仅末位数字不同的两条真实记忆相似度可达 0.92+，
+// 旧的 0.60 阈值会把第二条静默覆盖到第一条上。
+// 现在哈希阈值收紧到 0.95，语义上不同的事实必须各自成条。
+func TestStoreDistinctFactsNotMerged(t *testing.T) {
+	e, _ := newTestEngine(t)
+	ctx := context.Background()
+
+	mustStore(t, e, "生产环境数据库在 10.0.0.5", "fact", 0.5, "")
+	res, err := e.Store(ctx, StoreInput{Content: "生产环境数据库在 10.0.0.6"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Action != ActionCreated {
+		t.Fatalf("仅末位数字不同的两条事实不应合并，得到 %s（previous=%v）", res.Action, res.Previous)
+	}
+	if res.Previous != nil {
+		t.Fatal("新增记忆不应携带 Previous")
+	}
+	st, err := e.Stats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Total != 2 {
+		t.Fatalf("两条不同事实应共存，总数应为 2，得到 %d", st.Total)
+	}
+}
+
+// TestStoreMergePersists 验证合并结果真正落盘（而不只是返回值正确）：
+// 重开数据库后内容、强化计数、合并标签、原创建时间都应保持。
+func TestStoreMergePersists(t *testing.T) {
+	dir := t.TempDir()
+
+	e1, _ := newTestEngineAt(t, dir)
+	m1, _ := mustStore(t, e1, "部署前必须跑完整测试", "procedure", 0.5, "", "ci")
+	res, err := e1.Store(context.Background(), StoreInput{
+		Content: "部署前必须跑完整测试!", Importance: 0.8, Tags: []string{"release"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Action != ActionUpdated {
+		t.Fatalf("近重复内容应合并，得到 %s", res.Action)
+	}
+	if err := e1.Close(); err != nil {
+		t.Fatalf("关闭引擎失败: %v", err)
+	}
+
+	e2, _ := newTestEngineAt(t, dir)
+	defer e2.Close()
+	got, err := e2.Get(context.Background(), m1.ID)
+	if err != nil {
+		t.Fatalf("重开后按 ID 查询失败: %v", err)
+	}
+	if got.Content != "部署前必须跑完整测试!" {
+		t.Fatalf("合并后的新内容应落盘: %q", got.Content)
+	}
+	if got.Importance != 0.8 {
+		t.Fatalf("合并后重要度应取较大值 0.8，得到 %f", got.Importance)
+	}
+	if got.AccessCount != 1 {
+		t.Fatalf("合并后强化计数应为 1，得到 %d", got.AccessCount)
+	}
+	if len(got.Tags) != 2 {
+		t.Fatalf("合并后标签应为 2 个，得到 %v", got.Tags)
+	}
+	if !got.CreatedAt.Equal(m1.CreatedAt) {
+		t.Fatalf("合并应保留原创建时间: %v != %v", got.CreatedAt, m1.CreatedAt)
+	}
+}
+
+// TestConcurrentStoreDedup 验证 storeMu 串行化写入路径：
+// 并发写入同语义内容时恰好产生一条记忆、一次 created。
+func TestConcurrentStoreDedup(t *testing.T) {
+	e, _ := newTestEngine(t)
+
+	const n = 8
+	actions := make([]StoreAction, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			res, err := e.Store(context.Background(), StoreInput{Content: "并发写入的同一条记忆"})
+			if err != nil {
+				t.Errorf("并发 Store 失败: %v", err)
+				return
+			}
+			actions[i] = res.Action
+		}(i)
+	}
+	wg.Wait()
+
+	created := 0
+	for _, a := range actions {
+		if a == ActionCreated {
+			created++
+		}
+	}
+	if created != 1 {
+		t.Fatalf("并发写入应恰好一次 created，得到 %d（actions=%v）", created, actions)
+	}
+	st, err := e.Stats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Total != 1 {
+		t.Fatalf("并发去重后总数应为 1，得到 %d", st.Total)
 	}
 }
 
@@ -196,10 +316,9 @@ func TestGetDeleteAndForget(t *testing.T) {
 		t.Fatalf("Delete 应删除 1 条，得到 %d, err=%v", n, err)
 	}
 
-	// Forget（语义删除）：哈希嵌入器对"废弃的 API 密钥"这类改述召回有限，
-	// 阈值放宽到提供者默认去重阈值附近
+	// Forget（语义删除）：不传 Threshold，验证哈希提供者的自适应默认阈值（0.5）
 	mustStore(t, e, "旧版的 API 密钥 sk-old-xxx 已废弃", "fact", 0.3, "")
-	removed, err := e.Forget(ctx, ForgetInput{Query: "废弃的 API 密钥", Threshold: 0.5})
+	removed, err := e.Forget(ctx, ForgetInput{Query: "废弃的 API 密钥"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,10 +434,10 @@ func TestValidationErrors(t *testing.T) {
 	e, _ := newTestEngine(t)
 	ctx := context.Background()
 
-	if _, _, err := e.Store(ctx, StoreInput{Content: "  "}); err == nil {
+	if _, err := e.Store(ctx, StoreInput{Content: "  "}); err == nil {
 		t.Fatal("空内容应报错")
 	}
-	if _, _, err := e.Store(ctx, StoreInput{Content: "ok", Kind: "bogus"}); err == nil {
+	if _, err := e.Store(ctx, StoreInput{Content: "ok", Kind: "bogus"}); err == nil {
 		t.Fatal("非法类型应报错")
 	}
 	if _, err := e.Search(ctx, SearchInput{Query: ""}); err == nil {
@@ -327,10 +446,51 @@ func TestValidationErrors(t *testing.T) {
 	if _, err := e.Forget(ctx, ForgetInput{Query: ""}); err == nil {
 		t.Fatal("空遗忘目标应报错")
 	}
+	// 非法 kind 在过滤查询中同样必须报错，而不是静默忽略、放大结果集
+	if _, err := e.Search(ctx, SearchInput{Query: "任意", Kind: "bogus"}); err == nil {
+		t.Fatal("Search 非法 kind 应报错")
+	}
+	if _, err := e.List(ctx, ListInput{Kind: "bogus"}); err == nil {
+		t.Fatal("List 非法 kind 应报错")
+	}
+	if _, err := e.Forget(ctx, ForgetInput{Query: "任意", Kind: "bogus"}); err == nil {
+		t.Fatal("Forget 非法 kind 应报错")
+	}
 	// 重要度越界裁剪
-	m, _, err := e.Store(ctx, StoreInput{Content: "重要度越界", Importance: 42})
-	if err != nil || m.Importance != 1 {
-		t.Fatalf("重要度应裁剪到 1，得到 %f err=%v", m.Importance, err)
+	m, err := e.Store(ctx, StoreInput{Content: "重要度越界", Importance: 42})
+	if err != nil || m.Memory.Importance != 1 {
+		t.Fatalf("重要度应裁剪到 1，得到 %f err=%v", m.Memory.Importance, err)
+	}
+}
+
+// TestListAndSearchLimit 验证 limit 截断与排序稳定性。
+func TestListAndSearchLimit(t *testing.T) {
+	e, clock := newTestEngine(t)
+	ctx := context.Background()
+
+	mustStore(t, e, "第一条待 limit 记忆", "fact", 0.5, "")
+	clock.Advance(1 * time.Hour)
+	mustStore(t, e, "第二条待 limit 记忆", "fact", 0.5, "")
+	clock.Advance(1 * time.Hour)
+	third, _ := mustStore(t, e, "第三条待 limit 记忆", "fact", 0.5, "")
+
+	listed, err := e.List(ctx, ListInput{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 2 {
+		t.Fatalf("List limit=2 应只返回 2 条，得到 %d", len(listed))
+	}
+	if listed[0].ID != third.ID {
+		t.Fatalf("List 截断应保留最新的一条: %s", listed[0].Content)
+	}
+
+	found, err := e.Search(ctx, SearchInput{Query: "待 limit 记忆", Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 {
+		t.Fatalf("Search limit=1 应只返回 1 条，得到 %d", len(found))
 	}
 }
 

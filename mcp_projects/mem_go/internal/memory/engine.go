@@ -71,12 +71,26 @@ func Open(cfg Config) (*Engine, error) {
 	}
 
 	name := collectionName(cfg.Embedder.Dim())
+	// 用 ListCollectionMetas 区分"集合不存在"与真实 IO 错误：
+	// 直接 LoadCollectionMeta 的失败无法区分这两种情况。
+	metas, err := store.ListCollectionMetas()
+	if err != nil {
+		store.Close()
+		return nil, fmt.Errorf("读取集合元数据失败: %w", err)
+	}
 	var col *core.Collection
-	if meta, metaErr := store.LoadCollectionMeta(name); metaErr != nil {
+	var existing *core.CollectionMeta
+	for i := range metas {
+		if metas[i].Name == name {
+			existing = &metas[i]
+			break
+		}
+	}
+	if existing == nil {
 		// 首次创建：启用 HNSW 索引与余弦相似度
 		col, err = core.NewCollectionWithParams(name, cfg.Embedder.Dim(), core.Cosine, store, true, core.DefaultHNSWParams())
 	} else {
-		col, err = core.NewCollectionWithParams(meta.Name, meta.VectorLen, meta.Metric, store, meta.UseHNSW, meta.HNSWParams)
+		col, err = core.NewCollectionWithParams(existing.Name, existing.VectorLen, existing.Metric, store, existing.UseHNSW, existing.HNSWParams)
 	}
 	if err != nil {
 		store.Close()
@@ -115,16 +129,27 @@ const (
 	ActionUpdated StoreAction = "updated" // 命中重复记忆，合并更新
 )
 
+// StoreResult 是一次写入的完整结果。
+type StoreResult struct {
+	Memory Memory      // 写入后的记忆（合并时为更新后的形态）
+	Action StoreAction // created | updated
+	// Previous 是合并更新前被覆盖的既有记忆（含旧内容）。
+	// 合并会覆盖旧内容，调用方（agent）需要它来审计本次合并是否误伤；
+	// 仅 Action == ActionUpdated 时非 nil。
+	Previous *Memory
+}
+
 // Store 写入一条记忆。同 scope 下语义重复时自动合并：
 // 以新内容为准、标签取并集、重要度取较大值，并递增强化次数。
-func (e *Engine) Store(ctx context.Context, in StoreInput) (Memory, StoreAction, error) {
+// 合并并非无损操作，结果中的 Previous 携带被覆盖的旧内容供审计。
+func (e *Engine) Store(ctx context.Context, in StoreInput) (StoreResult, error) {
 	content := strings.TrimSpace(in.Content)
 	if content == "" {
-		return Memory{}, "", fmt.Errorf("记忆内容不能为空")
+		return StoreResult{}, fmt.Errorf("记忆内容不能为空")
 	}
 	kind, err := NormalizeKind(in.Kind)
 	if err != nil {
-		return Memory{}, "", err
+		return StoreResult{}, err
 	}
 	scope := normalizeScope(in.Scope)
 	importance := ClampImportance(in.Importance)
@@ -135,16 +160,16 @@ func (e *Engine) Store(ctx context.Context, in StoreInput) (Memory, StoreAction,
 
 	vecs, err := e.cfg.Embedder.Embed(ctx, []string{content})
 	if err != nil {
-		return Memory{}, "", fmt.Errorf("向量化失败: %w", err)
+		return StoreResult{}, fmt.Errorf("向量化失败: %w", err)
 	}
 
-	// 同 scope 内做语义去重检查
+	// 同 scope 内做语义去重检查（结果按相似度降序，只需最优命中）
 	scopeFilter := &core.Filter{Must: []core.Condition{
 		{Key: payloadScope, Match: core.MatchValue{Value: scope}},
 	}}
-	hits, err := e.col.Search(vecs[0], scopeFilter, 5)
+	hits, err := e.col.Search(vecs[0], scopeFilter, 1)
 	if err != nil {
-		return Memory{}, "", fmt.Errorf("去重检索失败: %w", err)
+		return StoreResult{}, fmt.Errorf("去重检索失败: %w", err)
 	}
 
 	if len(hits) > 0 && float64(hits[0].Score) >= e.cfg.DedupThreshold {
@@ -162,9 +187,9 @@ func (e *Engine) Store(ctx context.Context, in StoreInput) (Memory, StoreAction,
 			AccessCount: old.AccessCount + 1,
 		}
 		if err := e.upsertMemory(updated, vecs[0]); err != nil {
-			return Memory{}, "", err
+			return StoreResult{}, err
 		}
-		return updated, ActionUpdated, nil
+		return StoreResult{Memory: updated, Action: ActionUpdated, Previous: &old}, nil
 	}
 
 	mem := Memory{
@@ -178,9 +203,9 @@ func (e *Engine) Store(ctx context.Context, in StoreInput) (Memory, StoreAction,
 		UpdatedAt:  now,
 	}
 	if err := e.upsertMemory(mem, vecs[0]); err != nil {
-		return Memory{}, "", err
+		return StoreResult{}, err
 	}
-	return mem, ActionCreated, nil
+	return StoreResult{Memory: mem, Action: ActionCreated}, nil
 }
 
 // SearchInput 是语义检索的参数。
@@ -207,8 +232,12 @@ func (e *Engine) Search(ctx context.Context, in SearchInput) ([]Memory, error) {
 	if err != nil {
 		return nil, fmt.Errorf("向量化失败: %w", err)
 	}
+	filter, err := buildFilter(in.Scope, in.Kind, in.Tag)
+	if err != nil {
+		return nil, err
+	}
 	// 多取候选再做重排，避免 HNSW 截断丢结果
-	hits, err := e.col.Search(vecs[0], buildFilter(in.Scope, in.Kind, in.Tag), max(20, limit*4))
+	hits, err := e.col.Search(vecs[0], filter, max(20, limit*4))
 	if err != nil {
 		return nil, fmt.Errorf("检索失败: %w", err)
 	}
@@ -242,7 +271,11 @@ func (e *Engine) List(_ context.Context, in ListInput) ([]Memory, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	points, err := e.col.GetPointsByFilter(buildFilter(in.Scope, in.Kind, in.Tag))
+	filter, err := buildFilter(in.Scope, in.Kind, in.Tag)
+	if err != nil {
+		return nil, err
+	}
+	points, err := e.col.GetPointsByFilter(filter)
 	if err != nil {
 		return nil, fmt.Errorf("列出记忆失败: %w", err)
 	}
@@ -311,7 +344,13 @@ func (e *Engine) Forget(ctx context.Context, in ForgetInput) ([]Memory, error) {
 	}
 	threshold := in.Threshold
 	if threshold <= 0 {
-		threshold = 0.8
+		// 默认阈值随嵌入提供者自适应：真实模型语义分布下 0.8 合理，
+		// 词面哈希的相似度普遍偏低（改述常在 0.5~0.7），沿用 0.8 几乎删不到东西。
+		if aware, ok := e.cfg.Embedder.(ForgetThresholdAware); ok {
+			threshold = aware.DefaultForgetThreshold()
+		} else {
+			threshold = 0.8
+		}
 	}
 	limit := in.Limit
 	if limit <= 0 {
@@ -322,7 +361,11 @@ func (e *Engine) Forget(ctx context.Context, in ForgetInput) ([]Memory, error) {
 	if err != nil {
 		return nil, fmt.Errorf("向量化失败: %w", err)
 	}
-	hits, err := e.col.Search(vecs[0], buildFilter(in.Scope, in.Kind, in.Tag), max(20, limit*2))
+	filter, err := buildFilter(in.Scope, in.Kind, in.Tag)
+	if err != nil {
+		return nil, err
+	}
+	hits, err := e.col.Search(vecs[0], filter, max(20, limit*2))
 	if err != nil {
 		return nil, fmt.Errorf("检索待遗忘记忆失败: %w", err)
 	}
@@ -382,10 +425,10 @@ func (e *Engine) Stats(_ context.Context) (Stats, error) {
 // ---------------- 内部工具函数 ----------------
 
 // upsertMemory 将记忆写入向量库并立即刷盘（记忆数据量小，安全优先）。
+// 注意：Version 由 govector 在 Upsert 内部按写入时刻生成，调用方无需提供。
 func (e *Engine) upsertMemory(m Memory, vec []float32) error {
 	err := e.col.Upsert([]core.PointStruct{{
 		ID:      m.ID,
-		Version: uint64(m.UpdatedAt.UnixMilli()),
 		Vector:  vec,
 		Payload: memoryToPayload(m),
 	}})
@@ -400,18 +443,24 @@ func (e *Engine) upsertMemory(m Memory, vec []float32) error {
 
 // buildFilter 将 scope/kind/tag 组装为 govector payload 过滤器。
 // 无条件时返回空过滤器（govector 的 GetPointsByFilter 不接受 nil）。
-func buildFilter(scope, kind, tag string) *core.Filter {
+// kind 非空但无法识别时返回错误——静默忽略会让过滤悄悄失效、
+// 结果集意外变宽，与 Store 对非法 kind 报错的行为保持一致。
+func buildFilter(scope, kind, tag string) (*core.Filter, error) {
 	var must []core.Condition
 	if scope = normalizeScope(scope); scope != "" {
 		must = append(must, core.Condition{Key: payloadScope, Match: core.MatchValue{Value: scope}})
 	}
-	if k, err := NormalizeKind(kind); err == nil && kind != "" {
+	if strings.TrimSpace(kind) != "" {
+		k, err := NormalizeKind(kind)
+		if err != nil {
+			return nil, err
+		}
 		must = append(must, core.Condition{Key: payloadKind, Match: core.MatchValue{Value: string(k)}})
 	}
 	if tag = strings.TrimSpace(tag); tag != "" {
 		must = append(must, core.Condition{Key: payloadTags, Type: core.MatchTypeContains, Match: core.MatchValue{Value: tag}})
 	}
-	return &core.Filter{Must: must}
+	return &core.Filter{Must: must}, nil
 }
 
 func normalizeScope(s string) string { return strings.TrimSpace(s) }

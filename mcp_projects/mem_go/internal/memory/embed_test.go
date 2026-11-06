@@ -72,9 +72,9 @@ func TestHashEmbedderSimilarityOrdering(t *testing.T) {
 }
 
 func TestHashEmbedderDimFloor(t *testing.T) {
-	e := NewHashEmbedder(1) // 低于下限应回到默认值
-	if e.Dim() != DefaultHashDim {
-		t.Fatalf("维度下限应生效，得到 %d", e.Dim())
+	e := NewHashEmbedder(1) // 低于下限应被钳制到 64
+	if e.Dim() != 64 {
+		t.Fatalf("维度下限应钳制到 64，得到 %d", e.Dim())
 	}
 }
 

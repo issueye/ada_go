@@ -80,14 +80,16 @@ type storeIn struct {
 }
 
 type storeOut struct {
-	Status string        `json:"status"` // created | updated
 	Action string        `json:"action"` // created=新增, updated=合并更新既有记忆
 	Memory memory.Memory `json:"memory"`
+	// Previous 是合并更新前被覆盖的旧记忆，仅 action=updated 时存在。
+	// 合并非无损操作，返回旧内容供调用方判断是否误合并、必要时按 ID 恢复。
+	Previous *memory.Memory `json:"previous,omitempty"`
 }
 
 func storeTool(engine *memory.Engine) mcp.ToolHandlerFor[storeIn, storeOut] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in storeIn) (*mcp.CallToolResult, storeOut, error) {
-		mem, action, err := engine.Store(ctx, memory.StoreInput{
+		res, err := engine.Store(ctx, memory.StoreInput{
 			Content:    in.Content,
 			Kind:       in.Kind,
 			Tags:       in.Tags,
@@ -97,15 +99,19 @@ func storeTool(engine *memory.Engine) mcp.ToolHandlerFor[storeIn, storeOut] {
 		if err != nil {
 			return nil, storeOut{}, err
 		}
+		mem := res.Memory
 		var head string
-		if action == memory.ActionUpdated {
+		if res.Action == memory.ActionUpdated {
 			head = "已合并更新既有记忆（内容相似，视为同一记忆的强化）"
+			if res.Previous != nil && res.Previous.Content != mem.Content {
+				head += fmt.Sprintf("\n⚠️ 覆盖前内容：%s", res.Previous.Content)
+			}
 		} else {
 			head = "已保存新记忆"
 		}
-		return textResult(fmt.Sprintf("%s：%s\nID: %s | 类型: %s | 重要度: %.2f | 命名空间: %s",
-				head, mem.Content, mem.ID, mem.Kind, mem.Importance, mem.Scope)),
-			storeOut{Status: "ok", Action: string(action), Memory: mem}, nil
+		return textResult(fmt.Sprintf("%s\nID: %s | 类型: %s | 重要度: %.2f | 命名空间: %s",
+				head, mem.ID, mem.Kind, mem.Importance, mem.Scope)),
+			storeOut{Action: string(res.Action), Memory: mem, Previous: res.Previous}, nil
 	}
 }
 
@@ -137,7 +143,7 @@ func searchTool(engine *memory.Engine) mcp.ToolHandlerFor[searchIn, searchOut] {
 		for i, m := range results {
 			sb.WriteString(fmt.Sprintf("%d. [得分 %.3f|相似 %.3f] (%s) %s  [标签: %s | 更新: %s | ID: %s]\n",
 				i+1, m.Score, m.Similarity, m.Kind, m.Content,
-				renderTags(m.Tags), m.UpdatedAt.Format("2006-01-02"), m.ID))
+				renderTags(m.Tags), m.UpdatedAt.Local().Format("2006-01-02"), m.ID))
 		}
 		return textResult(strings.TrimRight(sb.String(), "\n")), searchOut{Count: len(results), Results: results}, nil
 	}
@@ -168,7 +174,7 @@ func listTool(engine *memory.Engine) mcp.ToolHandlerFor[listIn, listOut] {
 		for i, m := range results {
 			sb.WriteString(fmt.Sprintf("%d. (%s) %s  [标签: %s | 更新: %s | ID: %s]\n",
 				i+1, m.Kind, m.Content, renderTags(m.Tags),
-				m.UpdatedAt.Format("2006-01-02 15:04"), m.ID))
+				m.UpdatedAt.Local().Format("2006-01-02 15:04"), m.ID))
 		}
 		return textResult(strings.TrimRight(sb.String(), "\n")), listOut{Count: len(results), Results: results}, nil
 	}
@@ -215,7 +221,7 @@ func deleteTool(engine *memory.Engine) mcp.ToolHandlerFor[deleteIn, deleteOut] {
 
 type forgetIn struct {
 	Query     string  `json:"query" jsonschema:"要遗忘的内容描述（必填）"`
-	Threshold float64 `json:"threshold,omitempty" jsonschema:"相似度阈值 0-1，默认 0.8；调高更保守"`
+	Threshold float64 `json:"threshold,omitempty" jsonschema:"相似度阈值 0-1，默认随嵌入提供者自适应（真实模型 0.8 / 离线哈希 0.5）；调高更保守"`
 	Limit     int     `json:"limit,omitempty" jsonschema:"最多删除条数，默认 5"`
 	Kind      string  `json:"kind,omitempty" jsonschema:"按类型过滤"`
 	Tag       string  `json:"tag,omitempty" jsonschema:"按标签过滤"`
