@@ -657,19 +657,23 @@ export default defineComponent({
       });
       this.persistModels(models, "模型已保存。");
     },
-    removeModel() {
+    /// 删除指定模型：列表行与编辑弹窗共用同一套确认与持久化逻辑。
+    removeModelById(modelId: string) {
       const selected = this.selected;
-      const target = this.editingModelId;
-      if (!selected || !target) return;
+      if (!selected || !modelId) return;
       const run = () => {
-        this.persistModels((selected.models || []).filter((m: any) => m && m.id !== target), "模型已删除。");
+        this.persistModels((selected.models || []).filter((m: any) => m && m.id !== modelId), "模型已删除。");
       };
       const confirm = (window as any).adaConfirm;
       if (typeof confirm === "function") {
-        confirm("删除模型「" + target + "」？", run);
+        confirm("删除模型「" + modelId + "」？", run);
       } else {
         run();
       }
+    },
+    removeModel() {
+      if (!this.editingModelId) return;
+      this.removeModelById(this.editingModelId);
     },
   },
   render(h) {
@@ -976,6 +980,7 @@ export default defineComponent({
                                   >设为当前</Button>
                                 )}
                                 <Button size="sm" variant="ghost" onClick={() => this.openEditModel(model)}>编辑</Button>
+                                <Button size="sm" variant="danger" onClick={() => this.removeModelById(model.id)}>删除</Button>
                               </div>
                             </div>
                           );

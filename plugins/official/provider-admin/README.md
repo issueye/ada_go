@@ -23,7 +23,7 @@
 | 样式 | `provider-admin.css`（`static/`） |
 | 浏览器 bundle | `static/client.js`（`pluginbuild` 从 `client.tsx` 生成） |
 
-P2-4b-2b：`providers` 页已替换为组件化实现，支持新增供应商、设为当前、启用/停用、删除、拉取/添加模型、模型新增/删除/编辑与供应商信息编辑。拉取模型会打开勾选弹窗，只添加选中的模型；模型的添加与编辑也通过弹窗完成；模型推理等级是动态标签，输入模态是复选框。legacy `provider-admin.js` / `page.tsx` 保留在仓库作历史参考，但清单不再加载脚本。页面通过 `backend.read` 动作 `state` 预取 `/state`，SSR/无 JS 也能看到供应商目录；关闭 `pluginIslands` 或设 `ADAG_DISABLE_ISLANDS=1` 时只保留 SSR。禁用插件时入口、页面与 bundle 一起消失。
+P2-4b-2b：`providers` 页已替换为组件化实现，支持新增供应商、设为当前、启用/停用、删除、拉取/添加模型、模型新增/删除/编辑与供应商信息编辑。拉取模型会打开勾选弹窗，只添加选中的模型；模型的添加与编辑也通过弹窗完成；模型列表每行直接提供「删除」按钮（二次确认后保存），不必先打开编辑弹窗。模型推理等级是动态标签，输入模态是复选框。legacy `provider-admin.js` / `page.tsx` 保留在仓库作历史参考，但清单不再加载脚本。页面通过 `backend.read` 动作 `state` 预取 `/state`，SSR/无 JS 也能看到供应商目录；关闭 `pluginIslands` 或设 `ADAG_DISABLE_ISLANDS=1` 时只保留 SSR。禁用插件时入口、页面与 bundle 一起消失。
 
 P2-4b-3（0.4.0）：按设计稿重排页面结构与控件形态。
 

@@ -680,19 +680,23 @@ var providers_next_default = defineComponent({
       });
       this.persistModels(models, "模型已保存。");
     },
-    removeModel() {
+    /// 删除指定模型：列表行与编辑弹窗共用同一套确认与持久化逻辑。
+    removeModelById(modelId) {
       const selected = this.selected;
-      const target = this.editingModelId;
-      if (!selected || !target) return;
+      if (!selected || !modelId) return;
       const run = () => {
-        this.persistModels((selected.models || []).filter((m) => m && m.id !== target), "模型已删除。");
+        this.persistModels((selected.models || []).filter((m) => m && m.id !== modelId), "模型已删除。");
       };
       const confirm = window.adaConfirm;
       if (typeof confirm === "function") {
-        confirm("删除模型「" + target + "」？", run);
+        confirm("删除模型「" + modelId + "」？", run);
       } else {
         run();
       }
+    },
+    removeModel() {
+      if (!this.editingModelId) return;
+      this.removeModelById(this.editingModelId);
     }
   },
   render(h2) {
@@ -852,7 +856,7 @@ var providers_next_default = defineComponent({
           onClick: () => this.selectModel(model.id)
         },
         "设为当前"
-      ), /* @__PURE__ */ h2(Button, { size: "sm", variant: "ghost", onClick: () => this.openEditModel(model) }, "编辑")));
+      ), /* @__PURE__ */ h2(Button, { size: "sm", variant: "ghost", onClick: () => this.openEditModel(model) }, "编辑"), /* @__PURE__ */ h2(Button, { size: "sm", variant: "danger", onClick: () => this.removeModelById(model.id) }, "删除")));
     })) : /* @__PURE__ */ h2(Empty, { title: "还没有模型", description: "点「拉取模型」从服务商同步，或手动添加一个。" })), /* @__PURE__ */ h2("div", { class: "pm-danger" }, /* @__PURE__ */ h2("span", { class: "pm-danger__label" }, "危险操作", tip("停用后将从聊天列表中隐藏，配置与密钥保留；删除会同时移除其下所有模型。")), /* @__PURE__ */ h2("span", { class: "pm-danger__actions" }, /* @__PURE__ */ h2(
       Button,
       {
