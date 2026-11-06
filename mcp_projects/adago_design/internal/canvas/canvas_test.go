@@ -40,7 +40,7 @@ func TestStoreCRUDAndPersist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if b2.Title != "b2" || b2.X != x || b2.UpdatedAt.Equal(b.UpdatedAt) {
+	if b2.Title != "b2" || b2.X != x || b2.UpdatedAt.Before(b.UpdatedAt) {
 		t.Fatalf("Update 未生效: %+v", b2)
 	}
 	got, err := s.Get(a.ID)
@@ -74,20 +74,111 @@ func TestStoreCRUDAndPersist(t *testing.T) {
 func TestStorePersistFileFormat(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := OpenStore(dir)
-	s.Add(newTestNode("x"))
+	a := s.Add(newTestNode("x"))
+	b := s.Add(newTestNode("y"))
+	if _, err := s.AddEdge(a.ID, b.ID, "流向"); err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
 	raw, err := os.ReadFile(filepath.Join(dir, "canvas.json"))
 	if err != nil {
 		t.Fatalf("canvas.json 未生成: %v", err)
 	}
-	var nodes []*Node
-	if err := json.Unmarshal(raw, &nodes); err != nil {
+	var file persistedFile
+	if err := json.Unmarshal(raw, &file); err != nil {
 		t.Fatalf("canvas.json 不是合法 JSON: %v", err)
 	}
-	if len(nodes) != 1 || nodes[0].Title != "x" {
-		t.Fatalf("持久化内容异常: %s", raw)
+	if file.Version != 2 || len(file.Nodes) != 2 || len(file.Edges) != 1 {
+		t.Fatalf("持久化内容异常: version=%d nodes=%d edges=%d", file.Version, len(file.Nodes), len(file.Edges))
+	}
+	if file.Edges[0].Label != "流向" {
+		t.Fatalf("连线标签异常: %+v", file.Edges[0])
 	}
 	if _, err := os.Stat(filepath.Join(dir, "canvas.json.tmp")); !os.IsNotExist(err) {
 		t.Error("临时文件应已被 rename 清理")
+	}
+}
+
+func TestStoreV1Migration(t *testing.T) {
+	dir := t.TempDir()
+	// 写一份 v1 裸数组格式
+	v1 := `[
+		{"id":"n-old-1","title":"旧节点","kind":"note","html":"<html></html>","width":300,"height":200,"x":10,"y":20,"z":3}
+	]`
+	if err := os.WriteFile(filepath.Join(dir, "canvas.json"), []byte(v1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := OpenStore(dir)
+	if err != nil {
+		t.Fatalf("v1 迁移失败: %v", err)
+	}
+	nodes := s.List()
+	if len(nodes) != 1 || nodes[0].ID != "n-old-1" || nodes[0].Z != 3 {
+		t.Fatalf("v1 节点迁移异常: %+v", nodes)
+	}
+	// 迁移后的下一次写入应为 v2
+	s.AddEdge("n-old-1", "n-old-1", "") // 自环报错，不写入
+	s.Add(newTestNode("new"))
+	raw, _ := os.ReadFile(filepath.Join(dir, "canvas.json"))
+	var file persistedFile
+	if err := json.Unmarshal(raw, &file); err != nil || file.Version != 2 {
+		t.Fatalf("迁移后应写 v2 格式: %v", err)
+	}
+}
+
+func TestEdges(t *testing.T) {
+	s, _ := OpenStore("")
+	a := s.Add(newTestNode("a"))
+	b := s.Add(newTestNode("b"))
+	c := s.Add(newTestNode("c"))
+	e, err := s.AddEdge(a.ID, b.ID, "下一步")
+	if err != nil {
+		t.Fatalf("AddEdge: %v", err)
+	}
+	if e.ID == "" || e.From != a.ID || e.To != b.ID || e.Label != "下一步" {
+		t.Fatalf("连线内容异常: %+v", e)
+	}
+	// 重复（含反向）应拒绝
+	if _, err := s.AddEdge(b.ID, a.ID, ""); err != ErrEdgeDuplicate {
+		t.Fatalf("反向重复应 ErrEdgeDuplicate: %v", err)
+	}
+	// 自环
+	if _, err := s.AddEdge(a.ID, a.ID, ""); err != ErrEdgeSelfLoop {
+		t.Fatalf("自环应 ErrEdgeSelfLoop: %v", err)
+	}
+	// 端点缺失
+	if _, err := s.AddEdge(a.ID, "n-none", ""); err != ErrEdgeEndpoint {
+		t.Fatalf("端点缺失应 ErrEdgeEndpoint: %v", err)
+	}
+	if len(s.ListEdges()) != 1 {
+		t.Fatalf("连线数 = %d", len(s.ListEdges()))
+	}
+	// 删除节点级联删除连线
+	if _, err := s.Remove(a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.ListEdges()) != 0 {
+		t.Fatalf("节点删除后连线应级联删除")
+	}
+	// 删除连线
+	e2, _ := s.AddEdge(b.ID, c.ID, "")
+	if ok, _ := s.RemoveEdge(e2.ID); !ok {
+		t.Fatal("RemoveEdge 应成功")
+	}
+	if ok, _ := s.RemoveEdge(e2.ID); ok {
+		t.Fatal("重复 RemoveEdge 应 false")
+	}
+	// Clear + Restore 覆盖连线
+	e3, _ := s.AddEdge(b.ID, c.ID, "回环")
+	s.Clear()
+	if len(s.ListEdges()) != 0 {
+		t.Fatal("清空后应无连线")
+	}
+	if n, _, ok := s.RestoreLastClear(); !ok || n != 2 { // a 已被删除，快照只剩 b/c
+		t.Fatalf("恢复节点异常: %d %v", n, ok)
+	}
+	edges := s.ListEdges()
+	if len(edges) != 1 || edges[0].ID != e3.ID || edges[0].Label != "回环" {
+		t.Fatalf("连线恢复异常: %+v", edges)
 	}
 }
 

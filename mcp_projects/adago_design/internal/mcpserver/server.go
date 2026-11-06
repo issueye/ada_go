@@ -4,6 +4,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -131,6 +132,31 @@ func registerTools(server *mcp.Server, d Deps) {
 		Name:        "canvas_export",
 		Description: "把画布全部节点导出为一张独立 HTML 板（按坐标定位、iframe 还原预览），返回文件路径。",
 	}, exportTool(d))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "design_derive",
+		Description: "从品牌主色派生自定义设计体系：10 阶色板 + 语义色 + 中性灰（结构继承基底体系），持久化并注册，可直接用于全部设计工具。",
+	}, deriveTool(d))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "design_register",
+		Description: "注册自定义设计体系：传入 Token JSON（结构缺省字段从基底体系兜底），持久化并注册。",
+	}, registerTool(d))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "design_audit",
+		Description: "设计走查：WCAG 对比度、字号下限、圆角/间距阶梯、状态色完备性，产出评分与报告节点。",
+	}, auditTool(d))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "canvas_connect",
+		Description: "在画布两个节点之间画连线（SVG 贝塞尔，可带标签），表达页面流向。",
+	}, connectTool(d))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "canvas_group",
+		Description: "创建分组框：自动包住成员节点的边界（垫底虚线框），用于分区与叙事。",
+	}, groupTool(d))
 }
 
 // fail 构造带稳定错误码的 isError 结果（不返回 error，避免丢失结构化错误信息）。
@@ -139,6 +165,25 @@ func registerTools(server *mcp.Server, d Deps) {
 func fail[O any](code, msg, hint string) (*mcp.CallToolResult, O, error) {
 	var zero O
 	return failWith(zero, code, msg, hint)
+}
+
+func auditStatusText(s string) string {
+	switch s {
+	case "pass":
+		return "通过"
+	case "warn":
+		return "警告"
+	}
+	return "失败"
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func failWith[O any](out O, code, msg, hint string) (*mcp.CallToolResult, O, error) {
@@ -911,5 +956,303 @@ func exportTool(d Deps) mcp.ToolHandlerFor[exportIn, exportOut] {
 		}
 		out := exportOut{Path: p, NodeCount: len(nodes), Bytes: len(htmlDoc)}
 		return textResult(fmt.Sprintf("已导出 %d 个节点到 %s（%d 字节）。浏览器直接打开即可查看。", len(nodes), p, len(htmlDoc))), out, nil
+	}
+}
+
+// ---------------- design_derive ----------------
+
+type deriveIn struct {
+	Primary     string `json:"primary" jsonschema:"品牌主色，#RRGGBB 格式（如 #C8412B）"`
+	Name        string `json:"name" jsonschema:"体系名称（如「山茶茶饮」）"`
+	BaseSystem  string `json:"base_system" jsonschema:"结构基底体系 ID（颜色之外的 Token 继承它），如 volcano/element/douyin"`
+	AddToCanvas *bool  `json:"add_to_canvas,omitempty" jsonschema:"是否生成色板预览节点摆上画布，默认 true"`
+}
+
+type deriveOut struct {
+	SystemID   string   `json:"system_id"`
+	Name       string   `json:"name"`
+	BaseSystem string   `json:"base_system"`
+	Primary    string   `json:"primary"`
+	Palette    []string `json:"palette"`
+	Themes     []string `json:"themes"`
+	NodeID     string   `json:"node_id,omitempty"`
+	CanvasURL  string   `json:"canvas_url,omitempty"`
+}
+
+func deriveTool(d Deps) mcp.ToolHandlerFor[deriveIn, deriveOut] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in deriveIn) (*mcp.CallToolResult, deriveOut, error) {
+		sys, err := design.Derive(design.DeriveInput{
+			Primary: in.Primary, Name: in.Name, BaseSystemID: in.BaseSystem,
+		})
+		if err != nil {
+			return failWith[deriveOut](deriveOut{Primary: in.Primary, BaseSystem: in.BaseSystem},
+				"derive_failed", err.Error(), "primary 用 #RRGGBB；base_system 用 design_systems 查询")
+		}
+		if err := design.SaveCustomSystem(sys, d.DataDir); err != nil {
+			return failWith[deriveOut](deriveOut{SystemID: sys.ID},
+				"persist_failed", err.Error(), "")
+		}
+		scale, _ := design.BrandPalette(in.Primary)
+		out := deriveOut{
+			SystemID: sys.ID, Name: sys.Name, BaseSystem: design.SanitizeID(in.BaseSystem),
+			Primary: strings.ToUpper(in.Primary), Palette: scale, Themes: sys.Themes,
+		}
+		text := fmt.Sprintf("已派生品牌体系「%s」（%s，基底 %s）并持久化。ID: %s\n10 阶色板: %s",
+			sys.Name, out.Primary, out.BaseSystem, sys.ID, strings.Join(scale, " "))
+		add := true
+		if in.AddToCanvas != nil {
+			add = *in.AddToCanvas
+		}
+		if add {
+			boardHTML, _, berr := design.DeriveBoardHTML(sys, scale)
+			if berr == nil {
+				node := d.Store.Add(canvas.Node{
+					Title: sys.Name + " · 品牌色板", System: sys.ID, Kind: canvas.KindPalette,
+					HTML: boardHTML, Width: 420, Height: 480,
+					Tags: []string{"derive", sys.ID, out.Primary},
+				})
+				out.NodeID = node.ID
+				out.CanvasURL = d.BaseURL()
+				text += fmt.Sprintf("\n色板已摆上画布：节点 %s（%s）", node.ID, out.CanvasURL)
+			}
+		}
+		return textResult(text), out, nil
+	}
+}
+
+// ---------------- design_register ----------------
+
+type registerIn struct {
+	Name        string `json:"name" jsonschema:"体系名称"`
+	TokensJSON  string `json:"tokens_json" jsonschema:"light 主题 Token 的 JSON（colors/type/spacing/radius/shadows/motion/grid 字段）"`
+	DarkJSON    string `json:"dark_json,omitempty" jsonschema:"可选，dark 主题 Token JSON"`
+	Family      string `json:"family,omitempty" jsonschema:"mobile|web|cross，默认继承 base_system"`
+	BaseSystem  string `json:"base_system,omitempty" jsonschema:"结构兜底体系 ID，缺省字段从中复制，默认 volcano"`
+	AddToCanvas *bool  `json:"add_to_canvas,omitempty" jsonschema:"默认 false"`
+}
+
+type registerOut struct {
+	SystemID string   `json:"system_id"`
+	Name     string   `json:"name"`
+	Themes   []string `json:"themes"`
+	NodeID   string   `json:"node_id,omitempty"`
+}
+
+func registerTool(d Deps) mcp.ToolHandlerFor[registerIn, registerOut] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in registerIn) (*mcp.CallToolResult, registerOut, error) {
+		var light design.Tokens
+		if err := json.Unmarshal([]byte(in.TokensJSON), &light); err != nil {
+			return failWith[registerOut](registerOut{Name: in.Name}, "bad_tokens",
+				"tokens_json 解析失败: "+err.Error(), "")
+		}
+		base, ok := design.GetSystem(design.SanitizeID(in.BaseSystem))
+		if !ok {
+			base, _ = design.GetSystem("volcano")
+		}
+		// 结构兜底：空字段从基底复制
+		if light.Grid <= 0 {
+			light.Grid = base.Light.Grid
+		}
+		if light.Type.Family == "" {
+			light.Type = base.Light.Type
+		}
+		if len(light.Type.Levels) == 0 {
+			light.Type.Levels = base.Light.Type.Levels
+		}
+		if len(light.Spacing) == 0 {
+			light.Spacing = base.Light.Spacing
+		}
+		if len(light.Radius) == 0 {
+			light.Radius = base.Light.Radius
+		}
+		if len(light.Shadows) == 0 {
+			light.Shadows = base.Light.Shadows
+		}
+		if len(light.Motion) == 0 {
+			light.Motion = base.Light.Motion
+		}
+		sys := &design.System{
+			Name: in.Name, Vendor: "自定义", Family: firstNonEmpty(in.Family, base.Family),
+			Themes: []string{"light"}, Light: light,
+			Description: "自定义注册的设计体系。",
+			Style:       design.StyleNotes{Summary: "自定义注册体系：" + in.Name},
+		}
+		if err := design.ValidateCustom(sys); err != nil {
+			return failWith[registerOut](registerOut{Name: in.Name}, "invalid_tokens", err.Error(),
+				"检查 colors 是否为 hex/rgba、字号与圆角是否越界")
+		}
+		if strings.TrimSpace(in.DarkJSON) != "" {
+			var dark design.Tokens
+			if err := json.Unmarshal([]byte(in.DarkJSON), &dark); err != nil {
+				return failWith[registerOut](registerOut{Name: in.Name}, "bad_tokens",
+					"dark_json 解析失败: "+err.Error(), "")
+			}
+			if dark.Grid <= 0 {
+				dark.Grid = light.Grid
+			}
+			if len(dark.Type.Levels) == 0 {
+				dark.Type = light.Type
+			}
+			sys.Dark = &dark
+			sys.Themes = []string{"light", "dark"}
+		}
+		id := design.ClaimCustomID(in.Name, d.DataDir)
+		sys.ID = id
+		if err := design.SaveCustomSystem(sys, d.DataDir); err != nil {
+			return failWith[registerOut](registerOut{Name: in.Name}, "persist_failed", err.Error(), "")
+		}
+		out := registerOut{SystemID: sys.ID, Name: sys.Name, Themes: sys.Themes}
+		text := fmt.Sprintf("已注册自定义体系「%s」，ID: %s（主题: %s），已持久化，可直接用于 design_tokens/design_preview/design_screen。",
+			sys.Name, sys.ID, strings.Join(sys.Themes, "/"))
+		if in.AddToCanvas != nil && *in.AddToCanvas {
+			res, err := design.Compose(design.ComposeInput{SystemID: sys.ID, Theme: design.ThemeLight,
+				Components: []string{"button", "card", "input"}, Title: sys.Name + " · 注册验证"})
+			if err == nil {
+				node := d.Store.Add(canvas.Node{
+					Title: sys.Name + " · 注册验证", System: sys.ID, Kind: canvas.KindComponent,
+					HTML: res.HTML, Width: res.Width, Height: res.Height,
+					Tags: []string{"register", sys.ID},
+				})
+				out.NodeID = node.ID
+				text += fmt.Sprintf("\n注册验证预览已摆上画布：节点 %s", node.ID)
+			}
+		}
+		return textResult(text), out, nil
+	}
+}
+
+// ---------------- design_audit ----------------
+
+type auditIn struct {
+	System      string `json:"system" jsonschema:"体系 ID"`
+	Theme       string `json:"theme,omitempty" jsonschema:"light|dark，默认 light"`
+	AddToCanvas *bool  `json:"add_to_canvas,omitempty" jsonschema:"是否生成走查报告节点摆上画布，默认 true"`
+}
+
+type auditOut struct {
+	System string              `json:"system"`
+	Theme  string              `json:"theme"`
+	Score  int                 `json:"score"`
+	Passed int                 `json:"passed"`
+	Warned int                 `json:"warned"`
+	Failed int                 `json:"failed"`
+	Checks []design.AuditCheck `json:"checks"`
+	NodeID string              `json:"node_id,omitempty"`
+}
+
+func auditTool(d Deps) mcp.ToolHandlerFor[auditIn, auditOut] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in auditIn) (*mcp.CallToolResult, auditOut, error) {
+		res, err := design.Audit(in.System, design.ThemeKey(design.SanitizeID(in.Theme)))
+		if err != nil {
+			return failWith[auditOut](auditOut{System: in.System}, "audit_failed", err.Error(),
+				"用 design_systems 查看可用体系")
+		}
+		out := auditOut{System: res.System, Theme: res.Theme, Score: res.Score,
+			Passed: res.Passed, Warned: res.Warned, Failed: res.Failed, Checks: res.Checks}
+		text := res.Summary
+		for _, c := range res.Checks {
+			if c.Status != "pass" {
+				text += fmt.Sprintf("\n[%s] %s: %s", auditStatusText(c.Status), c.Name, c.Detail)
+			}
+		}
+		add := true
+		if in.AddToCanvas != nil {
+			add = *in.AddToCanvas
+		}
+		if add {
+			node := d.Store.Add(canvas.Node{
+				Title:  res.System + " · 走查报告",
+				System: res.System,
+				Kind:   canvas.KindPalette,
+				HTML:   design.AuditBoardHTML(res),
+				Width:  420, Height: 520,
+				Tags: []string{"audit", res.System, res.Theme, fmt.Sprint(res.Score)},
+			})
+			out.NodeID = node.ID
+			text += fmt.Sprintf("\n走查报告已摆上画布：节点 %s", node.ID)
+		}
+		return textResult(text), out, nil
+	}
+}
+
+// ---------------- canvas_connect / canvas_group ----------------
+
+type connectIn struct {
+	From  string `json:"from" jsonschema:"源节点 ID"`
+	To    string `json:"to" jsonschema:"目标节点 ID"`
+	Label string `json:"label,omitempty" jsonschema:"连线标签（如「下一步」）"`
+}
+
+type connectOut struct {
+	Edge canvas.Edge `json:"edge"`
+}
+
+func connectTool(d Deps) mcp.ToolHandlerFor[connectIn, connectOut] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in connectIn) (*mcp.CallToolResult, connectOut, error) {
+		edge, err := d.Store.AddEdge(in.From, in.To, in.Label)
+		switch {
+		case err == canvas.ErrEdgeEndpoint:
+			return failWith[connectOut](connectOut{}, "not_found", "连线端点节点不存在", "用 canvas_list 查看现有节点")
+		case err == canvas.ErrEdgeDuplicate:
+			return failWith[connectOut](connectOut{}, "edge_duplicate", "两节点间已存在连线", "")
+		case err == canvas.ErrEdgeSelfLoop:
+			return failWith[connectOut](connectOut{}, "bad_request", "连线不可自环", "")
+		case err != nil:
+			return failWith[connectOut](connectOut{}, "internal", err.Error(), "")
+		}
+		return textResult(fmt.Sprintf("已连线 %s → %s（%s）。", in.From, in.To, firstNonEmpty(edge.Label, "无标签"))),
+			connectOut{Edge: edge}, nil
+	}
+}
+
+type groupIn struct {
+	Title   string   `json:"title" jsonschema:"分组框标题"`
+	NodeIDs []string `json:"node_ids" jsonschema:"成员节点 ID 列表（框自动包住成员边界）"`
+	Padding int      `json:"padding,omitempty" jsonschema:"内边距，默认 28"`
+}
+
+type groupOut struct {
+	Node   canvas.Node `json:"node"`
+	Member int         `json:"member"`
+}
+
+func groupTool(d Deps) mcp.ToolHandlerFor[groupIn, groupOut] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in groupIn) (*mcp.CallToolResult, groupOut, error) {
+		if len(in.NodeIDs) == 0 {
+			return failWith[groupOut](groupOut{}, "bad_request", "node_ids 不能为空", "")
+		}
+		minX, minY := 1e18, 1e18
+		maxX, maxY := -1e18, -1e18
+		member := 0
+		for _, id := range in.NodeIDs {
+			n, err := d.Store.Get(id)
+			if err != nil {
+				continue
+			}
+			member++
+			minX = math.Min(minX, n.X)
+			minY = math.Min(minY, n.Y)
+			maxX = math.Max(maxX, n.X+float64(n.Width))
+			maxY = math.Max(maxY, n.Y+float64(n.Height))
+		}
+		if member == 0 {
+			return failWith[groupOut](groupOut{}, "not_found", "成员节点都不存在", "")
+		}
+		pad := float64(in.Padding)
+		if pad <= 0 {
+			pad = 28
+		}
+		frame := d.Store.Add(canvas.Node{
+			Title:  in.Title,
+			Kind:   canvas.KindFrame,
+			Width:  int(maxX - minX + pad*2),
+			Height: int(maxY - minY + pad*2 + 24),
+			X:      minX - pad,
+			Y:      minY - pad,
+			Tags:   append([]string{"frame"}, in.NodeIDs...),
+		})
+		return textResult(fmt.Sprintf("分组框「%s」已创建（节点 %s，包住 %d 个成员，%dx%d @ %.0f,%.0f）。",
+				frame.Title, frame.ID, member, frame.Width, frame.Height, frame.X, frame.Y)),
+			groupOut{Node: frame, Member: member}, nil
 	}
 }

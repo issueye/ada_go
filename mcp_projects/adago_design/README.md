@@ -54,6 +54,9 @@ bin\adago-design.exe mcp
 | `design_tokens` | 查询 Token（system/theme/category：color/type/spacing/radius/shadow/motion） |
 | `design_components` | 组件清单；指定 component 返回详情与 HTML 片段 |
 | `design_search` | 跨体系搜索体系/组件/Token |
+| `design_derive` | 从品牌主色派生自定义体系（10 阶色板 + 语义色，结构继承基底），持久化注册 |
+| `design_register` | 注册自定义体系（Token JSON，结构缺省从基底兜底） |
+| `design_audit` | 设计走查：WCAG 对比度/字号下限/阶梯/状态色，评分 + 报告节点 |
 | `design_preview` | 用某体系把组件渲染成真实预览页，默认自动摆上画布 |
 | `design_screen` | 按模板（login/settings/feed/profile）生成整页真实预览，自动摆上画布 |
 | `design_compare` | 两体系 Token 对比（结构化 diff）；可选生成并排对比板节点 |
@@ -62,6 +65,8 @@ bin\adago-design.exe mcp
 | `canvas_arrange` | 节点自动网格排版（体系分组优先） |
 | `canvas_restore` | 恢复最近一次清空（内存快照） |
 | `canvas_export` | 导出整块画布为独立 HTML 文件 |
+| `canvas_connect` | 节点间连线（带标签的贝塞尔曲线，持久化） |
+| `canvas_group` | 分组框（自动包住成员节点，垫底虚线框） |
 | `canvas_screenshot` | 截图画布或单个节点，返回 PNG（需画布已在浏览器打开） |
 | `canvas_url` | 获取画布访问地址 |
 
@@ -89,6 +94,18 @@ bin\adago-design.exe mcp
 .\scripts\build-mcp.cmd -Register        # 构建 + 注册 computer-use（原有行为）
 .\scripts\build-mcp.cmd -Register -IncludeAdagoDesignMcp
 ```
+
+## 检查模式（蓝湖式元素标注）
+
+工具条「🔍 检查」开启元素检查模式：
+
+- 在预览上**悬停**即高亮元素并画测量标注，**点选**锁定并打开规格面板
+- 标注：到画板四边距离、最近兄弟间距（红线 + 刻度 + px 标签）、四周遮罩聚焦
+- 规格面板：尺寸 / 内边距 / 边框 / 圆角 / 阴影 / 背景 / 字体（computed style）
+- **Token 合规标记**：每个数值标注 ✓（落在体系 Token 阶梯）、✓≈（2px 内近似）、
+  ⚠（偏离阶梯并给出最近规范值）——强制规范的即时呈现
+- 走查联动：`design_audit` 的「组件规范」检查扫描 StyleSheet 中偏离阶梯的
+  字面 padding/margin/gap/border-radius（`var(--ds-*)` 驱动的值视为合规）
 
 ## 截图原理（无 CDP）
 

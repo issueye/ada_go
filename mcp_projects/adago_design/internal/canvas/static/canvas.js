@@ -5,6 +5,7 @@
 const S = {
   nodes: new Map(),      // id -> node
   els: new Map(),        // id -> element
+  edges: new Map(),      // id -> edge
   tx: 0, ty: 0, scale: 1,
   selected: null,
   dragging: null,        // {id, dx, dy, moved}
@@ -15,6 +16,10 @@ const S = {
 
 const $ = (id) => document.getElementById(id);
 const viewport = $("viewport"), world = $("world"), grid = $("grid-layer");
+const edgeSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+edgeSvg.id = "edges";
+edgeSvg.innerHTML = '<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c5cff"/></marker></defs>';
+world.appendChild(edgeSvg);
 
 // ---------------- 工具 ----------------
 function toast(msg, isErr) {
@@ -95,7 +100,7 @@ function fitView() {
 // ---------------- 节点渲染 ----------------
 function nodeEl(n) {
   const el = document.createElement("div");
-  el.className = "node";
+  el.className = "node" + (n.kind === "frame" ? " node--frame" : "");
   el.dataset.id = n.id;
   el.style.left = n.x + "px";
   el.style.top = n.y + "px";
@@ -103,10 +108,16 @@ function nodeEl(n) {
   el.style.height = n.height + "px";
   el.style.zIndex = n.z || 1;
   const sys = n.system ? `<span class="node__tag">${esc(n.system)}</span>` : "";
-  el.innerHTML =
-    `<div class="node__head"><span class="node__title">${esc(n.title || n.id)}</span>${sys}` +
-    `<button class="node__del" title="删除">✕</button></div>` +
-    `<div class="node__body"><iframe sandbox="allow-same-origin" srcdoc="${esc(n.html)}" scrolling="auto"></iframe></div>`;
+  if (n.kind === "frame") {
+    el.innerHTML =
+      `<div class="node__head node__head--frame"><span class="node__title">${esc(n.title || "分组")}</span>` +
+      `<button class="node__del" title="删除">✕</button></div>`;
+  } else {
+    el.innerHTML =
+      `<div class="node__head"><span class="node__title">${esc(n.title || n.id)}</span>${sys}` +
+      `<button class="node__del" title="删除">✕</button></div>` +
+      `<div class="node__body"><iframe sandbox="allow-same-origin" srcdoc="${esc(n.html)}" scrolling="auto"></iframe></div>`;
+  }
   el.querySelector(".node__del").addEventListener("click", (e) => { e.stopPropagation(); removeNode(n.id); });
   el.querySelector(".node__head").addEventListener("mousedown", (e) => startNodeDrag(e, n.id));
   el.addEventListener("mousedown", () => selectNode(n.id));
@@ -178,6 +189,7 @@ async function removeNode(id) {
   try {
     await api("/api/nodes/" + id, { method: "DELETE" });
     removeNodeEl(id);
+    renderEdges();
   } catch (e) { toast("删除失败: " + e.message, true); }
 }
 
@@ -202,6 +214,7 @@ window.addEventListener("mousemove", (e) => {
     n.x = nx; n.y = ny;
     const el = S.els.get(S.dragging.id);
     el.style.left = nx + "px"; el.style.top = ny + "px";
+    renderEdges();
   } else if (S.panning) {
     S.tx = S.panning.tx + (e.clientX - S.panning.sx);
     S.ty = S.panning.ty + (e.clientY - S.panning.sy);
@@ -247,6 +260,36 @@ window.addEventListener("keydown", (e) => {
   else if (e.key === "-") zoomAt(innerWidth / 2, innerHeight / 2, 1 / 1.15);
 });
 
+// ---------------- 连线渲染（SVG，世界坐标系内） ----------------
+function renderEdges() {
+  while (edgeSvg.childNodes.length > 1) edgeSvg.removeChild(edgeSvg.lastChild);
+  for (const e of S.edges.values()) {
+    const a = S.nodes.get(e.from), b = S.nodes.get(e.to);
+    if (!a || !b) continue;
+    const ax = a.x + a.width / 2, ay = a.y + a.height / 2;
+    const bx = b.x + b.width / 2, by = b.y + b.height / 2;
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    // 贝塞尔：从源底部中点到目标顶部中点，距离越远弧度越大
+    const x1 = a.x + a.width / 2, y1 = a.y + a.height;
+    const x2 = b.x + b.width / 2, y2 = b.y;
+    const dy = Math.max(48, Math.abs(y2 - y1) / 2);
+    line.setAttribute("d", `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${x2} ${y2 - dy}, ${x2} ${y2}`);
+    line.setAttribute("class", "edge-line");
+    line.setAttribute("marker-end", "url(#arrow)");
+    edgeSvg.appendChild(line);
+    if (e.label) {
+      const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      text.setAttribute("x", (ax + bx) / 2);
+      text.setAttribute("y", (ay + by) / 2);
+      text.setAttribute("class", "edge-label");
+      text.textContent = e.label;
+      edgeSvg.appendChild(text);
+    }
+    // 引用保存到 line 便于删除节点时清理（renderEdges 每次全量重画即可）
+    line.dataset.edgeId = e.id;
+  }
+}
+
 // ---------------- 同步轮询 ----------------
 async function pollNodes() {
   try {
@@ -264,6 +307,12 @@ async function pollNodes() {
       }
     }
     for (const id of [...S.nodes.keys()]) if (!seen.has(id)) removeNodeEl(id);
+    // 连线同步
+    try {
+      const ed = await api("/api/edges");
+      S.edges = new Map((ed.edges || []).map((e) => [e.id, e]));
+    } catch (_) { /* 连线同步失败不影响节点 */ }
+    renderEdges();
   } catch (_) { /* 状态条已处理 */ }
 }
 
@@ -384,7 +433,13 @@ async function rasterize(html, width, height, scale) {
     canvas.width = Math.max(1, Math.round(width * scale));
     canvas.height = Math.max(1, Math.round(realH * scale));
     const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#ffffff";
+    // 底色取文档 body 的实际背景色，避免深色主题在内容未铺满处露白
+    let bg = "#ffffff";
+    try {
+      const c = doc.defaultView.getComputedStyle(doc.body).backgroundColor;
+      if (c && c !== "rgba(0, 0, 0, 0)") bg = c;
+    } catch (_) { /* 保持白底 */ }
+    ctx.fillStyle = bg;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     return canvas.toDataURL("image/png").split(",")[1];
@@ -402,6 +457,7 @@ async function runCaptureTask(task) {
       if (S.nodes.size === 0) throw new Error("画布为空，没有可截图的内容");
       let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
       for (const n of S.nodes.values()) {
+        if (n.kind === "frame") continue; // 分组框是背板，不参与截图边界
         minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
         maxX = Math.max(maxX, n.x + n.width); maxY = Math.max(maxY, n.y + n.height);
       }
@@ -412,7 +468,36 @@ async function runCaptureTask(task) {
       const ctx = canvas.getContext("2d");
       ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--bg") || "#0f1014";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // 先画连线（与画布一致：连线在节点下层）
+      const toX = (v) => (v - minX + pad) * scale, toY = (v) => (v - minY + pad) * scale;
+      ctx.strokeStyle = "#7c5cff";
+      ctx.fillStyle = "#e8e9ee";
+      ctx.lineWidth = 2 * scale;
+      ctx.font = `${Math.round(11 * scale)}px sans-serif`;
+      for (const e of S.edges.values()) {
+        const a = S.nodes.get(e.from), b = S.nodes.get(e.to);
+        if (!a || !b || a.kind === "frame" || b.kind === "frame") continue;
+        const x1 = toX(a.x + a.width / 2), y1 = toY(a.y + a.height);
+        const x2 = toX(b.x + b.width / 2), y2 = toY(b.y);
+        const dy = Math.max(48 * scale, Math.abs(y2 - y1) / 2);
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.bezierCurveTo(x1, y1 + dy, x2, y2 - dy, x2, y2);
+        ctx.stroke();
+        if (e.label) {
+          const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+          const w = ctx.measureText(e.label).width + 8 * scale;
+          ctx.fillStyle = "#16171d";
+          ctx.fillRect(mx - w / 2, my - 10 * scale, w, 16 * scale);
+          ctx.fillStyle = "#e8e9ee";
+          ctx.fillText(e.label, mx - w / 2 + 4 * scale, my + 3 * scale);
+          ctx.strokeStyle = "#7c5cff";
+          ctx.fillStyle = "#e8e9ee";
+        }
+      }
+      // 再叠节点（跳过分组框）
       for (const n of S.nodes.values()) {
+        if (n.kind === "frame") continue;
         const part = await rasterize(n.html, n.width, n.height, scale);
         const img = new Image();
         await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = "data:image/png;base64," + part; });
@@ -467,6 +552,8 @@ $("btn-clear").addEventListener("click", async () => {
   try {
     await api("/api/nodes/clear", { method: "POST" });
     for (const id of [...S.nodes.keys()]) removeNodeEl(id);
+    S.edges = new Map();
+    renderEdges();
     toast("画布已清空");
   } catch (e) { toast("清空失败: " + e.message, true); }
 });
@@ -495,3 +582,289 @@ pollNodes().then(fitView);
 setInterval(pollNodes, 2000);
 loadCatalog();
 taskLoop();
+
+// ================= 元素检查模式（蓝湖式标注） =================
+// 同源 iframe（sandbox=allow-same-origin）允许父页读取 contentDocument，
+// 因此检查逻辑全部在父页实现：悬停高亮 → 点击选中 → 注入测量层 → 规格面板。
+const INS = {
+  on: false,
+  node: null,        // 正在检查的节点 id
+  target: null,      // 选中的元素
+  hover: null,       // 悬停的元素
+  catalog: null,     // 体系 Token 详情缓存 {systemId: detail}
+};
+
+const ACCENT = "#fe2c55";
+
+function toggleInspect() {
+  INS.on = !INS.on;
+  $("btn-inspect").classList.toggle("tb-active", INS.on);
+  for (const [, el] of S.els) {
+    const iframe = el.querySelector("iframe");
+    if (!iframe) continue;
+    if (INS.on) attachInspect(iframe);
+    else detachInspect(iframe);
+  }
+  if (!INS.on) {
+    INS.node = null; INS.target = null;
+    if (S.selected) { selectNode(S.selected); } // 恢复节点信息面板
+  }
+  toast(INS.on ? "检查模式已开启：在预览上悬停/点选元素" : "检查模式已关闭");
+}
+
+// 在 iframe 文档上挂载检查监听
+function attachInspect(iframe) {
+  const doc = iframe.contentDocument;
+  if (!doc || !doc.body) {
+    // 文档未就绪：load 后再挂
+    iframe.addEventListener("load", () => attachInspect(iframe), { once: true });
+    return;
+  }
+  if (iframe.__dsx) return; // 已挂载
+  const state = { move: null, leave: null, click: null, scroll: null, layer: null };
+  iframe.__dsx = state;
+  const nodeId = iframe.closest(".node").dataset.id;
+
+  state.move = (e) => {
+    if (INS.node && INS.node !== nodeId && INS.target) return; // 已选中别的节点则不跟随悬停
+    setHover(iframe, nodeId, e.target);
+  };
+  state.leave = () => {
+    if (INS.hover === iframe) clearHover();
+  };
+  state.click = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    INS.node = nodeId;
+    INS.target = e.target;
+    drawInspect(iframe);
+    showSpecPanel(iframe, nodeId, e.target);
+  };
+  state.scroll = () => { if (INS.node === nodeId && INS.target) drawInspect(iframe); };
+  doc.addEventListener("mousemove", state.move, true);
+  doc.addEventListener("mouseleave", state.leave, true);
+  doc.addEventListener("click", state.click, true);
+  doc.addEventListener("scroll", state.scroll, true);
+  iframe.addEventListener("load", () => { if (INS.on) { detachInspect(iframe); attachInspect(iframe); } });
+}
+
+function detachInspect(iframe) {
+  const state = iframe.__dsx;
+  if (!state) return;
+  const doc = iframe.contentDocument;
+  if (doc) {
+    if (state.move) doc.removeEventListener("mousemove", state.move, true);
+    if (state.leave) doc.removeEventListener("mouseleave", state.leave, true);
+    if (state.click) doc.removeEventListener("click", state.click, true);
+    if (state.scroll) doc.removeEventListener("scroll", state.scroll, true);
+  }
+  iframe.__dsx = null;
+  iframe.dataset.inspectAttached = "";
+}
+
+function ensureLayer(iframe) {
+  const doc = iframe.contentDocument;
+  let layer = doc.querySelector(".dsx-layer");
+  if (!layer) {
+    layer = doc.createElement("div");
+    layer.className = "dsx-layer";
+    const style = doc.createElement("style");
+    style.textContent = `
+      .dsx-layer{position:fixed;inset:0;pointer-events:none;z-index:2147483000}
+      .dsx-mask{position:fixed;background:rgba(22,24,35,.35)}
+      .dsx-hl{position:fixed;outline:2px solid ${ACCENT};outline-offset:-1px;background:rgba(254,44,85,.06)}
+      .dsx-line{position:fixed;background:${ACCENT}}
+      .dsx-tick{position:fixed;background:${ACCENT}}
+      .dsx-label{position:fixed;background:${ACCENT};color:#fff;font:600 10px/1 "Segoe UI",system-ui,sans-serif;
+        padding:2px 5px;border-radius:3px;white-space:nowrap;z-index:2147483001}
+    `;
+    doc.head.appendChild(style);
+    doc.body.appendChild(layer);
+  }
+  return layer;
+}
+
+function clearHover() {
+  for (const [, el] of S.els) {
+    const iframe = el.querySelector("iframe");
+    if (iframe && iframe.__dsx) {
+      const layer = ensureLayer(iframe);
+      layer.innerHTML = "";
+    }
+  }
+  INS.hover = null;
+  if (INS.on && !INS.target && INS.node) { /* 保留选中态 */ }
+}
+
+// 悬停跟随高亮
+function setHover(iframe, nodeId, target) {
+  if (INS.node && INS.node !== nodeId) return;
+  if (!target || target === iframe.contentDocument.documentElement || target === iframe.contentDocument.body) {
+    if (!INS.target) { ensureLayer(iframe).innerHTML = ""; }
+    return;
+  }
+  INS.hover = iframe;
+  drawInspect(iframe, target, false);
+}
+
+// 绘制测量层：遮罩 + 高亮 + 画板四边距离 + 最近兄弟间距（蓝湖式）
+function drawInspect(iframe, target, pinned) {
+  const doc = iframe.contentDocument;
+  const layer = ensureLayer(iframe);
+  let el = target || INS.target;
+  if (!el || !el.isConnected) return;
+  if (!pinned) {
+    if (INS.target && INS.node === iframe.closest(".node").dataset.id) {
+      el = INS.target; // 选中态优先于悬停
+    }
+  }
+  layer.innerHTML = "";
+  const rect = el.getBoundingClientRect();
+  const bodyRect = doc.body.getBoundingClientRect();
+  // 四周遮罩（蓝湖式聚焦）
+  const masks = [
+    [0, 0, "100%", Math.max(0, rect.top)],
+    [0, rect.bottom, "100%", Math.max(0, bodyRect.height - rect.bottom)],
+    [0, rect.top, Math.max(0, rect.left), rect.height],
+    [rect.right, rect.top, Math.max(0, bodyRect.width - rect.right), rect.height],
+  ];
+  for (const [x, y, w, h] of masks) {
+    if (w <= 0 || h <= 0) continue;
+    const m = doc.createElement("div");
+    m.className = "dsx-mask";
+    m.style.cssText = `left:${x}px;top:${y}px;width:${w}px;height:${h}px`;
+    layer.appendChild(m);
+  }
+  const hl = doc.createElement("div");
+  hl.className = "dsx-hl";
+  hl.style.cssText = `left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px`;
+  layer.appendChild(hl);
+
+  // 画板四边距离（垂直/水平两条测量线）
+  const dists = [];
+  if (rect.top - bodyRect.top >= 0) dists.push(["v", rect.left + rect.width / 2, bodyRect.top, rect.top]);
+  if (bodyRect.bottom - rect.bottom >= 0) dists.push(["v", rect.left + rect.width / 2, rect.bottom, bodyRect.bottom]);
+  if (rect.left - bodyRect.left >= 0) dists.push(["h", bodyRect.left, rect.top + rect.height / 2, rect.left]);
+  if (bodyRect.right - rect.right >= 0) dists.push(["h", rect.right, rect.top + rect.height / 2, bodyRect.right]);
+  // 最近兄弟间距
+  const parent = el.parentElement;
+  if (parent && parent !== doc.body) {
+    const pRect = parent.getBoundingClientRect();
+    for (const sib of parent.children) {
+      if (sib === el || sib.classList.contains("dsx-layer")) continue;
+      const s = sib.getBoundingClientRect();
+      if (s.width === 0 && s.height === 0) continue;
+      const vOverlap = rect.top < s.bottom && s.top < rect.bottom;
+      const hOverlap = rect.left < s.right && s.left < rect.right;
+      if (vOverlap && s.right <= rect.left) dists.push(["h", s.right, rect.top + rect.height / 2, rect.left]);
+      if (vOverlap && s.left >= rect.right) dists.push(["h", rect.right, rect.top + rect.height / 2, s.left]);
+      if (hOverlap && s.bottom <= rect.top) dists.push(["v", Math.max(rect.left, s.left) + Math.min(rect.width, s.width) / 2, s.bottom, rect.top]);
+      if (hOverlap && s.top >= rect.bottom) dists.push(["v", Math.max(rect.left, s.left) + Math.min(rect.width, s.width) / 2, rect.bottom, s.top]);
+    }
+    void pRect;
+  }
+  for (const [dir, x1, y1, y2orx2] of dists) {
+    const isV = dir === "v";
+    const from = isV ? y1 : x1;
+    const to = isV ? y2orx2 : y2orx2;
+    const len = Math.abs(to - from);
+    if (len < 1) continue;
+    const line = doc.createElement("div");
+    line.className = "dsx-line";
+    if (isV) line.style.cssText = `left:${x1}px;top:${Math.min(from, to)}px;width:1px;height:${len}px`;
+    else line.style.cssText = `left:${Math.min(from, to)}px;top:${y1}px;width:${len}px;height:1px`;
+    layer.appendChild(line);
+    // 端点刻度
+    for (const p of [from, to]) {
+      const tick = doc.createElement("div");
+      tick.className = "dsx-tick";
+      if (isV) tick.style.cssText = `left:${x1 - 3}px;top:${p - 3}px;width:7px;height:7px`;
+      else tick.style.cssText = `left:${p - 3}px;top:${y1 - 3}px;width:7px;height:7px`;
+      layer.appendChild(tick);
+    }
+    const label = doc.createElement("div");
+    label.className = "dsx-label";
+    if (isV) label.style.cssText = `left:${x1 + 6}px;top:${(from + to) / 2 - 7}px`;
+    else label.style.cssText = `left:${(from + to) / 2 - 14}px;top:${y1 - 18}px`;
+    label.textContent = Math.round(len) + "px";
+    layer.appendChild(label);
+  }
+}
+
+// 规格面板：结构化样式 + Token 合规标记
+async function showSpecPanel(iframe, nodeId, el) {
+  const n = S.nodes.get(nodeId);
+  if (!n) return;
+  selectNode(nodeId);
+  const detail = await ensureCatalog(n.system);
+  const cs = iframe.contentDocument.defaultView.getComputedStyle(el);
+  const con = (val, kind) => tokenMark(val, kind, detail);
+  const fmtDist = (v) => Math.max(0, Math.round(v));
+  const rect = el.getBoundingClientRect();
+  const bodyRect = iframe.contentDocument.body.getBoundingClientRect();
+  const tag = el.tagName.toLowerCase() + (el.className && typeof el.className === "string" && el.className.trim() ? "." + el.className.trim().split(/\s+/).join(".") : "");
+  const rows = [];
+  rows.push(["尺寸", `${Math.round(rect.width)} × ${Math.round(rect.height)} px`]);
+  rows.push(["到画板", `上${fmtDist(rect.top - bodyRect.top)} / 左${fmtDist(rect.left - bodyRect.left)} / 下${fmtDist(bodyRect.bottom - rect.bottom)} / 右${fmtDist(bodyRect.right - rect.right)}`]);
+  const pad = [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft].map((v) => Math.round(parseFloat(v)));
+  rows.push(["内边距", `${pad[0]} ${pad[1]} ${pad[2]} ${pad[3]} ${con(pad[0], "spacing")}${con(pad[1], "spacing")}`]);
+  const bt = cs.borderTopWidth;
+  rows.push(["边框", bt !== "0px" ? `${bt} ${cs.borderTopStyle} ${cs.borderTopColor}` : "无"]);
+  const brs = [cs.borderTopLeftRadius, cs.borderTopRightRadius, cs.borderBottomRightRadius, cs.borderBottomLeftRadius].map((v) => Math.round(parseFloat(v)));
+  rows.push(["圆角", brs[0] === brs[1] && brs[1] === brs[2] && brs[2] === brs[3] ? `${brs[0]}px ${con(brs[0], "radius")}` : `${brs.join(" / ")} ${con(brs[0], "radius")}`]);
+  rows.push(["阴影", cs.boxShadow !== "none" ? cs.boxShadow.slice(0, 60) + (cs.boxShadow.length > 60 ? "…" : "") + con(cs.boxShadow, "shadow") : "无"]);
+  rows.push(["背景", cs.backgroundColor]);
+  const fs = Math.round(parseFloat(cs.fontSize));
+  rows.push(["字体", `${fs}px / ${cs.fontWeight} ${con(fs, "type")} ${cs.color}`]);
+
+  $("insp-body").innerHTML =
+    `<div style="font-size:11px;color:var(--fg2);margin-bottom:8px">🔍 元素规格 · ${esc(n.title || n.id)}（Esc 退出选中）</div>` +
+    `<div class="spec-tag">${esc(tag)}</div>` +
+    rows.map(([k, v]) => `<div class="kv spec-row"><span class="chip">${esc(k)}</span><span class="spec-val">${v}</span></div>`).join("");
+}
+
+// Token 合规标记：✓ 落在阶梯 / ⚠ 偏差（给出最近规范值）
+function tokenMark(val, kind, detail) {
+  if (!detail || !detail.light) return "";
+  const tok = detail.light;
+  let vals = null;
+  if (kind === "spacing") vals = Object.values(tok.spacing || {});
+  else if (kind === "radius") vals = Object.values(tok.radius || {});
+  else if (kind === "type") vals = Object.values(tok.type.levels || {}).map((l) => l.size);
+  else return "";
+  if (!vals || !vals.length) return "";
+  let nearest = null, diff = 1e9;
+  for (const v of vals) {
+    const d = Math.abs(val - v);
+    if (d < diff || (d === diff && nearest !== null && v < nearest)) { diff = d; nearest = v; }
+  }
+  if (diff === 0) return ` <span class="mark ok">✓ ${nearest}px</span>`;
+  if (diff <= 2 && nearest > 0) return ` <span class="mark ok">✓≈${nearest}px</span>`;
+  return ` <span class="mark warn">⚠ 规范 ${nearest}px</span>`;
+}
+
+async function ensureCatalog(systemID) {
+  if (!systemID) return null;
+  INS.catalog = INS.catalog || {};
+  if (INS.catalog[systemID]) return INS.catalog[systemID];
+  try {
+    const d = await api("/api/catalog/systems/" + encodeURIComponent(systemID));
+    INS.catalog[systemID] = d;
+    return d;
+  } catch (_) { return null; }
+}
+
+// 检查模式的 Esc 退出选中
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && INS.on && INS.target) {
+    INS.target = null; INS.node = null;
+    clearHover();
+    for (const [, el] of S.els) {
+      const iframe = el.querySelector("iframe");
+      if (iframe && iframe.__dsx) ensureLayer(iframe).innerHTML = "";
+    }
+    if (S.selected) selectNode(S.selected);
+    e.stopPropagation();
+  }
+}, true);
+
+$("btn-inspect").addEventListener("click", toggleInspect);

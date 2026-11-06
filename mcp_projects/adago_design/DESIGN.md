@@ -208,6 +208,11 @@ SDK：`github.com/modelcontextprotocol/go-sdk v1.8.0`（与 mem-go 一致）。
 | `canvas_export` | `title?` | 全画布独立 HTML 板文件路径 |
 | `canvas_screenshot` | `nodeID?`（空=全画布）, `scale?=1` | `ImageContent`（PNG） |
 | `canvas_url` | — | 画布访问地址与打开方式 |
+| `design_derive` | `primary`(#RRGGBB), `name`, `base_system`, `addToCanvas?=true` | 10 阶品牌色板 + 派生体系（持久化注册）+ 色板节点 |
+| `design_register` | `name`, `tokens_json`, `dark_json?`, `base_system?` | 自定义体系注册（结构兜底 + 持久化） |
+| `design_audit` | `system`, `theme?`, `addToCanvas?=true` | WCAG 对比度/字号/阶梯走查评分 + 报告节点 |
+| `canvas_connect` | `from`, `to`, `label?` | 节点间贝塞尔连线（SVG，持久化） |
+| `canvas_group` | `title`, `node_ids[]`, `padding?` | 分组框（垫底虚线框，自动包住成员） |
 
 ### 3.3 屏幕模板（design_screen）
 
@@ -263,5 +268,7 @@ GOWORK=off go build -trimpath -o bin/adago-design.exe .
 - M0：数据模型 + 设计体系 Token/组件/样式生成 + 画布（摆放/预览/截图）+ MCP 工具 + 测试 + 文档。✅
 - M1：体系扩到 8 套（+Ant Design/TDesign/Material 3）、design_compare（Token diff + 对比板）、
   design_screen（4 种整页模板）、design_search、canvas_arrange/restore/export。✅
-- M2（候选）：SVG 连线/分组框、画布 minimap、导出 ZIP（HTML+CSS 拆分）、
-  体系继续扩展（Fluent 2 / Chakra / TDesign 移动端）、Token diff 高亮到组件级。
+- M2：design_derive（品牌色派生体系，持久化注册）、design_register（自定义体系）、
+  design_audit（WCAG 走查）、canvas_connect/canvas_group（连线与分组框，canvas.json v2）。✅
+- M3（候选）：minimap、框选批量操作、画布内编辑、演示模式、Markdown 设计文档导出、
+  ZIP 导出、Web 字体打包、ada-go 插件化、组件级对比。

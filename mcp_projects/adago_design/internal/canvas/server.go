@@ -69,6 +69,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/tasks", s.handleTaskClaim)
 	mux.HandleFunc("POST /api/tasks/{id}/result", s.handleTaskResult)
 	mux.HandleFunc("GET /api/capture/{id}", s.handleCaptureWait)
+	mux.HandleFunc("GET /api/edges", s.handleListEdges)
+	mux.HandleFunc("POST /api/edges", s.handleAddEdge)
+	mux.HandleFunc("DELETE /api/edges/{id}", s.handleDeleteEdge)
 	mux.HandleFunc("GET /api/catalog/systems", s.handleCatalogSystems)
 	mux.HandleFunc("GET /api/catalog/systems/{id}", s.handleCatalogSystem)
 	mux.HandleFunc("POST /api/catalog/preview", s.handleCatalogPreview)
@@ -348,6 +351,55 @@ func (s *Server) handleCaptureWait(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"result": res, "ok": true})
 }
 
+// ---------------- edges ----------------
+
+func (s *Server) handleListEdges(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"edges": s.store.ListEdges()})
+}
+
+type addEdgeIn struct {
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Label string `json:"label"`
+}
+
+func (s *Server) handleAddEdge(w http.ResponseWriter, r *http.Request) {
+	var in addEdgeIn
+	if !decodeBody(w, r, &in) {
+		return
+	}
+	edge, err := s.store.AddEdge(in.From, in.To, in.Label)
+	switch {
+	case errors.Is(err, ErrEdgeEndpoint):
+		writeErr(w, http.StatusNotFound, APIError("not_found", "连线端点节点不存在", "canvas_list 查看现有节点"))
+		return
+	case errors.Is(err, ErrEdgeDuplicate):
+		writeErr(w, http.StatusConflict, APIError("edge_duplicate", "两节点间已存在连线", ""))
+		return
+	case errors.Is(err, ErrEdgeSelfLoop):
+		writeErr(w, http.StatusBadRequest, APIError("bad_request", "连线不可自环", ""))
+		return
+	case err != nil:
+		writeErr(w, http.StatusInternalServerError, APIError("internal", err.Error(), ""))
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"edge": edge})
+}
+
+func (s *Server) handleDeleteEdge(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	removed, err := s.store.RemoveEdge(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, APIError("internal", err.Error(), ""))
+		return
+	}
+	if !removed {
+		writeErr(w, http.StatusNotFound, APIError("not_found", "连线 "+id+" 不存在", ""))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"removed": id})
+}
+
 // ---------------- catalog ----------------
 
 func (s *Server) handleCatalogSystems(w http.ResponseWriter, _ *http.Request) {
@@ -392,8 +444,8 @@ func (s *Server) handleCatalogPreview(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, APIError("bad_request", "components is required", ""))
 		return
 	}
-	if len(in.Components) > 12 {
-		in.Components = in.Components[:12]
+	if len(in.Components) > 24 {
+		in.Components = in.Components[:24]
 	}
 	html, w2, h, err := s.Catalog.ComposePreview(in.System, in.Components, in.Theme, in.Title)
 	if err != nil {

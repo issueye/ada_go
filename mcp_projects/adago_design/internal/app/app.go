@@ -32,6 +32,12 @@ func (s *Server) Tasks() *canvas.TaskQueue { return s.tasks }
 
 // Start 启动画布 HTTP 服务；port=0 自动探测。
 func Start(ctx context.Context, cfg *config.Config) (*Server, error) {
+	// 自定义体系（品牌派生等）在打开存储前注册
+	if n, err := design.LoadCustomSystems(cfg.DataDir); err != nil {
+		log.Printf("自定义体系加载失败: %v", err)
+	} else if n > 0 {
+		log.Printf("已加载 %d 个自定义设计体系", n)
+	}
 	store, err := canvas.OpenStore(cfg.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
