@@ -66,6 +66,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/projects/{id}", s.handleGetProject)
 	mux.HandleFunc("PUT /api/projects/{id}", s.handleUpdateProject)
 	mux.HandleFunc("DELETE /api/projects/{id}", s.handleDeleteProject)
+	mux.HandleFunc("PUT /api/projects/{id}/canvas", s.handleSetProjectCanvas)
+	mux.HandleFunc("GET /api/canvas/presets", s.handleCanvasPresets)
 	mux.HandleFunc("GET /api/nodes", s.handleListNodes)
 	mux.HandleFunc("POST /api/nodes", s.handleAddNode)
 	mux.HandleFunc("PUT /api/nodes/{id}", s.handleUpdateNode)

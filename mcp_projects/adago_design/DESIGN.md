@@ -129,7 +129,13 @@ type Project struct {
     ID        string    `json:"id"`        // p-<ts>-<seq>
     Name      string    `json:"name"`      // 必填、同名去重
     Note      string    `json:"note,omitempty"`
+    Canvas    *ProjectCanvas `json:"canvas,omitempty"` // nil = 自由画布（无边界）
     CreatedAt, UpdatedAt time.Time
+}
+
+type ProjectCanvas struct {
+    Width, Height int    // 版式边界（320..8192）
+    Ratio         string // 预设 ID（16:9 …）或 custom
 }
 
 type Node struct {
@@ -151,6 +157,7 @@ type Node struct {
 
 `Store`：内存 map + 互斥锁；变更即写 `canvas.json`（原子替换，v3 格式
 `{version:3, projects, nodes, edges}`）；启动时载入并完成迁移。
+`projects[].canvas` 是 v3 的可选增量字段：旧文件没有该字段 = 自由画布，无需版本升级。
 节点 HTML 由服务端（design 包）生成，画布 UI 不二次加工。
 
 ### 4.2 HTTP API（全部 `127.0.0.1`，POST 校验 Origin 同源）
@@ -164,6 +171,8 @@ type Node struct {
 | `GET /api/projects/{id}` | 单个项目（404 `unknown_project`） |
 | `PUT /api/projects/{id}` | 改名/改备注 |
 | `DELETE /api/projects/{id}` | 删除空项目；非空 409 `project_not_empty` |
+| `GET /api/canvas/presets` | 画布比例预设表 + 合法尺寸区间（UI 菜单数据源） |
+| `PUT /api/projects/{id}/canvas` | 设置画布版式 `{ratio}` / `{width,height}` / `{free:true}`；未知比例 400 `unknown_ratio`，尺寸非法 400 `bad_request` |
 | `GET /api/nodes` | 节点列表；`?project=<id>` 过滤（未知项目 404），`?system=` 兼容过滤 |
 | `POST /api/nodes` | 新建节点，`project` 必填（缺失 400 `project_required`） |
 | `PUT /api/nodes/{id}` | 更新（位置/高度/标题等） |
@@ -190,32 +199,43 @@ MCP canvas_screenshot ─► POST /api/capture ─► 任务入队
 ### 4.4 画布 UI（vanilla JS，无构建步骤）
 
 - 交互：空白处拖拽平移；滚轮/触控板缩放（以光标为中心）；节点头部拖拽移动；
-  点击选中 → 右侧检查器；Del 删除；`F` 适配全部节点。
-- 侧栏：顶部是**项目树**（`全部` + 计数 + `⋯` / `＋ 新建项目 ⇧N` / 搜索 / 文件夹行 + 计数），
-  参照设计稿工具的分组列表；`S.project === ""` 表示「全部」，否则为单项目作用域。
+  点击选中 → 右侧检查器；Del 删除；`F` 适配全部节点；`0` 画布居中（见下）。
+- **画布控制组**（工具条最左）：
+  - 工具条按钮**只显示图标**，名称与当前值走 `data-tip` 伪元素 tooltip（原生 `title`
+    延迟约 1s 且样式不可控）；按钮同时写 `aria-label`，键盘聚焦也能看到提示。
+    下拉展开时（`aria-expanded="true"`）隐藏触发按钮的 tooltip —— 两者都在按钮下方，
+    否则气泡会压住菜单前几行。
+  - `选择画布`：`全部项目 / 项目` 下拉，每行显示该项目版式与稿数；切换即换作用域。
+  - `修改比例`：自由画布 + 8 个比例预设 + 自定义宽高；落库为项目 `canvas` 字段，
+    对应 MCP `project_canvas`。未选项目时按钮禁用（画布是项目属性）。
+  - `居中展示`：目标矩形 = 单画布聚焦节点 > 项目版式 > 全部节点包围盒；
+    对齐到「左侧浮窗右侧、工具条下方、检查器左侧」的可见区中心，放不下时缩放到刚好放下。
+  - 纸张层 `#canvas-paper`（世界坐标，z-index 低于连线/节点，`pointer-events:none`）：
+    只作版式参考，不裁剪、不限制拖拽；`body.mode-solo` 时隐藏。
+- **左侧双浮窗**（`#left-dock`，两块独立卡片，分别可收起）：
+  - `#project-panel`：**项目树**（`全部` + 计数 + `⋯` / `＋ 新建项目 ⇧N` / 搜索 /
+    文件夹行 + 计数），参照设计稿工具的分组列表。
+  - `#system-panel`：**设计体系清单**，点开看 Token 摘要与组件列表，可一键「添加预览卡」。
+  - 收起只隐藏 `.dock-body`，标题条始终留在屏内（不存在「收起来拉不回来」的入口问题）；
+    状态分别写 `adago.projCollapsed` / `adago.sysCollapsed`，互不牵连。
+  - `S.project === ""` 表示「全部」，否则为单项目作用域。
 - **全部视图**：一次渲染所有项目的节点，按项目分行并在行首打橙色分组标签
   （`#group-labels`，世界坐标、随拖动更新、按 1/scale 反向缩放保证可读）。
   进入时若检测到项目包围盒相交，自动调 `POST /api/arrange {group_by:"project"}`
   排一次（行首留 220px 标签位），之后仍是自由画布，可拖可连。
 - **单画布聚焦**（双击项目树子项 / 双击卡片标题栏）：`S.solo = nodeID`。
   不改数据、不改作用域，只给其它节点加 `.solo-hidden`（轮询新增节点同样处理），
-  再让 `fitView()` 只算这一张稿（放大上限 1.6×、留白 48px、按「侧栏右侧 +
-  工具条下方」的可见区居中）。`#edges` / `#rel-layer` / `#group-labels` / 检查器
-  一并收起，顶部 `#solo-bar` 显示标题与所属项目，树里对应子项高亮。
+  再让 `fitView()` 只算这一张稿（放大上限 1.6×、留白 48px、按「左侧浮窗右侧 +
+  工具条下方」的可见区居中）。`#edges` / `#group-labels` / 检查器一并收起，
+  但 `#rel-layer` **必须保留**：检查模式里同一张卡内 A↔B 的间距/对齐标注就画在
+  这一层，隐藏它会出现「选了两块却量不出距离」。顶部 `#solo-bar` 显示标题与
+  所属项目，树里对应子项高亮。
   `Esc` / 双击空白 / 返回按钮退出；`resetCanvas()`（切项目、删项目）与被聚焦
   节点被删除时自动退出。**单击子项延后 220ms 执行**，双击到来即取消 ——
   否则两次 click 会先触发两次 `switchProject`，和双击的切作用域竞态。
-- 侧栏原设计：顶部是项目选择器（`<select>` + 新建/管理按钮）——切项目 = 换一块画布：
-  先清掉当前渲染的节点，再按 `?project=` 重新拉取；当前项目记在 localStorage。
-  「项目管理」面板（`#proj-modal`）承担新建 / 重命名 / 删除 / 切换四件事，
-  行内展示节点数、分组框数、更新时间与 ID；`#proj-select` 只做快速切换（只显示名称，
-  计数在面板里，避免 220px 的窄栏被长名字挤爆）。切项目后必须同步 `select.value`，
-  否则从面板切换会出现「画布换了、下拉没换」的状态分叉。
-  下方是设计体系清单（点开看 Token 摘要与组件列表，可一键「添加预览卡」）。
-- 侧栏收起：面板整体 `translateX(-296px)` 移出屏幕，但**必须留一个屏内入口** ——
-  左侧常驻「› 体系」把手 `#sb-expand`，由 `body.sb-collapsed` 控制显隐；
-  否则收起来就再也点不到展开按钮（原来的 `#sb-toggle` 也一起被移出了屏幕）。
-  收起状态写 localStorage，刷新后保持。
+- 切项目 = 换一块画布：先清掉当前渲染的节点，再按 `?project=` 重新拉取；
+  当前项目记在 localStorage。「项目管理」面板（`#proj-modal`）承担新建 / 重命名 /
+  删除 / 切换四件事，行内展示节点数、分组框数、画布版式、更新时间与 ID。
 - 渲染：每节点一个 `sandbox="allow-same-origin"` 的 iframe（srcdoc），
   按 `Scale` 用 CSS transform 缩放。
 - 同步：本地操作即时生效 + 每 2s 增量合并（按 UpdatedAt）。
@@ -289,6 +309,7 @@ MCP canvas_screenshot ─► POST /api/capture ─► 任务入队
 | 连线两端必须同项目 | `Store.AddEdge` | `edge_cross_project` |
 | 项目非空不可删 | `Store.RemoveProject` | `project_not_empty` |
 | 自动排版只在项目内计算 | `autoPositionLocked(projectID, …)` | —（各项目从 (80,80) 起） |
+| 画布宽高必须成对、在 320..8192，比例预设合法 | `Store.SetProjectCanvas` | `bad_request` / `unknown_ratio` |
 | 恢复快照不跨已删项目 | `RestoreLastClear` | 跳过该项目节点 |
 
 为什么拦在 `Store` 而不是 handler：节点有两条写入路径（HTTP 直连 / MCP 工具），
@@ -311,6 +332,7 @@ SDK：`github.com/modelcontextprotocol/go-sdk v1.8.0`（与 mem-go 一致）。
 | `project_create` | `name`（必填、同名拒绝）、`note?` | 项目（含 ID）+ 「下一步带 project」提示 |
 | `project_list` | — | 项目列表（含节点计数、更新时间） |
 | `project_remove` | `id`, `confirm=true` | 删除结果；非空项目拒绝 |
+| `project_canvas` | `project`, `ratio?` 或 `width?/height?`, `free?` | 项目（含 `canvas`）+ 可选预设清单 |
 | `design_artboard` | `artboard?`, `family?` | 画板清单或单个 `ArtboardSpec`（含 `contract` 契约文本） |
 | `design_fonts` | `script?=latin/hans/mono` | 字体清单（含授权标记）+ 默认栈 + 授权策略 |
 | `design_icons` | `query?`, `group?`, `format?=sprite/inline` | 图标清单（名字/分组/别名/HTML） |
@@ -405,7 +427,7 @@ func IconRef(name string, size int) string
 func ExpandIcons(s string) string        // 展开模板里的 {{icon:name:size}}
 ```
 
-- 38 个图标、24 网格、1.8 描边、`currentColor`（自动继承 Token 色）。
+- 42 个图标、24 网格、1.8 描边、`currentColor`（自动继承 Token 色）。
 - 分组：`arrow / action / status / nav / media / data`；名字扁平语义（`close` / `check` /
   `chevron-right`），分组放 `Group` 字段，历史字符符号放 `Tags`（`design_icons?query=✕`）。
 - 组件模板写 `{{icon:check:12}}`，渲染时展开 —— 保持模板可读、可 diff，且不会被

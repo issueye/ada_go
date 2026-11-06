@@ -2,6 +2,7 @@ package canvas
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -35,6 +36,11 @@ func projectErr(err error, id string) *Error {
 	case errors.Is(err, ErrEdgeCrossProject):
 		return APIError("edge_cross_project", "连线两端必须属于同一项目",
 			"跨项目表达流向请改用分组框或便签")
+	case errors.Is(err, ErrUnknownCanvasRatio):
+		return APIError("unknown_ratio", "未知画布比例预设", "可用比例："+strings.Join(CanvasPresetIDs(), " / "))
+	case errors.Is(err, ErrCanvasSizeInvalid):
+		return APIError("bad_request", "画布尺寸非法",
+			fmt.Sprintf("宽高需同时给出，且在 %d..%d 之间", MinCanvasSide, MaxCanvasSide))
 	}
 	return APIError("internal", err.Error(), "")
 }
@@ -44,7 +50,9 @@ func statusForProjectErr(err error) int {
 	switch {
 	case errors.Is(err, ErrProjectRequired),
 		errors.Is(err, ErrProjectNameEmpty),
-		errors.Is(err, ErrEdgeCrossProject):
+		errors.Is(err, ErrEdgeCrossProject),
+		errors.Is(err, ErrUnknownCanvasRatio),
+		errors.Is(err, ErrCanvasSizeInvalid):
 		return http.StatusBadRequest
 	case errors.Is(err, ErrUnknownProject), errors.Is(err, ErrProjectNotFound):
 		return http.StatusNotFound
@@ -108,4 +116,41 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"removed": id})
+}
+
+// ---------------- 画布版式（比例 / 尺寸） ----------------
+
+// handleCanvasPresets 返回比例预设表与合法尺寸区间（UI 直接渲染成菜单）。
+func (s *Server) handleCanvasPresets(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"presets":  CanvasPresets(),
+		"min_side": MinCanvasSide,
+		"max_side": MaxCanvasSide,
+	})
+}
+
+type canvasConfigIn struct {
+	Ratio  string `json:"ratio"`  // 预设 ID；与 width/height 二选一
+	Width  int    `json:"width"`  // 自定义宽（px）
+	Height int    `json:"height"` // 自定义高（px）
+	Free   bool   `json:"free"`   // true = 恢复自由画布（无边界）
+}
+
+// handleSetProjectCanvas 设置当前画布的比例/尺寸；free=true 清除边界。
+func (s *Server) handleSetProjectCanvas(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	var in canvasConfigIn
+	if !decodeBody(w, r, &in) {
+		return
+	}
+	var cfg *ProjectCanvas
+	if !in.Free {
+		cfg = &ProjectCanvas{Ratio: in.Ratio, Width: in.Width, Height: in.Height}
+	}
+	p, err := s.store.SetProjectCanvas(id, cfg)
+	if err != nil {
+		writeErr(w, statusForProjectErr(err), projectErr(err, id))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"project": p, "canvas": p.Canvas})
 }

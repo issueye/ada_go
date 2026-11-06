@@ -44,6 +44,12 @@ func projectFail[O any](out O, err error, id string) (*mcp.CallToolResult, O, er
 	case errors.Is(err, canvas.ErrEdgeCrossProject):
 		return failWith(out, "edge_cross_project", "连线两端必须属于同一项目",
 			"跨项目表达流向请改用分组框或便签")
+	case errors.Is(err, canvas.ErrUnknownCanvasRatio):
+		return failWith(out, "unknown_ratio", "未知画布比例预设",
+			"可用比例："+strings.Join(canvas.CanvasPresetIDs(), " / "))
+	case errors.Is(err, canvas.ErrCanvasSizeInvalid):
+		return failWith(out, "bad_request", "画布尺寸非法",
+			fmt.Sprintf("宽高需同时给出，且在 %d..%d 之间", canvas.MinCanvasSide, canvas.MaxCanvasSide))
 	}
 	return failWith(out, "internal", err.Error(), "")
 }
@@ -64,6 +70,12 @@ func registerProjectTools(server *mcp.Server, d Deps) {
 		Name:        "project_remove",
 		Description: "删除空项目（需 confirm=true）。项目下仍有设计稿时会被拒绝，需先 canvas_clear。",
 	}, projectRemoveTool(d))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "project_canvas",
+		Description: "设置当前画布（项目作用域）的版式：比例预设或自定义宽高，free=true 恢复自由画布。" +
+			"读取当前版式用 project_list；画布只是版式参考，不限制节点拖拽。",
+	}, projectCanvasTool(d))
 }
 
 // ---------------- project_create ----------------
@@ -84,7 +96,7 @@ func projectCreateTool(d Deps) mcp.ToolHandlerFor[projectCreateIn, projectCreate
 			return projectFail[projectCreateOut](projectCreateOut{}, err, "")
 		}
 		var sb strings.Builder
-		fmt.Fprintf(&sb, "已创建项目「%s」，ID: %s。\n下一步：design_preview / design_screen / canvas_add 时把 project 设为 %s，设计稿才会落到这个项目下。",
+		fmt.Fprintf(&sb, "已创建项目「%s」，ID: %s。\n下一步：design_preview / design_screen / canvas_add 时把 project 设为 %s，设计稿才会落到这个项目下。\n需要固定画布比例时调用 project_canvas（16:9 / 9:16 / 4:3 等）。",
 			p.Name, p.ID, p.ID)
 		return textResult(sb.String()), projectCreateOut{Project: p}, nil
 	}
@@ -113,8 +125,12 @@ func projectListTool(d Deps) mcp.ToolHandlerFor[projectListIn, projectListOut] {
 			if p.Note != "" {
 				note = " — " + p.Note
 			}
-			fmt.Fprintf(&sb, "- %s（%s）：%d 个节点%s，更新于 %s\n",
-				p.ID, p.Name, p.NodeCount, note, p.UpdatedAt.Format("2006-01-02 15:04"))
+			canvasInfo := ""
+			if p.Canvas != nil {
+				canvasInfo = "，画布 " + p.Canvas.Caption()
+			}
+			fmt.Fprintf(&sb, "- %s（%s）：%d 个节点%s%s，更新于 %s\n",
+				p.ID, p.Name, p.NodeCount, canvasInfo, note, p.UpdatedAt.Format("2006-01-02 15:04"))
 		}
 		sb.WriteString("\n新增设计稿时把 project 设为上面的 ID。")
 		return textResult(strings.TrimRight(sb.String(), "\n")), out, nil
@@ -142,5 +158,47 @@ func projectRemoveTool(d Deps) mcp.ToolHandlerFor[projectRemoveIn, projectRemove
 			return projectFail[projectRemoveOut](projectRemoveOut{}, err, in.ID)
 		}
 		return textResult(fmt.Sprintf("已删除项目 %s。", in.ID)), projectRemoveOut{Removed: in.ID}, nil
+	}
+}
+
+// ---------------- project_canvas ----------------
+
+type projectCanvasIn struct {
+	Project string `json:"project,omitempty" jsonschema:"项目 ID（画布作用域）；用 project_list 查询"`
+	Ratio   string `json:"ratio,omitempty" jsonschema:"比例预设 ID：16:9|16:10|4:3|3:2|1:1|3:4|2:3|9:16；与 width/height 二选一"`
+	Width   int    `json:"width,omitempty" jsonschema:"自定义画布宽（px，320..8192）"`
+	Height  int    `json:"height,omitempty" jsonschema:"自定义画布高（px，320..8192）"`
+	Free    bool   `json:"free,omitempty" jsonschema:"true = 恢复自由画布（无边界）"`
+}
+
+type projectCanvasOut struct {
+	Project canvas.Project        `json:"project"`
+	Presets []canvas.CanvasPreset `json:"presets,omitempty"`
+}
+
+func projectCanvasTool(d Deps) mcp.ToolHandlerFor[projectCanvasIn, projectCanvasOut] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in projectCanvasIn) (*mcp.CallToolResult, projectCanvasOut, error) {
+		if perr := checkProject(d, in.Project); perr != nil {
+			return projectFail[projectCanvasOut](projectCanvasOut{}, perr, in.Project)
+		}
+		var cfg *canvas.ProjectCanvas
+		if !in.Free {
+			cfg = &canvas.ProjectCanvas{Ratio: in.Ratio, Width: in.Width, Height: in.Height}
+		}
+		p, err := d.Store.SetProjectCanvas(in.Project, cfg)
+		if err != nil {
+			out := projectCanvasOut{}
+			// 比例写错时把可选值一并返回，模型可以立刻自纠
+			if errors.Is(err, canvas.ErrUnknownCanvasRatio) || errors.Is(err, canvas.ErrCanvasSizeInvalid) {
+				out.Presets = canvas.CanvasPresets()
+			}
+			return projectFail[projectCanvasOut](out, err, in.Project)
+		}
+		out := projectCanvasOut{Project: p}
+		if p.Canvas == nil {
+			return textResult(fmt.Sprintf("画布「%s」已恢复为自由画布（无边界）。", p.Name)), out, nil
+		}
+		return textResult(fmt.Sprintf("画布「%s」已设为 %s。\n提示：画布边界只作版式参考，不影响节点拖拽；在画布 UI 点「居中」或按 0 可把画布居中展示。",
+			p.Name, p.Canvas.Caption())), out, nil
 	}
 }

@@ -14,6 +14,10 @@ const S = {
   online: true,
   project: "",          // 画布作用域："" = 全部，否则为项目 ID
   projects: [],         // 项目列表（含每个项目的节点数）
+  canvas: null,         // 当前画布版式（项目属性）：{width,height,ratio} 或 null（自由画布）
+  presets: [],          // 画布比例预设（GET /api/canvas/presets）
+  minSide: 320,         // 画布宽高下限（服务端下发，用于前端快速校验）
+  maxSide: 8192,        // 画布宽高上限
   expanded: new Set(),  // 项目树里展开的项目
   treeNodes: new Map(), // projectID -> [{id,title}] 懒加载的子项
   treeFilter: "",       // 项目树搜索词
@@ -33,6 +37,13 @@ world.appendChild(edgeSvg);
 const relLayer = document.createElementNS("http://www.w3.org/2000/svg", "svg");
 relLayer.id = "rel-layer";
 world.appendChild(relLayer);
+
+// 画布纸张：项目版式边界（放在连线层之前，保证连线与节点都画在纸面上）
+const paperEl = document.createElement("div");
+paperEl.id = "canvas-paper";
+paperEl.className = "hidden";
+paperEl.innerHTML = '<span class="cv-label"><b class="cv-size"></b><span class="cv-ratio"></span></span>';
+world.insertBefore(paperEl, edgeSvg);
 
 // ---------------- 工具 ----------------
 function toast(msg, isErr) {
@@ -69,7 +80,7 @@ function setOnline(ok) {
   const c = $("conn");
   c.classList.toggle("conn--ok", ok);
   c.classList.toggle("conn--bad", !ok);
-  c.querySelector(".conn__text").textContent = ok ? "已连接" : "连接断开";
+  setTip("conn", ok ? "已连接" : "连接断开");
 }
 
 function esc(s) {
@@ -110,7 +121,7 @@ function fitView() {
   const labelPad = !soloNode && isAllScope() && S.nodes.size > 0 ? 170 : 0;
   minX -= labelPad;
   const bw = maxX - minX + pad * 2, bh = maxY - minY + pad * 2;
-  const gutter = document.body.classList.contains("sb-collapsed") ? 0 : 296;
+  const gutter = leftDockWidth();
   const availW = innerWidth - (soloNode ? gutter + 64 : 320);
   const availH = innerHeight - (soloNode ? 150 : 120);
   const cap = soloNode ? 1.6 : 1.2;
@@ -126,6 +137,247 @@ function fitView() {
   }
   applyTransform();
   scheduleEdges("*");
+}
+
+// ---------------- 画布版式（选择 / 比例 / 居中） ----------------
+// 画布 = 项目作用域 + 一份版式（宽高/比例）。版式是项目的属性，随项目走：
+//   选择画布 = 切项目作用域；修改比例 = PUT /api/projects/{id}/canvas；
+//   居中展示 = 把画布矩形（无版式时用全部节点包围盒）对齐到可视区中心。
+// 纸张只作版式参考，不裁剪、不拦截事件：无限画布仍可把草稿摆到边界外。
+
+function currentProject() {
+  return S.project ? S.projects.find((p) => p.id === S.project) || null : null;
+}
+
+function canvasCaption(c) {
+  if (!c || !c.width) return "自由画布";
+  return c.width + "×" + c.height + " · " + (c.ratio || "custom");
+}
+
+// 从项目列表同步当前画布版式，并刷新纸张与工具条。
+function syncCanvasFromScope() {
+  const p = currentProject();
+  S.canvas = p && p.canvas ? p.canvas : null;
+  renderCanvas();
+}
+
+function renderCanvas() {
+  if (S.canvas && S.canvas.width > 0) {
+    paperEl.classList.remove("hidden");
+    paperEl.style.width = S.canvas.width + "px";
+    paperEl.style.height = S.canvas.height + "px";
+    paperEl.querySelector(".cv-size").textContent = S.canvas.width + " × " + S.canvas.height;
+    paperEl.querySelector(".cv-ratio").textContent = S.canvas.ratio || "custom";
+  } else {
+    paperEl.classList.add("hidden");
+  }
+  // 工具条只显示图标：当前画布 / 比例都写进 tooltip（data-tip）
+  const p = currentProject();
+  const scopeTip = isAllScope()
+    ? "画布：全部项目 · 点击选择画布"
+    : "画布：" + (p ? p.name : "未选择") + " · " +
+      (S.canvas ? S.canvas.width + "×" + S.canvas.height + "（" + (S.canvas.ratio || "custom") + "）" : "自由画布") +
+      " · 点击选择";
+  setTip("cv-select", scopeTip);
+
+  const ratioTip = !S.project
+    ? "先选择一个画布（项目），再设置比例"
+    : S.canvas
+      ? "画布比例：" + (S.canvas.ratio || "自定义") + "（" + S.canvas.width + "×" + S.canvas.height + "） · 点击修改"
+      : "画布比例：自由画布 · 点击修改";
+  setTip("cv-ratio", ratioTip);
+  const ratioBtn = $("cv-ratio");
+  if (ratioBtn) {
+    ratioBtn.classList.toggle("is-disabled", !S.project);
+    ratioBtn.setAttribute("aria-disabled", S.project ? "false" : "true");
+  }
+}
+
+// 更新图标按钮的 tooltip 与无障碍名称。
+function setTip(id, text) {
+  const el = $(id);
+  if (!el) return;
+  el.dataset.tip = text;
+  el.setAttribute("aria-label", text);
+}
+
+// ---- 下拉菜单 ----
+function renderCanvasMenu() {
+  const box = $("cv-menu");
+  if (!box) return;
+  const rows = S.projects
+    .map((p) => {
+      const active = p.id === S.project;
+      const meta = canvasCaption(p.canvas) + " · " + (p.node_count || 0) + " 稿";
+      return `<button data-act="scope" data-id="${esc(p.id)}" class="${active ? "is-active" : ""}">
+        ${icon("folder", 14)}<span class="tb-menu__name">${esc(p.name)}</span><span class="tb-menu__meta">${esc(meta)}</span></button>`;
+    })
+    .join("");
+  box.innerHTML =
+    `<div class="tb-menu__head">画布（项目作用域）</div>` +
+    `<button data-act="scope" data-id="" class="${isAllScope() ? "is-active" : ""}">` +
+    `${icon("grid", 14)}<span class="tb-menu__name">全部项目</span><span class="tb-menu__meta">${totalNodes()} 个稿</span></button>` +
+    (rows || '<div class="tb-menu__empty">还没有项目。设计稿必须归属项目，先新建一个。</div>') +
+    `<div class="tb-menu__sep"></div>` +
+    `<button data-act="new">${icon("plus", 14)}<span>新建项目…</span></button>` +
+    `<button data-act="manage">${icon("settings", 14)}<span>项目管理…</span></button>`;
+}
+
+function renderRatioMenu() {
+  const box = $("ratio-menu");
+  if (!box) return;
+  const cur = S.canvas ? (S.canvas.ratio || "custom") : "free";
+  const rows = S.presets
+    .map((p) => {
+      const active = cur === p.id;
+      return `<button data-ratio="${esc(p.id)}" class="${active ? "is-active" : ""}">
+        ${icon("fit", 14)}<span>${esc(p.name)}</span><span class="tb-menu__meta">${p.width}×${p.height}</span></button>`;
+    })
+    .join("");
+  box.innerHTML =
+    `<div class="tb-menu__head">画布比例</div>` +
+    `<button data-ratio="free" class="${cur === "free" ? "is-active" : ""}">` +
+    `${icon("grid", 14)}<span>自由画布</span><span class="tb-menu__meta">无边界</span></button>` +
+    rows +
+    `<div class="tb-menu__sep"></div>` +
+    `<button data-ratio="custom" class="${cur === "custom" ? "is-active" : ""}">${icon("settings", 14)}<span>自定义宽高…</span></button>`;
+}
+
+function closeCanvasMenus() {
+  for (const id of ["cv-menu", "ratio-menu"]) {
+    const el = $(id);
+    if (el) el.classList.add("hidden");
+  }
+  for (const id of ["cv-select", "cv-ratio"]) {
+    const trigger = $(id);
+    if (trigger) trigger.setAttribute("aria-expanded", "false");
+  }
+}
+
+function toggleCanvasMenu(id) {
+  const menu = $(id);
+  if (!menu) return;
+  const willOpen = menu.classList.contains("hidden");
+  closeCanvasMenus();
+  closeTreeMenu();
+  if (!willOpen) return;
+  if (id === "cv-menu") renderCanvasMenu();
+  else renderRatioMenu();
+  menu.classList.remove("hidden");
+  const trigger = $(id === "cv-menu" ? "cv-select" : "cv-ratio");
+  if (trigger) trigger.setAttribute("aria-expanded", "true");
+}
+
+async function loadCanvasPresets() {
+  try {
+    const data = await api("/api/canvas/presets");
+    if (Array.isArray(data.presets) && data.presets.length) S.presets = data.presets;
+    if (data.min_side) S.minSide = data.min_side;
+    if (data.max_side) S.maxSide = data.max_side;
+  } catch (_) {
+    // 接口不可用时退回内置最小集，保证菜单仍可用（服务端仍会做最终校验）
+    S.presets = [
+      { id: "16:9", name: "宽屏 16:9", width: 1920, height: 1080 },
+      { id: "4:3", name: "标准 4:3", width: 1440, height: 1080 },
+      { id: "1:1", name: "方形 1:1", width: 1440, height: 1440 },
+      { id: "9:16", name: "竖屏 9:16", width: 1080, height: 1920 },
+    ];
+  }
+  renderRatioMenu();
+}
+
+function applyProjectPatch(p) {
+  if (!p || !p.id) return;
+  const i = S.projects.findIndex((x) => x.id === p.id);
+  if (i >= 0) S.projects[i] = Object.assign({}, S.projects[i], p);
+  else S.projects.push(p);
+}
+
+async function setCanvasConfig(payload, okText) {
+  if (!S.project) {
+    toast("画布是项目的属性：先在「全部项目」下拉里选一个项目", true);
+    return false;
+  }
+  try {
+    const data = await api("/api/projects/" + encodeURIComponent(S.project) + "/canvas", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    applyProjectPatch(data.project);
+    syncCanvasFromScope();
+    renderProjectTree();
+    if (isProjectModalOpen()) renderProjectRows();
+    centerView(true);
+    toast(okText || "画布已更新");
+    return true;
+  } catch (e) {
+    toast("画布设置失败: " + e.message, true);
+    return false;
+  }
+}
+
+// ---- 居中 ----
+// 目标矩形：单画布聚焦时是该节点；否则有版式用画布矩形，没有则用全部节点包围盒。
+function canvasBounds() {
+  const solo = S.solo && S.nodes.get(S.solo);
+  if (solo) return { x: solo.x, y: solo.y, w: solo.width, h: solo.height, kind: "node" };
+  if (S.canvas && S.canvas.width > 0) {
+    return { x: 0, y: 0, w: S.canvas.width, h: S.canvas.height, kind: "canvas" };
+  }
+  const nodes = [...S.nodes.values()].filter((n) => n.kind !== "frame");
+  if (!nodes.length) return null;
+  let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+  for (const n of nodes) {
+    minX = Math.min(minX, n.x);
+    minY = Math.min(minY, n.y);
+    maxX = Math.max(maxX, n.x + n.width);
+    maxY = Math.max(maxY, n.y + n.height);
+  }
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY, kind: "nodes" };
+}
+
+// 可视区：扣掉左侧浮窗、右侧检查器、顶部工具条（聚焦时还有一条返回条）。
+function leftDockWidth() {
+  const dock = $("left-dock");
+  if (!dock) return 0;
+  const open = [...dock.querySelectorAll(".dock-panel")].some((p) => !p.classList.contains("is-collapsed"));
+  return open ? 292 : 0;
+}
+
+function visibleRect() {
+  const left = leftDockWidth();
+  const inspEl = $("inspector");
+  const right = inspEl && !inspEl.classList.contains("hidden") ? 288 : 0;
+  const top = 64 + (S.solo ? 46 : 0);
+  return {
+    x: left, y: top,
+    w: Math.max(160, innerWidth - left - right),
+    h: Math.max(160, innerHeight - top - 12),
+  };
+}
+
+// centerView(fit)：fit=true 时缩放到刚好放下，否则保持当前缩放（放不下才缩）。
+function centerView(fit) {
+  const b = canvasBounds();
+  if (!b) {
+    toast("画布上还没有内容");
+    return;
+  }
+  const v = visibleRect();
+  const pad = b.kind === "canvas" ? 72 : 48;
+  const availW = Math.max(40, v.w - pad * 2);
+  const availH = Math.max(40, v.h - pad * 2);
+  let scale = S.scale;
+  if (fit || b.w * scale > availW || b.h * scale > availH) {
+    scale = Math.min(1, availW / b.w, availH / b.h);
+  }
+  scale = Math.min(4, Math.max(0.06, scale));
+  S.scale = scale;
+  S.tx = v.x + v.w / 2 - (b.x + b.w / 2) * scale;
+  S.ty = v.y + v.h / 2 - (b.y + b.h / 2) * scale;
+  applyTransform();
+  scheduleEdges("*");
+  scheduleLabels();
 }
 
 // ---------------- 节点渲染 ----------------
@@ -433,6 +685,7 @@ window.addEventListener("keydown", (e) => {
     if (S.selected) { e.preventDefault(); removeNode(S.selected); }
   }
   else if (e.key === "f" || e.key === "F") fitView();
+  else if (e.key === "0") centerView(true);
   else if (e.key === "Escape") {
     if (S.selected) { const el = S.els.get(S.selected); if (el) el.classList.remove("selected"); S.selected = null; $("inspector").classList.add("hidden"); }
   }
@@ -522,6 +775,18 @@ function upsertEdge(e) {
 }
 
 // ---------------- 同步轮询 ----------------
+// 节点每 2s 增量合并；项目/画布版式低频刷新（约 30s）：
+// Agent 侧 project_create / project_canvas 不会触发 UI 事件，只能靠轮询兜底。
+let pollTicks = 0;
+let projectsSig = "";
+
+function projectsSignature(list) {
+  return JSON.stringify((list || []).map((p) => [
+    p.id, p.name, p.note, p.node_count, p.frame_count, p.updated_at,
+    p.canvas ? p.canvas.width : 0, p.canvas ? p.canvas.height : 0, p.canvas ? p.canvas.ratio : "",
+  ]));
+}
+
 async function pollNodes() {
   if (S.drag) return;
   const q = S.project ? "?project=" + encodeURIComponent(S.project) : "";
@@ -546,7 +811,23 @@ async function pollNodes() {
     S.edges = new Map((ed.edges || []).map((e) => [e.id, e]));
     scheduleEdges("*");
     scheduleLabels();
+    if (++pollTicks % 15 === 0) await refreshProjectsQuietly();
   } catch (_) { /* 状态条已处理 */ }
+}
+
+// 项目 / 画布版式的低频刷新：只有内容真变了才重建树，避免每轮刷新打断滚动与展开状态。
+async function refreshProjectsQuietly() {
+  try {
+    const data = await api("/api/projects");
+    const next = data.projects || [];
+    const sig = projectsSignature(next);
+    if (sig === projectsSig) return;
+    projectsSig = sig;
+    S.projects = next;
+    syncCanvasFromScope();
+    renderProjectTree();
+    if (isProjectModalOpen()) renderProjectRows();
+  } catch (_) { /* 网络异常时保持现状 */ }
 }
 
 // ---------------- 项目（画布作用域） ----------------
@@ -641,7 +922,9 @@ async function focusNode(projectID, nodeID) {
 function applySoloVisibility() {
   for (const [id, el] of S.els) el.classList.toggle("solo-hidden", !!S.solo && id !== S.solo);
   edgeSvg.style.display = S.solo ? "none" : "";
-  relLayer.style.display = S.solo ? "none" : "";
+  // 关系层不能跟着隐藏：检查模式里 A↔B 的间距/对齐标注（含同一张卡内）
+  // 就画在 #rel-layer；隐藏它会出现「选了两块却量不出距离」。
+  relLayer.style.display = "";
   document.body.classList.toggle("mode-solo", !!S.solo);
   // 只切 class，不重建树 DOM（聚焦可能正由树上的 dblclick 触发）
   document.querySelectorAll(".tree-child[data-node]").forEach((el) => {
@@ -708,6 +991,7 @@ async function loadProjects(preferred) {
     S.projects = [];
     toast("项目列表加载失败: " + e.message, true);
   }
+  projectsSig = projectsSignature(S.projects);
   const remembered = preferred !== undefined
     ? preferred
     : (localStorage.getItem("adago.scope") || "all");
@@ -717,23 +1001,28 @@ async function loadProjects(preferred) {
     S.project = SCOPE_ALL;
   }
   localStorage.setItem("adago.scope", S.project || "all");
+  syncCanvasFromScope();
   renderProjectTree();
   return S.project;
 }
 
 async function switchProject(id) {
   const scope = id || SCOPE_ALL;
-  if (scope === S.project) { closeTreeMenu(); return; }
+  if (scope === S.project) { closeTreeMenu(); closeCanvasMenus(); return; }
   S.project = scope;
   localStorage.setItem("adago.scope", scope || "all");
   closeTreeMenu();
+  closeCanvasMenus();
   resetCanvas();
+  syncCanvasFromScope();
   renderProjectTree();
   await pollNodes();
   if (isAllScope()) await ensureGroupLayout();
   if (S.nodes.size === 0) showEmptyHint();
   else hideEmptyHint();
-  fitView();
+  // 有版式就居中版式（而不是把所有节点塞进视野）；自由画布仍按内容适配
+  if (S.canvas) centerView(true);
+  else fitView();
 }
 
 // 「全部」视图里，各项目原本都从 (80,80) 起排，卡片会完全重叠。
@@ -784,6 +1073,8 @@ async function arrangeByProject(silent) {
 async function reloadProjects() {
   const data = await api("/api/projects");
   S.projects = data.projects || [];
+  projectsSig = projectsSignature(S.projects);
+  syncCanvasFromScope();
   renderProjectTree();
   if (isProjectModalOpen()) renderProjectRows();
 }
@@ -856,6 +1147,7 @@ function isProjectModalOpen() {
 
 function openProjectModal() {
   closeTreeMenu();
+  closeCanvasMenus();
   if (!isProjectModalOpen()) $("proj-modal").classList.remove("hidden");
   renderProjectRows();
   const input = $("proj-name");
@@ -888,10 +1180,11 @@ function renderProjectRows() {
     .map((p) => {
       const cur = p.id === S.project;
       const frames = p.frame_count ? ` · ${p.frame_count} 个分组框` : "";
+      const canvasMeta = p.canvas ? ` · 画布 ${p.canvas.width}×${p.canvas.height}` : "";
       return `<div class="proj-row${cur ? " is-current" : ""}" data-id="${esc(p.id)}">
         <div class="proj-row__main">
           <div class="proj-row__name">${esc(p.name)}${cur ? '<span class="proj-row__cur">当前</span>' : ""}</div>
-          <div class="proj-row__meta">${p.node_count} 个设计稿${frames} · 更新 ${fmtTime(p.updated_at)} · ${esc(p.id)}</div>
+          <div class="proj-row__meta">${p.node_count} 个设计稿${frames}${canvasMeta} · 更新 ${fmtTime(p.updated_at)} · ${esc(p.id)}</div>
         </div>
         <div class="proj-row__acts">
           ${cur ? "" : '<button data-act="switch">切换</button>'}
@@ -1226,21 +1519,82 @@ async function taskLoop() {
 $("btn-zoom-in").addEventListener("click", () => zoomAt(innerWidth / 2, innerHeight / 2, 1.2));
 $("btn-zoom-out").addEventListener("click", () => zoomAt(innerWidth / 2, innerHeight / 2, 1 / 1.2));
 $("btn-fit").addEventListener("click", fitView);
+
+// ---- 画布：选择 / 比例 / 居中 ----
+$("cv-select").addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleCanvasMenu("cv-menu");
+});
+$("cv-ratio").addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (!S.project) { toast("画布是项目的属性：先在「全部项目」下拉里选一个项目", true); return; }
+  toggleCanvasMenu("ratio-menu");
+});
+$("cv-center").addEventListener("click", () => centerView(true));
+
+$("cv-menu").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-act]");
+  if (!btn) return;
+  const act = btn.dataset.act;
+  closeCanvasMenus();
+  if (act === "scope") await switchProject(btn.dataset.id || SCOPE_ALL);
+  else if (act === "new" || act === "manage") openProjectModal();
+});
+
+$("ratio-menu").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-ratio]");
+  if (!btn) return;
+  const kind = btn.dataset.ratio;
+  closeCanvasMenus();
+  if (!S.project) { toast("先在「全部项目」下拉里选一个项目", true); return; }
+  if (kind === "free") {
+    await setCanvasConfig({ free: true }, "已恢复自由画布");
+    return;
+  }
+  if (kind === "custom") {
+    const cur = S.canvas ? S.canvas.width + "x" + S.canvas.height : "1440x900";
+    const raw = prompt("画布尺寸（宽 x 高，" + S.minSide + "-" + S.maxSide + "）：", cur);
+    if (raw == null) return;
+    const m = raw.trim().match(/^(\d+)\s*[x×*]\s*(\d+)$/i);
+    if (!m) { toast("格式应为「宽 x 高」，如 1440x900", true); return; }
+    const w = Number(m[1]), h = Number(m[2]);
+    if (w < S.minSide || h < S.minSide || w > S.maxSide || h > S.maxSide) {
+      toast("宽高需在 " + S.minSide + "-" + S.maxSide + " 之间", true);
+      return;
+    }
+    await setCanvasConfig({ width: w, height: h }, "画布尺寸已更新");
+    return;
+  }
+  await setCanvasConfig({ ratio: kind }, "画布比例已更新");
+});
 $("sb-back").addEventListener("click", backToList);
 $("insp-close").addEventListener("click", () => $("inspector").classList.add("hidden"));
-function setSidebarCollapsed(collapsed) {
-  const sb = $("sidebar");
-  sb.classList.toggle("collapsed", collapsed);
-  // body 上的 class 驱动 #sb-expand 显隐：侧栏整体移出屏幕后，
-  // 屏内必须仍有一个可点的展开入口，否则面板就再也拉不回来了。
-  document.body.classList.toggle("sb-collapsed", collapsed);
-  const bt = $("sb-toggle");
-  if (bt) bt.innerHTML = icon(collapsed ? "chevron-right" : "chevron-left", 16);
-  try { localStorage.setItem("adago.sbCollapsed", collapsed ? "1" : "0"); } catch (_) { /* 隐私模式忽略 */ }
+
+// ---- 左侧双浮窗：项目 / 设计体系各自独立收起 ----
+// 收起只隐藏 body、保留标题条，因此不需要额外的「展开把手」，也不会出现收起来拉不回来的问题。
+function setPanelCollapsed(which, collapsed) {
+  const panel = $(which === "project" ? "project-panel" : "system-panel");
+  const btn = $(which === "project" ? "proj-collapse" : "sys-collapse");
+  if (!panel) return;
+  panel.classList.toggle("is-collapsed", !!collapsed);
+  if (btn) {
+    btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    btn.title = (collapsed ? "展开" : "收起") + (which === "project" ? "项目" : "设计体系") + "面板";
+    btn.setAttribute("aria-label", btn.title);
+  }
+  try {
+    localStorage.setItem(which === "project" ? "adago.projCollapsed" : "adago.sysCollapsed", collapsed ? "1" : "0");
+  } catch (_) { /* 隐私模式忽略 */ }
 }
 
-$("sb-toggle").addEventListener("click", () => setSidebarCollapsed(!$("sidebar").classList.contains("collapsed")));
-$("sb-expand").addEventListener("click", () => setSidebarCollapsed(false));
+function togglePanel(which) {
+  const panel = $(which === "project" ? "project-panel" : "system-panel");
+  if (!panel) return;
+  setPanelCollapsed(which, !panel.classList.contains("is-collapsed"));
+}
+
+$("proj-collapse").addEventListener("click", () => togglePanel("project"));
+$("sys-collapse").addEventListener("click", () => togglePanel("system"));
 $("solo-back").addEventListener("click", () => exitSolo());
 // ---- 项目树交互 ----
 $("tree-all").addEventListener("click", () => switchProject(SCOPE_ALL));
@@ -1291,6 +1645,7 @@ $("tree-rows").addEventListener("dblclick", (e) => {
 // 点空白关掉「更多」菜单
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".tree__head")) closeTreeMenu();
+  if (!e.target.closest(".tb-canvas")) closeCanvasMenus();
 });
 
 // ⇧N：新建项目（与设计稿工具的习惯一致）
@@ -1312,6 +1667,13 @@ document.querySelectorAll("[data-proj-close]").forEach((el) => {
 window.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (isProjectModalOpen()) { closeProjectModal(); e.preventDefault(); e.stopPropagation(); return; }
+  const cvMenu = $("cv-menu"), ratioMenu = $("ratio-menu");
+  if ((cvMenu && !cvMenu.classList.contains("hidden")) || (ratioMenu && !ratioMenu.classList.contains("hidden"))) {
+    closeCanvasMenus();
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
   const menu = $("tree-menu");
   if (menu && !menu.classList.contains("hidden")) {
     closeTreeMenu();
@@ -1368,13 +1730,17 @@ $("btn-add-note").addEventListener("click", async () => {
 // ---------------- 启动 ----------------
 applyTransform();
 try {
-  if (localStorage.getItem("adago.sbCollapsed") === "1") setSidebarCollapsed(true);
+  // 两块浮窗的收起状态分开记，互不牵连
+  setPanelCollapsed("project", localStorage.getItem("adago.projCollapsed") === "1");
+  setPanelCollapsed("system", localStorage.getItem("adago.sysCollapsed") === "1");
 } catch (_) { /* 忽略 */ }
+loadCanvasPresets();
 loadProjects().then(() => {
   if (!S.projects.length) showEmptyHint();
   pollNodes().then(() => {
     if (S.nodes.size === 0) showEmptyHint();
-    fitView();
+    if (S.canvas) centerView(true);
+    else fitView();
   });
 });
 setInterval(pollNodes, 2000);

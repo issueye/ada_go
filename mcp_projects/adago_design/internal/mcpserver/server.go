@@ -39,7 +39,8 @@ func NewServer(d Deps) *mcp.Server {
 			Instructions: "这是设计体系 MCP（adago-design）：内置 Apple HIG、火山 Arco、抖音、小米 MIUI、Element Plus、" +
 				"Ant Design、TDesign、Material 3 八套设计体系的 Token 与组件库，并提供浏览器无限画布。" +
 				"推荐流程：① project_create 建项目（已有项目用 project_list 查 ID）→ " +
-				"② design_artboard 定画板尺寸规范（iPhone 393×852 / Web 1440×900 等）→ " +
+				"② design_artboard 定画板尺寸规范（iPhone 393×852 / Web 1440×900 等）；" +
+				"需要限制整块画布的比例时用 project_canvas（16:9 / 9:16 / 4:3 / 自定义宽高）→ " +
 				"③ design_systems / design_tokens / design_components / design_search 查阅规范 → " +
 				"④ design_preview（组件组合，需带 artboard）或 design_screen（login/settings/feed/profile 整页）摆上画布 → " +
 				"⑤ design_audit 走查（含字体授权、图标一致性、尺寸规范）→ canvas_arrange 排版 → " +

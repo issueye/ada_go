@@ -42,7 +42,7 @@ project_create（或 project_list 选已有）
 |---|---|---|
 | 画板（尺寸） | `design_artboard` | 8 块画板：iPhone 15 / SE、Android 360、微信小程序、iPad、Web 1280/1440、桌面应用壳。给出内容区、安全区、栅格、导出倍率与「尺寸契约」文本 |
 | 字体（授权） | `design_fonts` | 字体注册表带商用/嵌入/再分发三个标记；默认栈是 Inter + Noto Sans SC（OFL），全平台可复现 |
-| 图标 | `design_icons` | 38 个 24 网格线性图标，`{{icon:name:size}}` 占位符在渲染时展开为内联精灵 |
+| 图标 | `design_icons` | 42 个 24 网格线性图标，`{{icon:name:size}}` 占位符在渲染时展开为内联精灵 |
 
 三条硬规则：
 
@@ -87,6 +87,7 @@ bin\adago-design.exe mcp
 | `project_create` | **创建设计项目**（设计稿的归属容器）；同名拒绝，重复调用请改用 `project_list` |
 | `project_list` | 列出项目与各自的设计稿数量；不确定 `project` 填什么时先调它 |
 | `project_remove` | 删除**空**项目（`confirm=true`）；项目下仍有设计稿会被拒绝 |
+| `project_canvas` | **画布版式**：按比例预设或自定义宽高设置当前画布，`free=true` 恢复自由画布；读取用 `project_list` |
 | `design_artboard` | **画板（尺寸规范）**：列表 / 按 ID 取推导值；返回内容区、安全区、栅格、导出倍率与尺寸契约 |
 | `design_fonts` | **字体授权**：可商用 / 可嵌入 / 可再分发标记，各脚本默认字族栈，授权策略 |
 | `design_icons` | **图标库**：按名称/分组/别名检索，返回 `<use>` 引用或独立 `<svg>` |
@@ -111,7 +112,8 @@ bin\adago-design.exe mcp
 | `canvas_url` | 获取画布访问地址 |
 
 错误以 `isError` 结果返回并携带稳定错误码：`project_required` / `unknown_project` /
-`project_duplicate` / `project_not_empty` / `edge_cross_project` / `unknown_system` /
+`project_duplicate` / `project_not_empty` / `edge_cross_project` / `unknown_ratio` /
+`unknown_system` /
 `unknown_artboard` / `unknown_component` / `capture_timeout` / `confirm_required` /
 `bad_request` / `screen_failed` / `compare_failed` / `empty_canvas`。
 
@@ -175,14 +177,14 @@ bin\adago-design.exe mcp
   （避免轮询误判为远端修改而重载 iframe）
 - 预览高度自适应：组件预览加载后实测 `.ds-page` 高度回写（`auto_height`），
   消除卡片内滚动条与截图裁切
-- 侧栏收起后左侧保留常驻「› 体系」把手（`#sb-expand`）：侧栏整体移出屏幕，
-  但展开入口必须留在屏内，否则面板拉不回来；收起状态记在 localStorage
+- 左侧拆成两块独立浮窗（`#left-dock`）：项目面板在上、设计体系面板在下，可分别收起；
+  收起后只留标题条，状态分别记在 `localStorage`（`adago.projCollapsed` / `adago.sysCollapsed`）
 - 滚动条统一成「透明轨道 + 6px 悬浮滑块」（面板与预览文档各一套规则）：
   默认滚动条在深色主题下是一整条灰带，还会挤占卡片版心宽度
 
-## 项目管理（左侧项目树）
+## 项目管理（左侧项目浮窗）
 
-侧栏顶部是项目树，参照设计稿工具的分组列表：
+左侧「项目」浮窗里是项目树，参照设计稿工具的分组列表：
 
 ```
 全部        4   ⋯        ← 点「全部」回到跨项目视图；⋯ 里是管理/重排/刷新
@@ -206,6 +208,25 @@ bin\adago-design.exe mcp
 - **管理**：`⋯ → 项目管理…` 打开面板，支持重命名、删除（仅空项目）、切换。
 - **重排**：`⋯ → 按项目重新排列`，把各项目排成行（行首留 200px 标签位）。
   进入「全部」时若检测到项目包围盒重叠，会自动排一次，之后仍可自由拖动。
+
+## 画布版式（选择 / 比例 / 居中）
+
+工具栏靠左是画布控制组。**画布 = 项目作用域 + 一份版式**，三件事都收在这里：
+
+> 工具条**只显示图标**：画布名、比例、适配/检查/清空等文字与当前状态都放在悬停
+> tooltip 里（键盘聚焦同样可见），避免长项目名把工具条撑成多行。
+
+- **选择画布**：文件夹图标 →「全部项目 / 项目名」下拉，每行带该项目的版式与稿数；选中即切换作用域。
+  与左侧项目树共用同一状态（`localStorage` 记住上次选择），两边互相同步。
+- **修改比例**：比例图标 → 自由画布 / 16:9 / 16:10 / 4:3 / 3:2 / 1:1 / 3:4 / 2:3 / 9:16 / 自定义宽高。
+  比例落成具体宽高（预设长边 1080–1920，自定义 320–8192），存进项目的
+  `canvas` 字段（`canvas.json`）；Agent 侧对应 `project_canvas` 工具。
+- **居中展示**：准星图标；把画布矩形对齐到可视区中心（自动扣掉左侧浮窗、检查器、工具条），
+  放不下时缩放到刚好放下；自由画布按全部节点包围盒居中。快捷键 `0`。
+
+画布纸张（`#canvas-paper`）只作版式参考：**不裁剪、不拦截事件**，节点仍可拖到边界外
+当草稿区。单画布聚焦（双击卡片/项目树子项）时纸张自动隐藏，居中改为对准该节点。
+Agent 修改画布版式后，画布 UI 约 30s 内低频率刷新同步（无需手动刷新页面）。
 
 ## 截图原理（无 CDP）
 

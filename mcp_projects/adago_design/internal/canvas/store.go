@@ -82,15 +82,23 @@ func (e Edge) Clone() Edge { return e }
 // 导出也按项目分目录（exports/<project-id>/）。项目本身不可为空创建 ——
 // Name 必填且同名去重，避免 Agent 反复 project_create 造出一堆空项目。
 type Project struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Note      string    `json:"note,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	Note      string         `json:"note,omitempty"`
+	Canvas    *ProjectCanvas `json:"canvas,omitempty"` // nil = 自由画布（无边界）
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
 }
 
-// Clone 返回项目副本。
-func (p Project) Clone() Project { return p }
+// Clone 返回项目副本（Canvas 深拷贝，避免调用方改到存储内部状态）。
+func (p Project) Clone() Project {
+	cp := p
+	if p.Canvas != nil {
+		canvasCopy := *p.Canvas
+		cp.Canvas = &canvasCopy
+	}
+	return cp
+}
 
 // ProjectSummary 是带节点计数的项目视图（列表接口用）。
 type ProjectSummary struct {
@@ -116,6 +124,9 @@ var (
 	ErrProjectNameEmpty = errors.New("project name is required")
 	ErrProjectDuplicate = errors.New("project name already exists")
 	ErrProjectNotEmpty  = errors.New("project still has design nodes")
+	// 画布版式（比例/尺寸）校验错误
+	ErrUnknownCanvasRatio = errors.New("unknown canvas ratio")
+	ErrCanvasSizeInvalid  = errors.New("invalid canvas size")
 )
 
 // Store 是线程安全的项目/节点/连线仓库，变更即持久化。

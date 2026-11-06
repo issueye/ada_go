@@ -41,6 +41,10 @@ func init() {
 		Body: `<path d="M5 5h14v9l-5 5H5z"/><path d="M19 14h-5v5"/>`})
 	RegisterIcon(Icon{Name: "fit", Group: IconGroupAction, Tags: []string{"maximize", "fullscreen", "zoom-fit"},
 		Body: `<path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/>`})
+	RegisterIcon(Icon{Name: "ratio", Group: IconGroupAction, Tags: []string{"比例", "aspect", "frame", "画布比例"},
+		Body: `<rect x="3" y="5" width="18" height="14" rx="2"/><rect x="6.5" y="8.5" width="11" height="7" rx="1"/>`})
+	RegisterIcon(Icon{Name: "center", Group: IconGroupAction, Tags: []string{"居中", "align-center", "focus", "target"},
+		Body: `<circle cx="12" cy="12" r="6"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>`})
 	RegisterIcon(Icon{Name: "link", Group: IconGroupAction, Tags: []string{"connect", "chain", "关联"},
 		Body: `<path d="M10.5 13.5a3.5 3.5 0 005 0l2.5-2.5a3.5 3.5 0 00-5-5l-1 1"/>` +
 			`<path d="M13.5 10.5a3.5 3.5 0 00-5 0L6 13a3.5 3.5 0 005 5l1-1"/>`})
