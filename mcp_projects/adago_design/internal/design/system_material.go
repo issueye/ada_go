@@ -3,7 +3,7 @@ package design
 // Material Design 3 —— 基于谷歌 Material You（M3）基线调色板与字型阶梯整理。
 func init() {
 	baseType := TypeScale{
-		Family: `Roboto, "Noto Sans SC", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif`,
+		Family: `Roboto, Inter, "Noto Sans SC", system-ui, "PingFang SC", sans-serif`,
 		Levels: map[string]TypeSpec{
 			"display-large":  {Size: 57, Weight: 400, LineHeight: 1.12, Usage: "大展示字（display-large）"},
 			"headline-large": {Size: 32, Weight: 400, LineHeight: 1.13, Usage: "大标题（headline-large）"},

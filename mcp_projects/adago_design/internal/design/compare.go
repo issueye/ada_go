@@ -252,7 +252,7 @@ body{font-family:"Segoe UI",system-ui,"PingFang SC","Microsoft YaHei",sans-serif
 	doc := "<!DOCTYPE html>\n<html lang=\"zh-CN\" data-kind=\"compare\"><head><meta charset=\"utf-8\"><title>对比 " +
 		esc(sa.ID) + " vs " + esc(sbSys.ID) + "</title><style>" + boardCSS + "</style></head>\n<body>\n" +
 		b.String() + "\n</body>\n</html>\n"
-	return doc, 420, nil
+	return doc, BoardWidth, nil
 }
 
 // writeSwatch 写一枚色板行。

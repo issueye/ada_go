@@ -20,13 +20,16 @@ func ExportBoard(nodes []Node, title string) string {
 	minX, minY, maxX, maxY := bounds(nodes)
 	pad := 40.0
 	for _, n := range nodes {
+		meta := n.System + " · " + n.Kind
+		if n.Artboard != "" {
+			meta += " · " + n.Artboard
+		}
 		b.WriteString(fmt.Sprintf(
 			`<div class="frame" style="left:%dpx;top:%dpx;width:%dpx;height:%dpx">`+
-				`<div class="cap"><span class="cap-title">%s</span><span class="cap-meta">%s · %s</span></div>`+
+				`<div class="cap"><span class="cap-title">%s</span><span class="cap-meta">%s</span></div>`+
 				`<iframe sandbox="allow-same-origin" srcdoc="%s" scrolling="auto"></iframe></div>`+"\n",
 			int(n.X-minX+pad), int(n.Y-minY+pad), n.Width, n.Height,
-			html.EscapeString(n.Title), html.EscapeString(n.System),
-			html.EscapeString(n.Kind), html.EscapeString(n.HTML)))
+			html.EscapeString(n.Title), html.EscapeString(meta), html.EscapeString(n.HTML)))
 	}
 	w := int(maxX - minX + pad*2)
 	h := int(maxY - minY + pad*2 + 56)

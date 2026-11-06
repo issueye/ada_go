@@ -64,8 +64,12 @@ func Derive(in DeriveInput) (*System, error) {
 		Guideline: append([]string{fmt.Sprintf("品牌主色 %s（%s 阶色板 1-10 可用），由 %s 结构派生。", strings.ToUpper(primary), "10", base.Name)}, base.Guideline...),
 	}
 	sys.Light = recolorTokens(base.Light, scale, semHues, infoHue, false)
+	// 派生品牌体系不继承基底品牌字体（否则「某茶饮品牌稿莫名用抖音字体」），
+	// 回到可商用可嵌入的默认栈。
+	sys.Light.Type.Family = DefaultStacks["latin"]
 	if base.Dark != nil {
 		dk := recolorTokens(*base.Dark, scale, semHues, infoHue, true)
+		dk.Type.Family = DefaultStacks["latin"]
 		sys.Dark = &dk
 	}
 	return sys, nil
@@ -399,5 +403,5 @@ header{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 `
 	doc := "<!DOCTYPE html>\n<html lang=\"zh-CN\" data-kind=\"derive\"><head><meta charset=\"utf-8\"><title>品牌色板 " +
 		esc(sys.Name) + "</title><style>" + css + "</style></head>\n<body>\n" + b.String() + "\n</body>\n</html>\n"
-	return doc, 420, nil
+	return doc, BoardWidth, nil
 }

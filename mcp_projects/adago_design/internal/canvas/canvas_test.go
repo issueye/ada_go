@@ -21,6 +21,28 @@ func newTestNode(title string) Node {
 	}
 }
 
+// newTestProject 建一个测试项目并返回 ID。
+// 设计稿必须归属已存在的项目，所以每个要 Add 的用例先建项目。
+func newTestProject(t *testing.T, s *Store) string {
+	t.Helper()
+	p, err := s.AddProject("测试项目", "")
+	if err != nil {
+		t.Fatalf("AddProject: %v", err)
+	}
+	return p.ID
+}
+
+// addNode 是 Store.Add 的测试封装（自动带项目并断言无错误）。
+func addNode(t *testing.T, s *Store, projectID string, n Node) Node {
+	t.Helper()
+	n.ProjectID = projectID
+	created, err := s.Add(n)
+	if err != nil {
+		t.Fatalf("Add(%s): %v", n.Title, err)
+	}
+	return created
+}
+
 func TestStoreCRUDAndPersist(t *testing.T) {
 	dir := t.TempDir()
 	s, err := OpenStore(dir)
@@ -30,12 +52,13 @@ func TestStoreCRUDAndPersist(t *testing.T) {
 	if len(s.List()) != 0 {
 		t.Fatal("新存储应为空")
 	}
-	a := s.Add(newTestNode("a"))
+	pid := newTestProject(t, s)
+	a := addNode(t, s, pid, newTestNode("a"))
 	if a.ID == "" || a.Kind != KindNote || a.Width != 420 {
 		t.Fatalf("Add 默认值异常: %+v", a)
 	}
-	b := s.Add(newTestNode("b"))
-	x, y := s.AutoPosition(420, 320)
+	b := addNode(t, s, pid, newTestNode("b"))
+	x, y := s.AutoPosition(pid, 420, 320)
 	b2, err := s.Update(b.ID, func(n *Node) { n.X, n.Y = x, y; n.Title = "b2" })
 	if err != nil {
 		t.Fatalf("update: %v", err)
@@ -66,16 +89,17 @@ func TestStoreCRUDAndPersist(t *testing.T) {
 	if ok, _ := s2.Remove(a.ID); ok {
 		t.Fatal("重复 Remove 应返回 false")
 	}
-	if n := s2.Clear(); n != 1 {
-		t.Fatalf("Clear = %d, 期望 1", n)
+	if n, cerr := s2.Clear(pid); cerr != nil || n != 1 {
+		t.Fatalf("Clear = %d (%v), 期望 1", n, cerr)
 	}
 }
 
 func TestStorePersistFileFormat(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := OpenStore(dir)
-	a := s.Add(newTestNode("x"))
-	b := s.Add(newTestNode("y"))
+	pid := newTestProject(t, s)
+	a := addNode(t, s, pid, newTestNode("x"))
+	b := addNode(t, s, pid, newTestNode("y"))
 	if _, err := s.AddEdge(a.ID, b.ID, "流向"); err != nil {
 		t.Fatalf("AddEdge: %v", err)
 	}
@@ -87,8 +111,9 @@ func TestStorePersistFileFormat(t *testing.T) {
 	if err := json.Unmarshal(raw, &file); err != nil {
 		t.Fatalf("canvas.json 不是合法 JSON: %v", err)
 	}
-	if file.Version != 2 || len(file.Nodes) != 2 || len(file.Edges) != 1 {
-		t.Fatalf("持久化内容异常: version=%d nodes=%d edges=%d", file.Version, len(file.Nodes), len(file.Edges))
+	if file.Version != 3 || len(file.Projects) != 1 || len(file.Nodes) != 2 || len(file.Edges) != 1 {
+		t.Fatalf("持久化内容异常: version=%d projects=%d nodes=%d edges=%d",
+			file.Version, len(file.Projects), len(file.Nodes), len(file.Edges))
 	}
 	if file.Edges[0].Label != "流向" {
 		t.Fatalf("连线标签异常: %+v", file.Edges[0])
@@ -115,21 +140,29 @@ func TestStoreV1Migration(t *testing.T) {
 	if len(nodes) != 1 || nodes[0].ID != "n-old-1" || nodes[0].Z != 3 {
 		t.Fatalf("v1 节点迁移异常: %+v", nodes)
 	}
-	// 迁移后的下一次写入应为 v2
+	// v1 节点没有 project_id，迁移后应自动落到历史项目
+	if nodes[0].ProjectID != LegacyProjectID {
+		t.Fatalf("v1 节点应迁入 %s，得到 %q", LegacyProjectID, nodes[0].ProjectID)
+	}
+	if len(s.ListProjects()) != 1 || s.ListProjects()[0].ID != LegacyProjectID {
+		t.Fatalf("迁移后应存在历史项目: %+v", s.ListProjects())
+	}
+	// 迁移后的下一次写入应为 v3
 	s.AddEdge("n-old-1", "n-old-1", "") // 自环报错，不写入
-	s.Add(newTestNode("new"))
+	addNode(t, s, LegacyProjectID, newTestNode("new"))
 	raw, _ := os.ReadFile(filepath.Join(dir, "canvas.json"))
 	var file persistedFile
-	if err := json.Unmarshal(raw, &file); err != nil || file.Version != 2 {
-		t.Fatalf("迁移后应写 v2 格式: %v", err)
+	if err := json.Unmarshal(raw, &file); err != nil || file.Version != 3 {
+		t.Fatalf("迁移后应写 v3 格式: %v", err)
 	}
 }
 
 func TestEdges(t *testing.T) {
 	s, _ := OpenStore("")
-	a := s.Add(newTestNode("a"))
-	b := s.Add(newTestNode("b"))
-	c := s.Add(newTestNode("c"))
+	pid := newTestProject(t, s)
+	a := addNode(t, s, pid, newTestNode("a"))
+	b := addNode(t, s, pid, newTestNode("b"))
+	c := addNode(t, s, pid, newTestNode("c"))
 	e, err := s.AddEdge(a.ID, b.ID, "下一步")
 	if err != nil {
 		t.Fatalf("AddEdge: %v", err)
@@ -169,7 +202,9 @@ func TestEdges(t *testing.T) {
 	}
 	// Clear + Restore 覆盖连线
 	e3, _ := s.AddEdge(b.ID, c.ID, "回环")
-	s.Clear()
+	if _, err := s.Clear(pid); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
 	if len(s.ListEdges()) != 0 {
 		t.Fatal("清空后应无连线")
 	}
@@ -184,12 +219,13 @@ func TestEdges(t *testing.T) {
 
 func TestAutoPositionEmptyAndRow(t *testing.T) {
 	s, _ := OpenStore("")
-	x1, y1 := s.AutoPosition(420, 320)
+	pid := newTestProject(t, s)
+	x1, y1 := s.AutoPosition(pid, 420, 320)
 	if x1 != 80 || y1 != 80 {
 		t.Fatalf("空画布首个位置 = (%v,%v), 期望 (80,80)", x1, y1)
 	}
-	s.Add(Node{Title: "1", Width: 420, Height: 320, HTML: "x", X: x1, Y: y1})
-	x2, y2 := s.AutoPosition(420, 320)
+	addNode(t, s, pid, Node{Title: "1", Width: 420, Height: 320, HTML: "x", X: x1, Y: y1})
+	x2, y2 := s.AutoPosition(pid, 420, 320)
 	if x2 != x1+420+48 {
 		t.Fatalf("第二个节点应排在右侧: %v", x2)
 	}
@@ -200,8 +236,9 @@ func TestAutoPositionEmptyAndRow(t *testing.T) {
 
 func TestAutoPositionWrap(t *testing.T) {
 	s, _ := OpenStore("")
-	s.Add(Node{Title: "wide", Width: 3400, Height: 400, HTML: "x"})
-	x, y := s.AutoPosition(800, 400)
+	pid := newTestProject(t, s)
+	addNode(t, s, pid, Node{Title: "wide", Width: 3400, Height: 400, HTML: "x"})
+	x, y := s.AutoPosition(pid, 800, 400)
 	if x != 80 {
 		t.Fatalf("超宽后应回到行首 x=80, got %v", x)
 	}
@@ -212,13 +249,19 @@ func TestAutoPositionWrap(t *testing.T) {
 
 func TestConcurrentAccess(t *testing.T) {
 	s, _ := OpenStore("")
+	pid := newTestProject(t, s)
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 20; j++ {
-				n := s.Add(newTestNode("c"))
+				node := newTestNode("c")
+				node.ProjectID = pid
+				n, err := s.Add(node)
+				if err != nil {
+					continue
+				}
 				s.Update(n.ID, func(nn *Node) { nn.Title = "m" })
 				s.List()
 				s.Get(n.ID)
@@ -266,11 +309,22 @@ func doJSON(t *testing.T, method, url string, body any) (*http.Response, map[str
 	return res, data
 }
 
+// newHTTPProject 通过 HTTP 建项目并返回 ID（HTTP 用例新增节点前必须先建项目）。
+func newHTTPProject(t *testing.T, ts *httptest.Server) string {
+	t.Helper()
+	res, data := doJSON(t, "POST", ts.URL+"/api/projects", map[string]any{"name": "HTTP 用例项目"})
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("建项目 status = %d: %v", res.StatusCode, data)
+	}
+	return data["project"].(map[string]any)["id"].(string)
+}
+
 func TestNodeAPIFlow(t *testing.T) {
 	_, ts := newTestServer(t)
+	pid := newHTTPProject(t, ts)
 
 	res, _ := doJSON(t, "POST", ts.URL+"/api/nodes", map[string]any{
-		"title": "卡片", "kind": "component", "system": "volcano",
+		"project": pid, "title": "卡片", "kind": "component", "system": "volcano",
 		"html": "<html><body>hello</body></html>", "width": 420, "height": 300,
 	})
 	if res.StatusCode != http.StatusCreated {
@@ -374,7 +428,7 @@ func TestCatalogEndpoints(t *testing.T) {
 		t.Fatalf("未知体系应 404, got %d", got)
 	}
 	res, data := doJSON(t, "POST", ts.URL+"/api/catalog/preview", map[string]any{
-		"system": "fake", "components": []string{"button"},
+		"project": newHTTPProject(t, ts), "system": "fake", "components": []string{"button"},
 	})
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("preview status = %d: %v", res.StatusCode, data)
@@ -390,16 +444,17 @@ func (fakeCatalog) SystemDetail(id string) (any, bool) {
 	}
 	return map[string]any{"id": "fake", "components": []map[string]any{{"id": "button", "name": "按钮"}}}, true
 }
-func (fakeCatalog) ComposePreview(system string, comps []string, theme, title string) (string, int, int, error) {
-	return "<html>preview</html>", 420, 300, nil
+func (fakeCatalog) ComposePreview(system string, comps []string, theme, title, artboard string) (string, int, int, string, error) {
+	return "<html>preview</html>", 420, 300, "iphone-15", nil
 }
 
 func TestCaptureFlow(t *testing.T) {
 	srv, ts := newTestServer(t)
 	_ = srv
-	// 建一个节点
+	// 建一个节点（先建项目）
 	res0(t, ts, "POST", "/api/nodes", map[string]any{
-		"html": "<html><body>x</body></html>", "width": 300, "height": 200, "title": "t",
+		"project": newHTTPProject(t, ts),
+		"html":    "<html><body>x</body></html>", "width": 300, "height": 200, "title": "t",
 	})
 	nodes := res0(t, ts, "GET", "/api/nodes", nil)["nodes"].([]any)
 	nodeID := nodes[0].(map[string]any)["id"].(string)

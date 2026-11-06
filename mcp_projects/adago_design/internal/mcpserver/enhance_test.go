@@ -30,6 +30,7 @@ func TestDesignCompareTool(t *testing.T) {
 	// 摆上画布
 	before := len(d.Store.List())
 	res = callTool(t, sess, "design_compare", map[string]any{
+		"project":  testProject(t, d),
 		"system_a": "douyin", "system_b": "material", "theme": "dark", "add_to_canvas": true,
 	})
 	if res.IsError {
@@ -52,9 +53,10 @@ func TestDesignCompareTool(t *testing.T) {
 
 func TestDesignScreenTool(t *testing.T) {
 	sess, d := newTestSession(t)
+	pid := testProject(t, d)
 	before := len(d.Store.List())
 	res := callTool(t, sess, "design_screen", map[string]any{
-		"system": "xiaomi", "template": "login", "theme": "light", "app_name": "米家",
+		"project": pid, "system": "xiaomi", "template": "login", "theme": "light", "app_name": "米家",
 	})
 	if res.IsError {
 		t.Fatalf("design_screen 失败: %s", contentText(t, res))
@@ -75,13 +77,13 @@ func TestDesignScreenTool(t *testing.T) {
 	}
 	// 全部模板 × 抽查体系
 	for _, tpl := range []string{"settings", "feed", "profile"} {
-		res = callTool(t, sess, "design_screen", map[string]any{"system": "material", "template": tpl})
+		res = callTool(t, sess, "design_screen", map[string]any{"project": pid, "system": "material", "template": tpl})
 		if res.IsError {
 			t.Fatalf("%s 失败: %s", tpl, contentText(t, res))
 		}
 	}
 	// 错误模板
-	res = callTool(t, sess, "design_screen", map[string]any{"system": "ant", "template": "dashboard"})
+	res = callTool(t, sess, "design_screen", map[string]any{"project": pid, "system": "ant", "template": "dashboard"})
 	if !res.IsError || !strings.Contains(contentText(t, res), "screen_failed") {
 		t.Fatalf("未知模板应报 screen_failed: %s", contentText(t, res))
 	}
@@ -108,14 +110,15 @@ func TestDesignSearchTool(t *testing.T) {
 
 func TestCanvasArrangeRestoreExport(t *testing.T) {
 	sess, d := newTestSession(t)
+	pid := testProject(t, d)
 	// 造 6 个节点（两体系交错，验证 arrange 会按体系聚合）
 	for i, sys := range []string{"element", "douyin", "element", "douyin", "element", "douyin"} {
-		d.Store.Add(canvas.Node{
+		seedNode(t, d, canvas.Node{
 			Title: sys + "-" + string(rune('a'+i)), System: sys, Kind: canvas.KindComponent,
 			HTML: "<html><body>" + sys + "</body></html>", Width: 300, Height: 200,
 		})
 	}
-	res := callTool(t, sess, "canvas_arrange", nil)
+	res := callTool(t, sess, "canvas_arrange", map[string]any{"project": pid})
 	if res.IsError {
 		t.Fatalf("canvas_arrange 失败: %s", contentText(t, res))
 	}
@@ -140,7 +143,7 @@ func TestCanvasArrangeRestoreExport(t *testing.T) {
 	}
 
 	// clear + restore
-	res = callTool(t, sess, "canvas_clear", map[string]any{"confirm": true})
+	res = callTool(t, sess, "canvas_clear", map[string]any{"project": pid, "confirm": true})
 	if res.IsError {
 		t.Fatalf("canvas_clear 失败: %s", contentText(t, res))
 	}
@@ -183,7 +186,7 @@ func TestCanvasArrangeRestoreExport(t *testing.T) {
 		}
 	}
 	// 空画布导出
-	callTool(t, sess, "canvas_clear", map[string]any{"confirm": true})
+	callTool(t, sess, "canvas_clear", map[string]any{"project": pid, "confirm": true})
 	res = callTool(t, sess, "canvas_export", nil)
 	if !res.IsError || !strings.Contains(contentText(t, res), "empty_canvas") {
 		t.Fatalf("空画布导出应报 empty_canvas: %s", contentText(t, res))

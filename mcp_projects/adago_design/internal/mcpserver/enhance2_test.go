@@ -10,9 +10,10 @@ import (
 
 func TestDesignDeriveTool(t *testing.T) {
 	sess, d := newTestSession(t)
+	pid := testProject(t, d)
 	before := len(d.Store.List())
 	res := callTool(t, sess, "design_derive", map[string]any{
-		"primary": "#C8412B", "name": "山茶茶饮", "base_system": "volcano",
+		"project": pid, "primary": "#C8412B", "name": "山茶茶饮", "base_system": "volcano",
 	})
 	if res.IsError {
 		t.Fatalf("design_derive 失败: %s", contentText(t, res))
@@ -26,14 +27,14 @@ func TestDesignDeriveTool(t *testing.T) {
 	}
 	// 用派生体系 ID 生成预览（体系注册生效）
 	res = callTool(t, sess, "design_preview", map[string]any{
-		"system": "shancha-chayin", "components": []string{"button"},
+		"project": pid, "system": "shancha-chayin", "components": []string{"button"},
 	})
 	if !res.IsError {
 		t.Log("派生 ID 命中（slug 来自名称）")
 	}
 	// 错误路径
 	res = callTool(t, sess, "design_derive", map[string]any{
-		"primary": "red", "name": "x", "base_system": "volcano",
+		"project": pid, "primary": "red", "name": "x", "base_system": "volcano",
 	})
 	if !res.IsError || !strings.Contains(contentText(t, res), "derive_failed") {
 		t.Fatalf("非法色应报 derive_failed: %s", contentText(t, res))
@@ -42,8 +43,11 @@ func TestDesignDeriveTool(t *testing.T) {
 
 func TestDesignAuditTool(t *testing.T) {
 	sess, d := newTestSession(t)
+	pid := testProject(t, d)
 	before := len(d.Store.List())
-	res := callTool(t, sess, "design_audit", map[string]any{"system": "element", "theme": "light"})
+	res := callTool(t, sess, "design_audit", map[string]any{
+		"project": pid, "system": "element", "theme": "light",
+	})
 	if res.IsError {
 		t.Fatalf("design_audit 失败: %s", contentText(t, res))
 	}
@@ -63,7 +67,7 @@ func TestDesignAuditTool(t *testing.T) {
 		t.Fatal("报告节点应含走查报告渲染")
 	}
 	// 错误路径
-	res = callTool(t, sess, "design_audit", map[string]any{"system": "nope"})
+	res = callTool(t, sess, "design_audit", map[string]any{"project": pid, "system": "nope"})
 	if !res.IsError || !strings.Contains(contentText(t, res), "audit_failed") {
 		t.Fatalf("未知体系应报 audit_failed: %s", contentText(t, res))
 	}
@@ -71,9 +75,9 @@ func TestDesignAuditTool(t *testing.T) {
 
 func TestCanvasConnectAndGroup(t *testing.T) {
 	sess, d := newTestSession(t)
-	a := d.Store.Add(canvas.Node{Title: "A", HTML: "<html>a</html>", Width: 300, Height: 200, X: 0, Y: 0})
-	b := d.Store.Add(canvas.Node{Title: "B", HTML: "<html>b</html>", Width: 300, Height: 200, X: 500, Y: 0})
-	c := d.Store.Add(canvas.Node{Title: "C", HTML: "<html>c</html>", Width: 300, Height: 200, X: 0, Y: 400})
+	a := seedNode(t, d, canvas.Node{Title: "A", HTML: "<html>a</html>", Width: 300, Height: 200, X: 0, Y: 0})
+	b := seedNode(t, d, canvas.Node{Title: "B", HTML: "<html>b</html>", Width: 300, Height: 200, X: 500, Y: 0})
+	c := seedNode(t, d, canvas.Node{Title: "C", HTML: "<html>c</html>", Width: 300, Height: 200, X: 0, Y: 400})
 
 	res := callTool(t, sess, "canvas_connect", map[string]any{"from": a.ID, "to": b.ID, "label": "下一步"})
 	if res.IsError {

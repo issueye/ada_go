@@ -35,7 +35,7 @@ func init() {
 				"gradient-live": {"linear-gradient(135deg,#FE2C55,#25F4EE)", "直播/活动渐变"},
 			},
 			Type: TypeScale{
-				Family: `"Douyin Sans", "DouyinSansBold", "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif`,
+				Family: `"Douyin Sans", Inter, "Noto Sans SC", system-ui, "PingFang SC", sans-serif`,
 				Levels: map[string]TypeSpec{
 					"display": {Size: 32, Weight: 800, LineHeight: 1.19, Usage: "活动大字"},
 					"title-1": {Size: 24, Weight: 700, LineHeight: 1.33, Usage: "页面大标题"},
@@ -84,7 +84,7 @@ func init() {
 				"gradient-live": {"linear-gradient(135deg,#FE2C55,#25F4EE)", "直播/活动渐变"},
 			},
 			Type: TypeScale{
-				Family: `"Douyin Sans", "DouyinSansBold", "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif`,
+				Family: `"Douyin Sans", Inter, "Noto Sans SC", system-ui, "PingFang SC", sans-serif`,
 				Levels: map[string]TypeSpec{
 					"display": {Size: 32, Weight: 800, LineHeight: 1.19, Usage: "活动大字"},
 					"title-1": {Size: 24, Weight: 700, LineHeight: 1.33, Usage: "页面大标题"},

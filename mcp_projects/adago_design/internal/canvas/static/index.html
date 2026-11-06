@@ -8,6 +8,9 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='6' fill='%237C5CFF'/><text x='12' y='17' font-size='13' text-anchor='middle' fill='white' font-family='sans-serif'>D</text></svg>">
 </head>
 <body>
+  <!-- 图标精灵必须先于工具条解析：icons.js 同步注入 <symbol>，后续 <use> 才能立即命中 -->
+  <script src="icons.js"></script>
+
   <div id="viewport">
     <div id="grid-layer"></div>
     <div id="world"></div>
@@ -16,39 +19,122 @@
   <header id="toolbar">
     <div class="tb-brand"><span class="tb-logo">D</span> adago-design</div>
     <div class="tb-group">
-      <button id="btn-zoom-out" title="缩小">−</button>
+      <button id="btn-zoom-out" title="缩小"><svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-minus"/></svg></button>
       <span id="zoom-label">100%</span>
-      <button id="btn-zoom-in" title="放大">+</button>
-      <button id="btn-fit" title="适配全部节点 (F)">适配</button>
+      <button id="btn-zoom-in" title="放大"><svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-plus"/></svg></button>
+      <button id="btn-fit" title="适配全部节点 (F)"><svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-fit"/></svg>适配</button>
     </div>
     <div class="tb-group">
-      <button id="btn-add-note" title="添加便签">＋便签</button>
-      <button id="btn-inspect" title="元素检查：点选预览内元素，查看边距/内边距/边框/圆角/阴影及 Token 合规">🔍 检查</button>
-      <button id="btn-clear" title="清空画布">清空</button>
+      <button id="btn-add-note" title="添加便签"><svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-note"/></svg>便签</button>
+      <button id="btn-inspect" title="元素检查：悬停看规格与间距；点选 A 后移入另一个元素即对比 A↔B（再单击固定 B / Esc 退出）"><svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-inspect"/></svg>检查</button>
+      <button id="btn-clear" title="清空画布"><svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-trash"/></svg>清空</button>
     </div>
     <div class="tb-spacer"></div>
-    <span id="conn" class="conn conn--ok" title="服务连接状态">● 已连接</span>
-    <button id="btn-theme" title="切换界面主题">🌗</button>
+    <span id="conn" class="conn conn--ok" title="服务连接状态"><i class="dot"></i><span class="conn__text">已连接</span></span>
+    <button id="btn-theme" title="切换界面主题"><svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-theme"/></svg></button>
   </header>
+
+  <!-- 单画布聚焦：双击项目树里的设计稿（或双击卡片）进入，Esc / 返回按钮退出 -->
+  <div id="solo-bar" class="hidden" role="toolbar" aria-label="单画布聚焦">
+    <button id="solo-back" class="solo-back" title="返回完整画布（Esc）">
+      <svg class="ds-icon ds-icon--14" aria-hidden="true"><use href="#ds-ic-chevron-left"/></svg>返回画布
+    </button>
+    <span class="solo-bar__sep"></span>
+    <span id="solo-title" class="solo-bar__title"></span>
+    <span id="solo-project" class="solo-bar__proj"></span>
+    <span class="solo-bar__hint">双击空白处或按 Esc 退出</span>
+  </div>
 
   <aside id="sidebar">
     <div class="sb-head">
-      <span>设计体系</span>
-      <button id="sb-toggle" title="收起/展开">‹</button>
+      <span>项目</span>
+      <button id="sb-toggle" title="收起面板（收起后左侧仍有展开按钮）"><svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-chevron-left"/></svg></button>
     </div>
+
+    <!-- 项目树：参照设计稿工具的分组列表（全部 / 新建 / 搜索 / 文件夹行 + 计数） -->
+    <div class="tree">
+      <div class="tree__head">
+        <button id="tree-all" class="tree__all" title="显示全部项目的设计稿">
+          <svg class="ds-icon ds-icon--14" aria-hidden="true"><use href="#ds-ic-chevron-down"/></svg>
+          <span>全部</span>
+        </button>
+        <span id="tree-total" class="tree__total">0</span>
+        <button id="tree-more" class="tree__more" title="更多操作">
+          <svg class="ds-icon ds-icon--14" aria-hidden="true"><use href="#ds-ic-more"/></svg>
+        </button>
+        <div id="tree-menu" class="menu hidden">
+          <button data-menu="manage">项目管理…</button>
+          <button data-menu="arrange">按项目重新排列</button>
+          <button data-menu="refresh">刷新</button>
+        </div>
+      </div>
+
+      <button id="tree-new" class="tree__new">
+        <svg class="ds-icon ds-icon--14" aria-hidden="true"><use href="#ds-ic-plus"/></svg>
+        <span>新建项目</span>
+        <kbd>⇧N</kbd>
+      </button>
+
+      <label class="tree__search">
+        <svg class="ds-icon ds-icon--14" aria-hidden="true"><use href="#ds-ic-search"/></svg>
+        <input id="tree-filter" type="search" placeholder="搜索项目" autocomplete="off" />
+      </label>
+
+      <div id="tree-rows" class="tree__rows"></div>
+    </div>
+
+    <div class="sb-sub"><span>设计体系</span><span class="sb-sub__hint">Token · 组件</span></div>
+
     <div id="sb-list"></div>
     <div id="sb-detail" class="hidden">
-      <button id="sb-back">‹ 返回体系列表</button>
+      <button id="sb-back"><svg class="ds-icon ds-icon--14" aria-hidden="true"><use href="#ds-ic-chevron-left"/></svg>返回体系列表</button>
       <div id="sb-detail-body"></div>
     </div>
   </aside>
 
+  <!-- 侧栏收起后的常驻展开入口：侧栏整体位移出屏，必须留一个屏内可点的把手 -->
+  <button id="sb-expand" title="展开设计体系面板">
+    <svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-chevron-right"/></svg>
+    <span class="sb-expand__text">体系</span>
+  </button>
+
   <aside id="inspector" class="hidden">
-    <div class="sb-head"><span>检查器</span><button id="insp-close">✕</button></div>
+    <div class="sb-head"><span>检查器</span>
+      <button id="insp-close" title="关闭"><svg class="ds-icon ds-icon--14" aria-hidden="true"><use href="#ds-ic-close"/></svg></button>
+    </div>
     <div id="insp-body"></div>
   </aside>
 
   <div id="toast" class="hidden"></div>
+
+  <!-- 项目管理：下拉只做快速切换，新建/重命名/删除/切换集中在这里 -->
+  <div id="proj-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="proj-modal-title">
+    <div class="modal__mask" data-proj-close></div>
+    <div class="modal__box">
+      <header class="modal__head">
+        <span id="proj-modal-title">项目管理</span>
+        <button id="proj-modal-close" class="modal__x" data-proj-close title="关闭">
+          <svg class="ds-icon ds-icon--14" aria-hidden="true"><use href="#ds-ic-close"/></svg>
+        </button>
+      </header>
+      <div class="modal__body">
+        <div class="proj-create">
+          <input id="proj-name" class="proj-input" placeholder="新项目名称（如「官网改版」）" maxlength="40" />
+          <button id="proj-create" class="btn btn--primary">创建项目</button>
+          <input id="proj-note" class="proj-input proj-input--note" placeholder="备注（可选）：目标、范围、验收口径" maxlength="80" />
+        </div>
+        <div class="proj-list-title">
+          全部项目 <span id="proj-count" class="proj-count">0</span>
+        </div>
+        <div id="proj-rows" class="proj-rows"></div>
+      </div>
+      <footer class="modal__foot">
+        设计稿必须归属项目；删除项目前需先清空它下面的设计稿（画布「清空」只作用于当前项目）。
+      </footer>
+    </div>
+  </div>
+
   <script src="canvas.js"></script>
+  <script src="inspect.js"></script>
 </body>
 </html>

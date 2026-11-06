@@ -85,8 +85,17 @@ var componentCatalog = map[string]Component{
 // esc 转义 HTML 文本。
 func esc(s string) string { return html.EscapeString(s) }
 
-// renderComponent 按组件 ID 生成演示片段。
+// renderComponent 生成演示片段（图标占位符在此统一展开为 <svg>）。
 func renderComponent(compID string) (string, error) {
+	frag, err := componentTemplate(compID)
+	if err != nil {
+		return "", err
+	}
+	return ExpandIcons(frag), nil
+}
+
+// componentTemplate 返回带 {{icon:...}} 占位符的原始片段。
+func componentTemplate(compID string) (string, error) {
 	if _, valid := componentCatalog[compID]; !valid {
 		return "", fmt.Errorf("unknown component %q", compID)
 	}
@@ -124,11 +133,11 @@ func renderComponent(compID string) (string, error) {
 		return `
 <div class="ds-field">
   <label class="ds-label">所属部门</label>
-  <div class="ds-select"><span>研发中心</span><span class="ds-select__arrow">▾</span></div>
+  <div class="ds-select"><span>研发中心</span><span class="ds-select__arrow">{{icon:chevron-down:16}}</span></div>
 </div>
 <div class="ds-field">
   <label class="ds-label">城市</label>
-  <div class="ds-select ds-select--disabled"><span>请选择</span><span class="ds-select__arrow">▾</span></div>
+  <div class="ds-select ds-select--disabled"><span>请选择</span><span class="ds-select__arrow">{{icon:chevron-down:16}}</span></div>
 </div>`, nil
 	case "switch":
 		return `
@@ -139,7 +148,7 @@ func renderComponent(compID string) (string, error) {
 	case "checkbox":
 		return `
 <div class="ds-check-group">
-  <label class="ds-checkbox ds-checkbox--checked"><span class="ds-checkbox__box">✓</span> 全部消息</label>
+  <label class="ds-checkbox ds-checkbox--checked"><span class="ds-checkbox__box">{{icon:check:12}}</span> 全部消息</label>
   <label class="ds-checkbox"><span class="ds-checkbox__box"></span> 仅重要事项</label>
   <label class="ds-checkbox"><span class="ds-checkbox__box"></span> 营销活动</label>
 </div>`, nil
@@ -193,10 +202,10 @@ func renderComponent(compID string) (string, error) {
 </div>`, nil
 	case "alert":
 		return `
-<div class="ds-alert ds-alert--info"><span class="ds-alert__icon">i</span><span>这是一条信息通告：今晚 22:00 系统维护。</span></div>
-<div class="ds-alert ds-alert--success"><span class="ds-alert__icon">✓</span><span>保存成功，配置已生效。</span></div>
-<div class="ds-alert ds-alert--warning"><span class="ds-alert__icon">!</span><span>存储空间不足 10%，请及时清理。</span></div>
-<div class="ds-alert ds-alert--danger"><span class="ds-alert__icon">✕</span><span>支付失败，请更换支付方式后重试。</span></div>`, nil
+<div class="ds-alert ds-alert--info"><span class="ds-alert__icon">{{icon:info:12}}</span><span>这是一条信息通告：今晚 22:00 系统维护。</span></div>
+<div class="ds-alert ds-alert--success"><span class="ds-alert__icon">{{icon:check:12}}</span><span>保存成功，配置已生效。</span></div>
+<div class="ds-alert ds-alert--warning"><span class="ds-alert__icon">{{icon:warning:12}}</span><span>存储空间不足 10%，请及时清理。</span></div>
+<div class="ds-alert ds-alert--danger"><span class="ds-alert__icon">{{icon:danger:12}}</span><span>支付失败，请更换支付方式后重试。</span></div>`, nil
 	case "progress":
 		return `
 <div class="ds-field">
@@ -210,25 +219,25 @@ func renderComponent(compID string) (string, error) {
 	case "navbar":
 		return `
 <div class="ds-navbar">
-  <span class="ds-navbar__side ds-navbar__back">‹ 返回</span>
+  <span class="ds-navbar__side ds-navbar__back">{{icon:chevron-left:16}} 返回</span>
   <span class="ds-navbar__title">订单详情</span>
-  <span class="ds-navbar__side ds-navbar__right">⋯</span>
+  <span class="ds-navbar__side ds-navbar__right">{{icon:more:16}}</span>
 </div>`, nil
 	case "tabbar":
 		return `
 <div class="ds-tabbar">
-  <div class="ds-tabbar__item ds-tabbar__item--active"><span class="ds-tabbar__icon">◉</span><span>首页</span></div>
-  <div class="ds-tabbar__item"><span class="ds-tabbar__icon">◎</span><span>发现</span></div>
-  <div class="ds-tabbar__item"><span class="ds-tabbar__icon">✚</span><span>发布</span></div>
-  <div class="ds-tabbar__item"><span class="ds-tabbar__icon">▢</span><span>消息</span></div>
-  <div class="ds-tabbar__item"><span class="ds-tabbar__icon">○</span><span>我的</span></div>
+  <div class="ds-tabbar__item ds-tabbar__item--active"><span class="ds-tabbar__icon">{{icon:home:20}}</span><span>首页</span></div>
+  <div class="ds-tabbar__item"><span class="ds-tabbar__icon">{{icon:compass:20}}</span><span>发现</span></div>
+  <div class="ds-tabbar__item"><span class="ds-tabbar__icon">{{icon:plus:20}}</span><span>发布</span></div>
+  <div class="ds-tabbar__item"><span class="ds-tabbar__icon">{{icon:message:20}}</span><span>消息</span></div>
+  <div class="ds-tabbar__item"><span class="ds-tabbar__icon">{{icon:user:20}}</span><span>我的</span></div>
 </div>`, nil
 	case "list":
 		return `
 <div class="ds-list">
-  <div class="ds-list__item"><div class="ds-list__main"><div class="ds-list__title">账户与安全</div></div><span class="ds-list__value">已保护</span><span class="ds-list__arrow">›</span></div>
-  <div class="ds-list__item"><div class="ds-list__main"><div class="ds-list__title">通用设置</div></div><span class="ds-list__arrow">›</span></div>
-  <div class="ds-list__item"><div class="ds-list__main"><div class="ds-list__title">深色模式</div><div class="ds-list__desc">跟随系统</div></div><span class="ds-list__value">自动</span><span class="ds-list__arrow">›</span></div>
+  <div class="ds-list__item"><div class="ds-list__main"><div class="ds-list__title">账户与安全</div></div><span class="ds-list__value">已保护</span><span class="ds-list__arrow">{{icon:chevron-right:16}}</span></div>
+  <div class="ds-list__item"><div class="ds-list__main"><div class="ds-list__title">通用设置</div></div><span class="ds-list__arrow">{{icon:chevron-right:16}}</span></div>
+  <div class="ds-list__item"><div class="ds-list__main"><div class="ds-list__title">深色模式</div><div class="ds-list__desc">跟随系统</div></div><span class="ds-list__value">自动</span><span class="ds-list__arrow">{{icon:chevron-right:16}}</span></div>
 </div>`, nil
 	case "dialog":
 		return `
@@ -245,8 +254,8 @@ func renderComponent(compID string) (string, error) {
 	case "toast":
 		return `
 <div class="ds-demo-row ds-demo-row--wrap">
-  <div class="ds-toast ds-toast--success"><span class="ds-toast__icon">✓</span>已提交</div>
-  <div class="ds-toast ds-toast--error"><span class="ds-toast__icon">✕</span>网络异常，请重试</div>
+  <div class="ds-toast ds-toast--success"><span class="ds-toast__icon">{{icon:check:14}}</span>已提交</div>
+  <div class="ds-toast ds-toast--error"><span class="ds-toast__icon">{{icon:close:14}}</span>网络异常，请重试</div>
   <div class="ds-toast ds-toast--info">已复制到剪贴板</div>
 </div>`, nil
 	}
@@ -264,6 +273,7 @@ type ComposeInput struct {
 	Theme      ThemeKey
 	Components []string // 组件 ID 顺序即展示顺序
 	Title      string
+	Artboard   string // 画板 ID；空 = 按体系 Family 取默认画板
 }
 
 // ComposeResult 是生成的预览文档。
@@ -271,8 +281,9 @@ type ComposeResult struct {
 	HTML     string // 完整 HTML 文档
 	SystemID string
 	Theme    ThemeKey
-	Width    int      // 建议渲染宽度
-	Height   int      // 建议渲染高度
+	Artboard string   // 实际生效的画板 ID
+	Width    int      // 渲染宽度（取自画板，不再写死 420/390）
+	Height   int      // 初始渲染高度；客户端渲染后按内容自适应修正
 	Missing  []string // 无效组件 ID
 	CSSBytes int      // StyleSheet 字节数（提示信息量）
 }
@@ -282,6 +293,10 @@ func Compose(in ComposeInput) (*ComposeResult, error) {
 	sys, ok := GetSystem(SanitizeID(in.SystemID))
 	if !ok {
 		return nil, fmt.Errorf("unknown system %q", in.SystemID)
+	}
+	ab, ok := ResolveArtboard(in.Artboard, sys.Family)
+	if !ok {
+		return nil, fmt.Errorf("unknown artboard %q（可用 design_artboard 查看）", in.Artboard)
 	}
 	var missing []string
 	var body strings.Builder
@@ -309,36 +324,49 @@ func Compose(in ComposeInput) (*ComposeResult, error) {
 	if title == "" {
 		title = sys.Name + " 组件预览"
 	}
-	width := 420
-	if sys.Family == "mobile" {
-		width = 390
+	// 初始高度只是首帧估值，客户端加载后按 .ds-page 实测高度回写（auto_height）
+	height := 200 + len(in.Components)*140
+	if height < 320 {
+		height = 320
 	}
-	doc := buildDoc(css, body.String(), title, sys.ID, string(effTheme))
-	height := 220 + len(in.Components)*150
-	if height > 1600 {
-		height = 1600
+	if height > 1800 {
+		height = 1800
 	}
+	doc := buildDoc(css, body.String(), title, sys.ID, string(effTheme), ab)
 	return &ComposeResult{
-		HTML: doc, SystemID: sys.ID, Theme: effTheme,
-		Width: width, Height: height, Missing: missing, CSSBytes: len(css),
+		HTML: doc, SystemID: sys.ID, Theme: effTheme, Artboard: ab.ID,
+		Width: ab.Width, Height: height, Missing: missing, CSSBytes: len(css),
 	}, nil
 }
 
-// buildDoc 拼装完整 HTML 文档。
-func buildDoc(css, body, title, sysID, theme string) string {
+// buildDoc 拼装完整 HTML 文档：内联 StyleSheet + 画板变量 + 图标精灵。
+// 全仓唯一文档出口，保证「一份结构 × 多份皮肤」在预览/导出/截图三处完全一致。
+func buildDoc(css, body, title, sysID, theme string, ab Artboard) string {
 	var b strings.Builder
-	b.WriteString("<!DOCTYPE html>\n<html lang=\"zh-CN\" data-system=\"" + esc(sysID) + "\" data-theme=\"" + esc(theme) + "\">\n<head>\n<meta charset=\"utf-8\">\n")
+	b.WriteString("<!DOCTYPE html>\n<html lang=\"zh-CN\" data-system=\"" + esc(sysID) +
+		"\" data-theme=\"" + esc(theme) + "\" data-artboard=\"" + esc(ab.ID) +
+		"\" data-font-license=\"" + esc(StackLicenseLabel(fontFamilyOf(sysID))) + "\">\n<head>\n<meta charset=\"utf-8\">\n")
 	b.WriteString("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>" + esc(title) + "</title>\n")
-	b.WriteString("<style>\n" + css + "\n</style>\n</head>\n")
-	b.WriteString("<body class=\"ds-surface\">\n<main class=\"ds-page\">\n")
+	b.WriteString("<style>\n" + css + "\n" + PageCSS(ab) + "</style>\n</head>\n")
+	// 图标精灵必须内联：预览是 srcdoc 文档，外链相对路径无基准，截图会 404
+	b.WriteString("<body class=\"ds-surface\">\n" + IconSprite() + "\n<main class=\"ds-page\">\n")
 	b.WriteString(`<header class="ds-page__head"><span class="ds-page__title">` + esc(title) + `</span><span class="ds-page__meta">` + esc(sysID) + " · " + esc(theme) + `</span></header>` + "\n")
 	b.WriteString(body)
 	b.WriteString("\n</main>\n</body>\n</html>\n")
 	return b.String()
 }
 
+// fontFamilyOf 取体系的字族串（供文档级授权标注）。
+func fontFamilyOf(sysID string) string {
+	if sys, ok := GetSystem(sysID); ok {
+		return sys.Light.Type.Family
+	}
+	return DefaultStack("latin")
+}
+
 // StandaloneDoc 把任意 body 片段（HTML）包装为使用某体系皮肤的完整文档。
 func StandaloneDoc(sys *System, theme ThemeKey, title, bodyHTML string) string {
 	css := StyleSheet(sys, theme)
-	return buildDoc(css, bodyHTML, title, sys.ID, string(theme))
+	ab := DefaultArtboardFor(sys.Family)
+	return buildDoc(css, ExpandIcons(bodyHTML), title, sys.ID, string(theme), ab)
 }

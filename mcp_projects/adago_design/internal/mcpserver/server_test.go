@@ -11,6 +11,7 @@ import (
 
 	"adagodesign/internal/app"
 	"adagodesign/internal/canvas"
+	"adagodesign/internal/design"
 )
 
 // newTestDeps 组装内存态依赖（不落盘）。
@@ -43,6 +44,31 @@ func newTestSession(t *testing.T) (*mcp.ClientSession, Deps) {
 	}
 	t.Cleanup(func() { sess.Close() })
 	return sess, d
+}
+
+// testProject 返回本会话的测试项目（不存在则建）。
+// 设计稿必须归属已存在的项目，工具用例新增节点前都要先拿到它。
+func testProject(t *testing.T, d Deps) string {
+	t.Helper()
+	if ps := d.Store.ListProjects(); len(ps) > 0 {
+		return ps[0].ID
+	}
+	p, err := d.Store.AddProject("测试项目", "")
+	if err != nil {
+		t.Fatalf("AddProject: %v", err)
+	}
+	return p.ID
+}
+
+// seedNode 直接往 Store 塞节点（自动带项目），用于准备画布初始状态。
+func seedNode(t *testing.T, d Deps, n canvas.Node) canvas.Node {
+	t.Helper()
+	n.ProjectID = testProject(t, d)
+	created, err := d.Store.Add(n)
+	if err != nil {
+		t.Fatalf("seed Add(%s): %v", n.Title, err)
+	}
+	return created
 }
 
 // callTool 走真实 MCP 会话调用工具并返回 CallToolResult。
@@ -140,6 +166,7 @@ func TestDesignSystemsAndTokens(t *testing.T) {
 
 func TestDesignComponentsAndPreview(t *testing.T) {
 	sess, d := newTestSession(t)
+	pid := testProject(t, d)
 	res := callTool(t, sess, "design_components", map[string]any{"system": "apple"})
 	if res.IsError {
 		t.Fatalf("design_components 失败: %s", contentText(t, res))
@@ -159,7 +186,8 @@ func TestDesignComponentsAndPreview(t *testing.T) {
 	// 预览 + 入画布
 	before := len(d.Store.List())
 	res = callTool(t, sess, "design_preview", map[string]any{
-		"system": "douyin", "components": []string{"navbar", "card", "tabbar"},
+		"project": pid,
+		"system":  "douyin", "components": []string{"navbar", "card", "tabbar"},
 		"title": "抖音订单页", "theme": "dark",
 	})
 	if res.IsError {
@@ -191,9 +219,11 @@ func TestDesignComponentsAndPreview(t *testing.T) {
 
 func TestCanvasToolsFlow(t *testing.T) {
 	sess, d := newTestSession(t)
+	pid := testProject(t, d)
 	// add
 	res := callTool(t, sess, "canvas_add", map[string]any{
-		"title": "自绘卡片", "html": "<!DOCTYPE html><html><body><p>hello</p></body></html>",
+		"project": pid,
+		"title":   "自绘卡片", "html": "<!DOCTYPE html><html><body><p>hello</p></body></html>",
 		"width": 300, "height": 200, "tags": []string{"demo"},
 	})
 	if res.IsError {
@@ -229,12 +259,12 @@ func TestCanvasToolsFlow(t *testing.T) {
 		t.Fatalf("canvas_remove 失败: %s", contentText(t, res))
 	}
 	// clear 需确认
-	res = callTool(t, sess, "canvas_clear", nil)
+	res = callTool(t, sess, "canvas_clear", map[string]any{"project": pid})
 	if !res.IsError || !bytes.Contains([]byte(contentText(t, res)), []byte("confirm_required")) {
 		t.Fatalf("未确认清空应报 confirm_required: %s", contentText(t, res))
 	}
 	// add 错误路径
-	res = callTool(t, sess, "canvas_add", map[string]any{"title": "空", "html": " "})
+	res = callTool(t, sess, "canvas_add", map[string]any{"project": pid, "title": "空", "html": " "})
 	if !res.IsError || !bytes.Contains([]byte(contentText(t, res)), []byte("bad_request")) {
 		t.Fatalf("空 html 应报 bad_request: %s", contentText(t, res))
 	}
@@ -245,7 +275,7 @@ func TestCanvasScreenshotTimeout(t *testing.T) {
 	ctx := context.Background()
 
 	// 加一个节点，然后截图（无 UI 领取 → capture_timeout）
-	d.Store.Add(canvas.Node{Title: "x", HTML: "<html></html>", Width: 100, Height: 100})
+	seedNode(t, d, canvas.Node{Title: "x", HTML: "<html></html>", Width: 100, Height: 100})
 	nodes := d.Store.List()
 	res, err := sess.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "canvas_screenshot",
@@ -283,7 +313,7 @@ func TestCanvasScreenshotSuccess(t *testing.T) {
 	}()
 	t.Cleanup(func() { <-done })
 
-	d.Store.Add(canvas.Node{Title: "x", HTML: "<html></html>", Width: 100, Height: 100})
+	seedNode(t, d, canvas.Node{Title: "x", HTML: "<html></html>", Width: 100, Height: 100})
 	nodes := d.Store.List()
 	res, err := sess.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "canvas_screenshot",
@@ -316,12 +346,16 @@ func TestCanvasScreenshotSuccess(t *testing.T) {
 func TestCatalogBridgeMatchesCanvas(t *testing.T) {
 	// app.Catalog 的 ComposePreview 与 design.Compose 输出一致
 	cat := app.Catalog{}
-	html, w, h, err := cat.ComposePreview("element", []string{"button", "input"}, "light", "桥接测试")
+	html, w, h, abID, err := cat.ComposePreview("element", []string{"button", "input"}, "light", "桥接测试", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w != 420 || !bytes.Contains([]byte(html), []byte("element skin")) {
-		t.Fatalf("桥接预览异常: w=%d", w)
+	wantW := design.DefaultArtboardFor("web").Width
+	if abID != "web-1440" {
+		t.Fatalf("画板未回传: %q", abID)
+	}
+	if w != wantW || !bytes.Contains([]byte(html), []byte("element skin")) {
+		t.Fatalf("桥接预览异常: w=%d want=%d", w, wantW)
 	}
 	_, ok := cat.SystemDetail("xiaomi")
 	if !ok {

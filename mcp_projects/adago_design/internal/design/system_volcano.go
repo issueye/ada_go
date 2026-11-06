@@ -33,7 +33,7 @@ func init() {
 			"bg-3":           {"#F2F3F5", "三级表面"},
 		},
 		Type: TypeScale{
-			Family: `Inter, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif`,
+			Family: `Inter, "Noto Sans SC", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif`,
 			Levels: map[string]TypeSpec{
 				"display": {Size: 32, Weight: 600, LineHeight: 1.25, Usage: "数字/营销大字"},
 				"title-1": {Size: 24, Weight: 600, LineHeight: 1.33, Usage: "页面标题"},
@@ -107,7 +107,7 @@ func init() {
 				"bg-3":           {"#313132", "三级表面"},
 			},
 			Type: TypeScale{
-				Family: `Inter, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif`,
+				Family: `Inter, "Noto Sans SC", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif`,
 				Levels: map[string]TypeSpec{
 					"display": {Size: 32, Weight: 600, LineHeight: 1.25, Usage: "数字/营销大字"},
 					"title-1": {Size: 24, Weight: 600, LineHeight: 1.33, Usage: "页面标题"},

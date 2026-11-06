@@ -39,7 +39,7 @@ func init() {
 				"fill-primary":                {"#78788033", "半透明填充（开关轨道等）"},
 			},
 			Type: TypeScale{
-				Family: `-apple-system, "SF Pro Text", "SF Pro Display", "PingFang SC", "Helvetica Neue", sans-serif`,
+				Family: `-apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, "Noto Sans SC", system-ui, sans-serif`,
 				Levels: map[string]TypeSpec{
 					"large-title": {Size: 34, Weight: 700, LineHeight: 1.21, Usage: "大标题"},
 					"title-1":     {Size: 28, Weight: 700, LineHeight: 1.21, Usage: "一级标题"},
@@ -95,7 +95,7 @@ func init() {
 				"fill-primary":                {"#7878805C", "半透明填充"},
 			},
 			Type: TypeScale{
-				Family: `-apple-system, "SF Pro Text", "SF Pro Display", "PingFang SC", "Helvetica Neue", sans-serif`,
+				Family: `-apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, "Noto Sans SC", system-ui, sans-serif`,
 				Levels: map[string]TypeSpec{
 					"large-title": {Size: 34, Weight: 700, LineHeight: 1.21, Usage: "大标题"},
 					"title-1":     {Size: 28, Weight: 700, LineHeight: 1.21, Usage: "一级标题"},

@@ -193,6 +193,15 @@ func Audit(systemID string, theme ThemeKey) (*AuditResult, error) {
 	// 7. 组件 CSS 字面值规范（padding/margin/gap/border-radius 必须落在 Token 阶梯）
 	appendSpecCheck(res, sys, eff)
 
+	// 8. 字体授权（可商用 / 可嵌入 / 跨端可复现）
+	appendFontCheck(res, tok)
+
+	// 9. 图标与符号一致性（禁止 emoji 与字符图标）
+	appendIconCheck(res, sys, eff)
+
+	// 10. 尺寸规范（必须能落到一块画板上）
+	appendSizeCheck(res, sys)
+
 	// 评分：fail -18，warn -6
 	res.Score = 100 - res.Failed*18 - res.Warned*6
 	if res.Score < 0 {

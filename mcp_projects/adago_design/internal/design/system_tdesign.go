@@ -3,7 +3,7 @@ package design
 // 腾讯 TDesign —— 基于腾讯 TDesign 公开设计变量（--td-*)整理。
 func init() {
 	baseType := TypeScale{
-		Family: `-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif`,
+		Family: `-apple-system, BlinkMacSystemFont, "Segoe UI", Inter, "Noto Sans SC", system-ui, "PingFang SC", sans-serif`,
 		Levels: map[string]TypeSpec{
 			"h1":      {Size: 36, Weight: 600, LineHeight: 1.33, Usage: "页面主标题"},
 			"h2":      {Size: 28, Weight: 600, LineHeight: 1.29, Usage: "区块标题"},

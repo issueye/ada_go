@@ -38,12 +38,22 @@ func NewServer(d Deps) *mcp.Server {
 		&mcp.ServerOptions{
 			Instructions: "这是设计体系 MCP（adago-design）：内置 Apple HIG、火山 Arco、抖音、小米 MIUI、Element Plus、" +
 				"Ant Design、TDesign、Material 3 八套设计体系的 Token 与组件库，并提供浏览器无限画布。" +
-				"推荐流程：design_systems 了解体系 → design_tokens / design_components / design_search 查阅规范 → " +
-				"design_preview（组件组合）或 design_screen（login/settings/feed/profile 整页）摆上画布 → " +
-				"design_compare 生成体系对比板 → canvas_arrange 自动排版 → canvas_screenshot 回看效果 → " +
-				"canvas_export 导出独立 HTML。画布 URL 通过 canvas_url 获取；截图需要画布已在浏览器中打开。",
+				"推荐流程：① project_create 建项目（已有项目用 project_list 查 ID）→ " +
+				"② design_artboard 定画板尺寸规范（iPhone 393×852 / Web 1440×900 等）→ " +
+				"③ design_systems / design_tokens / design_components / design_search 查阅规范 → " +
+				"④ design_preview（组件组合，需带 artboard）或 design_screen（login/settings/feed/profile 整页）摆上画布 → " +
+				"⑤ design_audit 走查（含字体授权、图标一致性、尺寸规范）→ canvas_arrange 排版 → " +
+				"canvas_screenshot 回看 → canvas_export 导出独立 HTML。" +
+				"硬规则：设计稿必须归属于已存在的项目 —— 任何新增设计稿的工具（design_preview / design_screen / " +
+				"canvas_add / design_audit / design_derive / design_compare）都必须传 project；没有项目就先 project_create，" +
+				"否则会返回 project_required。" +
+				"硬规则：图标只能用 design_icons 的 SVG，禁止 emoji 与 ▾ › ✕ ◉ 等字符；" +
+				"字体必须来自 design_fonts 中 Commercial=true 的条目；每个预览都要声明画板。" +
+				"画布 URL 通过 canvas_url 获取；截图需要画布已在浏览器中打开。",
 		})
 	registerTools(server, d)
+	registerCatalogTools(server)
+	registerProjectTools(server, d)
 	return server
 }
 
@@ -187,7 +197,7 @@ func firstNonEmpty(vals ...string) string {
 }
 
 func failWith[O any](out O, code, msg, hint string) (*mcp.CallToolResult, O, error) {
-	text := fmt.Sprintf("❌ [%s] %s", code, msg)
+	text := fmt.Sprintf("[ERROR %s] %s", code, msg)
 	if hint != "" {
 		text += "\n提示: " + hint
 	}
@@ -366,16 +376,19 @@ func componentsTool() mcp.ToolHandlerFor[componentsIn, componentsOut] {
 // ---------------- design_preview ----------------
 
 type previewIn struct {
+	Project     string   `json:"project,omitempty" jsonschema:"项目 ID（必填；没有项目先 project_create，或用 project_list 选一个）"`
 	System      string   `json:"system" jsonschema:"设计体系 ID"`
 	Components  []string `json:"components" jsonschema:"组件 ID 列表（顺序即展示顺序），如 [\"navbar\",\"list\",\"tabbar\"]"`
 	Title       string   `json:"title,omitempty" jsonschema:"预览标题，默认「体系名 组件预览」"`
 	Theme       string   `json:"theme,omitempty" jsonschema:"light|dark，默认 light"`
+	Artboard    string   `json:"artboard,omitempty" jsonschema:"画板 ID（尺寸规范），如 iphone-15 / web-1440；默认按体系 Family 取 design_artboard 的默认值"`
 	AddToCanvas *bool    `json:"add_to_canvas,omitempty" jsonschema:"是否摆上画布，默认 true"`
 }
 
 type previewOut struct {
 	System     string   `json:"system"`
 	Theme      string   `json:"theme"`
+	Artboard   string   `json:"artboard"`
 	Width      int      `json:"width"`
 	Height     int      `json:"height"`
 	Missing    []string `json:"missing,omitempty"`
@@ -387,34 +400,42 @@ type previewOut struct {
 
 func previewTool(d Deps) mcp.ToolHandlerFor[previewIn, previewOut] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in previewIn) (*mcp.CallToolResult, previewOut, error) {
+		if perr := checkProject(d, in.Project); perr != nil {
+			return projectFail[previewOut](previewOut{System: design.SanitizeID(in.System)}, perr, in.Project)
+		}
 		res, err := design.Compose(design.ComposeInput{
 			SystemID:   design.SanitizeID(in.System),
 			Components: in.Components,
 			Title:      in.Title,
 			Theme:      design.ThemeKey(design.SanitizeID(in.Theme)),
+			Artboard:   in.Artboard,
 		})
 		if err != nil {
 			return fail[previewOut]("compose_failed", err.Error(),
-				"用 design_systems / design_components 确认体系与组件 ID")
+				"用 design_systems / design_components 确认体系与组件 ID；用 design_artboard 确认画板 ID")
 		}
 		out := previewOut{
-			System: res.SystemID, Theme: string(res.Theme), Width: res.Width,
-			Height: res.Height, Missing: res.Missing, HTMLBytes: len(res.HTML),
+			System: res.SystemID, Theme: string(res.Theme), Artboard: res.Artboard,
+			Width: res.Width, Height: res.Height, Missing: res.Missing, HTMLBytes: len(res.HTML),
 		}
 		add := true
 		if in.AddToCanvas != nil {
 			add = *in.AddToCanvas
 		}
 		var sb strings.Builder
-		fmt.Fprintf(&sb, "已生成 %s（%s）预览：%d 组件，%dx%d，HTML %d 字节",
-			res.SystemID, res.Theme, len(in.Components)-len(res.Missing), res.Width, res.Height, len(res.HTML))
+		fmt.Fprintf(&sb, "已生成 %s（%s）预览：%d 组件，画板 %s，%dx%d，HTML %d 字节",
+			res.SystemID, res.Theme, len(in.Components)-len(res.Missing), res.Artboard, res.Width, res.Height, len(res.HTML))
 		if add {
-			node := d.Store.Add(canvas.Node{
-				Title: nodeTitle(in.Title, res.SystemID), System: res.SystemID,
-				Kind: canvas.KindScreen, HTML: res.HTML,
+			node, aerr := d.Store.Add(canvas.Node{
+				ProjectID: in.Project,
+				Title:     nodeTitle(in.Title, res.SystemID), System: res.SystemID,
+				Kind: canvas.KindComponent, HTML: res.HTML, Artboard: res.Artboard,
 				Width: res.Width, Height: res.Height,
-				Tags: append([]string{res.SystemID, string(res.Theme)}, in.Components...),
+				Tags: append([]string{res.SystemID, string(res.Theme), "artboard:" + res.Artboard, "project:" + in.Project}, in.Components...),
 			})
+			if aerr != nil {
+				return projectFail[previewOut](out, aerr, in.Project)
+			}
 			out.NodeID = node.ID
 			out.CanvasURL = d.BaseURL()
 			path, perr := exportHTML(d.DataDir, node.ID, res.HTML)
@@ -426,7 +447,7 @@ func previewTool(d Deps) mcp.ToolHandlerFor[previewIn, previewOut] {
 				fmt.Fprintf(&sb, "\nHTML 文件: %s", out.ExportPath)
 			}
 			if len(res.Missing) > 0 {
-				fmt.Fprintf(&sb, "\n⚠️ 无效组件已跳过: %s", strings.Join(res.Missing, ", "))
+				fmt.Fprintf(&sb, "\n[WARN] 无效组件已跳过: %s", strings.Join(res.Missing, ", "))
 			}
 		}
 		return textResult(sb.String()), out, nil
@@ -458,15 +479,17 @@ func exportHTML(dataDir, nodeID, html string) (string, error) {
 // ---------------- canvas_add ----------------
 
 type canvasAddIn struct {
-	Title  string   `json:"title" jsonschema:"节点标题"`
-	HTML   string   `json:"html" jsonschema:"完整 HTML 文档或片段（画布用沙箱 iframe 渲染）"`
-	Kind   string   `json:"kind,omitempty" jsonschema:"screen|component|palette|note，默认 note"`
-	System string   `json:"system,omitempty" jsonschema:"关联的设计体系 ID（可选）"`
-	Width  int      `json:"width,omitempty" jsonschema:"渲染宽度，默认 420"`
-	Height int      `json:"height,omitempty" jsonschema:"渲染高度，默认 320"`
-	X      *float64 `json:"x,omitempty" jsonschema:"画布 X 坐标；与 y 一起提供则不自动布局"`
-	Y      *float64 `json:"y,omitempty" jsonschema:"画布 Y 坐标"`
-	Tags   []string `json:"tags,omitempty" jsonschema:"标签"`
+	Project  string   `json:"project,omitempty" jsonschema:"项目 ID（必填；没有项目先 project_create，或用 project_list 选一个）"`
+	Title    string   `json:"title" jsonschema:"节点标题"`
+	HTML     string   `json:"html" jsonschema:"完整 HTML 文档或片段（画布用沙箱 iframe 渲染）"`
+	Kind     string   `json:"kind,omitempty" jsonschema:"screen|component|palette|note，默认 note"`
+	System   string   `json:"system,omitempty" jsonschema:"关联的设计体系 ID（可选）"`
+	Artboard string   `json:"artboard,omitempty" jsonschema:"画板 ID（尺寸规范）；给出时未指定 width/height 则取画板尺寸"`
+	Width    int      `json:"width,omitempty" jsonschema:"渲染宽度；默认取画板宽度，无画板时 420"`
+	Height   int      `json:"height,omitempty" jsonschema:"渲染高度；默认取画板高度，无画板时 320"`
+	X        *float64 `json:"x,omitempty" jsonschema:"画布 X 坐标；与 y 一起提供则不自动布局"`
+	Y        *float64 `json:"y,omitempty" jsonschema:"画布 Y 坐标"`
+	Tags     []string `json:"tags,omitempty" jsonschema:"标签"`
 }
 
 type canvasAddOut struct {
@@ -482,16 +505,37 @@ func addTool(d Deps) mcp.ToolHandlerFor[canvasAddIn, canvasAddOut] {
 		if in.Kind != "" && !canvas.ValidKind(in.Kind) {
 			return fail[canvasAddOut]("bad_request", "kind 须为 screen|component|palette|note", "")
 		}
+		tags := in.Tags
+		if in.Artboard != "" {
+			ab, ok := design.GetArtboard(in.Artboard)
+			if !ok {
+				return fail[canvasAddOut]("unknown_artboard", "未知画板 "+in.Artboard,
+					"用 design_artboard 查看可用画板")
+			}
+			if in.Width <= 0 {
+				in.Width = ab.Width
+			}
+			if in.Height <= 0 {
+				in.Height = ab.Height
+			}
+			tags = append(append([]string{}, tags...), "artboard:"+ab.ID)
+		}
+		if perr := checkProject(d, in.Project); perr != nil {
+			return projectFail[canvasAddOut](canvasAddOut{}, perr, in.Project)
+		}
 		n := canvas.Node{
-			Title: in.Title, Kind: in.Kind, System: in.System, HTML: in.HTML,
-			Width: in.Width, Height: in.Height, Tags: in.Tags,
+			ProjectID: in.Project,
+			Title:     in.Title, Kind: in.Kind, System: in.System, HTML: in.HTML,
+			Artboard: in.Artboard, Tags: tags,
+			Width: in.Width, Height: in.Height,
 		}
 		if in.X != nil && in.Y != nil {
 			n.X, n.Y = *in.X, *in.Y
-		} else {
-			n.X, n.Y = d.Store.AutoPosition(in.Width, in.Height)
 		}
-		created := d.Store.Add(n)
+		created, aerr := d.Store.Add(n)
+		if aerr != nil {
+			return projectFail[canvasAddOut](canvasAddOut{}, aerr, in.Project)
+		}
 		out := canvasAddOut{Node: created, CanvasURL: d.BaseURL()}
 		return textResult(fmt.Sprintf("已添加节点 %s「%s」(%dx%d @ %.0f,%.0f)。画布: %s",
 				created.ID, created.Title, created.Width, created.Height, created.X, created.Y, out.CanvasURL)),
@@ -502,20 +546,22 @@ func addTool(d Deps) mcp.ToolHandlerFor[canvasAddIn, canvasAddOut] {
 // ---------------- canvas_list / move / remove / clear ----------------
 
 type canvasListIn struct {
-	System string `json:"system,omitempty" jsonschema:"按体系 ID 过滤"`
-	Tag    string `json:"tag,omitempty" jsonschema:"按标签过滤"`
+	Project string `json:"project,omitempty" jsonschema:"按项目过滤（可选）"`
+	System  string `json:"system,omitempty" jsonschema:"按体系 ID 过滤"`
+	Tag     string `json:"tag,omitempty" jsonschema:"按标签过滤"`
 }
 
 type nodeSummary struct {
-	ID     string   `json:"id"`
-	Title  string   `json:"title"`
-	System string   `json:"system,omitempty"`
-	Kind   string   `json:"kind"`
-	X      float64  `json:"x"`
-	Y      float64  `json:"y"`
-	Width  int      `json:"width"`
-	Height int      `json:"height"`
-	Tags   []string `json:"tags,omitempty"`
+	ID        string   `json:"id"`
+	ProjectID string   `json:"project_id"`
+	Title     string   `json:"title"`
+	System    string   `json:"system,omitempty"`
+	Kind      string   `json:"kind"`
+	X         float64  `json:"x"`
+	Y         float64  `json:"y"`
+	Width     int      `json:"width"`
+	Height    int      `json:"height"`
+	Tags      []string `json:"tags,omitempty"`
 }
 
 type canvasListOut struct {
@@ -527,7 +573,7 @@ func listTool(d Deps) mcp.ToolHandlerFor[canvasListIn, canvasListOut] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in canvasListIn) (*mcp.CallToolResult, canvasListOut, error) {
 		out := canvasListOut{Nodes: []nodeSummary{}}
 		var sb strings.Builder
-		for _, n := range d.Store.List() {
+		for _, n := range d.Store.ListByProject(in.Project) {
 			if in.System != "" && n.System != in.System {
 				continue
 			}
@@ -535,7 +581,7 @@ func listTool(d Deps) mcp.ToolHandlerFor[canvasListIn, canvasListOut] {
 				continue
 			}
 			out.Nodes = append(out.Nodes, nodeSummary{
-				ID: n.ID, Title: n.Title, System: n.System, Kind: n.Kind,
+				ID: n.ID, ProjectID: n.ProjectID, Title: n.Title, System: n.System, Kind: n.Kind,
 				X: n.X, Y: n.Y, Width: n.Width, Height: n.Height, Tags: n.Tags,
 			})
 			sb.WriteString(fmt.Sprintf("- %s 「%s」 %s/%s (%dx%d @ %.0f,%.0f)\n",
@@ -599,7 +645,8 @@ func removeTool(d Deps) mcp.ToolHandlerFor[canvasRemoveIn, struct{}] {
 }
 
 type canvasClearIn struct {
-	Confirm *bool `json:"confirm,omitempty" jsonschema:"必须显式传 true 才会清空"`
+	Project string `json:"project,omitempty" jsonschema:"项目 ID（必填；只清空该项目）"`
+	Confirm *bool  `json:"confirm,omitempty" jsonschema:"必须显式传 true 才会清空"`
 }
 
 func clearTool(d Deps) mcp.ToolHandlerFor[canvasClearIn, struct{}] {
@@ -607,8 +654,14 @@ func clearTool(d Deps) mcp.ToolHandlerFor[canvasClearIn, struct{}] {
 		if in.Confirm == nil || !*in.Confirm {
 			return fail[struct{}]("confirm_required", "清空画布需要 confirm=true", "该操作不可撤销，请先 canvas_list 确认")
 		}
-		n := d.Store.Clear()
-		return textResult(fmt.Sprintf("已清空 %d 个节点。", n)), struct{}{}, nil
+		if perr := checkProject(d, in.Project); perr != nil {
+			return projectFail[struct{}](struct{}{}, perr, in.Project)
+		}
+		n, cerr := d.Store.Clear(in.Project)
+		if cerr != nil {
+			return projectFail[struct{}](struct{}{}, cerr, in.Project)
+		}
+		return textResult(fmt.Sprintf("已清空项目 %s 的 %d 个节点（可用 canvas_restore 恢复）。", in.Project, n)), struct{}{}, nil
 	}
 }
 
@@ -695,6 +748,7 @@ func urlTool(d Deps) mcp.ToolHandlerFor[struct{}, canvasURLOut] {
 // ---------------- design_compare ----------------
 
 type compareIn struct {
+	Project     string `json:"project,omitempty" jsonschema:"生成对比板节点时必填"`
 	SystemA     string `json:"system_a" jsonschema:"体系 A 的 ID"`
 	SystemB     string `json:"system_b" jsonschema:"体系 B 的 ID"`
 	Theme       string `json:"theme,omitempty" jsonschema:"light|dark，默认 light"`
@@ -732,13 +786,20 @@ func compareTool(d Deps) mcp.ToolHandlerFor[compareIn, compareOut] {
 		}
 		text := res.Summary()
 		if in.AddToCanvas != nil && *in.AddToCanvas {
+			if perr := checkProject(d, in.Project); perr != nil {
+				return projectFail[compareOut](out, perr, in.Project)
+			}
 			boardHTML, _, berr := design.CompareBoardHTML(res.A, res.B, theme)
 			if berr == nil {
-				node := d.Store.Add(canvas.Node{
-					Title: res.A + " vs " + res.B, System: res.A, Kind: canvas.KindPalette,
+				node, aerr := d.Store.Add(canvas.Node{
+					ProjectID: in.Project,
+					Title:     res.A + " vs " + res.B, System: res.A, Kind: canvas.KindPalette,
 					HTML: boardHTML, Width: 420, Height: 460,
-					Tags: []string{"compare", res.A, res.B, string(theme)},
+					Tags: []string{"compare", res.A, res.B, string(theme), "project:" + in.Project},
 				})
+				if aerr != nil {
+					return projectFail[compareOut](out, aerr, in.Project)
+				}
 				out.NodeID = node.ID
 				text += fmt.Sprintf("\n对比板已摆上画布：节点 %s（%s）", node.ID, d.BaseURL())
 			}
@@ -750,11 +811,13 @@ func compareTool(d Deps) mcp.ToolHandlerFor[compareIn, compareOut] {
 // ---------------- design_screen ----------------
 
 type screenIn struct {
+	Project     string `json:"project,omitempty" jsonschema:"项目 ID（必填；没有项目先 project_create，或用 project_list 选一个）"`
 	System      string `json:"system" jsonschema:"设计体系 ID"`
 	Template    string `json:"template" jsonschema:"模板: login|settings|feed|profile"`
 	Title       string `json:"title,omitempty" jsonschema:"预览标题，默认「体系名 · 模板名」"`
 	Theme       string `json:"theme,omitempty" jsonschema:"light|dark，默认 light"`
 	AppName     string `json:"app_name,omitempty" jsonschema:"品牌块/顶栏应用名，默认「我的应用」"`
+	Artboard    string `json:"artboard,omitempty" jsonschema:"画板 ID（尺寸规范），默认按体系 Family 取 design_artboard 的默认值"`
 	AddToCanvas *bool  `json:"add_to_canvas,omitempty" jsonschema:"默认 true"`
 }
 
@@ -762,6 +825,7 @@ type screenOut struct {
 	System    string   `json:"system"`
 	Template  string   `json:"template"`
 	Theme     string   `json:"theme"`
+	Artboard  string   `json:"artboard"`
 	Width     int      `json:"width"`
 	Height    int      `json:"height"`
 	Uses      []string `json:"uses,omitempty"`
@@ -771,17 +835,21 @@ type screenOut struct {
 
 func screenTool(d Deps) mcp.ToolHandlerFor[screenIn, screenOut] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in screenIn) (*mcp.CallToolResult, screenOut, error) {
+		if perr := checkProject(d, in.Project); perr != nil {
+			return projectFail[screenOut](screenOut{System: in.System, Template: in.Template}, perr, in.Project)
+		}
 		res, err := design.ComposeScreen(design.ScreenInput{
 			SystemID: design.SanitizeID(in.System), Template: in.Template,
-			Theme: design.ThemeKey(design.SanitizeID(in.Theme)), Title: in.Title, AppName: in.AppName,
+			Theme: design.ThemeKey(design.SanitizeID(in.Theme)), Title: in.Title,
+			AppName: in.AppName, Artboard: in.Artboard,
 		})
 		if err != nil {
 			return failWith[screenOut](screenOut{System: in.System, Template: in.Template},
-				"screen_failed", err.Error(), "模板: login|settings|feed|profile")
+				"screen_failed", err.Error(), "模板: login|settings|feed|profile；画板用 design_artboard 查询")
 		}
 		tpl, _ := design.GetScreenTemplate(in.Template)
 		out := screenOut{System: res.SystemID, Template: tpl.ID, Theme: string(res.Theme),
-			Width: res.Width, Height: res.Height, Uses: tpl.Components}
+			Artboard: res.Artboard, Width: res.Width, Height: res.Height, Uses: tpl.Components}
 		title := in.Title
 		if title == "" {
 			title = res.SystemID + " · " + tpl.Name
@@ -791,14 +859,18 @@ func screenTool(d Deps) mcp.ToolHandlerFor[screenIn, screenOut] {
 			add = *in.AddToCanvas
 		}
 		var sb strings.Builder
-		fmt.Fprintf(&sb, "已生成 %s（%s）「%s」整页预览：%dx%d，用到组件 %s",
-			res.SystemID, res.Theme, tpl.Name, res.Width, res.Height, strings.Join(tpl.Components, "/"))
+		fmt.Fprintf(&sb, "已生成 %s（%s）「%s」整页预览：画板 %s，%dx%d，用到组件 %s",
+			res.SystemID, res.Theme, tpl.Name, res.Artboard, res.Width, res.Height, strings.Join(tpl.Components, "/"))
 		if add {
-			node := d.Store.Add(canvas.Node{
-				Title: title, System: res.SystemID, Kind: canvas.KindScreen, HTML: res.HTML,
-				Width: res.Width, Height: res.Height,
-				Tags: append([]string{res.SystemID, string(res.Theme), tpl.ID}, tpl.Components...),
+			node, aerr := d.Store.Add(canvas.Node{
+				ProjectID: in.Project,
+				Title:     title, System: res.SystemID, Kind: canvas.KindScreen, HTML: res.HTML,
+				Artboard: res.Artboard, Width: res.Width, Height: res.Height,
+				Tags: append([]string{res.SystemID, string(res.Theme), tpl.ID, "artboard:" + res.Artboard, "project:" + in.Project}, tpl.Components...),
 			})
+			if aerr != nil {
+				return projectFail[screenOut](out, aerr, in.Project)
+			}
 			out.NodeID = node.ID
 			out.CanvasURL = d.BaseURL()
 			fmt.Fprintf(&sb, "\n已摆上画布：节点 %s（%s）", node.ID, out.CanvasURL)
@@ -842,7 +914,8 @@ func searchTool() mcp.ToolHandlerFor[searchIn, searchOut] {
 // ---------------- canvas_arrange ----------------
 
 type arrangeIn struct {
-	Columns int `json:"columns,omitempty" jsonschema:"每行节点数，默认按 sqrt(节点数) 取整；范围 1-8"`
+	Project string `json:"project,omitempty" jsonschema:"只排版该项目；留空表示全部"`
+	Columns int    `json:"columns,omitempty" jsonschema:"每行节点数，默认按 sqrt(节点数) 取整；范围 1-8"`
 }
 
 type arrangeOut struct {
@@ -854,9 +927,9 @@ type arrangeOut struct {
 
 func arrangeTool(d Deps) mcp.ToolHandlerFor[arrangeIn, arrangeOut] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in arrangeIn) (*mcp.CallToolResult, arrangeOut, error) {
-		nodes := d.Store.List()
+		nodes := d.Store.ListByProject(in.Project)
 		if len(nodes) == 0 {
-			return textResult("画布为空，无需排版。"), arrangeOut{Columns: 0, Order: []string{}}, nil
+			return textResult("该项目下没有节点，无需排版。"), arrangeOut{Columns: 0, Order: []string{}}, nil
 		}
 		// 排序：体系 -> 种类 -> 创建时间（同体系节点聚在一起）
 		sort.Slice(nodes, func(i, j int) bool {
@@ -929,7 +1002,8 @@ func restoreTool(d Deps) mcp.ToolHandlerFor[struct{}, restoreOut] {
 // ---------------- canvas_export ----------------
 
 type exportIn struct {
-	Title string `json:"title,omitempty" jsonschema:"导出板标题，默认「adago-design 画布导出」"`
+	Project string `json:"project,omitempty" jsonschema:"只导出该项目；留空表示全部"`
+	Title   string `json:"title,omitempty" jsonschema:"导出板标题，默认「adago-design 画布导出」"`
 }
 
 type exportOut struct {
@@ -940,9 +1014,9 @@ type exportOut struct {
 
 func exportTool(d Deps) mcp.ToolHandlerFor[exportIn, exportOut] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in exportIn) (*mcp.CallToolResult, exportOut, error) {
-		nodes := d.Store.List()
+		nodes := d.Store.ListByProject(in.Project)
 		if len(nodes) == 0 {
-			return fail[exportOut]("empty_canvas", "画布为空，没有可导出的内容", "先 design_preview 或 canvas_add 添加节点")
+			return fail[exportOut]("empty_canvas", "该项目下没有可导出的内容", "先 design_preview 或 canvas_add 添加节点")
 		}
 		htmlDoc := canvas.ExportBoard(nodes, in.Title)
 		name := fmt.Sprintf("board-%s.html", time.Now().Format("20060102-150405"))
@@ -962,6 +1036,7 @@ func exportTool(d Deps) mcp.ToolHandlerFor[exportIn, exportOut] {
 // ---------------- design_derive ----------------
 
 type deriveIn struct {
+	Project     string `json:"project,omitempty" jsonschema:"生成色板节点时必填"`
 	Primary     string `json:"primary" jsonschema:"品牌主色，#RRGGBB 格式（如 #C8412B）"`
 	Name        string `json:"name" jsonschema:"体系名称（如「山茶茶饮」）"`
 	BaseSystem  string `json:"base_system" jsonschema:"结构基底体系 ID（颜色之外的 Token 继承它），如 volcano/element/douyin"`
@@ -1004,13 +1079,20 @@ func deriveTool(d Deps) mcp.ToolHandlerFor[deriveIn, deriveOut] {
 			add = *in.AddToCanvas
 		}
 		if add {
+			if perr := checkProject(d, in.Project); perr != nil {
+				return projectFail[deriveOut](out, perr, in.Project)
+			}
 			boardHTML, _, berr := design.DeriveBoardHTML(sys, scale)
 			if berr == nil {
-				node := d.Store.Add(canvas.Node{
-					Title: sys.Name + " · 品牌色板", System: sys.ID, Kind: canvas.KindPalette,
+				node, aerr := d.Store.Add(canvas.Node{
+					ProjectID: in.Project,
+					Title:     sys.Name + " · 品牌色板", System: sys.ID, Kind: canvas.KindPalette,
 					HTML: boardHTML, Width: 420, Height: 480,
-					Tags: []string{"derive", sys.ID, out.Primary},
+					Tags: []string{"derive", sys.ID, out.Primary, "project:" + in.Project},
 				})
+				if aerr != nil {
+					return projectFail[deriveOut](out, aerr, in.Project)
+				}
 				out.NodeID = node.ID
 				out.CanvasURL = d.BaseURL()
 				text += fmt.Sprintf("\n色板已摆上画布：节点 %s（%s）", node.ID, out.CanvasURL)
@@ -1023,6 +1105,7 @@ func deriveTool(d Deps) mcp.ToolHandlerFor[deriveIn, deriveOut] {
 // ---------------- design_register ----------------
 
 type registerIn struct {
+	Project     string `json:"project,omitempty" jsonschema:"生成验证节点时必填"`
 	Name        string `json:"name" jsonschema:"体系名称"`
 	TokensJSON  string `json:"tokens_json" jsonschema:"light 主题 Token 的 JSON（colors/type/spacing/radius/shadows/motion/grid 字段）"`
 	DarkJSON    string `json:"dark_json,omitempty" jsonschema:"可选，dark 主题 Token JSON"`
@@ -1105,14 +1188,21 @@ func registerTool(d Deps) mcp.ToolHandlerFor[registerIn, registerOut] {
 		text := fmt.Sprintf("已注册自定义体系「%s」，ID: %s（主题: %s），已持久化，可直接用于 design_tokens/design_preview/design_screen。",
 			sys.Name, sys.ID, strings.Join(sys.Themes, "/"))
 		if in.AddToCanvas != nil && *in.AddToCanvas {
+			if perr := checkProject(d, in.Project); perr != nil {
+				return projectFail[registerOut](out, perr, in.Project)
+			}
 			res, err := design.Compose(design.ComposeInput{SystemID: sys.ID, Theme: design.ThemeLight,
 				Components: []string{"button", "card", "input"}, Title: sys.Name + " · 注册验证"})
 			if err == nil {
-				node := d.Store.Add(canvas.Node{
-					Title: sys.Name + " · 注册验证", System: sys.ID, Kind: canvas.KindComponent,
+				node, aerr := d.Store.Add(canvas.Node{
+					ProjectID: in.Project,
+					Title:     sys.Name + " · 注册验证", System: sys.ID, Kind: canvas.KindComponent,
 					HTML: res.HTML, Width: res.Width, Height: res.Height,
-					Tags: []string{"register", sys.ID},
+					Tags: []string{"register", sys.ID, "project:" + in.Project},
 				})
+				if aerr != nil {
+					return projectFail[registerOut](out, aerr, in.Project)
+				}
 				out.NodeID = node.ID
 				text += fmt.Sprintf("\n注册验证预览已摆上画布：节点 %s", node.ID)
 			}
@@ -1124,6 +1214,7 @@ func registerTool(d Deps) mcp.ToolHandlerFor[registerIn, registerOut] {
 // ---------------- design_audit ----------------
 
 type auditIn struct {
+	Project     string `json:"project,omitempty" jsonschema:"生成走查报告时必填"`
 	System      string `json:"system" jsonschema:"体系 ID"`
 	Theme       string `json:"theme,omitempty" jsonschema:"light|dark，默认 light"`
 	AddToCanvas *bool  `json:"add_to_canvas,omitempty" jsonschema:"是否生成走查报告节点摆上画布，默认 true"`
@@ -1160,14 +1251,21 @@ func auditTool(d Deps) mcp.ToolHandlerFor[auditIn, auditOut] {
 			add = *in.AddToCanvas
 		}
 		if add {
-			node := d.Store.Add(canvas.Node{
-				Title:  res.System + " · 走查报告",
-				System: res.System,
-				Kind:   canvas.KindPalette,
-				HTML:   design.AuditBoardHTML(res),
-				Width:  420, Height: 520,
-				Tags: []string{"audit", res.System, res.Theme, fmt.Sprint(res.Score)},
+			if perr := checkProject(d, in.Project); perr != nil {
+				return projectFail[auditOut](out, perr, in.Project)
+			}
+			node, aerr := d.Store.Add(canvas.Node{
+				ProjectID: in.Project,
+				Title:     res.System + " · 走查报告",
+				System:    res.System,
+				Kind:      canvas.KindPalette,
+				HTML:      design.AuditBoardHTML(res),
+				Width:     420, Height: 520,
+				Tags: []string{"audit", res.System, res.Theme, fmt.Sprint(res.Score), "project:" + in.Project},
 			})
+			if aerr != nil {
+				return projectFail[auditOut](out, aerr, in.Project)
+			}
 			out.NodeID = node.ID
 			text += fmt.Sprintf("\n走查报告已摆上画布：节点 %s", node.ID)
 		}
@@ -1224,10 +1322,18 @@ func groupTool(d Deps) mcp.ToolHandlerFor[groupIn, groupOut] {
 		minX, minY := 1e18, 1e18
 		maxX, maxY := -1e18, -1e18
 		member := 0
+		project := ""
 		for _, id := range in.NodeIDs {
 			n, err := d.Store.Get(id)
 			if err != nil {
 				continue
+			}
+			// 分组框必须和成员同项目：从成员推导，跨项目直接拒绝
+			if project == "" {
+				project = n.ProjectID
+			} else if project != n.ProjectID {
+				return failWith[groupOut](groupOut{}, "cross_project",
+					"成员节点分属不同项目，无法放同一个分组框", "按项目分别 canvas_group")
 			}
 			member++
 			minX = math.Min(minX, n.X)
@@ -1242,15 +1348,19 @@ func groupTool(d Deps) mcp.ToolHandlerFor[groupIn, groupOut] {
 		if pad <= 0 {
 			pad = 28
 		}
-		frame := d.Store.Add(canvas.Node{
-			Title:  in.Title,
-			Kind:   canvas.KindFrame,
-			Width:  int(maxX - minX + pad*2),
-			Height: int(maxY - minY + pad*2 + 24),
-			X:      minX - pad,
-			Y:      minY - pad,
-			Tags:   append([]string{"frame"}, in.NodeIDs...),
+		frame, ferr := d.Store.Add(canvas.Node{
+			ProjectID: project,
+			Title:     in.Title,
+			Kind:      canvas.KindFrame,
+			Width:     int(maxX - minX + pad*2),
+			Height:    int(maxY - minY + pad*2 + 24),
+			X:         minX - pad,
+			Y:         minY - pad,
+			Tags:      append([]string{"frame", "project:" + project}, in.NodeIDs...),
 		})
+		if ferr != nil {
+			return projectFail[groupOut](groupOut{}, ferr, project)
+		}
 		return textResult(fmt.Sprintf("分组框「%s」已创建（节点 %s，包住 %d 个成员，%dx%d @ %.0f,%.0f）。",
 				frame.Title, frame.ID, member, frame.Width, frame.Height, frame.X, frame.Y)),
 			groupOut{Node: frame, Member: member}, nil

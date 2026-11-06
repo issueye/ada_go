@@ -3,7 +3,7 @@ package design
 // 小米 MIUI / HyperOS —— 基于小米公开视觉规范整理（MiSans、大圆角、暖白轻阴影）。
 func init() {
 	base := TypeScale{
-		Family: `"MiSans", "MiSans VF", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`,
+		Family: `"MiSans", "HarmonyOS Sans SC", Inter, "Noto Sans SC", system-ui, "PingFang SC", sans-serif`,
 		Levels: map[string]TypeSpec{
 			"display": {Size: 36, Weight: 700, LineHeight: 1.17, Usage: "数字/大标题"},
 			"title-1": {Size: 26, Weight: 600, LineHeight: 1.31, Usage: "页面标题"},

@@ -96,14 +96,15 @@ func (Catalog) SystemSummaries() any {
 	out := make([]map[string]any, 0)
 	for _, sys := range design.Systems() {
 		out = append(out, map[string]any{
-			"id":              sys.ID,
-			"name":            sys.Name,
-			"vendor":          sys.Vendor,
-			"family":          sys.Family,
-			"summary":         sys.Style.Summary,
-			"keywords":        sys.Style.Keywords,
-			"themes":          sys.Themes,
-			"component_count": lenDesignComponents(),
+			"id":               sys.ID,
+			"name":             sys.Name,
+			"vendor":           sys.Vendor,
+			"family":           sys.Family,
+			"summary":          sys.Style.Summary,
+			"keywords":         sys.Style.Keywords,
+			"themes":           sys.Themes,
+			"component_count":  lenDesignComponents(),
+			"default_artboard": design.DefaultArtboardFor(sys.Family).ID,
 		})
 	}
 	return out
@@ -128,6 +129,8 @@ func (Catalog) SystemDetail(id string) (any, bool) {
 		"id": sys.ID, "name": sys.Name, "vendor": sys.Vendor, "family": sys.Family,
 		"description": sys.Description, "style": sys.Style, "themes": sys.Themes,
 		"light": light, "guideline": sys.Guideline, "components": compList,
+		"default_artboard": design.DefaultArtboardFor(sys.Family).ID,
+		"font_license":     design.StackLicenseLabel(light.Type.Family),
 	}
 	if sys.Dark != nil {
 		detail["dark"] = *sys.Dark
@@ -135,18 +138,19 @@ func (Catalog) SystemDetail(id string) (any, bool) {
 	return detail, true
 }
 
-// ComposePreview 生成预览文档。
-func (Catalog) ComposePreview(systemID string, components []string, theme, title string) (string, int, int, error) {
+// ComposePreview 生成预览文档（画板决定宽高），并回传实际生效的画板 ID。
+func (Catalog) ComposePreview(systemID string, components []string, theme, title, artboard string) (string, int, int, string, error) {
 	res, err := design.Compose(design.ComposeInput{
 		SystemID:   systemID,
 		Theme:      design.ThemeKey(themeOrDefault(theme)),
 		Components: components,
 		Title:      title,
+		Artboard:   artboard,
 	})
 	if err != nil {
-		return "", 0, 0, err
+		return "", 0, 0, "", err
 	}
-	return res.HTML, res.Width, res.Height, nil
+	return res.HTML, res.Width, res.Height, res.Artboard, nil
 }
 
 func themeOrDefault(t string) string {

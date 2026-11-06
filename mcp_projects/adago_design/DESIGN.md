@@ -125,35 +125,51 @@ ds-progress、ds-navbar、ds-tabbar、ds-list、ds-dialog、ds-toast
 ### 4.1 数据模型
 
 ```go
+type Project struct {
+    ID        string    `json:"id"`        // p-<ts>-<seq>
+    Name      string    `json:"name"`      // 必填、同名去重
+    Note      string    `json:"note,omitempty"`
+    CreatedAt, UpdatedAt time.Time
+}
+
 type Node struct {
-    ID     string   `json:"id"`       // n-<ts>-<rand>
-    Title  string   `json:"title"`
-    System string   `json:"system,omitempty"`
-    Kind   string   `json:"kind"`     // screen|component|palette|note
-    HTML   string   `json:"html"`     // 完整预览文档（iframe srcdoc）
-    Width  int      `json:"width"`    // 渲染宽度（手机 390 / 桌面 420）
-    Height int      `json:"height"`
-    X, Y   float64  `json:"x"`        // 画布坐标（未缩放）
-    Z      int      `json:"z"`
-    Tags   []string `json:"tags,omitempty"`
+    ID        string   `json:"id"`        // n-<ts>-<seq>
+    ProjectID string   `json:"project_id"` // 必填：必须指向已存在的项目
+    Title     string   `json:"title"`
+    System    string   `json:"system,omitempty"`
+    Kind      string   `json:"kind"`      // screen|component|palette|note|frame
+    HTML      string   `json:"html"`      // 完整预览文档（iframe srcdoc）
+    Artboard  string   `json:"artboard,omitempty"`
+    Width     int      `json:"width"`
+    Height    int      `json:"height"`
+    X, Y      float64  `json:"x"`         // 画布坐标（未缩放）
+    Z         int      `json:"z"`
+    Tags      []string `json:"tags,omitempty"`
     CreatedAt, UpdatedAt time.Time
 }
 ```
 
-`Store`：内存 map + 互斥锁；变更即写 `canvas.json`（原子替换）；
-启动时载入。节点 HTML 由服务端（design 包）生成，画布 UI 不二次加工。
+`Store`：内存 map + 互斥锁；变更即写 `canvas.json`（原子替换，v3 格式
+`{version:3, projects, nodes, edges}`）；启动时载入并完成迁移。
+节点 HTML 由服务端（design 包）生成，画布 UI 不二次加工。
 
 ### 4.2 HTTP API（全部 `127.0.0.1`，POST 校验 Origin 同源）
 
 | 方法/路径 | 说明 |
 |---|---|
 | `GET /` | 画布单页（embed.FS：index.html / canvas.css / canvas.js） |
-| `GET /api/health` | `{ok, version, nodeCount, captureReady}` |
-| `GET /api/nodes` | 全量节点（轮询同步，`?since=` 可增量） |
-| `POST /api/nodes` | 新建节点（服务端生成 ID/时间戳） |
-| `PUT /api/nodes/{id}` | 更新（位置/标题等；`if-unmodified-since` 防覆盖） |
-| `DELETE /api/nodes/{id}` | 删除 |
-| `POST /api/nodes/clear` | 清空 |
+| `GET /api/health` | `{ok, node_count, project_count, time}` |
+| `GET /api/projects` | 项目列表（含 `node_count` / `frame_count`） |
+| `POST /api/projects` | 建项目 `{name, note?}`；空名 400、同名 409 |
+| `GET /api/projects/{id}` | 单个项目（404 `unknown_project`） |
+| `PUT /api/projects/{id}` | 改名/改备注 |
+| `DELETE /api/projects/{id}` | 删除空项目；非空 409 `project_not_empty` |
+| `GET /api/nodes` | 节点列表；`?project=<id>` 过滤（未知项目 404），`?system=` 兼容过滤 |
+| `POST /api/nodes` | 新建节点，`project` 必填（缺失 400 `project_required`） |
+| `PUT /api/nodes/{id}` | 更新（位置/高度/标题等） |
+| `DELETE /api/nodes/{id}` | 删除（级联删连线） |
+| `POST /api/nodes/clear` | 清空**指定项目**，`project` 必填 |
+| `POST /api/arrange` | `{group_by:"project"}` 按项目分行重排（全部视图用），返回 `{moved}` |
 | `POST /api/capture` | 创建截图任务（tool 调用）→ `{taskID}` |
 | `GET /api/tasks` | UI 长轮询领取任务（10s 内返回或超时空列表） |
 | `POST /api/tasks/{id}/result` | UI 回传 PNG（base64 dataURL） |
@@ -174,13 +190,114 @@ MCP canvas_screenshot ─► POST /api/capture ─► 任务入队
 ### 4.4 画布 UI（vanilla JS，无构建步骤）
 
 - 交互：空白处拖拽平移；滚轮/触控板缩放（以光标为中心）；节点头部拖拽移动；
-  点击选中 → 右侧检查器（显示体系/Token 摘要/HTML 尺寸）；Del 删除；
-  `F` 适配全部节点。
-- 侧栏：设计体系清单（点开看 Token 摘要与组件列表，可一键「添加预览卡」）。
+  点击选中 → 右侧检查器；Del 删除；`F` 适配全部节点。
+- 侧栏：顶部是**项目树**（`全部` + 计数 + `⋯` / `＋ 新建项目 ⇧N` / 搜索 / 文件夹行 + 计数），
+  参照设计稿工具的分组列表；`S.project === ""` 表示「全部」，否则为单项目作用域。
+- **全部视图**：一次渲染所有项目的节点，按项目分行并在行首打橙色分组标签
+  （`#group-labels`，世界坐标、随拖动更新、按 1/scale 反向缩放保证可读）。
+  进入时若检测到项目包围盒相交，自动调 `POST /api/arrange {group_by:"project"}`
+  排一次（行首留 220px 标签位），之后仍是自由画布，可拖可连。
+- **单画布聚焦**（双击项目树子项 / 双击卡片标题栏）：`S.solo = nodeID`。
+  不改数据、不改作用域，只给其它节点加 `.solo-hidden`（轮询新增节点同样处理），
+  再让 `fitView()` 只算这一张稿（放大上限 1.6×、留白 48px、按「侧栏右侧 +
+  工具条下方」的可见区居中）。`#edges` / `#rel-layer` / `#group-labels` / 检查器
+  一并收起，顶部 `#solo-bar` 显示标题与所属项目，树里对应子项高亮。
+  `Esc` / 双击空白 / 返回按钮退出；`resetCanvas()`（切项目、删项目）与被聚焦
+  节点被删除时自动退出。**单击子项延后 220ms 执行**，双击到来即取消 ——
+  否则两次 click 会先触发两次 `switchProject`，和双击的切作用域竞态。
+- 侧栏原设计：顶部是项目选择器（`<select>` + 新建/管理按钮）——切项目 = 换一块画布：
+  先清掉当前渲染的节点，再按 `?project=` 重新拉取；当前项目记在 localStorage。
+  「项目管理」面板（`#proj-modal`）承担新建 / 重命名 / 删除 / 切换四件事，
+  行内展示节点数、分组框数、更新时间与 ID；`#proj-select` 只做快速切换（只显示名称，
+  计数在面板里，避免 220px 的窄栏被长名字挤爆）。切项目后必须同步 `select.value`，
+  否则从面板切换会出现「画布换了、下拉没换」的状态分叉。
+  下方是设计体系清单（点开看 Token 摘要与组件列表，可一键「添加预览卡」）。
+- 侧栏收起：面板整体 `translateX(-296px)` 移出屏幕，但**必须留一个屏内入口** ——
+  左侧常驻「› 体系」把手 `#sb-expand`，由 `body.sb-collapsed` 控制显隐；
+  否则收起来就再也点不到展开按钮（原来的 `#sb-toggle` 也一起被移出了屏幕）。
+  收起状态写 localStorage，刷新后保持。
 - 渲染：每节点一个 `sandbox="allow-same-origin"` 的 iframe（srcdoc），
   按 `Scale` 用 CSS transform 缩放。
-- 同步：本地操作即时生效 + 每 2s `GET /api/nodes?since=` 增量合并（按 UpdatedAt）。
-- 视觉：点阵网格背景、暗/亮主题切换、极简工具条（缩放百分比、适配、清空、主题）。
+- 同步：本地操作即时生效 + 每 2s 增量合并（按 UpdatedAt）。
+
+#### 拖动与渲染性能（对齐问题 4）
+
+踩过的坑与对策：
+
+| 现象 | 根因 | 对策 |
+|---|---|---|
+| 拖动时节点「粘住」 | 光标进入 iframe 后，父页面收不到 `mousemove`（iframe 内事件不冒泡）| `.node__body iframe{pointer-events:none}`；检查模式反向放开 |
+| 掉帧 | 每次 mousemove 全量重建连线 SVG | 元素池化 + 脏边增量 + rAF 合帧 |
+| 掉帧 | `left/top` 每帧触发 layout，iframe 表面重新光栅化 | `translate3d` + `will-change` + `contain:layout paint` |
+| 发虚 | `.node.dragging{opacity:.92}` 让 iframe 每帧重新混合 | 去掉 opacity，用阴影/`z-index` 表达拖动态 |
+| 经过面板时骤降 | 固定面板的 `backdrop-filter: blur` 每帧重算 | `body.is-dragging` 时关闭 blur |
+| 松手闪一下 | PUT 丢弃回包 → 本地 `updated_at` 陈旧 → 轮询误判 → 重设 srcdoc | 用回包覆盖本地节点；重载判定改为比对 `html` |
+
+#### 检查模式（对齐问题 6）
+
+两层职责分离：
+
+```
+卡片内（各自 iframe 的 .dsx-layer，视口坐标）  →  元素边框 / A B 角标 / 到画板距离
+卡片间（父页面 #rel-layer，世界坐标）          →  间距线 / 对齐虚线 / 包含重叠 / 尺寸差
+```
+
+- 状态机：`idle → anchor → (hover 临时 B | 点击固定 B)`；第三个元素使锚点前移（连续对比），
+  `Shift` 强制替换 B，`Esc` 逐级退出。原来的「`Alt` 悬停临时对照」已并入
+  **点选 + hover**：定 A 后移入谁就和谁比，不需要按键或第二次点击；
+  固定 B 后 hover 只刷新信息，不再改对比对象。
+- 悬停标注：`nameChip` 出元素名胶囊；`hoverGaps` 取最近两个兄弟的间距画
+  `dsx-line` + `dsx-label`（参考图的 `35px` 语义）。有锚点时让位给 A↔B 标注，
+  避免两套线在同一张卡里打架。
+- 世界坐标：`节点 x/y + 元素在 iframe 视口内的坐标`（`getBoundingClientRect` 已含滚动），
+  与画布缩放/平移解耦，因此跨卡片也能连线。
+- 标注层按 `data-role`（hover / sel）分区，清悬停只清那一张卡的 hover 分区，
+  绝不误清已选中的标注。
+- **坐标字段别混用**：`localRect()` 返回 `{x,y,w,h}`，`getBoundingClientRect()`
+  返回 `{left,top,right,bottom,width,height}`。`hoverGaps` 早期按后者取值，
+  所有比较都变成 `undefined < undefined` → 间距标注**静默消失、不抛异常**。
+  现在函数入口显式拆成 `L/T/R/B`，只有兄弟节点才读 DOMRect。
+- 检查器面板带 `panelGen` 代际号：`ensureCatalog` 是异步的，hover 又高频，
+  旧请求回来时若代际已变就丢弃结果，避免面板显示过期元素。
+- 代码在独立的 `static/inspect.js`（`canvas.js` 只管视图、拖动、同步、截图）。
+
+#### 滚动条（视觉一致性）
+
+面板与预览文档各有一套规则，但视觉统一为「透明轨道 + 6px 悬浮滑块」：
+
+```css
+*{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--fg2) 38%,transparent) transparent}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--fg2) 32%,transparent);
+  border-radius:999px;border:2px solid transparent;background-clip:padding-box}
+```
+
+- 10px 是**命中区**，2px 透明边框内缩后视觉宽度约 6px，既细又好抓；
+- 轨道透明，避免深色主题下出现一条高对比灰带；
+- 预览文档（iframe 内部）单独注入一份，用 `--ds-color-text-3` 着色，
+  与所在体系主题一致，且不会挤占版心宽度。
+
+### 4.5 项目作用域与不变量
+
+「先建项目、再加设计稿」不是 UI 约定，而是**数据层不变量**：
+
+| 不变量 | 落点 | 违反时的错误 |
+|---|---|---|
+| 节点必须有 `project_id`，且项目已存在 | `Store.Add`（唯一写入入口） | `project_required` / `unknown_project` |
+| 清空只能按项目清 | `Store.Clear(projectID)` | `project_required` |
+| 连线两端必须同项目 | `Store.AddEdge` | `edge_cross_project` |
+| 项目非空不可删 | `Store.RemoveProject` | `project_not_empty` |
+| 自动排版只在项目内计算 | `autoPositionLocked(projectID, …)` | —（各项目从 (80,80) 起） |
+| 恢复快照不跨已删项目 | `RestoreLastClear` | 跳过该项目节点 |
+
+为什么拦在 `Store` 而不是 handler：节点有两条写入路径（HTTP 直连 / MCP 工具），
+只有数据层能同时覆盖；handler 层只负责把哨兵错误翻译成稳定错误码 + 提示。
+
+**迁移**：v1（裸数组）与 v2（无 projects）在 `loadAll` 里统一处理 ——
+无 `project_id` 的节点归入固定项目 `p-default`「默认项目（历史数据）」；
+项目已被删但节点残留的，也一并归入，避免出现无主设计稿。
+这是唯一的自动建项目场景，只为不丢历史数据，新写入仍然严格校验。
 
 ## 5. MCP 工具（internal/mcpserver）
 
@@ -191,14 +308,20 @@ SDK：`github.com/modelcontextprotocol/go-sdk v1.8.0`（与 mem-go 一致）。
 
 | 工具 | 入参要点 | 出参 |
 |---|---|---|
-| `design_systems` | — | 体系清单（id/名称/风格要点/主题/组件数） |
+| `project_create` | `name`（必填、同名拒绝）、`note?` | 项目（含 ID）+ 「下一步带 project」提示 |
+| `project_list` | — | 项目列表（含节点计数、更新时间） |
+| `project_remove` | `id`, `confirm=true` | 删除结果；非空项目拒绝 |
+| `design_artboard` | `artboard?`, `family?` | 画板清单或单个 `ArtboardSpec`（含 `contract` 契约文本） |
+| `design_fonts` | `script?=latin/hans/mono` | 字体清单（含授权标记）+ 默认栈 + 授权策略 |
+| `design_icons` | `query?`, `group?`, `format?=sprite/inline` | 图标清单（名字/分组/别名/HTML） |
+| `design_systems` | — | 体系清单（id/名称/风格要点/主题/组件数/默认画板） |
 | `design_tokens` | `system`, `theme?=light`, `category?=all/color/type/spacing/radius/shadow/motion` | Token 全量或分类 |
 | `design_components` | `system`, `component?`（单个则含 HTML 片段） | 组件清单/详情/用法守则 |
 | `design_search` | `query` | 跨体系命中清单（体系/组件/Token） |
-| `design_preview` | `system`, `components[]`, `title?`, `theme?=light`, `addToCanvas?=true`, `tags?` | HTML 文档（路径+节选）、节点 ID、画布 URL |
-| `design_screen` | `system`, `template?=login/settings/feed/profile`, `theme?`, `app_name?`, `addToCanvas?=true` | 整页预览 HTML、节点 ID、用到组件 |
+| `design_preview` | `system`, `components[]`, `title?`, `theme?=light`, `artboard?`, `addToCanvas?=true`, `tags?` | HTML 文档（路径+节选）、节点 ID、画板 ID、画布 URL |
+| `design_screen` | `system`, `template?=login/settings/feed/profile`, `theme?`, `app_name?`, `artboard?`, `addToCanvas?=true` | 整页预览 HTML、节点 ID、用到组件 |
 | `design_compare` | `system_a`, `system_b`, `theme?`, `addToCanvas?=false` | 双体系 Token diff（颜色/字型/间距/圆角/阴影/动效）+ 可选对比板节点 |
-| `canvas_add` | `title`, `html`, `width?`, `height?`, `x?`, `y?`, `kind?=note`, `tags?` | 节点 ID + 画布 URL（不指定 x/y 自动布局） |
+| `canvas_add` | `title`, `html`, `artboard?`, `width?`, `height?`, `x?`, `y?`, `kind?=note`, `tags?` | 节点 ID + 画布 URL（给出画板时宽高取画板） |
 | `canvas_list` | `system?`, `tag?` | 节点摘要列表（含 x/y/w/h） |
 | `canvas_move` | `id`, `x`, `y` | 更新后节点 |
 | `canvas_remove` | `id` | 删除确认 |
@@ -222,6 +345,74 @@ SDK：`github.com/modelcontextprotocol/go-sdk v1.8.0`（与 mem-go 一致）。
 | `settings` | 导航栏 + 开关分组 ×3 + 列表分组 ×4 + 底部标签栏 |
 | `feed` | 导航栏 + 媒体卡片 ×2（渐变占位图/标题/操作行） + 底部标签栏 |
 | `profile` | 头像头部 + 统计行 + 列表 ×3 + 底部标签栏 |
+
+### 3.4 规范层：画板 / 字体 / 图标
+
+这三者是「设计前置约束」，各一个注册表 + 一个 MCP 查询工具。
+共同设计原则：**数据在 `internal/design`，由 `buildDoc` 内联进每份文档**——
+因为预览是 `srcdoc` 文档、截图走 `foreignObject` 序列化，任何外链资源都不可靠。
+
+#### (1) 画板 `artboard.go`（对齐问题 2）
+
+```go
+type Artboard struct {
+    ID, Name, Family        string
+    Width, Height           int  // @1x 逻辑像素
+    StatusBar, SafeTop, SafeBottom, NavBar, TabBar int
+    Columns, Margin, Gutter int
+    MaxContent              int  // 内容区上限（Web 用）
+    DPR                     []int
+}
+type ArtboardSpec struct {  // 推导值 = 尺寸契约
+    Artboard
+    ContentWidth, BodyHeight, ContentHeight int
+    ExportSizes []string  // ["@2x 786×1704", …]
+    Contract    string    // 给人/Agent 读的一段话
+}
+```
+
+- 8 块：`iphone-15`(393×852) / `iphone-se`(375×667) / `android-360` / `mp-wx`(375×812) /
+  `ipad-768` / `web-1280` / `web-1440` / `desktop-app`。
+- **命名**：`canvas.KindFrame` 已是「画布分组框」，画板一律叫 `Artboard`，不要复用 Frame。
+- `ResolveArtboard(id, family)`：显式 ID 优先，否则按 family 取默认（全仓唯一默认来源）。
+- `PageCSS(a)` 输出 `--ds-ab-*` 变量，`.ds-page` 用它取宽度与内边距（不再写死 560px）。
+- 高度策略：组件预览由客户端实测 `.ds-page` 高度回写（`Node.AutoHeight`）；
+  整页模板直接取 `BodyHeight`，一张卡 = 一块画板。
+
+#### (2) 字体 `fonts.go`（对齐问题 3）
+
+```go
+type FontSpec struct {
+    ID, Family, Script string
+    License            FontLicense // OFL / Apache / ISC / vendor-free / system-only / proprietary / unknown
+    Commercial, Embeddable, Redistributable, Attribution bool
+}
+```
+
+- `DefaultStacks`：`latin = Inter + Noto Sans SC + system-ui`，全部 OFL、可嵌入可再分发，
+  保证在无 PingFang/雅黑的 Android/Linux/CI 上排版一致。
+- 品牌字体：抖音美好体是 OFL（可再分发）；MiSans 免费商用、可嵌入但**禁止再分发字体文件**
+  （`Redistributable=false` + `Attribution=true`）。
+- `StackCommercial` / `StackReproducible` 给走查用：专有字体 fail，仅系统字体 warn。
+- 禁止 `@font-face` 外链（截图取不到），品牌字体只按本地 family 名引用。
+
+#### (3) 图标 `icons.go` + `icon_paths.go`（对齐问题 1、5）
+
+```go
+type Icon struct { Name, Group string; Tags []string; Body string; Filled bool }
+func IconSprite() string                 // 全部 <symbol>，注入文档 <body> 首部
+func IconRef(name string, size int) string
+func ExpandIcons(s string) string        // 展开模板里的 {{icon:name:size}}
+```
+
+- 38 个图标、24 网格、1.8 描边、`currentColor`（自动继承 Token 色）。
+- 分组：`arrow / action / status / nav / media / data`；名字扁平语义（`close` / `check` /
+  `chevron-right`），分组放 `Group` 字段，历史字符符号放 `Tags`（`design_icons?query=✕`）。
+- 组件模板写 `{{icon:check:12}}`，渲染时展开 —— 保持模板可读、可 diff，且不会被
+  字符串拼接淹没。
+- 画布 UI 侧的 `static/icons.js` 由 `go generate ./internal/design` 从同一份路径表生成，
+  两侧不漂移。
+- 走查「图标与符号」扫描 emoji/dingbat 与未解析的图标名，命中即 fail。
 
 约定（沿用 browser-use）：JSON 键 snake_case；错误不抛 JSON-RPC error，
 而是 `isError` 结果 + 稳定错误码（`unknown_system` / `unknown_component` /
@@ -253,13 +444,17 @@ GOWORK=off go build -trimpath -o bin/adago-design.exe .
 
 ## 8. 测试与验收
 
-- `internal/design`：注册表完备性（5 体系、Token 非空、颜色合法 hex）、
-  StyleSheet/Compose 生成物包含关键 token 值、组件 HTML 结构快照断言。
+- `internal/design`：注册表完备性（8 体系、Token 非空、颜色合法 hex）、
+  StyleSheet/Compose 生成物包含关键 token 值、组件 HTML 结构快照断言；
+  新增规范层不变量：图标命名/路径/精灵覆盖、画板推导值、字体全体系可商用、
+  **渲染产物无 emoji 与字符图标**。
 - `internal/canvas`：Store CRUD/持久化/并发、HTTP API 全路径（httptest）、
   截图任务闭环（模拟 UI 回传）/超时路径。
 - `internal/mcpserver`：内存 transport 走 `initialize` + `tools/list` +
   `tools/call`（design_tokens、design_preview、canvas_add、canvas_screenshot
-  超时路径），断言结果结构。
+  超时路径），断言结果结构；目录类工具与画板透传单测。
+- 前端：`go generate` 同步 icons.js；用无头 Chromium 做真实输入事件回归
+  （拖动跨越 iframe 区域不丢事件、检查模式 A↔B 跨卡片配对、截图链路出图）。
 - 门禁：`GOWORK=off go test ./... && go vet ./...`。
 - 冒烟：`serve` 起服务 → 浏览器打开画布 → MCP stdio 会话调用工具链。
 

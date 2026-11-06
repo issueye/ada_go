@@ -3,7 +3,7 @@ package design
 // Ant Design 5 —— 基于蚂蚁集团 Ant Design 公开设计变量（--ant-*）整理。
 func init() {
 	baseType := TypeScale{
-		Family: `-apple-system, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif`,
+		Family: `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, "Noto Sans SC", system-ui, "PingFang SC", sans-serif`,
 		Levels: map[string]TypeSpec{
 			"h1":      {Size: 38, Weight: 600, LineHeight: 1.23, Usage: "页面主标题"},
 			"h2":      {Size: 30, Weight: 600, LineHeight: 1.27, Usage: "区块标题"},

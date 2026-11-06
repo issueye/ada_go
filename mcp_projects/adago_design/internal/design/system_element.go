@@ -3,7 +3,7 @@ package design
 // Element Plus —— 基于 Element Plus 官方主题变量（--el-*）整理。
 func init() {
 	baseType := TypeScale{
-		Family: `"Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑", Arial, sans-serif`,
+		Family: `Inter, "Noto Sans SC", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif`,
 		Levels: map[string]TypeSpec{
 			"large":       {Size: 20, Weight: 500, LineHeight: 1.4, Usage: "大标题（--el-font-size-extra-large 同级）"},
 			"medium":      {Size: 18, Weight: 500, LineHeight: 1.44, Usage: "中标题"},

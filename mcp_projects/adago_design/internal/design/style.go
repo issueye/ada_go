@@ -77,8 +77,10 @@ var skinOverrides = map[string]func(Tokens) string{
 
 func cssVars(t Tokens) string {
 	var b strings.Builder
+	b.WriteString("/* font-license: " + StackLicenseLabel(t.Type.Family) + " */\n")
 	b.WriteString(":root{\n")
-	b.WriteString(fmt.Sprintf("  --ds-font: %s;\n  --ds-grid: %dpx;\n", t.Type.Family, t.Grid))
+	b.WriteString(fmt.Sprintf("  --ds-font: %s;\n  --ds-font-mono: %s;\n  --ds-grid: %dpx;\n",
+		t.Type.Family, DefaultStacks["mono"], t.Grid))
 	names := sortedStrKeys(t.Colors)
 	for _, name := range names {
 		b.WriteString(fmt.Sprintf("  --ds-color-%s: %s;\n", cssName(name), t.Colors[name].Value))
@@ -159,9 +161,26 @@ func cssBase(t Tokens) string {
 	return `
 /* reset & page */
 *{box-sizing:border-box;margin:0;padding:0}
+/* 滚动条：预览卡内同样是细滚动条（默认粗条会把 1440 宽的版式挤变形） */
+*{scrollbar-width:thin;scrollbar-color:var(--ds-color-text-3,#99999980) transparent}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--ds-color-text-3,#999) 38%,transparent);
+  border-radius:999px;border:2px solid transparent;background-clip:padding-box;min-height:32px}
+::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--ds-color-text-3,#999) 62%,transparent);background-clip:padding-box}
+::-webkit-scrollbar-corner{background:transparent}
 html,body{min-height:100%}
+/* icon：24 网格线性图标，颜色与尺寸都继承上下文（Token 驱动） */
+.ds-icon{width:1em;height:1em;display:inline-block;vertical-align:-.125em;flex:none;
+  fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ds-icon--filled{fill:currentColor;stroke:none}
+.ds-icon--12{width:12px;height:12px}
+.ds-icon--14{width:14px;height:14px}
+.ds-icon--16{width:16px;height:16px}
+.ds-icon--20{width:20px;height:20px}
+.ds-icon--24{width:24px;height:24px}
 .ds-surface{background:var(--ds-color-bg,#fff);color:var(--ds-color-text-1,var(--ds-color-text-primary,#1d2129));font-family:var(--ds-font);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh}
-.ds-page{max-width:560px;margin:0 auto;padding:var(--ds-space-lg,20px) 16px var(--ds-space-xxl,40px);display:flex;flex-direction:column;gap:16px}
+.ds-page{max-width:var(--ds-ab-content-w,560px);margin:0 auto;padding:var(--ds-ab-pad-y,var(--ds-space-lg,20px)) var(--ds-ab-margin,16px) var(--ds-ab-pad-b,var(--ds-space-xxl,40px));display:flex;flex-direction:column;gap:16px}
 .ds-page__head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding-bottom:var(--ds-space-sm,8px);border-bottom:1px solid var(--ds-color-border,#eee)}
 .ds-page__title{font-size:16px;font-weight:600}
 .ds-page__meta{font-size:12px;color:var(--ds-color-text-3,#999)}
@@ -191,7 +210,7 @@ html,body{min-height:100%}
 .ds-input:disabled{cursor:not-allowed;opacity:.6;background:var(--ds-color-fill-light,var(--ds-color-fill-2,#f5f7fa))}
 .ds-select{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;font-size:inherit;color:inherit;background:var(--ds-color-bg,#fff);border:1px solid var(--ds-color-border,#dcdfe6);border-radius:var(--ds-radius-medium,4px)}
 .ds-select--disabled{opacity:.6;cursor:not-allowed}
-.ds-select__arrow{color:var(--ds-color-text-3,#999);font-size:12px}
+.ds-select__arrow{display:inline-flex;color:var(--ds-color-text-3,#999)}
 
 /* switch */
 .ds-switch{position:relative;display:inline-flex;width:44px;height:26px;border-radius:999px;background:var(--ds-color-fill-3,#e5e6eb);transition:background var(--ds-motion-standard,200ms);flex:none}
@@ -201,8 +220,10 @@ html,body{min-height:100%}
 
 /* checkbox / radio */
 .ds-checkbox,.ds-radio{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:14px}
-.ds-checkbox__box{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:var(--ds-radius-small,2px);border:1px solid var(--ds-color-border-2,var(--ds-color-border,#dcdfe6));font-size:12px;color:transparent;transition:all var(--ds-motion-fast,150ms);flex:none}
+.ds-checkbox__box{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:var(--ds-radius-small,2px);border:1px solid var(--ds-color-border-2,var(--ds-color-border,#dcdfe6));font-size:12px;transition:all var(--ds-motion-fast,150ms);flex:none}
+.ds-checkbox__box .ds-icon{opacity:0;stroke-width:2.6}
 .ds-checkbox--checked .ds-checkbox__box{background:var(--ds-color-primary,#409eff);border-color:var(--ds-color-primary,#409eff);color:#fff}
+.ds-checkbox--checked .ds-checkbox__box .ds-icon{opacity:1}
 .ds-radio__dot{position:relative;display:inline-block;width:18px;height:18px;border-radius:50%;border:1px solid var(--ds-color-border-2,var(--ds-color-border,#dcdfe6));flex:none;transition:all var(--ds-motion-fast,150ms)}
 .ds-radio--checked .ds-radio__dot{border-color:var(--ds-color-primary,#409eff)}
 .ds-radio--checked .ds-radio__dot::after{content:"";position:absolute;inset:4px;border-radius:50%;background:var(--ds-color-primary,#409eff)}
@@ -262,12 +283,12 @@ html,body{min-height:100%}
 /* navbar / tabbar 基础 */
 .ds-navbar{display:flex;align-items:center;justify-content:space-between;height:48px;padding:0 12px;background:var(--ds-color-surface,var(--ds-color-bg-1,#fff));border-bottom:1px solid var(--ds-color-border-light,var(--ds-color-border,#eee));border-radius:var(--ds-radius-medium,8px)}
 .ds-navbar__title{font-size:16px;font-weight:600}
-.ds-navbar__side{font-size:14px;color:var(--ds-color-primary,#409eff);min-width:56px}
+.ds-navbar__side{font-size:14px;color:var(--ds-color-primary,#409eff);min-width:56px;display:inline-flex;align-items:center;gap:4px}
 .ds-navbar__back{cursor:pointer}
-.ds-navbar__right{text-align:right}
+.ds-navbar__right{justify-content:flex-end;text-align:right}
 .ds-tabbar{display:flex;justify-content:space-around;align-items:stretch;height:54px;background:var(--ds-color-surface,var(--ds-color-bg-1,#fff));border-top:1px solid var(--ds-color-border-light,var(--ds-color-border,#eee));border-radius:var(--ds-radius-medium,8px)}
 .ds-tabbar__item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:11px;color:var(--ds-color-text-3,#999);min-width:48px}
-.ds-tabbar__icon{font-size:18px;line-height:1}
+.ds-tabbar__icon{display:inline-flex;align-items:center;justify-content:center;height:20px;line-height:1}
 .ds-tabbar__item--active{color:var(--ds-color-primary,#409eff);font-weight:600}
 
 /* list */
@@ -278,7 +299,7 @@ html,body{min-height:100%}
 .ds-list__title{font-size:14px;font-weight:500}
 .ds-list__desc{font-size:12px;color:var(--ds-color-text-3,#999)}
 .ds-list__value{font-size:13px;color:var(--ds-color-text-2,#606266)}
-.ds-list__arrow{color:var(--ds-color-text-3,#bbb);font-size:15px}
+.ds-list__arrow{display:inline-flex;color:var(--ds-color-text-3,#bbb)}
 
 /* dialog / toast */
 .ds-dialog-demo{display:flex;align-items:center;justify-content:center;padding:8px 0;border-radius:var(--ds-radius-medium,8px);background:var(--ds-color-fill-2,#f2f3f5)}
@@ -289,7 +310,7 @@ html,body{min-height:100%}
 .ds-toast{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:var(--ds-radius-medium,8px);background:var(--ds-color-ink,#303133);color:#fff;font-size:13px}
 .ds-toast--success{background:var(--ds-color-success,#67c23a)}
 .ds-toast--error{background:var(--ds-color-danger,#f56c6c)}
-.ds-toast__icon{font-size:13px;font-weight:700}
+.ds-toast__icon{display:inline-flex;align-items:center}
 
 /* screen 模板（login/settings/feed/profile） */
 .ds-screen{display:flex;flex-direction:column;gap:16px}
@@ -307,6 +328,7 @@ html,body{min-height:100%}
 .ds-feed-title{font-size:15px;font-weight:600}
 .ds-feed-meta{font-size:12px;color:var(--ds-color-text-3,#999)}
 .ds-feed-actions{display:flex;gap:var(--ds-space-md,16px);font-size:13px;color:var(--ds-color-text-2,#606266)}
+.ds-feed-actions span{display:inline-flex;align-items:center;gap:4px}
 .ds-profile-head{display:flex;align-items:center;gap:var(--ds-space-md,16px);padding:16px;border-radius:var(--ds-radius-large,8px);border:1px solid var(--ds-color-border-light,transparent);background:var(--ds-color-surface,#fff)}
 .ds-profile-info{flex:1;display:flex;flex-direction:column;gap:2px}
 .ds-profile-name{font-size:17px;font-weight:700}

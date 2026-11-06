@@ -40,7 +40,8 @@ type CatalogSource interface {
 	// SystemDetail 返回某体系完整数据（Token + 组件清单 + 守则）。
 	SystemDetail(id string) (any, bool)
 	// ComposePreview 生成一张组件预览完整 HTML 文档。
-	ComposePreview(systemID string, components []string, theme, title string) (html string, width, height int, err error)
+	// artboard 为空表示按体系 Family 取默认画板；返回值 artboardID 是实际生效的画板。
+	ComposePreview(systemID string, components []string, theme, title, artboard string) (html string, width, height int, artboardID string, err error)
 }
 
 // Server 是画布 HTTP 服务。
@@ -60,11 +61,17 @@ func NewServer(store *Store, tasks *TaskQueue, origin string) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.handleHealth)
+	mux.HandleFunc("GET /api/projects", s.handleListProjects)
+	mux.HandleFunc("POST /api/projects", s.handleAddProject)
+	mux.HandleFunc("GET /api/projects/{id}", s.handleGetProject)
+	mux.HandleFunc("PUT /api/projects/{id}", s.handleUpdateProject)
+	mux.HandleFunc("DELETE /api/projects/{id}", s.handleDeleteProject)
 	mux.HandleFunc("GET /api/nodes", s.handleListNodes)
 	mux.HandleFunc("POST /api/nodes", s.handleAddNode)
 	mux.HandleFunc("PUT /api/nodes/{id}", s.handleUpdateNode)
 	mux.HandleFunc("DELETE /api/nodes/{id}", s.handleDeleteNode)
 	mux.HandleFunc("POST /api/nodes/clear", s.handleClearNodes)
+	mux.HandleFunc("POST /api/arrange", s.handleArrange)
 	mux.HandleFunc("POST /api/capture", s.handleCaptureCreate)
 	mux.HandleFunc("GET /api/tasks", s.handleTaskClaim)
 	mux.HandleFunc("POST /api/tasks/{id}/result", s.handleTaskResult)
@@ -157,12 +164,21 @@ func decodeBody[T any](w http.ResponseWriter, r *http.Request, dst *T) bool {
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "node_count": len(s.store.List()), "time": time.Now().Format(time.RFC3339),
+		"ok": true, "node_count": len(s.store.List()),
+		"project_count": len(s.store.ListProjects()),
+		"time":          time.Now().Format(time.RFC3339),
 	})
 }
 
 func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
-	nodes := s.store.List()
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	if project != "" {
+		if _, err := s.store.GetProject(project); err != nil {
+			writeErr(w, http.StatusNotFound, projectErr(err, project))
+			return
+		}
+	}
+	nodes := s.store.ListByProject(project)
 	if sys := r.URL.Query().Get("system"); sys != "" {
 		filtered := nodes[:0:0]
 		for _, n := range nodes {
@@ -176,20 +192,28 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 }
 
 type addNodeIn struct {
-	Title  string   `json:"title"`
-	System string   `json:"system"`
-	Kind   string   `json:"kind"`
-	HTML   string   `json:"html"`
-	Width  int      `json:"width"`
-	Height int      `json:"height"`
-	X      *float64 `json:"x"`
-	Y      *float64 `json:"y"`
-	Tags   []string `json:"tags"`
+	Project    string   `json:"project"`
+	Title      string   `json:"title"`
+	System     string   `json:"system"`
+	Kind       string   `json:"kind"`
+	HTML       string   `json:"html"`
+	Artboard   string   `json:"artboard"`
+	Width      int      `json:"width"`
+	Height     int      `json:"height"`
+	AutoHeight *bool    `json:"auto_height"`
+	X          *float64 `json:"x"`
+	Y          *float64 `json:"y"`
+	Tags       []string `json:"tags"`
 }
 
 func (s *Server) handleAddNode(w http.ResponseWriter, r *http.Request) {
 	var in addNodeIn
 	if !decodeBody(w, r, &in) {
+		return
+	}
+	if strings.TrimSpace(in.Project) == "" {
+		writeErr(w, http.StatusBadRequest, APIError("project_required",
+			"新增设计稿必须指定项目", "先 POST /api/projects 建项目，或用 project_list 查已有项目"))
 		return
 	}
 	if strings.TrimSpace(in.HTML) == "" {
@@ -204,15 +228,24 @@ func (s *Server) handleAddNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	n := Node{
-		Title: in.Title, System: in.System, Kind: in.Kind, HTML: in.HTML,
-		Width: in.Width, Height: in.Height, Tags: in.Tags,
+		ProjectID: in.Project,
+		Title:     in.Title, System: in.System, Kind: in.Kind, HTML: in.HTML,
+		Artboard: in.Artboard, Width: in.Width, Height: in.Height, Tags: in.Tags,
 	}
 	if in.X != nil && in.Y != nil {
 		n.X, n.Y = *in.X, *in.Y
-	} else {
-		n.X, n.Y = s.store.AutoPosition(in.Width, in.Height)
 	}
-	created := s.store.Add(n)
+	// 归属校验与自动排版都在 Store.Add 里做（项目必须已存在）
+	created, err := s.store.Add(n)
+	if err != nil {
+		writeErr(w, statusForProjectErr(err), projectErr(err, in.Project))
+		return
+	}
+	if in.AutoHeight != nil && !*in.AutoHeight {
+		if upd, err := s.store.Update(created.ID, func(x *Node) { x.AutoHeight = false }); err == nil {
+			created = upd
+		}
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{"node": created})
 }
 
@@ -231,6 +264,12 @@ func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 		}
 		if in.System != "" {
 			n.System = in.System
+		}
+		if in.Artboard != "" {
+			n.Artboard = in.Artboard
+		}
+		if in.AutoHeight != nil {
+			n.AutoHeight = *in.AutoHeight
 		}
 		if in.Width > 0 {
 			n.Width = in.Width
@@ -273,9 +312,24 @@ func (s *Server) handleDeleteNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"removed": id})
 }
 
-func (s *Server) handleClearNodes(w http.ResponseWriter, _ *http.Request) {
-	n := s.store.Clear()
-	writeJSON(w, http.StatusOK, map[string]any{"cleared": n})
+func (s *Server) handleClearNodes(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Project string `json:"project"`
+	}
+	if !decodeBody(w, r, &in) {
+		return
+	}
+	if strings.TrimSpace(in.Project) == "" {
+		writeErr(w, http.StatusBadRequest, APIError("project_required",
+			"清空必须指定项目", "项目之间是独立作用域，不存在「清空整个画布」"))
+		return
+	}
+	n, err := s.store.Clear(in.Project)
+	if err != nil {
+		writeErr(w, statusForProjectErr(err), projectErr(err, in.Project))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"cleared": n, "project": in.Project})
 }
 
 type captureIn struct {
@@ -351,10 +405,43 @@ func (s *Server) handleCaptureWait(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"result": res, "ok": true})
 }
 
+// handleArrange 按项目分组重排（「全部」视图用）。
+func (s *Server) handleArrange(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		GroupBy string `json:"group_by"`
+	}
+	if !decodeBody(w, r, &in) {
+		return
+	}
+	if in.GroupBy != "project" {
+		writeErr(w, http.StatusBadRequest, APIError("bad_request",
+			"group_by 只支持 project", ""))
+		return
+	}
+	moved, err := s.store.ArrangeByProject()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, APIError("internal", err.Error(), ""))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"moved": moved})
+}
+
 // ---------------- edges ----------------
 
-func (s *Server) handleListEdges(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"edges": s.store.ListEdges()})
+func (s *Server) handleListEdges(w http.ResponseWriter, r *http.Request) {
+	edges := s.store.ListEdges()
+	if project := strings.TrimSpace(r.URL.Query().Get("project")); project != "" {
+		filtered := make([]Edge, 0, len(edges))
+		for _, e := range edges {
+			a, errA := s.store.Get(e.From)
+			b, errB := s.store.Get(e.To)
+			if errA == nil && errB == nil && a.ProjectID == project && b.ProjectID == project {
+				filtered = append(filtered, e)
+			}
+		}
+		edges = filtered
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"edges": edges})
 }
 
 type addEdgeIn struct {
@@ -378,6 +465,9 @@ func (s *Server) handleAddEdge(w http.ResponseWriter, r *http.Request) {
 		return
 	case errors.Is(err, ErrEdgeSelfLoop):
 		writeErr(w, http.StatusBadRequest, APIError("bad_request", "连线不可自环", ""))
+		return
+	case errors.Is(err, ErrEdgeCrossProject):
+		writeErr(w, http.StatusBadRequest, projectErr(err, ""))
 		return
 	case err != nil:
 		writeErr(w, http.StatusInternalServerError, APIError("internal", err.Error(), ""))
@@ -425,10 +515,12 @@ func (s *Server) handleCatalogSystem(w http.ResponseWriter, r *http.Request) {
 }
 
 type catalogPreviewIn struct {
+	Project    string   `json:"project"`
 	System     string   `json:"system"`
 	Components []string `json:"components"`
 	Theme      string   `json:"theme"`
 	Title      string   `json:"title"`
+	Artboard   string   `json:"artboard"`
 }
 
 func (s *Server) handleCatalogPreview(w http.ResponseWriter, r *http.Request) {
@@ -440,6 +532,11 @@ func (s *Server) handleCatalogPreview(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &in) {
 		return
 	}
+	if strings.TrimSpace(in.Project) == "" {
+		writeErr(w, http.StatusBadRequest, APIError("project_required",
+			"新增设计稿必须指定项目", "先创建项目，再在项目下添加预览"))
+		return
+	}
 	if len(in.Components) == 0 {
 		writeErr(w, http.StatusBadRequest, APIError("bad_request", "components is required", ""))
 		return
@@ -447,18 +544,27 @@ func (s *Server) handleCatalogPreview(w http.ResponseWriter, r *http.Request) {
 	if len(in.Components) > 24 {
 		in.Components = in.Components[:24]
 	}
-	html, w2, h, err := s.Catalog.ComposePreview(in.System, in.Components, in.Theme, in.Title)
+	html, w2, h, abID, err := s.Catalog.ComposePreview(in.System, in.Components, in.Theme, in.Title, in.Artboard)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, APIError("compose_failed", err.Error(), ""))
 		return
 	}
-	node := Node{
-		Title: firstNonEmpty(in.Title, in.System+" 预览"), System: in.System,
-		Kind: KindComponent, HTML: html, Width: w2, Height: h,
-		Tags: append([]string{in.System, firstNonEmpty(in.Theme, "light")}, in.Components...),
+	tags := append([]string{in.System, firstNonEmpty(in.Theme, "light")}, in.Components...)
+	if abID != "" {
+		tags = append(tags, "artboard:"+abID)
 	}
-	node.X, node.Y = s.store.AutoPosition(w2, h)
-	created := s.store.Add(node)
+	tags = append(tags, "project:"+in.Project)
+	node := Node{
+		ProjectID: in.Project,
+		Title:     firstNonEmpty(in.Title, in.System+" 预览"), System: in.System,
+		Kind: KindComponent, HTML: html, Artboard: abID, Width: w2, Height: h,
+		Tags: tags,
+	}
+	created, err := s.store.Add(node)
+	if err != nil {
+		writeErr(w, statusForProjectErr(err), projectErr(err, in.Project))
+		return
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{"node": created})
 }
 
