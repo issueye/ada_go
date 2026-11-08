@@ -135,6 +135,41 @@ func TestRegisterRejectsBadDescriptors(t *testing.T) {
 	}
 }
 
+// TestRegisterRejectsReservedNames 钉住基座保留名：find_tool/exec_tool 由引擎
+// 内联实现（发现式工具的入口），模型调用会在目录查找之前被引擎拦截——放行注册
+// 只会造出永远不可达的工具。
+func TestRegisterRejectsReservedNames(t *testing.T) {
+	t.Parallel()
+	cat := toolkit.NewCatalog()
+	for _, name := range []string{domain.ToolFindName, domain.ToolExecName} {
+		d := descriptor(domain.AccessRead)
+		d.Name = name
+		err := cat.Register(d)
+		if err == nil || !strings.Contains(err.Error(), "基座保留名") {
+			t.Errorf("保留名 %q 必须拒绝注册，实得 %v", name, err)
+		}
+	}
+}
+
+// 发现式与轮次终止互斥：exec_tool 的终止判定读的是它自己的描述符，
+// 内层工具的 terminatesTurn 会被吞掉——要终止轮次就必须注入式注册。
+func TestRegisterRejectsDiscoveryWithTerminatesTurn(t *testing.T) {
+	t.Parallel()
+	cat := toolkit.NewCatalog()
+	d := descriptor(domain.AccessRead)
+	d.Discovery = true
+	d.TerminatesTurn = true
+	err := cat.Register(d)
+	if err == nil || !strings.Contains(err.Error(), "discovery 与 terminatesTurn") {
+		t.Fatalf("discovery+terminatesTurn 必须拒绝，实得 %v", err)
+	}
+	// 只有 discovery 本身合法。
+	d.TerminatesTurn = false
+	if err := cat.Register(d); err != nil {
+		t.Fatalf("纯 discovery 注册应通过，实得 %v", err)
+	}
+}
+
 // TestDuplicateToolNameRejected 是 pi 的「同名静默覆盖」缺陷的反面（01 §2.1）。
 func TestDuplicateToolNameRejected(t *testing.T) {
 	t.Parallel()

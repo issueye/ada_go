@@ -147,6 +147,13 @@ func validateDescriptor(d domain.Descriptor) error {
 	if !namePattern.MatchString(d.Name) {
 		return fmt.Errorf("toolkit: 工具名 %q 不满足 ^[a-z][a-z0-9_]{1,63}$", d.Name)
 	}
+	// 基座保留名（domain.ToolFindName/ToolExecName）：引擎在目录查找之前拦截
+	// 这两个名字（发现式工具的 find/exec 入口），放行注册只会造出永远不可达的工具。
+	// TODO(插件化)：入口实现搬迁到插件后本条保留——两个名字改由宿主为插件
+	// 入口预留（见 internal/engine/discovery.go 的 TODO）。
+	if d.Name == domain.ToolFindName || d.Name == domain.ToolExecName {
+		return fmt.Errorf("toolkit: 工具名 %q 是基座保留名（发现式工具的 find/exec 入口），插件不能注册", d.Name)
+	}
 	if strings.TrimSpace(d.PluginID) == "" {
 		return fmt.Errorf("toolkit: 工具 %q 缺少贡献者 pluginId（回执与审计要能追溯到插件）", d.Name)
 	}
@@ -166,6 +173,11 @@ func validateDescriptor(d domain.Descriptor) error {
 	}
 	if d.Timeout < 0 {
 		return fmt.Errorf("toolkit: 工具 %q 的 timeout 不能为负", d.Name)
+	}
+	// exec_tool 包装不了轮次终止语义（终止判定读的是 exec_tool 自己的描述符，
+	// 内层工具的 terminatesTurn 会被吞掉）：要终止轮次就必须注入式注册。
+	if d.Discovery && d.TerminatesTurn {
+		return fmt.Errorf("toolkit: 工具 %q 不能同时声明 discovery 与 terminatesTurn（终止轮次的工具必须注入式）", d.Name)
 	}
 	return nil
 }

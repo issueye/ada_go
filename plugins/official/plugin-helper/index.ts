@@ -69,6 +69,9 @@ interface AgentAPI {
     description: string;
     parameters: object;
     access: "read" | "write" | "exec" | "network";
+    // true=发现式：不注入模型清单，模型经基座 find_tool/exec_tool 使用
+    // （缺省 false = 注入式）。不能与 terminatesTurn 同用。
+    discovery?: boolean;
     execute: (args: any, ctx: ToolContext) => unknown;
   }): void;
 }

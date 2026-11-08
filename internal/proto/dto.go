@@ -71,7 +71,10 @@ type ToolDescriptor struct {
 	ParallelSafe   bool            `json:"parallelSafe"`
 	Rollback       bool            `json:"rollback"`
 	TerminatesTurn bool            `json:"terminatesTurn"`
-	PluginID       string          `json:"pluginId"`
+	// Discovery 标记发现式注册（05 §6.3）：不注入模型清单，模型经基座
+	// find_tool/exec_tool 使用。基座入口本身不在 tool.list 里。
+	Discovery bool   `json:"discovery"`
+	PluginID  string `json:"pluginId"`
 }
 
 // ToolResult 是工具结果 entry 的 payload（8.4）。

@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:f186b1deda141a4e) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:5dd269e4de75d60d) by plugins/official/build.mjs — do not edit
 // plugin-helper 后端：插件助手——安装与健康检查。
 //
 //   - route POST /create：CLI/测试用（管理页已移除，创建插件走对话里的
@@ -70,6 +70,9 @@
                         
                        
                                                   
+                                                    
+                                              
+                        
                                                       
            
  

@@ -35,6 +35,12 @@ type ToolDef struct {
 	Repeatable     bool            `json:"repeatable,omitempty"`
 	Rollback       bool            `json:"rollback,omitempty"`
 	TerminatesTurn bool            `json:"terminatesTurn,omitempty"`
+	// Discovery 选择注册形态（缺省 false = 注入式）：
+	//   - 注入式：工具声明随模型请求下发，模型直接调用；
+	//   - 发现式（true）：不注入模型清单，模型经基座 find_tool 拿到名称/说明/
+	//     参数 Schema 后用 exec_tool 执行；审批、超时、循环检测沿用本描述符。
+	// 适合低频/大 Schema 工具，省上下文；终止轮次的工具不能声明 discovery。
+	Discovery bool `json:"discovery,omitempty"`
 	// Handler 是脚本侧函数在宿主内的句柄；由 agentapi 填充，不来自 JSON。
 	Handler HandlerRef `json:"-"`
 }
@@ -249,7 +255,7 @@ func (t ToolDef) Descriptor(pluginID string) domain.Descriptor {
 		Name: t.Name, Description: t.Description, Parameters: t.Parameters,
 		Access: domain.Access(t.Access), Timeout: time.Duration(timeout) * time.Millisecond,
 		ParallelSafe: t.ParallelSafe, Repeatable: t.Repeatable, Rollback: t.Rollback,
-		TerminatesTurn: t.TerminatesTurn, PluginID: pluginID,
+		TerminatesTurn: t.TerminatesTurn, Discovery: t.Discovery, PluginID: pluginID,
 	}
 }
 

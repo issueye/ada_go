@@ -109,6 +109,53 @@ export default function (agent) {
 	}
 }
 
+// registerTool 的 discovery 位从脚本 JSON 一路带到引擎描述符（05 §6.3）：
+// 缺省 false（注入式），true 时不注入模型清单、只经 find_tool/exec_tool 使用。
+func TestRegisterToolDiscoveryFlag(t *testing.T) {
+	caps := testCaps(t, plugins.TrustThirdParty)
+	src := `
+export default function (agent) {
+  agent.registerTool({
+    name: "lazy_tool",
+    description: "发现式工具",
+    parameters: { type: "object", properties: {} },
+    access: "read",
+    discovery: true,
+    execute() { return { content: [{ type: "text", text: "ok" }] }; },
+  });
+  agent.registerTool({
+    name: "eager_tool",
+    description: "注入式工具",
+    parameters: { type: "object", properties: {} },
+    access: "read",
+    execute() { return { content: [{ type: "text", text: "ok" }] }; },
+  });
+}
+`
+	p, err := Load(context.Background(), testScript(t, caps, src), caps, Context{}, Options{
+		Targets: Targets{Tools: &recordingTools{}},
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	defer func() { _ = p.Close(context.Background()) }()
+
+	contrib := p.Contribution()
+	if contrib == nil || len(contrib.Tools) != 2 {
+		t.Fatalf("贡献工具数 = %+v，期望 2 个", contrib)
+	}
+	descs := map[string]domain.Descriptor{}
+	for _, def := range contrib.Tools {
+		descs[def.Name] = def.Descriptor(contrib.PluginID)
+	}
+	if !descs["lazy_tool"].Discovery {
+		t.Fatalf("lazy_tool 应是发现式: %+v", descs["lazy_tool"])
+	}
+	if descs["eager_tool"].Discovery {
+		t.Fatalf("eager_tool 缺省应是注入式: %+v", descs["eager_tool"])
+	}
+}
+
 // TestRebuildRunsFactoryWithStaging 钉重建路径的 staging 接线：
 // 一次超时/取消后 dirty Runtime 会在下一次调用前重建并重跑入口工厂；
 // 工厂必须能看到新的 staging，否则会误报「agent API 已冻结」。

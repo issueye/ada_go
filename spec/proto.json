@@ -187,9 +187,10 @@
         "parallelSafe": { "type": "boolean", "description": "整批都 parallelSafe 且产品策略允许时才并发，结果按源序回填" },
         "rollback": { "type": "boolean", "description": "true=执行前把涉及文件纳入检查点" },
         "terminatesTurn": { "type": "boolean", "description": "true=调用后本轮可自然结束（finish/ask 这类）" },
+        "discovery": { "type": "boolean", "description": "true=发现式注册：不注入模型清单，模型经基座 find_tool/exec_tool 使用；审批/超时/循环检测沿用本描述符（05 §6.3）" },
         "pluginId": { "type": "string", "description": "贡献该工具的插件 id（如 tools-fs）" }
       },
-      "required": ["name", "description", "parameters", "access", "timeoutMs", "parallelSafe", "rollback", "terminatesTurn", "pluginId"]
+      "required": ["name", "description", "parameters", "access", "timeoutMs", "parallelSafe", "rollback", "terminatesTurn", "discovery", "pluginId"]
     },
     "ToolReceipt": {
       "type": "object",

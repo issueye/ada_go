@@ -54,6 +54,12 @@ const (
 func (r *run) runTools(calls []domain.ToolCall, catalog []domain.Descriptor) toolOutcome {
 	byName := make(map[string]domain.Descriptor, len(catalog))
 	for _, d := range catalog {
+		// 发现式工具不进模型可见映射：目录快照里它们仍然存在（exec_tool 的内层
+		// 查找要靠完整快照），但模型直呼其名必须 tool_not_found —— 它们的契约
+		// 是「经 find_tool 发现、exec_tool 执行」，不是直接调用。
+		if d.Discovery {
+			continue
+		}
 		byName[d.Name] = d
 	}
 
@@ -128,13 +134,20 @@ func (r *run) runTools(calls []domain.ToolCall, catalog []domain.Descriptor) too
 			continue
 		}
 
-		res := r.deps.Runner.Execute(r.ctx, domain.ToolCall{CallID: call.CallID, Tool: call.Tool, Args: args})
+		// 分派执行：基座入口（find_tool/exec_tool）内联处理，其余走 Runner。
+		// 观察身份由分派决定（exec_tool 按内层工具做循环检测）。
+		res, obsDesc, obsArgs, abort := r.executeTool(call, desc, args)
+		if abort {
+			// 内层审批钩子中止了轮次：与注入式被钩子中止同形（不记结果，
+			// defer 补 interrupted 回执）。
+			return toolsErrored
+		}
 		record(call, res)
 		r.hook(HookToolAfterCall, mustJSON(map[string]any{
 			"callId": call.CallID, "tool": call.Tool, "status": string(res.Receipt.Status),
 		}))
 
-		switch r.loops.Observe(desc, args, res) {
+		switch r.loops.Observe(obsDesc, obsArgs, res) {
 		case loopWarn:
 			// 连续 3 次相同调用：先给错误回执提示换方法，轮次继续（02 §5.3）。
 			r.appendLoopWarning(call, desc)

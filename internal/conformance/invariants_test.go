@@ -121,8 +121,8 @@ func TestInvariants(t *testing.T) {
 		t.Parallel()
 		// 描述符字段必须与 08 §8.4 的 JSON 形状逐字一致（目录由它派生，不是另写一份）。
 		want := []string{
-			"access", "description", "name", "parameters", "parallelSafe", "pluginId",
-			"repeatable", "rollback", "terminatesTurn", "timeoutMs",
+			"access", "description", "discovery", "name", "parameters", "parallelSafe",
+			"pluginId", "repeatable", "rollback", "terminatesTurn", "timeoutMs",
 		}
 		got := jsonTags(reflect.TypeOf(domain.Descriptor{}))
 		sort.Strings(got)

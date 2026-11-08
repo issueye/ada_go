@@ -78,11 +78,20 @@
   access: "read",                // read | write | exec | network
   timeoutMs?: number, parallelSafe?: true, repeatable?: true,
   rollback?: true, terminatesTurn?: false,
+  discovery?: false,             // true=发现式：不注入模型清单（见下）
   async execute(args, ctx) {
     return { content: [{ type: "text", text: "给模型的文本" }], details: { ... } };
   },
 }
 ```
+
+**注册形态（`discovery`）**：缺省 `false` = 注入式——工具声明随模型请求下发，
+模型直接调用。`true` = **发现式**——声明不进模型清单，模型经基座保留工具
+`find_tool`（按关键词列出发现式工具的名称/说明/参数 Schema）发现后，用
+`exec_tool { tool, args }` 按名执行；审批（tool.beforeCall 看到的仍是本工具的
+描述符）、超时、循环检测与注入式完全一致。适合低频或大 Schema 工具（省上下文）。
+约束：`discovery: true` 不能与 `terminatesTurn: true` 同时声明（装配期拒绝）；
+`find_tool`/`exec_tool` 是基座保留名，插件不能注册同名工具。
 
 - `access: write/exec/network` 的工具调用要过审批策略；产品没装配
   `role=tool-policy` 插件时这类工具一律 denied。

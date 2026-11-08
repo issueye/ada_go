@@ -34,6 +34,20 @@ const (
 	TrustThirdParty Trust = "third-party"
 )
 
+// 基座保留的工具名：发现式工具机制的入口，由引擎内联实现（不进工具目录、
+// 不属于任何插件）。插件注册同名工具会被 toolkit 拒绝——否则模型调用会被
+// 引擎拦截，注册的工具永远不可达。
+//
+// TODO(插件化)：随引擎内联实现一并搬迁到插件（见 internal/engine/discovery.go
+// 的 TODO——前置是宿主提供 catalog.read / tool.invoke 两个受控桥）；保留名
+// 机制本身不动，搬迁后由宿主拒绝插件占用这两个名字。
+const (
+	// ToolFindName 列出发现式工具（名称/说明/参数 Schema）。
+	ToolFindName = "find_tool"
+	// ToolExecTool 按名执行一个发现式工具；审批与超时沿用该工具自己的描述符。
+	ToolExecName = "exec_tool"
+)
+
 // Descriptor 是工具描述符；字段逐字照 02 §5.4 的 Go 定义，
 // JSON 字段名照 08 §8.4（tool.list 与模型请求共用同一份描述符）。
 // INV-3：描述符注册表是唯一真源，目录由它派生；装配期冻结，运行期新登记只记日志
@@ -59,6 +73,10 @@ type Descriptor struct {
 	// TerminatesTurn 是 finish 这类可终止轮次的标记（02 §5.4；终止条件 completed 行）。
 	// ask_user 不在此列：它返回后要把回答喂回模型继续本轮。
 	TerminatesTurn bool `json:"terminatesTurn"`
+	// Discovery 标记「发现式」注册（05 §6.3 ToolDef.discovery）：不注入模型工具清单，
+	// 模型经 find_tool 发现、exec_tool 执行；审批/超时/循环检测沿用本描述符。
+	// 与 TerminatesTurn 互斥（exec_tool 包装不了轮次终止语义），注册期拒绝。
+	Discovery bool `json:"discovery"`
 	// PluginID 是贡献该工具的插件 id（“官方工具插件”或第三方；基座源码不出现具体插件 id）。
 	PluginID string `json:"pluginId"`
 }

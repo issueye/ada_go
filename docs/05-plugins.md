@@ -132,7 +132,7 @@ interface RouteRequest {
 type RouteHandler = (req: RouteRequest, ctx: ToolContext) => unknown;
 
 interface ToolDef {
-  name: string;                 // ^[a-z][a-z0-9_]{1,63}$
+  name: string;                 // ^[a-z][a-z0-9_]{1,63}$；find_tool/exec_tool 是基座保留名
   description: string;
   parameters: object;           // JSON Schema
   access: "read" | "write" | "exec" | "network"; // 外部效果分类；线程级 KV 不算 write；基座不据此审批
@@ -140,6 +140,7 @@ interface ToolDef {
   parallelSafe?: boolean;
   repeatable?: boolean;         // 轮询/等待类工具（如 check_task、wait_task）允许连续相同调用，不参与循环检测
   rollback?: boolean;
+  discovery?: boolean;          // true=发现式：不注入模型清单，模型经基座 find_tool/exec_tool 使用（缺省注入式；与 terminatesTurn 互斥）
   execute(args: any, ctx: ToolContext): Promise<ToolReturn> | ToolReturn;
 }
 

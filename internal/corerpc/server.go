@@ -985,7 +985,7 @@ func (s *Server) handleToolList(ctx context.Context, _ json.RawMessage) (any, er
 			Name: d.Name, Description: d.Description, Parameters: d.Parameters,
 			Access: string(d.Access), TimeoutMS: int(d.Timeout / time.Millisecond),
 			ParallelSafe: d.ParallelSafe, Rollback: d.Rollback,
-			TerminatesTurn: d.TerminatesTurn, PluginID: d.PluginID,
+			TerminatesTurn: d.TerminatesTurn, Discovery: d.Discovery, PluginID: d.PluginID,
 		})
 	}
 	return map[string]any{"tools": out}, nil

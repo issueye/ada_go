@@ -104,9 +104,19 @@
   "parallelSafe": true,
   "rollback": false,
   "terminatesTurn": false,
+  "discovery": false,
   "pluginId": "tools-fs"
 }
 ```
+
+`discovery` 标记「发现式」注册（05 §6.3 ToolDef.discovery）：缺省 `false`（注入式，
+声明随模型请求下发）；`true` 时不注入模型清单，模型经基座 `find_tool` 拿到
+名称/说明/参数 Schema 后用 `exec_tool` 按名执行——审批、超时、循环检测沿用
+该工具自己的描述符。`find_tool`/`exec_tool` 是基座保留名，不出现在 `tool.list`
+里，也不属于任何插件；目录里没有发现式工具时，这两个入口不注入模型请求。
+> TODO(插件化)：两个入口目前内联在引擎，计划搬迁到插件（前置是宿主提供
+> `catalog.read` / `tool.invoke` 受控桥，见 `internal/engine/discovery.go` 的 TODO）；
+> 搬迁不改变本节契约。
 
 回执（工具结果 entry 的 payload）：
 
