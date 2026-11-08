@@ -70,6 +70,55 @@ func (r *run) toMessages(summary *CompactSummary, entries []ports.Entry) []domai
 		}
 		out = append(out, m)
 	}
+	return ensureToolResults(out)
+}
+
+// ensureToolResults 给缺失回执的工具调用补一条合成结果。
+//
+// 正常路径下 runTools 保证每个 toolCall 都有回执（见 tools.go 的 defer 兜底），
+// 但历史里可能早就留下了缺口（旧版本中断、进程崩溃、手工改库）。这类上下文发给
+// OpenAI 兼容端点会被整轮拒绝（"Tool result is missing for tool call …"），
+// 所以请求前再兜一层：缺什么补什么，工具名和调用 id 保持不变，只补一条文字结果。
+// 补写只发生在请求载荷里，不落 entry（下次请求会再补一次，保持幂等）。
+func ensureToolResults(msgs []domain.Message) []domain.Message {
+	have := make(map[string]bool, len(msgs))
+	for _, m := range msgs {
+		if m.Role == domain.RoleTool && m.CallID != "" {
+			have[m.CallID] = true
+		}
+	}
+	missing := false
+	for _, m := range msgs {
+		for _, c := range m.ToolCalls {
+			if !have[c.CallID] {
+				missing = true
+			}
+		}
+	}
+	if !missing {
+		return msgs
+	}
+
+	out := make([]domain.Message, 0, len(msgs)+2)
+	filled := make(map[string]bool, len(msgs))
+	for _, m := range msgs {
+		out = append(out, m)
+		if m.Role != domain.RoleAssistant || len(m.ToolCalls) == 0 {
+			continue
+		}
+		for _, c := range m.ToolCalls {
+			if have[c.CallID] || filled[c.CallID] {
+				continue
+			}
+			filled[c.CallID] = true
+			out = append(out, domain.Message{
+				Role:   domain.RoleTool,
+				CallID: c.CallID,
+				Parts: []domain.Part{{Type: domain.PartText,
+					Text: "interrupted: 本轮在工具结果落库前结束，这个调用没有产生结果"}},
+			})
+		}
+	}
 	return out
 }
 
@@ -207,7 +256,7 @@ func (r *run) appendToolResult(call domain.ToolCall, res domain.Result) {
 		"content": res.Content,
 		"receipt": res.Receipt,
 	})
-	if _, err := r.deps.Session.AppendEntry(r.ctx, ports.Entry{
+	if _, err := r.deps.Session.AppendEntry(context.WithoutCancel(r.ctx), ports.Entry{
 		ThreadID: r.spec.ThreadID, Kind: domain.EntryMessage, Role: domain.RoleTool,
 		Payload: payload, Tokens: int64(estimateTokens(string(payload))),
 	}); err != nil {

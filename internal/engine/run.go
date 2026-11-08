@@ -133,6 +133,9 @@ func (r *run) execute() (terminal domain.TerminalReason) {
 		if p := recover(); p != nil {
 			r.emitNotice(domain.NoticeError, fmt.Sprintf("内核异常已隔离: %v", p))
 			terminate(TerminalError)
+			// 命名返回值必须一起改：否则 panic 路径对外返回空终态，
+			// 调用方拿不到 "error"，页面既不显示失败原因也不显示错误横幅。
+			terminal = TerminalError
 		}
 	}()
 
@@ -443,8 +446,10 @@ func (r *run) finish(reason domain.TerminalReason) {
 	if r.deps.RunStore != nil {
 		rec := RunRecord{ID: r.spec.RunID, ThreadID: r.spec.ThreadID,
 			Status: string(reason), StartedAt: r.start, EndedAt: r.deps.Clock.Now(), Usage: r.usage.snapshot()}
-		if reason == TerminalError {
-			rec.ErrorCode = domain.CodeName(domain.CodeProviderError)
+		// 错误码取本轮真正发出去的那个（evt.error），而不是一律记 provider_error：
+		// 否则协议错误、上下文超限、存储忙在 runs 表里都长一个样，事后无从追查。
+		if reason == TerminalError && r.lastErr != nil {
+			rec.ErrorCode = domain.CodeName(r.lastErr.Code)
 		}
 		_ = r.deps.RunStore.EndRun(r.ctx, rec)
 	}

@@ -220,6 +220,9 @@ func (c *client) close() {
 
 // broadcast 把领域事件转成 evt.* 通知并扇出。
 func (s *Server) broadcast(evt domain.Event) {
+	// 轮次内发过的错误要收敛回 runInfo：终态页与 turn.get 需要用真正的
+	// 错误码/详情解释失败原因（见 noteRunError）。
+	s.noteRunError(evt)
 	note, err := notificationFor(evt)
 	if err != nil {
 		return

@@ -179,6 +179,10 @@ type run struct {
 	seqGuard   sync.Mutex
 	finishedAt *time.Time
 
+	// lastErr 是本轮最后一条 evt.error 的业务错误：终态落库与界面展示都以它为准，
+	// 不再统一写成 provider_error（03 §5.5 的错误码必须能区分协议/计划/存储）。
+	lastErr *domain.Error
+
 	loops *loopDetector
 	// 幂等：同一 IdempotencyKey 重复提交不再开第二轮。
 }

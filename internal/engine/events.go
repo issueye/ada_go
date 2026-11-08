@@ -97,6 +97,7 @@ func (r *run) emitErrorCode(code domain.Code, detail string) {
 }
 
 func (r *run) emitError(err *domain.Error) {
+	r.lastErr = err
 	body := map[string]any{
 		"code": int(err.Code), "name": err.Name, "message": err.Detail,
 		"runId": r.spec.RunID, "at": r.deps.Clock.Now(),

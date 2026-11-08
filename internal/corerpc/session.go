@@ -48,6 +48,8 @@ type Session interface {
 
 	ModelRef() ports.ModelRef
 	ModelRefFor(threadID string) ports.ModelRef
+	// ContextBreakdown 返回系统提示与工具声明的估算 token（消息窗口由 RPC 侧累加）。
+	ContextBreakdown(ctx context.Context, threadID string) (systemTokens, toolTokens int)
 	ResolveModel(providerID, modelID string) (ports.ModelRef, bool)
 	ModelError() error
 	SetWorkspaceModel(ref ports.ModelRef)

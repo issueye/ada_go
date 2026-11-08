@@ -410,24 +410,29 @@ func (s *Server) handleThreadGet(ctx context.Context, raw json.RawMessage) (any,
 	return out, nil
 }
 
-// contextStats 估算当前上下文占用：从 head 回溯到最近压缩点，累加 entry.Tokens。
-// 系统提示词与工具 Schema 的 token 不在 entry 里，这里只统计真实消息窗口；
-// 因此它是保守下界，前端按「约」展示，不把它当精确计费数据。
+// contextStats 估算当前上下文占用，并拆成三段：系统提示词、工具声明、对话消息。
+//
+// 消息窗口从 head 回溯到最近压缩点累加 entry.Tokens；系统提示与工具 Schema 不在
+// entry 里，由会话按引擎同一套装配/估算给出（engine.SystemPromptTokens 等）。
+// 三段合计才是这次请求真正要发送的内容，环上的占比也按合计算 —— 与压缩水位同源。
+// 仍是估算值：界面用「约」展示，不当作精确计费数据。
 func (s *Server) contextStats(ctx context.Context, threadID string) (map[string]any, error) {
 	window, err := s.sess.Store().TraceFromHead(ctx, threadID)
 	if err != nil {
 		return nil, err
 	}
-	tokens := 0
+	messages := 0
 	if window.Compaction != nil {
-		tokens += int(window.Compaction.Tokens)
+		messages += int(window.Compaction.Tokens)
 	}
 	for _, e := range window.Entries {
-		tokens += int(e.Tokens)
+		messages += int(e.Tokens)
 	}
-	if tokens < 0 {
-		tokens = 0
+	if messages < 0 {
+		messages = 0
 	}
+	systemTokens, toolTokens := s.sess.ContextBreakdown(ctx, threadID)
+	tokens := messages + systemTokens + toolTokens
 	ref := s.sess.ModelRefFor(threadID)
 	limit := int(ref.ContextWindow)
 	percent := 0
@@ -438,7 +443,8 @@ func (s *Server) contextStats(ctx context.Context, threadID string) (map[string]
 		}
 	}
 	return map[string]any{
-		"tokens": tokens, "window": limit, "percent": percent,
+		"tokens": tokens, "messages": messages, "system": systemTokens, "tools": toolTokens,
+		"window": limit, "percent": percent,
 	}, nil
 }
 
@@ -1681,6 +1687,34 @@ func (s *Server) runState(threadID string) map[string]any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.runStateLocked(threadID)
+}
+
+// noteRunError 把轮次内发过的 evt.error 收敛到 runInfo。
+//
+// 引擎在轮次内部失败时只返回终态原因（err == nil），turn.start 的等待者拿不到
+// *domain.Error，页面因此只能显示一句泛泛的“检查 Core 日志”。错误事件是引擎
+// 唯一会带出码与详情的地方，这里按 runId 归到对应轮次，供 run.get/thread.get
+// 与终态页使用；后来者覆盖前者（最后一个错误才是结束本轮的那个）。
+func (s *Server) noteRunError(evt domain.Event) {
+	if evt.Kind != domain.EvtError || evt.ThreadID == "" || len(evt.Payload) == 0 {
+		return
+	}
+	var body struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		RunID   string `json:"runId"`
+	}
+	if err := json.Unmarshal(evt.Payload, &body); err != nil || body.Code == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur := s.runs[evt.ThreadID]
+	if cur == nil || (body.RunID != "" && cur.runID != body.RunID) {
+		return
+	}
+	cur.errorCode = body.Code
+	cur.errorDetail = body.Message
 }
 
 func (s *Server) runStateLocked(threadID string) map[string]any {

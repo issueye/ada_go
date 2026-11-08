@@ -34,10 +34,11 @@ type harness struct {
 	inter     *testkit.FakeInteractions
 }
 
-// stubRunner 是 engine.ToolRunner 的替身：按脚本返回结果或阻塞到取消。
+// stubRunner 是 engine.ToolRunner 的替身：按脚本返回结果、按需 panic 或阻塞到取消。
 type stubRunner struct {
 	mu       sync.Mutex
 	res      map[string]domain.Result
+	panicOn  map[string]bool
 	calls    []domain.ToolCall
 	blockFor time.Duration
 }
@@ -47,7 +48,11 @@ func (r *stubRunner) Execute(ctx context.Context, call domain.ToolCall) domain.R
 	r.calls = append(r.calls, call)
 	res, ok := r.res[call.Tool]
 	block := r.blockFor
+	boom := r.panicOn[call.Tool]
 	r.mu.Unlock()
+	if boom {
+		panic("stubRunner: 注入的 panic: " + call.Tool)
+	}
 	if !ok {
 		res = domain.Result{
 			Content: []domain.Part{{Type: domain.PartText, Text: "ok " + call.Tool}},
@@ -584,6 +589,49 @@ func TestCompactionFailureDoesNotLoseHistory(t *testing.T) {
 	errs := h.events.Filter(domain.EvtError)
 	if len(errs) == 0 {
 		t.Fatal("没有错误事件")
+	}
+}
+
+// TestRunToolsBackfillsReceiptsOnPanic 钉住「工具批中途异常也不能在历史里留缺口」：
+// assistant 声明的每个 toolCall 都必须有回执，否则下一次模型请求会被 OpenAI 兼容
+// 端点以「Tool result is missing for tool call …」整轮拒绝。真实事故是 go build
+// 落了回执、go test 没有（进程在工具执行中途异常），整条线程从此无法继续。
+func TestRunToolsBackfillsReceiptsOnPanic(t *testing.T) {
+	t.Parallel()
+	steps := testkit.ToolCall(0, "call_1", "read_file", `{"path":"a.go"}`)
+	steps = append(steps, testkit.ToolCall(1, "call_2", "read_file", `{"path":"b.go"}`)...)
+	steps = append(steps, testkit.Usage(domain.Usage{InputTokens: 100, OutputTokens: 8}))
+	steps = append(steps, testkit.Finish("tool_calls", "[DONE]"))
+	model := testkit.NewScriptedModel(steps)
+	h := newHarness(t, model, testkit.Descriptor("read_file", "tools-fs", domain.AccessRead))
+	h.runner.panicOn = map[string]bool{"read_file": true}
+	th, err := h.store.CreateThread(context.Background(), h.workspace, "panic")
+	if err != nil {
+		t.Fatalf("建线程失败: %v", err)
+	}
+
+	if got := h.run(t, context.Background(), th.ID, "读两个文件"); got != domain.TerminalError {
+		t.Fatalf("终态 = %q，期望 error（工具 panic）", got)
+	}
+
+	got := map[string]string{}
+	for _, e := range h.store.Entries(th.ID) {
+		if e.Role != domain.RoleTool {
+			continue
+		}
+		var payload struct {
+			CallID string `json:"callId"`
+			Status string `json:"status"`
+		}
+		if err := json.Unmarshal(e.Payload, &payload); err != nil {
+			t.Fatalf("回执解析失败: %v", err)
+		}
+		got[payload.CallID] = payload.Status
+	}
+	for _, id := range []string{"call_1", "call_2"} {
+		if status, ok := got[id]; !ok || status != string(domain.ReceiptInterrupted) {
+			t.Fatalf("%s 的回执 = %q（存在=%v），期望 interrupted；实际回执 %v", id, status, ok, got)
+		}
 	}
 }
 

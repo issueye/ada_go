@@ -57,9 +57,33 @@ func (r *run) runTools(calls []domain.ToolCall, catalog []domain.Descriptor) too
 		byName[d.Name] = d
 	}
 
+	// receipted 记录本批已经落库回执的调用。任何提前返回（取消、钩子中止、循环熔断、
+	// panic）都靠 defer 给剩下的调用补一条 interrupted 回执：模型上下文里 assistant
+	// 声明的 toolCalls 必须逐个有回执，缺一条下一次请求就会被 OpenAI 兼容端点以
+	// 「Tool result is missing for tool call …」拒掉，整条线程从此无法继续。
+	receipted := make(map[string]bool, len(calls))
+	record := func(call domain.ToolCall, res domain.Result) {
+		r.appendToolResult(call, res)
+		receipted[call.CallID] = true
+	}
+	deny := func(call domain.ToolCall, reason, detail string) {
+		r.recordDenied(call, reason, detail)
+		receipted[call.CallID] = true
+	}
+	defer func() {
+		// 补写失败不能盖住原始 panic/错误：这一层只保证「尽力补齐」。
+		defer func() { _ = recover() }()
+		for _, call := range calls {
+			if receipted[call.CallID] {
+				continue
+			}
+			r.recordInterrupted(call, "轮次在工具执行期间中断，未产生结果")
+		}
+	}()
+
 	for _, call := range calls {
 		if r.ctx.Err() != nil {
-			r.recordDenied(call, "cancelled", "轮次已取消，未执行该工具")
+			deny(call, "cancelled", "轮次已取消，未执行该工具")
 			r.keepPartialMessage()
 			return toolsCancelled
 		}
@@ -70,7 +94,7 @@ func (r *run) runTools(calls []domain.ToolCall, catalog []domain.Descriptor) too
 				Content: []domain.Part{{Type: domain.PartText, Text: "tool_not_found: 该工具本轮不可用"}},
 				Receipt: domain.Receipt{Status: domain.ReceiptError, Reason: "tool_not_found"},
 			}
-			r.appendToolResult(call, res)
+			record(call, res)
 			r.emitErrorCode(domain.CodeToolNotFound, "工具 "+call.Tool+" 不在本轮目录里")
 			continue
 		}
@@ -79,7 +103,7 @@ func (r *run) runTools(calls []domain.ToolCall, catalog []domain.Descriptor) too
 		verdict, err := r.beforeCall(call, desc)
 		if err != nil {
 			// tool.beforeCall 是唯一失败关闭的安全点（06 §6.6）。
-			r.recordDenied(call, "hook failed", err.Error())
+			deny(call, "hook failed", err.Error())
 			continue
 		}
 		if verdict.Aborted {
@@ -88,7 +112,7 @@ func (r *run) runTools(calls []domain.ToolCall, catalog []domain.Descriptor) too
 		}
 		if !verdict.Allowed {
 			// deny 是工具结果（INV-5）：记 denied 回执并把结果喂回模型，轮次继续。
-			r.recordDenied(call, "denied", verdict.Reason)
+			deny(call, "denied", verdict.Reason)
 			r.hook(HookToolAfterCall, mustJSON(map[string]any{"callId": call.CallID, "tool": call.Tool, "status": "denied"}))
 			continue
 		}
@@ -100,12 +124,12 @@ func (r *run) runTools(calls []domain.ToolCall, catalog []domain.Descriptor) too
 			}
 		}
 		if reason, denied := r.policyDeny(desc); denied {
-			r.recordDenied(call, reason, "没有可用的策略插件")
+			deny(call, reason, "没有可用的策略插件")
 			continue
 		}
 
 		res := r.deps.Runner.Execute(r.ctx, domain.ToolCall{CallID: call.CallID, Tool: call.Tool, Args: args})
-		r.appendToolResult(call, res)
+		record(call, res)
 		r.hook(HookToolAfterCall, mustJSON(map[string]any{
 			"callId": call.CallID, "tool": call.Tool, "status": string(res.Receipt.Status),
 		}))
@@ -157,6 +181,20 @@ func (r *run) recordDenied(call domain.ToolCall, reason, detail string) {
 	res := domain.Result{
 		Content: []domain.Part{{Type: domain.PartText, Text: "denied by policy: " + detail}},
 		Receipt: domain.Receipt{Status: domain.ReceiptDenied, StartedAt: now, FinishedAt: now, Reason: reason},
+	}
+	r.appendToolResult(call, res)
+}
+
+// recordInterrupted 给「本轮没来得及执行」的调用补回执。
+//
+// 场景是取消、钩子中止、循环熔断与 panic：这些路径不会再回到模型请求，
+// 但历史里 assistant 的 toolCalls 仍然存在，缺回执的上下文会让后续轮次
+// 永远被端点拒绝，因此这里必须把缺口补上（02 §5.4 interrupted）。
+func (r *run) recordInterrupted(call domain.ToolCall, detail string) {
+	now := r.deps.Clock.Now()
+	res := domain.Result{
+		Content: []domain.Part{{Type: domain.PartText, Text: "interrupted: " + detail}},
+		Receipt: domain.Receipt{Status: domain.ReceiptInterrupted, StartedAt: now, FinishedAt: now, Reason: "interrupted"},
 	}
 	r.appendToolResult(call, res)
 }

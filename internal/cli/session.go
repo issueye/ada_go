@@ -749,6 +749,19 @@ func (s *Session) ProviderConfigs() []provider.Config {
 // Store 返回工作区存储句柄（Core RPC 的线程/entry 查询复用它）。
 func (s *Session) Store() *sqlite.Store { return s.store }
 
+// ContextBreakdown 返回提示词侧的两块上下文开销（系统提示、工具声明）的估算
+// token；消息窗口由调用方从 head 路径累加。三段合计才是发给模型的那次请求。
+//
+// 与引擎同一套估算与装配（engine.SystemPromptTokens / ToolSchemaTokens），
+// 用户补上真实 contextWindow 后，环上的占比和压缩水位是同一个数。
+func (s *Session) ContextBreakdown(ctx context.Context, threadID string) (systemTokens, toolTokens int) {
+	s.mu.Lock()
+	deps := s.deps
+	s.mu.Unlock()
+	spec := engine.TurnSpec{ThreadID: threadID, Model: s.ModelRefFor(threadID)}
+	return engine.SystemPromptTokens(ctx, spec, deps.Prompts, deps.Skills), engine.ToolSchemaTokens(ctx, deps.Tools)
+}
+
 // Workspace 返回规范化后的工作区路径。
 func (s *Session) Workspace() string { return s.cfg.Workspace }
 
