@@ -281,20 +281,51 @@ MCP canvas_screenshot ─► POST /api/capture ─► 任务入队
   旧请求回来时若代际已变就丢弃结果，避免面板显示过期元素。
 - 代码在独立的 `static/inspect.js`（`canvas.js` 只管视图、拖动、同步、截图）。
 
+#### 界面设计系统（画布工具蒙皮）
+
+工具条、双浮窗、检查器、弹层与空态的**颜色/字号/圆角/间距/层级**只来自
+`static/tokens.css` 的 `--ui-*` 令牌；规范、审计与验收细则见
+[DESIGN-SYSTEM-UI.md](DESIGN-SYSTEM-UI.md)。要点：
+
+- **单色品牌**：纸面 `#EDE8DC` / 墨纸 `#14151A`，品牌就是墨本身（浅色墨底纸字，
+  深色纸底墨字）。彩色只留给状态（success/warn/danger，成对 soft+ink）与
+  检查标注的数据编码色（A 蓝 / B 红）。预览卡是页面里唯一的彩色源。
+- **缺省主题是纸面（light）**：`-theme` 参数落到 `Server.Theme`，`GET /` 把
+  `index.html` 里的 `data-theme="__ADAGO_THEME__"` 占位替换成实际主题；
+  用户点「切换界面主题」写 `localStorage adago.theme`，页面 bootstrap 在样式表之前应用（无白闪）。
+- **分层令牌**（`tokens.css` 明暗两套齐全）：
+  面 `canvas/surface/elevated/subtle`、线 `line/line-strong`、字 `ink/ink-2/ink-3`、
+  品牌 `brand/on-brand/brand-soft`、状态成对、`focus`、`scrim`、三级 `shadow`；
+  标尺 `space-1..16`（偶数网格）、`radius-xs..full`（7 档取代原 13 种）、
+  `text-xs..xl`（**废止 8px 与 10px**）、`z-paper..drag`（取代 10 个魔法数）。
+- **布局常量单源**：`--ui-gutter` / `--ui-dock-w` / `--ui-inspector-w` / `--ui-top-safe` /
+  `--ui-node-head-h` 由 JS 用 `getComputedStyle` 读（`tokenPx()`），
+  `leftDockWidth()` / `visibleRect()` / `fitView()` 不再复制 292/288/296/148 这些副本。
+- **交互组件**：原生 `prompt()/confirm()` 全部换成 `uiAsk()/uiConfirm()` 体系弹层
+  （点外关闭 / Esc / Tab 陷阱 / 焦点归还）；toast 普通 2.4s、错误 4.2s，
+  `role=status|alert` + `aria-live`；全局 `:focus-visible` 兜底 + `prefers-reduced-motion`。
+- **截图跟随主题**：`rasterize()` 与画布导出从令牌取底色/连线/标签色，
+  不再写死 `#7c5cff/#16171d`（浅色主题不再导出深色连线）。
+
+机器门禁在 `internal/canvas/ui_tokens_test.go`：令牌完整性、明暗对比度 ≥4.5、
+`canvas.css` 零原始色值/零字号圆角字面、JS 零色值与零原生对话框、`tokens.css` 先于 `canvas.css`。
+
 #### 滚动条（视觉一致性）
 
-面板与预览文档各有一套规则，但视觉统一为「透明轨道 + 6px 悬浮滑块」：
+面板与预览文档各有一套规则，但视觉统一为「透明轨道 + 悬浮细滑块」：
 
 ```css
-*{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--fg2) 38%,transparent) transparent}
+*{scrollbar-width:thin;
+  scrollbar-color:color-mix(in srgb,var(--ui-ink-3) 34%,transparent) transparent}
 ::-webkit-scrollbar{width:10px;height:10px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--fg2) 32%,transparent);
+::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--ui-ink-3) 30%,transparent);
   border-radius:999px;border:2px solid transparent;background-clip:padding-box}
 ```
 
 - 10px 是**命中区**，2px 透明边框内缩后视觉宽度约 6px，既细又好抓；
 - 轨道透明，避免深色主题下出现一条高对比灰带；
+- 滑块色取自 `--ui-ink-3` 而不是旧的 `--fg2`，与文字色阶同源；
 - 预览文档（iframe 内部）单独注入一份，用 `--ds-color-text-3` 着色，
   与所在体系主题一致，且不会挤占版心宽度。
 

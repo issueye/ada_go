@@ -50,11 +50,28 @@ type Server struct {
 	tasks   *TaskQueue
 	origin  string // 允许的 Origin（http://127.0.0.1:port）
 	Catalog CatalogSource
+	// Theme 是界面缺省主题（light|dark），来自 -theme；用户手动切换的
+	// localStorage 覆盖在页面 bootstrap 里完成（见 static/index.html）。
+	Theme string
 }
 
 // NewServer 构造画布服务。
 func NewServer(store *Store, tasks *TaskQueue, origin string) *Server {
-	return &Server{store: store, tasks: tasks, origin: origin}
+	return &Server{store: store, tasks: tasks, origin: origin, Theme: ThemeLight}
+}
+
+// 界面主题取值；缺省为纸面（浅色），与 UED 的 Black Swan 缺省态一致。
+const (
+	ThemeLight = "light"
+	ThemeDark  = "dark"
+)
+
+// NormalizeTheme 把任意输入收敛成合法主题名。
+func NormalizeTheme(t string) string {
+	if strings.EqualFold(strings.TrimSpace(t), ThemeDark) {
+		return ThemeDark
+	}
+	return ThemeLight
 }
 
 // Handler 组装全部路由。
@@ -92,9 +109,28 @@ func (s *Server) Handler() http.Handler {
 			fileServer.ServeHTTP(w, r)
 			return
 		}
-		http.ServeFileFS(w, r, staticRoot, "index.html")
+		s.serveIndex(w, r, staticRoot)
 	})
 	return s.guard(mux)
+}
+
+// serveIndex 输出 index.html，并把缺省主题注入 data-theme 占位符。
+// 用占位符替换而不是字符串拼接：主题名只可能是 light|dark（白名单收敛），
+// 且静态文件与其测试保持原样可读。
+func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request, staticRoot fs.FS) {
+	raw, err := fs.ReadFile(staticRoot, "index.html")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"error": Error{Code: "internal", Message: "index.html 不可用"},
+		})
+		return
+	}
+	theme := NormalizeTheme(s.Theme)
+	body := strings.Replace(string(raw), "data-theme=\"__ADAGO_THEME__\"",
+		`data-theme="`+theme+`"`, 1)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write([]byte(body))
 }
 
 // guard 统一处理：Origin 校验（写操作）、panic 兜底。

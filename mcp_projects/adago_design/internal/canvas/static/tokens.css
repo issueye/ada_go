@@ -1,0 +1,180 @@
+/* adago-design 画布界面 · 设计令牌（唯一真源）
+ *
+ * 只定义令牌，不含任何组件规则；组件样式一律引用这里，禁止写原始色值/字号/圆角。
+ * 语义命名与宿主 docs/19-ued.md 的 --ph-* 一一对齐（canvas/surface/elevated/subtle/
+ * line/ink/muted/faint/brand/on-brand/状态成对/焦点/滚动条/动效），未来并库只需改名。
+ *
+ * 主题：缺省 = 纸面（Black Swan 浅色）；html[data-theme="dark"] = 墨纸反转。
+ * 说明见 DESIGN-SYSTEM-UI.md §3。
+ */
+
+:root {
+  /* ---------- 面 ---------- */
+  --ui-canvas: #EDE8DC;        /* 画布工作区底 */
+  --ui-surface: #FBF8F1;       /* 浮窗 / 工具条 / 检查器 */
+  --ui-elevated: #FFFDF8;      /* 菜单 / 弹层 / 卡片 */
+  --ui-subtle: #F2EDE2;        /* 弱底：chip / 输入框 / hover */
+  --ui-subtle-strong: #E7E1D2; /* 选中弱底 */
+
+  /* ---------- 线 ---------- */
+  --ui-line: #DCD5C6;
+  --ui-line-strong: #C9C0AC;
+
+  /* ---------- 文字（对比度见 §3.2） ---------- */
+  --ui-ink: #16171A;           /* 正文 16.17:1 */
+  --ui-ink-2: #57544C;         /* 次要 6.82:1 */
+  --ui-ink-3: #6E6A60;         /* 辅助 4.87:1（11px 也达标） */
+
+  /* ---------- 品牌（单色：墨黑 × 宣纸） ---------- */
+  --ui-brand: #16171A;
+  --ui-on-brand: #F6F3EC;
+  --ui-brand-soft: #E7E1D2;
+
+  /* ---------- 状态（成对 soft + ink，两者都 ≥4.5） ---------- */
+  --ui-success-soft: #E7F3EA;
+  --ui-success-ink: #1F7A3D;
+  --ui-warn-soft: #FBEEDA;
+  --ui-warn-ink: #8A5300;
+  --ui-danger-soft: #FBE9E7;
+  --ui-danger-ink: #B3261E;
+
+  /* ---------- 检查标注（数据编码色，与体系肤色无关） ---------- */
+  --ui-ins-a: #0B5FFF;
+  --ui-ins-b: #C81E48;
+  /* 压在标注色上的文字：浅色主题是白字（5.13/5.62），深色主题标注本身变亮，
+     必须换成墨字（6.77/7.49），否则白字只有 2.34:1 */
+  --ui-on-ins: #FFFFFF;
+
+  /* ---------- 系统 ---------- */
+  --ui-focus: #16171A;
+  --ui-focus-halo: rgba(22, 23, 26, .28);
+  --ui-scrim: rgba(22, 23, 26, .36);
+  --ui-scrim-blur: 6px;
+  --ui-shadow-1: 0 1px 2px rgba(30, 26, 18, .08);
+  --ui-shadow-2: 0 6px 18px rgba(30, 26, 18, .10), 0 1px 2px rgba(30, 26, 18, .06);
+  --ui-shadow-3: 0 18px 48px rgba(30, 26, 18, .16), 0 2px 6px rgba(30, 26, 18, .08);
+  --ui-shadow-node: 0 8px 22px rgba(30, 26, 18, .10);
+  --ui-shadow-node-drag: 0 20px 44px rgba(30, 26, 18, .22);
+
+  /* ---------- 排版 ---------- */
+  --ui-font: "Inter", "Noto Sans SC", system-ui, -apple-system, "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  --ui-font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --ui-text-xs: 11px;
+  --ui-text-sm: 12px;
+  --ui-text-md: 13px;
+  --ui-text-lg: 15px;
+  --ui-text-xl: 17px;
+  --ui-lh-tight: 1.25;
+  --ui-lh-base: 1.5;
+  --ui-lh-relaxed: 1.7;
+  --ui-weight-regular: 400;
+  --ui-weight-medium: 500;
+  --ui-weight-bold: 700;
+  --ui-tracking-label: .06em;
+
+  /* ---------- 间距（偶数网格） ---------- */
+  --ui-space-1: 2px;
+  --ui-space-2: 4px;
+  --ui-space-3: 6px;
+  --ui-space-4: 8px;
+  --ui-space-5: 10px;
+  --ui-space-6: 12px;
+  --ui-space-8: 16px;
+  --ui-space-10: 20px;
+  --ui-space-12: 24px;
+  --ui-space-16: 32px;
+
+  /* ---------- 圆角 ---------- */
+  --ui-radius-xs: 2px;
+  --ui-radius-sm: 4px;
+  --ui-radius-md: 6px;
+  --ui-radius-lg: 8px;
+  --ui-radius-xl: 10px;
+  --ui-radius-2xl: 12px;
+  --ui-radius-full: 999px;
+
+  /* ---------- 控件 ---------- */
+  --ui-control-sm: 24px;
+  --ui-control-md: 28px;
+  --ui-control-lg: 32px;
+  --ui-border-w: 1px;
+  --ui-focus-w: 2px;
+
+  /* ---------- 布局常量（JS 从这里读，禁止再复制数值） ---------- */
+  --ui-gutter: 12px;
+  --ui-dock-w: 280px;
+  --ui-inspector-w: 288px;
+  --ui-toolbar-h: 44px;
+  --ui-top-safe: 56px;        /* 工具条高 + 上下外距，内容避让线 */
+  --ui-solo-bar-h: 44px;
+  --ui-node-head-h: 32px;
+  --ui-node-radius: var(--ui-radius-2xl);
+
+  /* ---------- 层级 ---------- */
+  --ui-z-paper: 0;
+  --ui-z-edge: 1;
+  --ui-z-label: 6;
+  --ui-z-panel: 20;
+  --ui-z-solo: 32;
+  --ui-z-toolbar: 34;
+  --ui-z-toast: 40;
+  --ui-z-popover: 45;
+  --ui-z-modal: 50;
+  --ui-z-rel: 60;
+  --ui-z-drag: 9999;
+
+  /* ---------- 动效 ---------- */
+  --ui-dur-fast: 120ms;
+  --ui-dur-base: 180ms;
+  --ui-dur-slow: 240ms;
+  --ui-ease: cubic-bezier(.2, .7, .3, 1);
+  --ui-transition: background-color var(--ui-dur-base) var(--ui-ease),
+    border-color var(--ui-dur-base) var(--ui-ease),
+    color var(--ui-dur-base) var(--ui-ease),
+    box-shadow var(--ui-dur-base) var(--ui-ease),
+    transform var(--ui-dur-base) var(--ui-ease);
+
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  --ui-canvas: #14151A;
+  --ui-surface: #1C1E24;
+  --ui-elevated: #23262E;
+  --ui-subtle: #242730;
+  --ui-subtle-strong: #2C303A;
+
+  --ui-line: #2E313A;
+  --ui-line-strong: #3D414C;
+
+  --ui-ink: #F2EFE7;           /* 15.60:1 */
+  --ui-ink-2: #B9B5AA;         /* 8.13:1 */
+  --ui-ink-3: #9A9588;         /* 5.57:1 */
+
+  --ui-brand: #F2EFE7;
+  --ui-on-brand: #16171A;
+  --ui-brand-soft: #2A2D35;
+
+  --ui-success-soft: #1B2A22;
+  --ui-success-ink: #63D68E;
+  --ui-warn-soft: #2B2517;
+  --ui-warn-ink: #F2B84B;
+  --ui-danger-soft: #2E1B1D;
+  --ui-danger-ink: #FF8A93;
+
+  --ui-ins-a: #6E9BFF;
+  --ui-ins-b: #FF7D96;
+  --ui-on-ins: #14151A;
+
+  --ui-focus: #F2EFE7;
+  --ui-focus-halo: rgba(242, 239, 231, .24);
+  --ui-scrim: rgba(8, 9, 12, .62);
+  --ui-shadow-1: 0 1px 2px rgba(0, 0, 0, .3);
+  --ui-shadow-2: 0 6px 18px rgba(0, 0, 0, .38), 0 1px 2px rgba(0, 0, 0, .24);
+  --ui-shadow-3: 0 18px 48px rgba(0, 0, 0, .5), 0 2px 6px rgba(0, 0, 0, .3);
+  --ui-shadow-node: 0 8px 22px rgba(0, 0, 0, .34);
+  --ui-shadow-node-drag: 0 20px 44px rgba(0, 0, 0, .5);
+
+  color-scheme: dark;
+}

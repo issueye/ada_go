@@ -66,7 +66,7 @@ Flags:
   -data string   数据目录（默认 %APPDATA%\adago-design，可被 ADAGO_DESIGN_DATA 覆盖）
   -open          启动后打开系统默认浏览器（serve 模式默认开启；mcp 模式需显式指定，
                  或设置 ADAGO_DESIGN_OPEN=1）
-  -theme string  画布界面主题 dark|light，默认 dark
+  -theme string  画布界面主题 light（纸面，默认）|dark（墨纸）；界面切换会记在浏览器里
 `)
 }
 

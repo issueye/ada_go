@@ -54,7 +54,7 @@ func FromFlags(name string, args []string) (*Config, error) {
 	dataDir := fs.String("data", "", "数据目录（默认 %APPDATA%\\adago-design，可被 ADAGO_DESIGN_DATA 覆盖）")
 	fs.BoolVar(&cfg.Open, "open", os.Getenv("ADAGO_DESIGN_OPEN") == "1", "启动后打开系统默认浏览器")
 	fs.Bool("no-open", false, "serve 模式下不自动打开浏览器（等价 -open=false）")
-	theme := fs.String("theme", "dark", "画布界面主题: dark|light")
+	theme := fs.String("theme", "light", "画布界面主题: light（纸面，缺省）|dark（墨纸）")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
@@ -63,10 +63,12 @@ func FromFlags(name string, args []string) (*Config, error) {
 	} else {
 		cfg.DataDir = DefaultDataDir()
 	}
-	if *theme == "light" {
-		cfg.Theme = "light"
-	} else {
+	// 主题白名单收敛：只接受 light/dark，其余按缺省（纸面）处理。
+	// 注意：用户手动切换会写到 localStorage 并在页面 bootstrap 时覆盖此缺省。
+	if strings.EqualFold(strings.TrimSpace(*theme), "dark") {
 		cfg.Theme = "dark"
+	} else {
+		cfg.Theme = "light"
 	}
 	if cfg.Port < 0 || cfg.Port > 65535 {
 		return nil, fmt.Errorf("端口 %d 超出范围", cfg.Port)

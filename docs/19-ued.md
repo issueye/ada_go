@@ -185,9 +185,17 @@ ada 词根统一，四种写法各有边界，**不得混用**：
 - **门禁**：`go test ./...`、`go vet ./...`、staticcheck、`adag verify`（13 项，其中 ui 项校验 tokens 来源头、a_da 副本清单、模板无内联 style）；UI 变更加走 19.3.3 主题清单 / 本篇对应条款的自查。
 - **文档先行**（沿 design.md 约定）：改令牌、组件、交互模式前先改本篇与 07 §7.7，再改实现；`adag verify ui` 的基线断言同步更新。
 - **镜像纪律**：`tokens.css`、`app.css`、`theme.js` 等上游镜像文件不做本地修改；本地能力一律以新文件叠加（先例：`app.js` 的窄屏补丁、本次的 `themes.js`/`themes.css`）。
+- **自成一体模块的界面同样遵守本篇**：`mcp_projects/adago_design` 是独立 Go module（`GOWORK=off`），
+  不能 import 宿主 `tokens.css`，因此它建了一份**同构的本地令牌层** `internal/canvas/static/tokens.css`
+  （`--ui-*` 语义与 `--ph-*` 一一对齐：canvas/surface/elevated/subtle/line/ink/muted/faint/
+  brand/on-brand/状态成对/focus/scrollbar/动效）。规则不变：单色品牌、缺省纸面（Black Swan）、
+  彩色只给状态与数据编码、令牌单源、禁用原生 `prompt/confirm`、焦点环与减少动效全覆盖；
+  机器门禁落在 `internal/canvas/ui_tokens_test.go`，设计系统说明见该模块 `DESIGN-SYSTEM-UI.md`。
+  **新增自成一体模块的界面时照此办理**：本地令牌层 + 同名语义 + 同样的门禁清单，而不是另起一套配色。
 - 本篇变更历史记录在文末；大版本随《UI 优化方案》里程碑推进。
 
 ---
 
 *变更：v1（2026-11-03）——初版：原则、品牌（命名/主题/文案/动效/资产）、令牌体系与主题准入、组件与 DOM、交互模式、可访问性、治理。*
 *变更：v1.1（2026-11-04）——补「标题层级」（一篇页面一个 h1）与「提交态」（整页 POST 的 pending 与防重复）两条，来源见优化方案批次 E。*
+*变更：v1.3（2026-11-09）——补「自成一体模块的界面同样遵守本篇」：adago_design 画布界面建立同构 `--ui-*` 本地令牌层、缺省纸面、单色品牌与机器门禁（见该模块 `DESIGN-SYSTEM-UI.md`）。*

@@ -47,6 +47,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Server, error) {
 
 	canvasSrv := canvas.NewServer(store, tasks, "")
 	canvasSrv.Catalog = Catalog{}
+	canvasSrv.Theme = canvas.NormalizeTheme(cfg.Theme)
 	handler := canvasSrv.Handler()
 	var ln net.Listener
 	for port := cfg.Port; port <= cfg.Port+20; port++ {

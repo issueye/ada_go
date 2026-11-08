@@ -24,13 +24,15 @@ const S = {
   solo: null,           // 单画布聚焦：只显示这一张设计稿（双击项目树子项 / 双击卡片）
 };
 
-const HEAD_H = 32;       // .node__head 高度（检查模式换算世界坐标要用）
+// 节点标题栏高度：唯一真源是 tokens.css 的 --ui-node-head-h，
+// 这里启动时读一次（检查模式换算世界坐标要用）。取不到再退回 32。
+const HEAD_H = tokenPx("--ui-node-head-h", 32);
 
 const $ = (id) => document.getElementById(id);
 const viewport = $("viewport"), world = $("world"), grid = $("grid-layer");
 const edgeSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
 edgeSvg.id = "edges";
-edgeSvg.innerHTML = '<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c5cff"/></marker></defs>';
+edgeSvg.innerHTML = '<defs><marker id="arrow" class="edge-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>';
 world.appendChild(edgeSvg);
 
 // 关系标注层（世界坐标系，跨卡片绘制；检查模式使用）
@@ -45,14 +47,136 @@ paperEl.className = "hidden";
 paperEl.innerHTML = '<span class="cv-label"><b class="cv-size"></b><span class="cv-ratio"></span></span>';
 world.insertBefore(paperEl, edgeSvg);
 
+// ---------------- 设计令牌读取 ----------------
+// 布局/颜色常量的唯一真源是 tokens.css。JS 只读，不复制数值：
+// 以前 leftDockWidth() 返回 292、fitView() 写 296/320/148，改样式就要同步改 JS。
+function tokenPx(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function tokenColor(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+
+// 画布界面 tokens 的 z-index / 布局常量（在 <head> 里已加载，启动即可读）
+const UI = {
+  headH: HEAD_H,
+  gutter: tokenPx("--ui-gutter", 12),
+  dockW: tokenPx("--ui-dock-w", 280),
+  inspectorW: tokenPx("--ui-inspector-w", 288),
+  toolbarH: tokenPx("--ui-toolbar-h", 44),
+  topSafe: tokenPx("--ui-top-safe", 56),
+  soloBarH: tokenPx("--ui-solo-bar-h", 44),
+};
+
+// ---------------- 询问 / 确认弹层 ----------------
+// 原生 prompt()/confirm() 由浏览器绘制，字体、圆角、语气全部脱离体系；
+// prompt 在部分环境被静默禁用 → 删项目、便签会直接不可用。这里统一走体系弹层，
+// 并补齐弹层四要素：点外关闭、Esc 关闭、Tab 陷阱、关闭后焦点归还（UED §19.5.1）。
+let askState = null;
+
+function focusables(root) {
+  return [...root.querySelectorAll(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+    .filter((el) => !el.disabled && el.offsetParent !== null);
+}
+
+function closeAsk(result) {
+  const box = $("ask-modal");
+  if (!box || box.classList.contains("hidden")) return;
+  box.classList.add("hidden");
+  const st = askState;
+  askState = null;
+  $("ask-input").value = "";
+  $("ask-error").textContent = "";
+  if (st && st.restore && typeof st.restore.focus === "function") st.restore.focus();
+  if (st && st.resolve) st.resolve(result);
+}
+
+// uiAsk({title, note, defaultValue, placeholder, okText, multiline}) → Promise<string|null>
+function uiAsk(opt) {
+  const o = opt || {};
+  return new Promise((resolve) => {
+    const box = $("ask-modal");
+    const restore = document.activeElement;
+    $("ask-title").textContent = o.title || "请输入";
+    $("ask-note").textContent = o.note || "";
+    $("ask-note").classList.toggle("hidden", !o.note);
+    $("ask-error").textContent = "";
+    const wrap = $("ask-field-wrap");
+    wrap.classList.toggle("hidden", o.field === false);
+    const input = $("ask-input");
+    input.value = o.defaultValue || "";
+    input.placeholder = o.placeholder || "";
+    input.rows = o.rows || 3;
+    // 单行询问（如重命名）不该占三行高：默认 min-height 只给多行输入
+    input.classList.toggle("ask-input--single", (o.rows || 3) <= 1);
+    $("ask-cancel").textContent = o.cancelText || "取消";
+    $("ask-ok").textContent = o.okText || "确定";
+    $("ask-ok").className = "btn btn--primary";
+    askState = { resolve, restore, mode: "ask", opt: o };
+    box.classList.remove("hidden");
+    box.dataset.kind = "ask";
+    setTimeout(() => { if (o.field !== false) { input.focus(); input.select(); } else $("ask-ok").focus(); }, 0);
+  });
+}
+
+// uiConfirm({title, note, okText, danger}) → Promise<boolean>
+function uiConfirm(opt) {
+  const o = opt || {};
+  return new Promise((resolve) => {
+    const box = $("ask-modal");
+    const restore = document.activeElement;
+    $("ask-title").textContent = o.title || "请确认";
+    $("ask-note").textContent = o.note || "";
+    $("ask-note").classList.toggle("hidden", !o.note);
+    $("ask-error").textContent = "";
+    $("ask-field-wrap").classList.add("hidden");
+    $("ask-cancel").textContent = o.cancelText || "取消";
+    $("ask-ok").textContent = o.okText || "确定";
+    $("ask-ok").className = "btn " + (o.danger ? "btn--danger" : "btn--primary");
+    askState = { resolve, restore, mode: "confirm", opt: o };
+    box.classList.remove("hidden");
+    box.dataset.kind = "confirm";
+    setTimeout(() => $("ask-ok").focus(), 0);
+  });
+}
+
+function submitAsk() {
+  const st = askState;
+  if (!st) return;
+  if (st.mode === "confirm") { closeAsk(true); return; }
+  const val = $("ask-input").value;
+  if (st.opt && typeof st.opt.validate === "function") {
+    const err = st.opt.validate(val);
+    if (err) {
+      $("ask-error").textContent = err;
+      $("ask-input").focus();
+      return;
+    }
+  }
+  closeAsk(val);
+}
+
 // ---------------- 工具 ----------------
 function toast(msg, isErr) {
   const t = $("toast");
   t.textContent = msg;
   t.classList.toggle("err", !!isErr);
-  t.classList.remove("hidden");
+  t.classList.toggle("hidden", false);
+  // 语义二分：普通反馈 role=status（polite），错误 role=alert（immediate）
+  t.setAttribute("role", isErr ? "alert" : "status");
+  t.setAttribute("aria-live", isErr ? "assertive" : "polite");
+  // 重放入场动画：连续相同文案也要有反馈（移除类再强制重排）
+  t.classList.remove("toast-in");
+  void t.offsetWidth;
+  t.classList.add("toast-in");
   clearTimeout(toast._h);
-  toast._h = setTimeout(() => t.classList.add("hidden"), 2600);
+  // 时长对齐 UED §19.5.3：普通 2.4s / 错误 4.2s
+  toast._h = setTimeout(() => t.classList.add("hidden"), isErr ? 4200 : 2400);
 }
 
 async function api(path, opts) {
@@ -122,19 +246,15 @@ function fitView() {
   minX -= labelPad;
   const bw = maxX - minX + pad * 2, bh = maxY - minY + pad * 2;
   const gutter = leftDockWidth();
-  const availW = innerWidth - (soloNode ? gutter + 64 : 320);
-  const availH = innerHeight - (soloNode ? 150 : 120);
+  const availW = innerWidth - (soloNode ? gutter + UI.inspectorW : gutter + UI.gutter * 2 + 48);
+  const availH = innerHeight - (soloNode ? 150 : UI.topSafe + UI.gutter * 3);
   const cap = soloNode ? 1.6 : 1.2;
   const scale = Math.min(cap, Math.max(0.08, Math.min(availW / bw, availH / bh)));
   S.scale = scale;
-  if (soloNode) {
-    // 聚焦视图按「侧栏右侧 + 工具条下方」的可见区居中
-    S.tx = (gutter + innerWidth) / 2 - (minX + maxX) / 2 * scale;
-    S.ty = (66 + innerHeight) / 2 - (minY + maxY) / 2 * scale;
-  } else {
-    S.tx = (innerWidth + 296) / 2 - (minX + maxX) / 2 * scale - 148;
-    S.ty = innerHeight / 2 - (minY + maxY) / 2 * scale;
-  }
+  // 居中到「浮窗右侧、工具条下方、检查器左侧」的可见区
+  const v = visibleRect();
+  S.tx = v.x + v.w / 2 - (minX + maxX) / 2 * scale;
+  S.ty = v.y + v.h / 2 - (minY + maxY) / 2 * scale;
   applyTransform();
   scheduleEdges("*");
 }
@@ -337,18 +457,19 @@ function canvasBounds() {
 }
 
 // 可视区：扣掉左侧浮窗、右侧检查器、顶部工具条（聚焦时还有一条返回条）。
+// 数值全部来自 tokens.css 的布局令牌，这里不再复制 292/288/64。
 function leftDockWidth() {
   const dock = $("left-dock");
   if (!dock) return 0;
   const open = [...dock.querySelectorAll(".dock-panel")].some((p) => !p.classList.contains("is-collapsed"));
-  return open ? 292 : 0;
+  return open ? UI.dockW + UI.gutter : 0;
 }
 
 function visibleRect() {
   const left = leftDockWidth();
   const inspEl = $("inspector");
-  const right = inspEl && !inspEl.classList.contains("hidden") ? 288 : 0;
-  const top = 64 + (S.solo ? 46 : 0);
+  const right = inspEl && !inspEl.classList.contains("hidden") ? UI.inspectorW : 0;
+  const top = UI.topSafe + UI.gutter + (S.solo ? UI.soloBarH + UI.gutter : 0);
   return {
     x: left, y: top,
     w: Math.max(160, innerWidth - left - right),
@@ -499,27 +620,53 @@ function removeNodeEl(id) {
 
 function hideEmptyHint() { const h = document.querySelector(".empty-hint"); if (h) h.remove(); }
 
-function showHint(html) {
+// 空态三件套：图标 + 标题（6–10 字）+ 说明句；可行动的空态带一个行动点。
+// 容器 pointer-events:none（不挡画布），只有行动按钮单独打开事件。
+function showHint(opts) {
   hideEmptyHint();
   const d = document.createElement("div");
   d.className = "empty-hint";
-  d.innerHTML = html;
+  d.innerHTML =
+    `<span class="empty-hint__icon">${icon(opts.icon || "note", 32)}</span>` +
+    `<b>${esc(opts.title)}</b>` +
+    `<span>${opts.desc}</span>` +
+    (opts.action ? `<button class="btn btn--primary empty-hint__act">${esc(opts.action)}</button>` : "");
   document.body.appendChild(d);
+  const act = d.querySelector(".empty-hint__act");
+  if (act && opts.onAction) act.addEventListener("click", opts.onAction);
 }
 
 function showEmptyHint() {
   if (!S.projects.length) {
-    showHint("<b>还没有项目</b><br>设计稿必须归属项目：点左侧「新建项目」创建（⇧N）<br>" +
-      "Agent 侧对应 project_create / project_list 工具");
+    showHint({
+      icon: "folder",
+      title: "还没有项目",
+      desc: "设计稿必须归属项目。新建一个项目后，左侧「设计体系」的预览就会落在它的画布上。<br>" +
+        "Agent 侧对应 project_create / project_list 工具。",
+      action: "新建项目",
+      onAction: openProjectModal,
+    });
     return;
   }
   if (isAllScope()) {
-    showHint("<b>项目里还没有设计稿</b><br>先在左侧选中一个项目，再从「设计体系」添加预览<br>" +
-      "或让 Agent 用 design_preview / design_screen 生成");
+    showHint({
+      icon: "grid",
+      title: "项目里还没有设计稿",
+      desc: "先在左侧选中一个项目，再从「设计体系」添加预览；<br>" +
+        "也可以让 Agent 用 design_preview / design_screen 生成。",
+      action: "选择一个项目",
+      onAction: () => $("tree-rows").focus(),
+    });
     return;
   }
-  showHint("<b>「" + esc(projectName(S.project)) + "」还没有设计稿</b><br>" +
-    "从左侧设计体系添加预览，或让 Agent 用 design_preview 生成");
+  showHint({
+    icon: "note",
+    title: "「" + esc(projectName(S.project)) + "」还没有设计稿",
+    desc: "从左侧设计体系添加预览，或让 Agent 用 design_preview 生成。",
+    action: "查看设计体系",
+    onAction: () => $("sys-collapse").getAttribute("aria-expanded") === "false"
+      ? togglePanel("system") : $("sb-list").focus(),
+  });
 }
 
 function selectNode(id) {
@@ -865,8 +1012,12 @@ function renderProjectTree() {
   rows.innerHTML = list.map((p) => {
     const active = p.id === S.project;
     const open = S.expanded.has(p.id);
-    return `<div class="tree-row${active ? " is-active" : ""}${open ? " is-open" : ""}" data-id="${esc(p.id)}">
-      <button class="tree-row__caret" data-act="toggle" title="${open ? "收起" : "展开"}">
+    return `<div class="tree-row${active ? " is-active" : ""}${open ? " is-open" : ""}"
+        data-id="${esc(p.id)}" role="treeitem" tabindex="0"
+        aria-selected="${active}" aria-expanded="${open}"
+        aria-label="${esc(p.name)}，${p.node_count} 个设计稿">
+      <button class="tree-row__caret" data-act="toggle" tabindex="-1"
+              title="${open ? "收起" : "展开"}" aria-label="${open ? "收起" : "展开"}项目">
         <svg class="ds-icon ds-icon--12" aria-hidden="true"><use href="#ds-ic-chevron-right"/></svg>
       </button>
       <span class="tree-row__icon">${icon(open ? "folder-open" : "folder", 14)}</span>
@@ -880,8 +1031,9 @@ function renderTreeChildren(p) {
   const nodes = S.treeNodes.get(p.id);
   if (!nodes) return '<div class="tree-children"><div class="tree-child">加载中…</div></div>';
   if (!nodes.length) return '<div class="tree-children"><div class="tree-child">暂无设计稿</div></div>';
-  return '<div class="tree-children">' + nodes.slice(0, 40).map((n) =>
-    `<div class="tree-child${n.id === S.solo ? " is-solo" : ""}" data-node="${esc(n.id)}" data-project="${esc(p.id)}" title="${esc(n.title || n.id)} · 单击定位 / 双击单独展示">` +
+  return '<div class="tree-children" role="group">' + nodes.slice(0, 40).map((n) =>
+    `<div class="tree-child${n.id === S.solo ? " is-solo" : ""}" data-node="${esc(n.id)}" data-project="${esc(p.id)}" tabindex="0"` +
+      ` title="${esc(n.title || n.id)} · 单击定位 / 双击单独展示">` +
       `${icon("note", 12)}<span>${esc(n.title || n.id)}</span></div>`
   ).join("") + "</div>";
 }
@@ -1212,22 +1364,38 @@ async function onProjectAction(act, id) {
     return;
   }
   if (act === "rename") {
-    const name = prompt("重命名项目：", target.name);
+    const name = await uiAsk({
+      title: "重命名项目",
+      note: "名称用于项目树、分组标签与导出文件名。",
+      defaultValue: target.name,
+      placeholder: "项目名称（最多 40 字）",
+      rows: 1,
+      okText: "保存",
+      validate: (v) => (v.trim() ? null : "项目名不能为空"),
+    });
     if (name == null) return;
-    if (!name.trim()) { toast("项目名不能为空", true); return; }
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === target.name) return;
     try {
       await api("/api/projects/" + encodeURIComponent(id), {
         method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim() }),
+        body: JSON.stringify({ name: trimmed }),
       });
       await reloadProjects();
       renderProjectRows();
-      toast("已重命名为：" + name.trim());
+      toast("已重命名为：" + trimmed);
     } catch (e) { toast("重命名失败: " + e.message, true); }
     return;
   }
   if (act === "remove") {
-    if (!confirm("删除项目「" + target.name + "」？\n只有空项目可以删除，项目下的设计稿需先清空。")) return;
+    const ok = await uiConfirm({
+      title: "删除项目",
+      note: "「" + target.name + "」下还有 " + (target.node_count || 0) +
+        " 个设计稿。只有空项目可以删除，需要先清空该项目。",
+      okText: "删除项目",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api("/api/projects/" + encodeURIComponent(id), { method: "DELETE" });
       if (S.project === id) {
@@ -1321,22 +1489,34 @@ async function showSystemDetail(id) {
     const radius = Object.entries((sys.light && sys.light.radius) || {});
     const comps = (sys.components || []);
     body.innerHTML = `
-      <div style="font-size:15px;font-weight:700">${esc(sys.name)}</div>
-      <div style="font-size:11px;color:var(--fg2);margin:2px 0 6px">${esc(sys.vendor)}</div>
-      <div style="font-size:12px;color:var(--fg2);line-height:1.6">${esc(sys.style && sys.style.summary || sys.description || "")}</div>
-      <div class="kv" style="margin-top:8px">
+      <div class="sys-detail__title">${esc(sys.name)}</div>
+      <div class="sys-detail__vendor">${esc(sys.vendor)}</div>
+      <div class="sys-detail__summary">${esc(sys.style && sys.style.summary || sys.description || "")}</div>
+      <div class="kv sys-detail__meta">
         <span class="chip">${icon("fit", 12)} ${esc(sys.default_artboard || "-")}</span>
         <span class="chip" title="字体授权构成">${icon("settings", 12)} ${esc(sys.font_license || "-")}</span>
       </div>
-      <div class="theme-seg" style="margin-top:10px">
+      <div class="theme-seg sys-detail__seg">
         <button data-th="light" class="${S.catalogTheme === "light" ? "active" : ""}">浅色</button>
         <button data-th="dark" class="${S.catalogTheme === "dark" ? "active" : ""}">深色</button>
       </div>
       <div class="sec"><div class="sec__title">颜色</div><div class="swatches">
-        ${colors.map(([k, v]) => `<div class="swatch" style="background:${esc(v.value || v)}" title="${esc(k)} = ${esc(v.value || v)}"><span>${esc(k.slice(0, 6))}</span></div>`).join("")}
+        ${colors.map(([k, v]) => {
+          const val = esc(v.value || v);
+          // 色值本身是数据：只作为色点注入。名字与色值用正文墨色落在纸上，
+          // 而不是压在色块上 —— 白色系色块上压白字必然不可读（旧实现的白字在 bg 上 1:1）。
+          return `<div class="swatch-row"><i class="swatch-dot" style="background:${val}"></i>` +
+            `<span class="swatch-name" title="${esc(k)}">${esc(k)}</span>` +
+            `<span class="swatch-val">${val}</span></div>`;
+        }).join("")}
       </div></div>
       <div class="sec"><div class="sec__title">字型</div>
-        ${levels.map(([k, v]) => `<div class="type-row"><span style="font-size:${Math.min(v.size || v.Size || 14, 22)}px;font-weight:${v.weight || v.Weight || 400}">${esc(k)}</span><small>${v.size || v.Size || "?"}px</small></div>`).join("")}
+        ${levels.map(([k, v]) => {
+          const trueSize = v.size || v.Size || 14;
+          const weight = v.weight || v.Weight || 400;
+          // 样例按 22px 封顶（浮窗只有 280 宽），显示的真实字号不受影响
+          return `<div class="type-row"><span class="type-row__sample" style="font-size:${Math.min(trueSize, 22)}px;font-weight:${weight}">${esc(k)}</span><small>${trueSize}px</small></div>`;
+        }).join("")}
       </div></div>
       <div class="sec"><div class="sec__title">间距 / 圆角</div><div class="kv">
         ${spacing.map(([k, v]) => `<span class="chip">${esc(k)} ${v}</span>`).join("")}
@@ -1415,12 +1595,12 @@ async function rasterize(html, width, height, scale) {
     canvas.width = Math.max(1, Math.round(width * scale));
     canvas.height = Math.max(1, Math.round(realH * scale));
     const ctx = canvas.getContext("2d");
-    // 底色取文档 body 的实际背景色，避免深色主题在内容未铺满处露白
-    let bg = "#ffffff";
+    // 底色取文档 body 的实际背景色，避免深色预览在内容未铺满处露白
+    let bg = tokenColor("--ui-elevated", "transparent");
     try {
       const c = doc.defaultView.getComputedStyle(doc.body).backgroundColor;
       if (c && c !== "rgba(0, 0, 0, 0)") bg = c;
-    } catch (_) { /* 保持白底 */ }
+    } catch (_) { /* 取不到就用节点面的令牌色 */ }
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -1448,15 +1628,21 @@ async function runCaptureTask(task) {
       canvas.width = Math.round((maxX - minX + pad * 2) * scale);
       canvas.height = Math.round((maxY - minY + pad * 2) * scale);
       const ctx = canvas.getContext("2d");
-      const pageBg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
-      ctx.fillStyle = pageBg || "#0f1014";
+      // 画布底色与连线/标签色全部读令牌：浅色主题导出浅色，深色导出深色，不再混色。
+      // 兜底用 transparent 而不是写死色值：令牌在 head 已加载，取不到说明样式没加载，
+      // 此时宁可留空也不要输出一套与界面不符的颜色。
+      const pageBg = tokenColor("--ui-canvas", "transparent");
+      ctx.fillStyle = pageBg;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       // 先画连线（与画布一致：连线在节点下层）
       const toX = (v) => (v - minX + pad) * scale, toY = (v) => (v - minY + pad) * scale;
-      ctx.strokeStyle = "#7c5cff";
-      ctx.fillStyle = "#e8e9ee";
+      const edgeInk = tokenColor("--ui-ink", "transparent");
+      const edgeStroke = tokenColor("--ui-brand", "transparent");
+      const labelBg = tokenColor("--ui-elevated", "transparent");
+      ctx.strokeStyle = edgeStroke;
+      ctx.fillStyle = edgeInk;
       ctx.lineWidth = 2 * scale;
-      ctx.font = `${Math.round(11 * scale)}px sans-serif`;
+      ctx.font = `${Math.round(11 * scale)}px ${tokenColor("--ui-font", "sans-serif")}`;
       for (const e of S.edges.values()) {
         const a = S.nodes.get(e.from), b = S.nodes.get(e.to);
         if (!a || !b || a.kind === "frame" || b.kind === "frame") continue;
@@ -1470,12 +1656,11 @@ async function runCaptureTask(task) {
         if (e.label) {
           const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
           const w = ctx.measureText(e.label).width + 8 * scale;
-          ctx.fillStyle = "#16171d";
+          ctx.fillStyle = labelBg;
           ctx.fillRect(mx - w / 2, my - 10 * scale, w, 16 * scale);
-          ctx.fillStyle = "#e8e9ee";
+          ctx.fillStyle = edgeInk;
           ctx.fillText(e.label, mx - w / 2 + 4 * scale, my + 3 * scale);
-          ctx.strokeStyle = "#7c5cff";
-          ctx.fillStyle = "#e8e9ee";
+          ctx.fillStyle = edgeInk;
         }
       }
       // 再叠节点（跳过分组框）
@@ -1553,15 +1738,28 @@ $("ratio-menu").addEventListener("click", async (e) => {
   }
   if (kind === "custom") {
     const cur = S.canvas ? S.canvas.width + "x" + S.canvas.height : "1440x900";
-    const raw = prompt("画布尺寸（宽 x 高，" + S.minSide + "-" + S.maxSide + "）：", cur);
+    // 用同一个 ask 弹层做校验：出错留在弹层里（Inline 错误），不关闭再弹第二条 toast
+    const parseSize = (raw) => raw.trim().match(/^(\d+)\s*[x×*]\s*(\d+)$/i);
+    const raw = await uiAsk({
+      title: "自定义画布尺寸",
+      note: "宽高需在 " + S.minSide + "–" + S.maxSide + " 之间，格式「宽 x 高」，如 1440x900。",
+      defaultValue: cur,
+      placeholder: cur,
+      rows: 1,
+      okText: "应用",
+      validate: (v) => {
+        const m = parseSize(v || "");
+        if (!m) return "格式应为「宽 x 高」，如 1440x900";
+        const w = Number(m[1]), h = Number(m[2]);
+        if (w < S.minSide || h < S.minSide || w > S.maxSide || h > S.maxSide) {
+          return "宽高需在 " + S.minSide + "–" + S.maxSide + " 之间";
+        }
+        return null;
+      },
+    });
     if (raw == null) return;
-    const m = raw.trim().match(/^(\d+)\s*[x×*]\s*(\d+)$/i);
-    if (!m) { toast("格式应为「宽 x 高」，如 1440x900", true); return; }
-    const w = Number(m[1]), h = Number(m[2]);
-    if (w < S.minSide || h < S.minSide || w > S.maxSide || h > S.maxSide) {
-      toast("宽高需在 " + S.minSide + "-" + S.maxSide + " 之间", true);
-      return;
-    }
+    if (!parseSize(raw)) return;
+    const w = Number(parseSize(raw)[1]), h = Number(parseSize(raw)[2]);
     await setCanvasConfig({ width: w, height: h }, "画布尺寸已更新");
     return;
   }
@@ -1642,6 +1840,33 @@ $("tree-rows").addEventListener("dblclick", (e) => {
   enterSolo(child.dataset.node, child.dataset.project);
 });
 
+// 键盘：树行 Enter 切作用域、空格展开/收起；子项 Enter 定位（双击语义保留给鼠标）
+$("tree-rows").addEventListener("keydown", (e) => {
+  const child = e.target.closest(".tree-child[data-node]");
+  if (child && (e.key === "Enter" || e.key === " ")) {
+    e.preventDefault();
+    focusNode(child.dataset.project, child.dataset.node);
+    return;
+  }
+  const row = e.target.closest(".tree-row");
+  if (!row) return;
+  if (e.key === " " || e.key === "ArrowRight") {
+    e.preventDefault();
+    if (!S.expanded.has(row.dataset.id)) toggleTreeRow(row.dataset.id);
+    else if (e.key === " ") toggleTreeRow(row.dataset.id);
+    return;
+  }
+  if (e.key === "ArrowLeft") {
+    e.preventDefault();
+    if (S.expanded.has(row.dataset.id)) toggleTreeRow(row.dataset.id);
+    return;
+  }
+  if (e.key === "Enter") {
+    e.preventDefault();
+    switchProject(row.dataset.id);
+  }
+});
+
 // 点空白关掉「更多」菜单
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".tree__head")) closeTreeMenu();
@@ -1663,9 +1888,39 @@ $("proj-name").addEventListener("keydown", (e) => {
 document.querySelectorAll("[data-proj-close]").forEach((el) => {
   el.addEventListener("click", closeProjectModal);
 });
+
+// ---- 询问/确认弹层：点外关闭、Esc 关闭、Tab 陷阱、焦点归还 ----
+function isAskOpen() {
+  const box = $("ask-modal");
+  return !!box && !box.classList.contains("hidden");
+}
+document.querySelectorAll("[data-ask-close]").forEach((el) => {
+  el.addEventListener("click", () => closeAsk(null));
+});
+$("ask-cancel").addEventListener("click", () => closeAsk(null));
+$("ask-ok").addEventListener("click", submitAsk);
+$("ask-input").addEventListener("keydown", (e) => {
+  // Enter 提交、Shift+Enter 换行；输入法组合中不拦（IME 必拦，UED §19.4）
+  if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+  e.preventDefault();
+  submitAsk();
+});
+$("ask-modal").addEventListener("keydown", (e) => {
+  if (e.key !== "Tab") return;
+  const list = focusables($("ask-modal"));
+  if (!list.length) return;
+  const first = list[0], last = list[list.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault(); last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault(); first.focus();
+  }
+});
+
 // Esc：先关「更多」菜单，再关弹层，不再落到「清空选择 / 退出检查模式」上
 window.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
+  if (isAskOpen()) { closeAsk(null); e.preventDefault(); e.stopPropagation(); return; }
   if (isProjectModalOpen()) { closeProjectModal(); e.preventDefault(); e.stopPropagation(); return; }
   const cvMenu = $("cv-menu"), ratioMenu = $("ratio-menu");
   if ((cvMenu && !cvMenu.classList.contains("hidden")) || (ratioMenu && !ratioMenu.classList.contains("hidden"))) {
@@ -1692,11 +1947,23 @@ window.addEventListener("keydown", (e) => {
 
 $("btn-theme").addEventListener("click", () => {
   const html = document.documentElement;
-  html.dataset.theme = html.dataset.theme === "dark" ? "light" : "dark";
+  const next = html.dataset.theme === "dark" ? "light" : "dark";
+  html.dataset.theme = next;
+  try { localStorage.setItem("adago.theme", next); } catch (_) { /* 隐私模式忽略 */ }
+  // 标注层/截图都从令牌取色，换主题后要让检查模式重挂一次（inspect.js 监听）
+  window.dispatchEvent(new CustomEvent("adago:theme-change", { detail: { theme: next } }));
+  toast(next === "dark" ? "已切换到墨纸（深色）" : "已切换到纸面（浅色）");
 });
 $("btn-clear").addEventListener("click", async () => {
   if (!S.project) { toast("还没有项目", true); return; }
-  if (!confirm("清空项目「" + projectName(S.project) + "」下的全部设计稿？")) return;
+  const ok = await uiConfirm({
+    title: "清空当前画布",
+    note: "将清空项目「" + projectName(S.project) + "」下的全部设计稿与连线。" +
+      "Agent 侧可用 canvas_restore 找回最近一次清空的内容。",
+    okText: "清空",
+    danger: true,
+  });
+  if (!ok) return;
   try {
     await api("/api/nodes/clear", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -1710,11 +1977,26 @@ $("btn-clear").addEventListener("click", async () => {
 });
 $("btn-add-note").addEventListener("click", async () => {
   if (!S.project) { toast("先在左侧项目树里选一个项目（或先新建），再添加便签", true); return; }
-  const text = prompt("便签内容：", "备注…");
+  const text = await uiAsk({
+    title: "添加便签",
+    note: "便签是画布上的自由注释卡，用来记目标、待办或验收口径。",
+    placeholder: "备注内容…",
+    rows: 4,
+    okText: "添加",
+  });
   if (text == null) return;
-  const html = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><style>
-    *{box-sizing:border-box}body{margin:0;font-family:"Inter","Noto Sans SC",system-ui,sans-serif;background:#FFF7C2;color:#5b4a00;
-    padding:14px;font-size:13px;line-height:1.6;min-height:120px;white-space:pre-wrap}</style></head>
+  if (!text.trim()) { toast("便签内容为空", true); return; }
+  // 便签是独立 srcdoc 文档，拿不到父页面变量：创建时把当前令牌值内联进去
+  const noteBg = tokenColor("--ui-surface", "transparent");
+  const noteInk = tokenColor("--ui-ink", "currentColor");
+  const noteLine = tokenColor("--ui-line-strong", "currentColor");
+  const noteFont = tokenColor("--ui-font", "sans-serif");
+  const html = `<!DOCTYPE html><html lang="zh-CN" data-note="1"><head><meta charset="utf-8"><style>
+    *{box-sizing:border-box}
+    body{margin:0;font-family:${noteFont};
+      background:${noteBg};color:${noteInk};padding:16px;font-size:13px;line-height:1.7;
+      min-height:120px;white-space:pre-wrap;border-left:2px solid ${noteLine}}
+  </style></head>
     <body>${esc(text)}</body></html>`;
   try {
     const data = await api("/api/nodes", {

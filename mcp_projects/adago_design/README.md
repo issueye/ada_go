@@ -55,6 +55,21 @@ project_create（或 project_list 选已有）
 图标库改动后跑一次 `GOWORK=off go generate ./internal/design`，
 会从 Go 侧路径表生成画布 UI 用的 `internal/canvas/static/icons.js`，两侧永不漂移。
 
+## 画布界面（设计系统）
+
+画布工具蒙皮走**单色品牌 + 令牌单源**：纸面（浅色，缺省）× 墨纸（深色）两套主题，
+颜色/字号/圆角/间距/层级全部来自 `internal/canvas/static/tokens.css` 的 `--ui-*` 令牌，
+组件样式 `canvas.css` 里不写任何原始色值。完整规范见 [DESIGN-SYSTEM-UI.md](DESIGN-SYSTEM-UI.md)。
+
+| 维度 | 规则 |
+|---|---|
+| 品牌 | 单色：浅色墨底纸字、深色纸底墨字；彩色只用于状态（成功/警告/危险）与检查标注 A/B |
+| 主题 | `data-theme=light`（缺省纸面）/ `dark`（墨纸）；`-theme` 只是缺省值，界面切换写浏览器 localStorage |
+| 字号 | 11 / 12 / 13 / 15 / 17（8px、10px 已废止） |
+| 圆角 | 2 / 4 / 6 / 8 / 10 / 12 / full（7 档取代原 13 种） |
+| 弹层 | `uiAsk()` / `uiConfirm()` 替代原生 prompt/confirm：点外关闭、Esc、Tab 陷阱、焦点归还 |
+| 门禁 | `ui_tokens_test.go`：令牌完整性、明暗对比度 ≥4.5、零字面值、零原生对话框 |
+
 ## 构建
 
 ```powershell

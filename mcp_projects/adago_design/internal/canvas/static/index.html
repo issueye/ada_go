@@ -1,11 +1,22 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="dark">
+<html lang="zh-CN" data-theme="__ADAGO_THEME__">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>adago-design · 无限画布</title>
+<!-- 主题先于样式表应用：避免先按缺省主题渲染一帧再翻转（白闪）。
+     优先级：用户上次手动切换（localStorage）> 服务端 -theme 缺省。 -->
+<script>
+(function () {
+  try {
+    var t = localStorage.getItem("adago.theme");
+    if (t === "dark" || t === "light") document.documentElement.dataset.theme = t;
+  } catch (_) { /* 隐私模式下 localStorage 不可用，保持服务端缺省 */ }
+})();
+</script>
+<link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="canvas.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='6' fill='%237C5CFF'/><text x='12' y='17' font-size='13' text-anchor='middle' fill='white' font-family='sans-serif'>D</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='6' fill='%2316171A'/><text x='12' y='17' font-size='13' text-anchor='middle' fill='%23F6F3EC' font-family='sans-serif'>D</text></svg>">
 </head>
 <body>
   <!-- 图标精灵必须先于工具条解析：icons.js 同步注入 <symbol>，后续 <use> 才能立即命中 -->
@@ -16,8 +27,8 @@
     <div id="world"></div>
   </div>
 
-  <header id="toolbar">
-    <div class="tb-brand"><span class="tb-logo">D</span> adago-design</div>
+  <header id="toolbar" role="toolbar" aria-label="画布工具">
+    <div class="tb-brand"><span class="tb-logo" aria-hidden="true">D</span> adago-design</div>
     <!-- 画布（项目作用域）：选择 / 比例 / 居中。
          工具条只显示图标，名称与状态走 data-tip 悬浮提示（见 canvas.css 的 [data-tip]）。 -->
     <div class="tb-group tb-canvas">
@@ -25,13 +36,13 @@
         <button id="cv-select" data-tip="选择画布" aria-label="选择画布" aria-haspopup="menu" aria-expanded="false">
           <svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-folder"/></svg>
         </button>
-        <div id="cv-menu" class="menu tb-menu hidden"></div>
+        <div id="cv-menu" class="menu tb-menu hidden" role="menu" aria-label="选择画布"></div>
       </div>
       <div class="tb-drop">
         <button id="cv-ratio" data-tip="修改画布比例" aria-label="修改画布比例" aria-haspopup="menu" aria-expanded="false">
           <svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-ratio"/></svg>
         </button>
-        <div id="ratio-menu" class="menu tb-menu hidden"></div>
+        <div id="ratio-menu" class="menu tb-menu hidden" role="menu" aria-label="画布比例"></div>
       </div>
       <button id="cv-center" data-tip="画布居中展示 (0)" aria-label="画布居中展示">
         <svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-center"/></svg>
@@ -39,17 +50,17 @@
     </div>
     <div class="tb-group">
       <button id="btn-zoom-out" data-tip="缩小" aria-label="缩小"><svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-minus"/></svg></button>
-      <span id="zoom-label">100%</span>
+      <span id="zoom-label" aria-live="polite" aria-label="当前缩放">100%</span>
       <button id="btn-zoom-in" data-tip="放大" aria-label="放大"><svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-plus"/></svg></button>
       <button id="btn-fit" data-tip="适配全部节点 (F)" aria-label="适配全部节点"><svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-fit"/></svg></button>
     </div>
     <div class="tb-group">
       <button id="btn-add-note" data-tip="添加便签" aria-label="添加便签"><svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-note"/></svg></button>
-      <button id="btn-inspect" data-tip="元素检查：悬停看规格，点选 A 后移入 B 对比 (Esc 退出)" aria-label="元素检查"><svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-inspect"/></svg></button>
+      <button id="btn-inspect" data-tip="元素检查：悬停看规格，点选 A 后移入 B 对比 (Esc 退出)" aria-label="元素检查" aria-pressed="false"><svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-inspect"/></svg></button>
       <button id="btn-clear" data-tip="清空当前画布" aria-label="清空当前画布"><svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-trash"/></svg></button>
     </div>
     <div class="tb-spacer"></div>
-    <span id="conn" class="conn conn--ok" data-tip="已连接" aria-label="连接状态：已连接"><i class="dot"></i></span>
+    <span id="conn" class="conn conn--ok" data-tip="已连接" aria-label="连接状态：已连接" role="status"><i class="dot"></i></span>
     <button id="btn-theme" data-tip="切换界面主题" aria-label="切换界面主题"><svg class="ds-icon ds-icon--16" aria-hidden="true"><use href="#ds-ic-theme"/></svg></button>
   </header>
 
@@ -58,7 +69,7 @@
     <button id="solo-back" class="solo-back" title="返回完整画布（Esc）">
       <svg class="ds-icon ds-icon--14" aria-hidden="true"><use href="#ds-ic-chevron-left"/></svg>返回画布
     </button>
-    <span class="solo-bar__sep"></span>
+    <span class="solo-bar__sep" aria-hidden="true"></span>
     <span id="solo-title" class="solo-bar__title"></span>
     <span id="solo-project" class="solo-bar__proj"></span>
     <span class="solo-bar__hint">双击空白处或按 Esc 退出</span>
@@ -66,7 +77,7 @@
 
   <!-- 左侧双浮窗：项目 / 设计体系。两块互相独立，可分别收起，收起后只留标题条。 -->
   <div id="left-dock">
-    <aside id="project-panel" class="dock-panel">
+    <aside id="project-panel" class="dock-panel" aria-label="项目">
       <header class="dock-head">
         <span class="dock-title">
           <svg class="ds-icon ds-icon--14" aria-hidden="true"><use href="#ds-ic-folder"/></svg>
@@ -85,13 +96,13 @@
               <span>全部</span>
             </button>
             <span id="tree-total" class="tree__total">0</span>
-            <button id="tree-more" class="tree__more" title="更多操作">
+            <button id="tree-more" class="tree__more" title="更多操作" aria-label="更多操作" aria-haspopup="menu" aria-expanded="false">
               <svg class="ds-icon ds-icon--14" aria-hidden="true"><use href="#ds-ic-more"/></svg>
             </button>
-            <div id="tree-menu" class="menu hidden">
-              <button data-menu="manage">项目管理…</button>
-              <button data-menu="arrange">按项目重新排列</button>
-              <button data-menu="refresh">刷新</button>
+            <div id="tree-menu" class="menu hidden" role="menu" aria-label="项目操作">
+              <button data-menu="manage" role="menuitem">项目管理…</button>
+              <button data-menu="arrange" role="menuitem">按项目重新排列</button>
+              <button data-menu="refresh" role="menuitem">刷新</button>
             </div>
           </div>
 
@@ -103,15 +114,16 @@
 
           <label class="tree__search">
             <svg class="ds-icon ds-icon--14" aria-hidden="true"><use href="#ds-ic-search"/></svg>
-            <input id="tree-filter" type="search" placeholder="搜索项目" autocomplete="off" />
+            <input id="tree-filter" type="search" placeholder="搜索项目" autocomplete="off"
+                   aria-label="搜索项目" />
           </label>
 
-          <div id="tree-rows" class="tree__rows"></div>
+          <div id="tree-rows" class="tree__rows" role="tree" aria-label="项目列表"></div>
         </div>
       </div>
     </aside>
 
-    <aside id="system-panel" class="dock-panel">
+    <aside id="system-panel" class="dock-panel" aria-label="设计体系">
       <header class="dock-head">
         <span class="dock-title">
           <svg class="ds-icon ds-icon--14" aria-hidden="true"><use href="#ds-ic-grid"/></svg>
@@ -132,14 +144,14 @@
     </aside>
   </div>
 
-  <aside id="inspector" class="hidden">
+  <aside id="inspector" class="hidden" aria-label="检查器">
     <div class="sb-head"><span>检查器</span>
-      <button id="insp-close" title="关闭"><svg class="ds-icon ds-icon--14" aria-hidden="true"><use href="#ds-ic-close"/></svg></button>
+      <button id="insp-close" title="关闭" aria-label="关闭检查器"><svg class="ds-icon ds-icon--14" aria-hidden="true"><use href="#ds-ic-close"/></svg></button>
     </div>
     <div id="insp-body"></div>
   </aside>
 
-  <div id="toast" class="hidden"></div>
+  <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
   <!-- 项目管理：下拉只做快速切换，新建/重命名/删除/切换集中在这里 -->
   <div id="proj-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="proj-modal-title">
@@ -147,15 +159,17 @@
     <div class="modal__box">
       <header class="modal__head">
         <span id="proj-modal-title">项目管理</span>
-        <button id="proj-modal-close" class="modal__x" data-proj-close title="关闭">
+        <button id="proj-modal-close" class="modal__x" data-proj-close title="关闭" aria-label="关闭项目管理">
           <svg class="ds-icon ds-icon--14" aria-hidden="true"><use href="#ds-ic-close"/></svg>
         </button>
       </header>
       <div class="modal__body">
         <div class="proj-create">
-          <input id="proj-name" class="proj-input" placeholder="新项目名称（如「官网改版」）" maxlength="40" />
+          <input id="proj-name" class="proj-input" placeholder="新项目名称（如「官网改版」）" maxlength="40"
+                 aria-label="新项目名称" />
           <button id="proj-create" class="btn btn--primary">创建项目</button>
-          <input id="proj-note" class="proj-input proj-input--note" placeholder="备注（可选）：目标、范围、验收口径" maxlength="80" />
+          <input id="proj-note" class="proj-input proj-input--note"
+                 placeholder="备注（可选）：目标、范围、验收口径" maxlength="80" aria-label="项目备注" />
         </div>
         <div class="proj-list-title">
           全部项目 <span id="proj-count" class="proj-count">0</span>
@@ -165,6 +179,31 @@
       <footer class="modal__foot">
         设计稿必须归属项目；删除项目前需先清空它下面的设计稿（画布「清空」只作用于当前项目）。
       </footer>
+    </div>
+  </div>
+
+  <!-- 询问 / 确认弹层：替代原生 prompt()/confirm()，保证字体、圆角、焦点与体系一致。
+       canvas.js 的 uiAsk()/uiConfirm() 复用这一份 DOM。 -->
+  <div id="ask-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="ask-title">
+    <div class="modal__mask" data-ask-close></div>
+    <div class="modal__box">
+      <header class="modal__head">
+        <span id="ask-title"></span>
+        <button id="ask-x" class="modal__x" data-ask-close title="关闭" aria-label="关闭">
+          <svg class="ds-icon ds-icon--14" aria-hidden="true"><use href="#ds-ic-close"/></svg>
+        </button>
+      </header>
+      <div class="modal__body">
+        <div id="ask-note" class="ask-note"></div>
+        <div id="ask-field-wrap" class="ask-field hidden">
+          <textarea id="ask-input" rows="3" aria-label="输入内容"></textarea>
+        </div>
+        <div id="ask-error" class="ask-error" role="alert"></div>
+      </div>
+      <div class="modal__acts">
+        <button id="ask-cancel" class="btn">取消</button>
+        <button id="ask-ok" class="btn btn--primary">确定</button>
+      </div>
     </div>
   </div>
 

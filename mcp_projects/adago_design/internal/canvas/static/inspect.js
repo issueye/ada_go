@@ -20,15 +20,23 @@ const INS = {
   catalog: {},    // systemId -> 体系详情（Token 合规标记用）
 };
 
-const ACC_A = "#165dff";  // anchor：标注蓝（对齐蓝湖式标注）
-const ACC_B = "#fe2c55";  // target / hover：红
+/* 标注配色：A/B 是「数据编码色」（同语法高亮的定位），不是品牌色，
+ * 因此与八套体系的肤色无关；取值只从 tokens.css 的令牌读，本文件不写色值。
+ * 取不到时留空（不可见）而不是回退到某个写死颜色——宁可看不见也不要与主题不符。 */
+function insA() { return tokenColor("--ui-ins-a", ""); }
+function insB() { return tokenColor("--ui-ins-b", ""); }
+function onIns() { return tokenColor("--ui-on-ins", ""); }
+function insInk() { return tokenColor("--ui-ink", ""); }
 const LAYER_STYLE_ID = "dsx-style";
 
 // ---------------- 开关 ----------------
 function toggleInspect() {
   INS.on = !INS.on;
   const btn = $("btn-inspect");
-  if (btn) btn.classList.toggle("tb-active", INS.on);
+  if (btn) {
+    btn.classList.toggle("tb-active", INS.on);
+    btn.setAttribute("aria-pressed", INS.on ? "true" : "false");
+  }
   document.body.classList.toggle("mode-inspect", INS.on);
   for (const [, el] of S.els) {
     const iframe = el.querySelector("iframe");
@@ -185,22 +193,29 @@ function ensureLayer(doc) {
   if (!doc.getElementById(LAYER_STYLE_ID)) {
     const style = doc.createElement("style");
     style.id = LAYER_STYLE_ID;
+    // 标注层样式所需的颜色一律从父页面令牌读（iframe 取不到父页面变量），
+    // 因此换主题后重新挂载即可得到新配色（toggleInspect 里会清掉旧 layer 样式）。
+    const A = insA(), B = insB(), onTint = onIns();
     style.textContent = `
       .dsx-layer{position:fixed;inset:0;pointer-events:none;z-index:2147483000}
       .dsx-box{position:fixed;border:1.5px solid;box-sizing:border-box}
-      .dsx-box--hover{border-color:${ACC_B};border-style:dashed;background:rgba(254,44,85,.04)}
-      .dsx-box--a{border-color:${ACC_A};background:rgba(22,93,255,.06)}
-      .dsx-box--b{border-color:${ACC_B};background:rgba(254,44,85,.06)}
-      .dsx-mask{position:fixed;background:rgba(22,24,35,.32)}
-      .dsx-line{position:fixed;background:${ACC_B}}
-      .dsx-tick{position:fixed;background:${ACC_B}}
-      .dsx-label{position:fixed;background:${ACC_B};color:#fff;font:600 10px/1 "Inter","Noto Sans SC",system-ui,sans-serif;
-        padding:2px 5px;border-radius:3px;white-space:nowrap;z-index:2147483001}
-      .dsx-badge{position:fixed;width:16px;height:16px;border-radius:4px;color:#fff;
-        font:700 10px/16px "Inter",system-ui,sans-serif;text-align:center;z-index:2147483001}
-      .dsx-name{position:fixed;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-        background:#fe2c55;color:#fff;font:600 10px/1.5 "Inter","Noto Sans SC",system-ui,sans-serif;
-        padding:1px 6px;border-radius:3px;z-index:2147483002;pointer-events:none}
+      .dsx-box--hover{border-color:${B};border-style:dashed;
+        background:color-mix(in srgb,${B} 5%,transparent)}
+      .dsx-box--a{border-color:${A};background:color-mix(in srgb,${A} 7%,transparent)}
+      .dsx-box--b{border-color:${B};background:color-mix(in srgb,${B} 7%,transparent)}
+      .dsx-mask{position:fixed;background:color-mix(in srgb,${insInk()} 32%,transparent)}
+      .dsx-line{position:fixed;background:${B}}
+      .dsx-tick{position:fixed;background:${B}}
+      .dsx-label{position:fixed;background:${B};color:${onTint};
+        font:600 11px/1 "Inter","Noto Sans SC",system-ui,sans-serif;
+        padding:2px 5px;border-radius:4px;white-space:nowrap;z-index:2147483001}
+      .dsx-badge{position:fixed;width:16px;height:16px;border-radius:4px;color:${onTint};
+        font:700 11px/16px "Inter",system-ui,sans-serif;text-align:center;
+        z-index:2147483001}
+      .dsx-name{position:fixed;max-width:260px;overflow:hidden;text-overflow:ellipsis;
+        white-space:nowrap;background:${B};color:${onTint};
+        font:600 11px/1.5 "Inter","Noto Sans SC",system-ui,sans-serif;
+        padding:1px 6px;border-radius:4px;z-index:2147483002;pointer-events:none}
     `;
     doc.head.appendChild(style);
   }
@@ -319,7 +334,7 @@ function renderHover() {
   if (!layer) return;
   const rect = localRect(el);
   box(doc, layer, rect, "dsx-box--hover", "hover");
-  nameChip(doc, layer, rect, elementLabel(el), ACC_B, "hover");
+  nameChip(doc, layer, rect, elementLabel(el), insB(), "hover");
   // 有锚点且正在对比时不再画「就近间距」，避免和 A↔B 的标注打架
   if (!INS.anchor) drawHoverGaps(doc, layer, el, rect);
 }
@@ -339,8 +354,8 @@ function renderSelection() {
   }
   const second = INS.target || INS.tempTarget;
   for (const [item, cls, text, color] of [
-    [INS.anchor, "dsx-box--a", "A", ACC_A],
-    [second, "dsx-box--b", INS.target ? "B" : "", ACC_B],
+    [INS.anchor, "dsx-box--a", "A", insA()],
+    [second, "dsx-box--b", INS.target ? "B" : "", insB()],
   ]) {
     if (!item || !item.el || !item.el.isConnected) continue;
     const host = S.els.get(item.nodeId);
@@ -419,7 +434,7 @@ function svgPill(parent, x, y, text, color) {
   const label = svg("text", {
     x: x, y: y + 1, "text-anchor": "middle", "dominant-baseline": "middle",
     "font-size": 11, "font-family": 'Inter, "Noto Sans SC", system-ui, sans-serif',
-    fill: "#fff", "font-weight": 600,
+    fill: onIns(), "font-weight": 600,
   });
   label.textContent = text;
   parent.appendChild(rect);
@@ -441,10 +456,10 @@ function svgOutline(parent, r, color, tag) {
     stroke: color, "stroke-width": 1, "stroke-dasharray": "4 3",
   }));
   if (tag) {
-    const b = svg("rect", { x: r.x - 7, y: r.y - 7, width: 14, height: 14, rx: 3, fill: color });
+    const b = svg("rect", { x: r.x - 7, y: r.y - 7, width: 14, height: 14, rx: 4, fill: color });
     const t = svg("text", {
       x: r.x, y: r.y - 1, "text-anchor": "middle", "dominant-baseline": "middle",
-      "font-size": 9, "font-weight": 700, fill: "#fff",
+      "font-size": 11, "font-weight": 700, fill: onIns(),
       "font-family": "Inter, system-ui, sans-serif",
     });
     t.textContent = tag;
@@ -461,11 +476,12 @@ function renderRelations() {
   const b = worldRect(second.nodeId, second.el);
   if (!a || !b) return;
 
-  svgOutline(relLayer, a, ACC_A, "A");
-  svgOutline(relLayer, b, ACC_B, "B");
+  svgOutline(relLayer, a, insA(), "A");
+  svgOutline(relLayer, b, insB(), "B");
 
   const rel = relation(a, b);
-  const ink = "#1d2129";
+  // 间距/对齐标注的胶囊底色：用正文墨色，白字/纸字对比都比彩色可读且不抢 A/B 的编码语义
+  const ink = insInk();
 
   // 水平间距：A/B 在水平方向分离且垂直投影有交集
   if (rel.separatedX) {
@@ -505,10 +521,10 @@ function renderRelations() {
       };
       relLayer.appendChild(svg("rect", {
         x: inter.x, y: inter.y, width: inter.w, height: inter.h,
-        fill: ACC_B, "fill-opacity": 0.12, stroke: ACC_B, "stroke-width": 1,
+        fill: insB(), "fill-opacity": 0.12, stroke: insB(), "stroke-width": 1,
       }));
       const label = rel.contains ? "A 包含 B" : "重叠 " + Math.round(ox) + "×" + Math.round(oy);
-      svgPill(relLayer, inter.x + inter.w / 2, inter.y - 12, label, ACC_B);
+      svgPill(relLayer, inter.x + inter.w / 2, inter.y - 12, label, insB());
     }
   }
 
@@ -518,13 +534,13 @@ function renderRelations() {
     if (g.dir === "v") {
       const x = g.key === "left" ? a.x : g.key === "right" ? a.x + a.w : a.x + a.w / 2;
       const y1 = Math.min(a.y, b.y) - 6, y2 = Math.max(a.y + a.h, b.y + b.h) + 6;
-      svgLine(relLayer, x, y1, x, y2, ACC_A, true);
-      svgPill(relLayer, x, y1 - 8, g.label, ACC_A);
+      svgLine(relLayer, x, y1, x, y2, insA(), true);
+      svgPill(relLayer, x, y1 - 8, g.label, insA());
     } else {
       const y = g.key === "top" ? a.y : g.key === "bottom" ? a.y + a.h : a.y + a.h / 2;
       const x1 = Math.min(a.x, b.x) - 6, x2 = Math.max(a.x + a.w, b.x + b.w) + 6;
-      svgLine(relLayer, x1, y, x2, y, ACC_A, true);
-      svgPill(relLayer, x2 + textWidth(g.label) / 2 + 8, y, g.label, ACC_A);
+      svgLine(relLayer, x1, y, x2, y, insA(), true);
+      svgPill(relLayer, x2 + textWidth(g.label) / 2 + 8, y, g.label, insA());
     }
   }
 }
@@ -660,10 +676,10 @@ async function renderPairPanel(body, anchorItem, targetItem, gen) {
 
   body.innerHTML =
     `<div class="insp-head">${icon("link", 14)} 元素关联</div>` +
-    `<div class="pair-row pair-row--a"><span class="pair-badge" style="background:${ACC_A}">A</span>` +
+    `<div class="pair-row pair-row--a"><span class="pair-badge pair-badge--a">A</span>` +
     `<span class="spec-tag spec-tag--tight">${esc(tagOf(anchorItem.el))}</span>` +
     `<span class="pair-size">${Math.round(a.w)}×${Math.round(a.h)}</span></div>` +
-    `<div class="pair-row pair-row--b"><span class="pair-badge" style="background:${ACC_B}">B</span>` +
+    `<div class="pair-row pair-row--b"><span class="pair-badge pair-badge--b">B</span>` +
     `<span class="spec-tag spec-tag--tight">${esc(tagOf(targetItem.el))}</span>` +
     `<span class="pair-size">${Math.round(b.w)}×${Math.round(b.h)}</span></div>` +
     `<div class="sec"><div class="sec__title">间距</div>` +
@@ -681,8 +697,10 @@ async function renderPairPanel(body, anchorItem, targetItem, gen) {
 
 // ---------------- 事件 ----------------
 window.addEventListener("keydown", (e) => {
-  // 项目弹层打开时 Esc 归弹层（canvas.js 的捕获监听已处理），检查模式不抢
-  if (!INS.on || (typeof isProjectModalOpen === "function" && isProjectModalOpen())) return;
+  // 「询问/确认」弹层打开时 Esc 归弹层（canvas.js 的捕获监听已处理），检查模式不抢
+  if (!INS.on) return;
+  if (typeof isAskOpen === "function" && isAskOpen()) return;
+  if (typeof isProjectModalOpen === "function" && isProjectModalOpen()) return;
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
   if (e.key === "Escape") {
     if (INS.target) { INS.target = null; scheduleDraw(true); e.preventDefault(); e.stopPropagation(); }
@@ -693,7 +711,27 @@ window.addEventListener("keydown", (e) => {
   }
 }, true);
 
+// 换主题后标注层样式要从新令牌重建：iframe 里存的是旧颜色的 <style>，
+// 只切父页面变量不会生效。这里清掉旧 layer 样式并在检查模式下重挂。
+function refreshInspectTheme() {
+  for (const [, el] of S.els) {
+    const iframe = el.querySelector("iframe");
+    const doc = iframe && iframe.contentDocument;
+    if (!doc) continue;
+    const style = doc.getElementById(LAYER_STYLE_ID);
+    if (style) style.remove();
+    const layer = doc.querySelector(".dsx-layer");
+    if (layer) layer.remove();
+    if (INS.on) attachInspect(iframe, el.dataset.id);
+    iframe.__dsx = INS.on ? iframe.__dsx : null;
+  }
+  if (INS.on) scheduleDraw(true);
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const btn = $("btn-inspect");
   if (btn) btn.addEventListener("click", toggleInspect);
 });
+
+// canvas.js 的主题切换会派发该事件（inspect.js 在 canvas.js 之后加载）
+window.addEventListener("adago:theme-change", refreshInspectTheme);
