@@ -12,9 +12,9 @@ import (
 )
 
 // codingPlugins 是 08 §8.6 与 development-plan §1.1 冻结的官方插件清单
-// （13 项：12 个后端实例；tools-plan/tools-ask 的后端与卡片同属一个插件，
-// provider-admin 同时提供 route 后端与页面，plugin-helper 只有后端（对话创建），
-// token-usage 是纯前端、ui-charts 是前端动态块 + 后端工具）。
+// （16 项；tools-plan/tools-ask 的后端与卡片同属一个插件，provider-admin 同时
+// 提供 route 后端与页面，plugin-helper 只有后端（对话创建），token-usage/
+// composer-telemetry 只有前端，ui-charts 是前端动态块 + 后端工具）。
 // 只出现在测试代码里：基座源码不认得它们（1.5.5 的硬边界），选择权在产品声明。
 var codingPlugins = []string{
 	"provider-openai-chat",
@@ -30,6 +30,9 @@ var codingPlugins = []string{
 	"token-usage",
 	"ui-charts",
 	"plugin-helper",
+	"env-manager",
+	"cron-manager",
+	"composer-telemetry",
 }
 
 // TestProductDeclarations 断言产品声明这一侧的契约（08 §8.6、M0.3/M0.4 交付物）：
@@ -49,7 +52,7 @@ func TestProductDeclarations(t *testing.T) {
 		mustNoErr(t, "LoadProduct(coding)", err)
 		mustEqual(t, "产品 id", "coding", p.ID)
 		mustEqual(t, "产品名", "ada-go Coding", p.Name)
-		mustCount(t, "coding 的官方插件数", 15, len(p.Plugins))
+		mustCount(t, "coding 的官方插件数", 16, len(p.Plugins))
 		for i, want := range codingPlugins {
 			if p.Plugins[i] != want {
 				t.Errorf("第 %d 项插件: want=%s got=%s", i+1, want, p.Plugins[i])

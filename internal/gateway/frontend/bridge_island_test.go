@@ -270,3 +270,131 @@ export default defineComponent({ render(h) { return <div class="%s">%s</div>; } 
 		t.Fatalf("两个根的 class 应保留：%s", text)
 	}
 }
+
+// clientOnly 贡献：服务端**不执行模板**，只输出带标记的空壳。这里故意让模板
+// 在渲染时抛错——如果桥还在跑模板，测试就会失败；输出里也不能有模板内容。
+func TestClientOnlySlotRendersEmptyShell(t *testing.T) {
+	m := &plugins.Manifest{
+		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
+		Trust: plugins.TrustBuiltin,
+		Frontend: &plugins.Frontend{
+			Capabilities: []plugins.Capability{plugins.CapFrontendScript},
+			Client:       "client.js",
+			Slots: []plugins.SlotContribution{{
+				Slot: "composer.footer", Template: "slot.tsx", Hydrate: true, ClientOnly: true,
+			}},
+		},
+	}
+	b, err := NewBridge(BridgeOptions{
+		Scripts: []host.Script{{
+			Manifest: m,
+			Bundle: map[string]string{"slot.tsx": `import { h, defineComponent } from "ada:render";
+export default defineComponent({
+  render(h) { throw new Error("clientOnly 贡献不应在服务端渲染"); }
+});
+`},
+			StaticAssets: map[string][]byte{"client.js": []byte("export default {}")},
+		}},
+		CSRF: func(*http.Request) string { return "csrf-secret" },
+	})
+	if err != nil {
+		t.Fatalf("NewBridge: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/threads/th_1", nil)
+	htmlText, n, err := b.Slot("composer.footer", req)
+	if err != nil {
+		t.Fatalf("Slot: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("贡献数 = %d，期望 1", n)
+	}
+	text := string(htmlText)
+	for _, want := range []string{
+		`class="ada-island ada-island--client"`,
+		`data-ada-plugin-island="demo:slot:composer.footer"`,
+		`data-ada-plugin="demo"`,
+		`data-ada-entry="slot:composer.footer"`,
+		`data-ada-module="/ext/demo/static/client.js?v=`,
+		`data-ada-props="`,
+		`data-ada-client-only="1"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("clientOnly 空壳缺少 %s：%s", want, text)
+		}
+	}
+	// 空壳：没有子节点，也没有模板输出（模板 render 抛错也不应影响外壳）。
+	if strings.Count(strings.TrimSpace(text), "<div") != 1 {
+		t.Fatalf("空壳应只有一个根元素：%s", text)
+	}
+	if strings.Contains(text, "clientOnly 贡献不应在服务端渲染") {
+		t.Fatalf("clientOnly 不应在服务端执行模板：%s", text)
+	}
+	// 与 hydrate 贡献同一套约束：首帧 props 里不能有 CSRF。
+	if strings.Contains(text, "csrf-secret") {
+		t.Fatalf("CSRF 不应进入 data-ada-props：%s", text)
+	}
+}
+
+// clientOnly 贡献同样让页面加载客户端引擎（否则空壳永远没人接管）。
+func TestClientOnlySlotReportsHasIslands(t *testing.T) {
+	m := &plugins.Manifest{
+		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
+		Trust: plugins.TrustBuiltin,
+		Frontend: &plugins.Frontend{
+			Capabilities: []plugins.Capability{plugins.CapFrontendScript},
+			Client:       "client.js",
+			Slots: []plugins.SlotContribution{{
+				Slot: "composer.footer", Template: "slot.tsx", Hydrate: true, ClientOnly: true,
+			}},
+		},
+	}
+	b, err := NewBridge(BridgeOptions{
+		Scripts: []host.Script{{
+			Manifest: m,
+			Bundle: map[string]string{"slot.tsx": `export default function () { return null; }
+`},
+			StaticAssets: map[string][]byte{"client.js": []byte("export default {}")},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewBridge: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/threads/th_1", nil)
+	if !b.HasIslands("chat", req) {
+		t.Fatal("clientOnly 贡献也应让 chat 页面加载客户端引擎")
+	}
+	if b.HasIslands("overview", req) {
+		t.Fatal("overview 不渲染 composer.footer，不应报告 HasIslands")
+	}
+}
+
+// clientOnly 没有 client bundle 是装配/渲染错误（没有 SSR 可回退，空壳没意义）。
+func TestClientOnlySlotWithoutClientIsError(t *testing.T) {
+	m := &plugins.Manifest{
+		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
+		Trust: plugins.TrustBuiltin,
+		Frontend: &plugins.Frontend{
+			Slots: []plugins.SlotContribution{{
+				Slot: "composer.footer", Template: "slot.tsx", ClientOnly: true,
+			}},
+		},
+	}
+	b, err := NewBridge(BridgeOptions{
+		Scripts: []host.Script{{
+			Manifest: m,
+			Bundle: map[string]string{"slot.tsx": `export default function () { return null; }
+`},
+			StaticAssets: map[string][]byte{},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewBridge: %v", err)
+	}
+	htmlText, n, err := b.Slot("composer.footer", httptest.NewRequest(http.MethodGet, "/threads/th_1", nil))
+	if err == nil {
+		t.Fatalf("没有 client 的 clientOnly 贡献应报错，实际产出：%s", htmlText)
+	}
+	if n != 0 {
+		t.Fatalf("失败贡献不应计数，n=%d", n)
+	}
+}

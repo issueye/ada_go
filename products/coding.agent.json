@@ -16,7 +16,8 @@
     "ui-charts",
     "plugin-helper",
     "env-manager",
-    "cron-manager"
+    "cron-manager",
+    "composer-telemetry"
   ],
   "capabilities": {
     "skills": true,

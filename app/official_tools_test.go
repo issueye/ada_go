@@ -78,7 +78,7 @@ func TestCodingProductAssembles(t *testing.T) {
 		t.Fatalf("后端插件数 = %d，期望 14（provider-admin/env-manager/cron-manager 的 route 后端也装配；前端插件走 Gateway）: %v",
 			len(asm.Plugins), pluginIDsOf(asm))
 	}
-	wantFrontend := []string{"tools-plan", "tools-ask", "provider-admin", "token-usage", "ui-charts", "env-manager", "cron-manager"}
+	wantFrontend := []string{"tools-plan", "tools-ask", "provider-admin", "token-usage", "ui-charts", "env-manager", "cron-manager", "composer-telemetry"}
 	if len(asm.FrontendDecls) != len(wantFrontend) {
 		t.Fatalf("前端声明 = %v，期望 %v", asm.FrontendDecls, wantFrontend)
 	}

@@ -2,13 +2,15 @@
  * plugin-islands.js · 插件岛屿的浏览器引导（docs/20 P1-5）
  * ---------------------------------------------------------------------------
  * 服务端在 hydrate 贡献的根元素上输出：
- *   data-ada-plugin-island / data-ada-plugin / data-ada-module / data-ada-props
+ *   data-ada-plugin-island / data-ada-plugin / data-ada-entry / data-ada-module / data-ada-props
  * 这里只做三件事：
  *   1. 按 data-ada-module 动态 import 插件 bundle（同 URL 只加载一次）；
  *   2. 读 data-ada-props，并从页面隐藏字段补 CSRF（服务端没有把它写进 props）；
- *   3. 用同一份组件定义 mount(el, { hydrate:true, rootElement:true })。
+ *   3. 用同一份组件定义接管元素：SSR 内容走 hydrate，空壳（data-ada-client-only=1）
+ *      走普通 mount——后者的容器里本来就没有内容，所以没有 SSR 回退可言。
  *
- * 单岛失败只标记该元素并保留 SSR DOM，不影响其他岛；没有 AdaRender 时直接退出。
+ * 单岛失败只标记该元素；SSR 岛保留服务端 DOM，client-only 岛保持空白。
+ * 没有 AdaRender 时直接退出。
  */
 (function () {
   'use strict';
@@ -25,7 +27,9 @@
     startedAt: 0,
     durationMs: 0,
     total: 0,
+    // hydrated 是 SSR 岛被接管的数量；mounted 是 client-only 岛被挂载的数量。
     hydrated: 0,
+    mounted: 0,
     failed: 0,
     pending: 0,
     islands: [],
@@ -70,6 +74,10 @@
 
     var label = element.getAttribute('data-ada-plugin-island') || moduleURL;
     var entry = element.getAttribute('data-ada-entry') || '';
+    // client-only 贡献：服务端只发了空壳（没有 SSR 内容），必须用普通 mount；
+    // 反之 SSR 岛必须 hydrate，否则会重建成两份 DOM。rootElement:true 只适用于
+    // hydrate（ada-render.js 对 rootElement && !hydrate 直接抛错）。
+    var clientOnly = element.getAttribute('data-ada-client-only') === '1';
     var started = now();
     diagnostics.total += 1;
     diagnostics.pending += 1;
@@ -112,18 +120,27 @@
       if (AdaUIIso && AdaUIIso.components && AdaUIIso.components.ModalAdapter) {
         app.component('Modal', AdaUIIso.components.ModalAdapter);
       }
-      app.mount(element, { hydrate: true, rootElement: true });
+      if (clientOnly) {
+        // 空壳是 <div>，插件根元素挂进它内部；mount 会清掉容器里已有的内容
+        // （本来就没有），所以不会出现「回退 + 客户端」两份 DOM。
+        app.mount(element);
+      } else {
+        app.mount(element, { hydrate: true, rootElement: true });
+      }
       element.removeAttribute('data-ada-loading');
-      diagnostics.hydrated += 1;
+      element.setAttribute('data-ada-mounted-mode', clientOnly ? 'mount' : 'hydrate');
+      diagnostics[clientOnly ? 'mounted' : 'hydrated'] += 1;
       diagnostics.islands.push({
         label: label,
         entry: entry,
+        mode: clientOnly ? 'mount' : 'hydrate',
         durationMs: Math.round((now() - started) * 10) / 10,
         ok: true,
       });
       return true;
     }).catch(function (err) {
-      // 失败时保留 SSR DOM，并允许后续再次尝试（例如网络恢复后）。
+      // 失败时允许后续再次尝试（例如网络恢复后）。SSR 岛保留服务端 DOM，
+      // client-only 岛保持空白——这是 clientOnly「没有 SSR 回退」的显式表达。
       element.removeAttribute('data-ada-mounted');
       element.removeAttribute('data-ada-loading');
       element.setAttribute('data-ada-error', '1');
@@ -131,11 +148,12 @@
       diagnostics.islands.push({
         label: label,
         entry: entry,
+        mode: clientOnly ? 'mount' : 'hydrate',
         durationMs: Math.round((now() - started) * 10) / 10,
         ok: false,
       });
       if (window.console && typeof window.console.error === 'function') {
-        window.console.error('[ada-islands] ' + label + ' hydrate 失败', err);
+        window.console.error('[ada-islands] ' + label + ' ' + (clientOnly ? 'mount' : 'hydrate') + ' 失败', err);
       }
       return false;
     }).then(function (ok) {

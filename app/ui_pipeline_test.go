@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -173,6 +174,87 @@ func TestProviderAdminSlotInComposer(t *testing.T) {
 			t.Fatalf("composer.left 插槽缺少 %q", want)
 		}
 	}
+}
+
+// 输入框辅助区整块由 composer-telemetry 的纯客户端岛接管：服务端只出空壳，
+// 页面里不该出现任何指标文案（没有 SSR 回退）。
+func TestComposerTelemetryIsClientOnlyShell(t *testing.T) {
+	core := &uiFakeCore{}
+	srv := newUIServer(t, core)
+
+	rec := uiGet(t, srv, "/thread/th_1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /thread/th_1 = %d\n%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`data-slot="composer.footer" data-contributors="1"`,
+		`data-ada-plugin-island="composer-telemetry:slot:composer.footer"`,
+		`data-ada-entry="slot:composer.footer"`,
+		`data-ada-module="/ext/composer-telemetry/static/client.js?v=`,
+		`data-ada-client-only="1"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("composer.footer 岛屿缺少 %q", want)
+		}
+	}
+	// 空壳：没有 SSR 内容；指标由岛自己轮询 /threads/{id}/state 后渲染。
+	for _, absent := range []string{"缓存命中", "ada-token-ring", "ada-context", "工作区："} {
+		if strings.Contains(body, absent) {
+			t.Fatalf("基座页面不应输出辅助区内容 %q（clientOnly 没有 SSR 回退）", absent)
+		}
+	}
+	// 首帧 props 不含 CSRF，且带上会话引用。属性值会被 html/template 转义，
+	// extractIslandProps 已经还原。
+	props := extractIslandProps(body)
+	if strings.Contains(props, "csrf") {
+		t.Fatalf("首帧 props 不应包含 CSRF：%s", props)
+	}
+	if !strings.Contains(props, `"thread":{"id":"th_1"}`) {
+		t.Fatalf("首帧 props 应带会话引用：%s", props)
+	}
+	// 工作区显示名由桥算好（web.workspaceName 同一规则）；这个夹具没接
+	// WorkspaceFor，所以两者都为空。
+	if strings.Contains(props, `"workspaceName"`) {
+		t.Fatalf("夹具没有工作区，props 不该出现 workspaceName：%s", props)
+	}
+	// bundle 与样式都能取到（岛要能在浏览器挂载）。
+	if rec := uiGet(t, srv, "/ext/composer-telemetry/static/client.js"); rec.Code != http.StatusOK {
+		t.Fatalf("client.js = %d", rec.Code)
+	}
+	if rec := uiGet(t, srv, "/ext/composer-telemetry/static/telemetry.css"); rec.Code != http.StatusOK {
+		t.Fatalf("telemetry.css = %d", rec.Code)
+	}
+	// 插件的 styles 必须被页面引用（`.ada-island--client { display: contents }`
+	// 就靠它，否则空壳会多占一层布局）。
+	if !strings.Contains(body, "/ext/composer-telemetry/static/telemetry.css") {
+		t.Fatal("会话页应引用插件的 telemetry.css")
+	}
+	// 页面必须加载客户端岛屿引擎，否则空壳永远没人接管。
+	if !strings.Contains(body, "plugin-islands.js") {
+		t.Fatal("会话页应加载 plugin-islands.js")
+	}
+}
+
+// extractIslandProps 取页面上 clientOnly 空壳的 data-ada-props 原文（转义前），
+// 失败信息里给出可读的片段而不是整页 HTML。属性按 map 键排序输出，
+// data-ada-client-only 可能排在 data-ada-props 之前——从标记之后向前找。
+func extractIslandProps(body string) string {
+	const marker = `data-ada-client-only="1"`
+	index := strings.Index(body, marker)
+	if index < 0 {
+		return "（找不到 clientOnly 空壳）"
+	}
+	start := strings.Index(body[index:], `data-ada-props="`)
+	if start < 0 {
+		return "（空壳上没有 data-ada-props）"
+	}
+	start += index + len(`data-ada-props="`)
+	end := strings.Index(body[start:], `"`)
+	if end < 0 {
+		return "（data-ada-props 未闭合）"
+	}
+	return html.UnescapeString(body[start : start+end])
 }
 
 // /ext 页面：hello 页 200，未知页面 404，静态资源 allowlist。

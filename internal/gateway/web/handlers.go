@@ -133,8 +133,6 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 		s.prepareTranscriptEdits(r, transcript, id, get.Run.Status)
 	}
 	run := buildRun(get.Run)
-	contextView := buildContextView(get.Context)
-	cacheHit, hasCache := s.cacheHitPercent(r, id)
 	threads, _ := s.listThreads(r, 50)
 	title := strings.TrimSpace(get.Thread.Title)
 	if title == "" {
@@ -165,9 +163,6 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 		Run:                 run,
 		Transcript:          transcript,
 		TranscriptStateJSON: string(stateJSON),
-		Context:             contextView,
-		CacheHitPercent:     cacheHit,
-		HasCache:            hasCache,
 		Interactions:        buildInteractions(get.Interactions, id, s.csrf(r)),
 		TurnKey:             newIdempotencyKey(),
 		Models:              models,
@@ -184,6 +179,54 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 		data.RefreshSeconds = 2
 	}
 	s.render(w, http.StatusOK, "chat", data)
+}
+
+// handleThreadState 是会话页的遥测轮询接口：一次 thread.get + 一次 usage.get，
+// 返回运行状态、上下文占用与用量三块只读数据，供插件岛在运行中反复取最新值。
+//
+// 这里刻意不知道任何插件：数据是基座的通用投影（与 SSR 页面用的是同一份 Core
+// 调用），插件 id 只出现在插件自己的清单里（1.5.5 基座零插件 id）。
+func (s *Server) handleThreadState(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeJSONError(w, http.StatusNotFound, "缺少会话 id")
+		return
+	}
+	rawGet, err := s.call(r, "thread.get", map[string]any{"threadId": id, "itemLimit": 1})
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, publicReason(err))
+		return
+	}
+	var get threadGetResult
+	if err := json.Unmarshal(rawGet, &get); err != nil {
+		writeJSONError(w, http.StatusBadGateway, "Core 返回了无法识别的会话状态")
+		return
+	}
+	out := map[string]any{"run": get.Run}
+	if get.Context != nil {
+		out["context"] = get.Context
+	}
+	// 用量的失败不致命：没有用量时只有 run/context，插件按缺字段退化显示。
+	if rawUsage, err := s.call(r, "usage.get", map[string]any{"threadId": id}); err == nil {
+		var usage struct {
+			Thread    usageTotalsDTO `json:"thread"`
+			Workspace usageTotalsDTO `json:"workspace"`
+		}
+		if json.Unmarshal(rawUsage, &usage) == nil {
+			out["usage"] = usage
+		}
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+type usageTotalsDTO struct {
+	InputTokens  int   `json:"inputTokens"`
+	OutputTokens int   `json:"outputTokens"`
+	CacheTokens  int   `json:"cacheTokens"`
+	CostMicros   int64 `json:"costMicros"`
 }
 
 // handleTranscriptJSON 只返回对话流行，供浏览器岛做 keyed patch；
@@ -1211,32 +1254,6 @@ func (s *Server) handleThreadArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirect(w, flashRedirect(next, "notice", "会话已归档"))
-}
-
-// cacheHitPercent 读取线程累计用量中的缓存命中率。缓存 token 是输入 token 的子集，
-// 因此命中率 = cache / input；没有用量时返回 false，页面显示「—」。
-func (s *Server) cacheHitPercent(r *http.Request, threadID string) (int, bool) {
-	raw, err := s.call(r, "usage.get", map[string]any{"threadId": threadID})
-	if err != nil {
-		return 0, false
-	}
-	var res struct {
-		Thread struct {
-			InputTokens int `json:"inputTokens"`
-			CacheTokens int `json:"cacheTokens"`
-		} `json:"thread"`
-	}
-	if json.Unmarshal(raw, &res) != nil || res.Thread.InputTokens <= 0 {
-		return 0, false
-	}
-	percent := (res.Thread.CacheTokens*100 + res.Thread.InputTokens/2) / res.Thread.InputTokens
-	if percent < 0 {
-		percent = 0
-	}
-	if percent > 100 {
-		percent = 100
-	}
-	return percent, true
 }
 
 // modelOptions 是输入框旁模型选择器的数据（model.list 投影）；失败时返回空列表，

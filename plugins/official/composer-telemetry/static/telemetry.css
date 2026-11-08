@@ -1,0 +1,20 @@
+/* composer-telemetry：输入框下方辅助区的纯客户端岛屿。
+ *
+ * .ada-aux / .ada-aux__* / .ada-token-ring / .ada-context 的视觉全部来自基座
+ * （ui/components.css 与 app-local.css），插件只负责两件基座样式没有的事：
+ *   1. 空壳与宿主容器不占布局（display:contents，与 .ada-slot 同一惯用法）；
+ *   2. 取数之前的占位根不占版面（避免空会话里多出 8px 空白）。
+ *
+ * 颜色只引用 --ph-* 设计令牌（CSP 也禁内联 style）。
+ */
+
+/* 宿主外壳（桥输出的 .ada-island--client）不能改变布局：让插件的 .ada-aux
+   直接成为 #composer-aux 的子元素，与迁走之前的 DOM 层级一致。 */
+.ada-island--client {
+  display: contents;
+}
+
+/* 取数之前：占位根不占版面，避免首屏闪一行空白。 */
+.ada-telemetry__pending {
+  display: none;
+}

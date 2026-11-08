@@ -17,6 +17,7 @@ var officialPluginIDs = []string{
 	"tools-fs", "tools-shell", "tools-git", "tools-plan", "tools-ask", "tools-skill", "tools-subagent",
 	"policy-default", "persona-coding", "provider-admin", "token-usage",
 	"plugin-helper", "ui-hello-tsx", "mcp-client", "env-manager", "browser-use",
+	"cron-manager", "composer-telemetry",
 }
 
 // TestConformanceBoundary 是 10 §11.1「边界」分层在 M0 能跑的两条：

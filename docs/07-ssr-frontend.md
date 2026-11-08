@@ -41,6 +41,10 @@
 └──────────────┴──────────────────────────────────────────────────────┘
 ```
 
+> 输入框下方的 `ComposerAux` 内容现在整体由 `composer-telemetry` 插件的纯客户端岛渲染
+> （`composer.footer` + `clientOnly`），基座只保留 `#composer-aux` 外壳；见 §7.5 与
+> [19-ued.md](19-ued.md) 的「输入区指标」。
+
 外壳尺寸、滚动归属与 a_da 完全一致：设计基准视口 1600×1000，视口锁定 `100dvh`（`100vh` 回退），页面本身不滚动，只有对话流、侧栏列表与二级内容滚动；侧栏 264px（≤960px 为 232px，≤760px 收为抽屉），主区最小 420px，顶栏 54px，Composer 固定底部，内容内边距 24–28px（窄屏 16–18px）。外壳 class 与 a_da 当前基线一致：`ada-shell` / `ada-sidebar` / `ada-main` / `ada-topbar` / `ada-scroll` / `ada-composer` / `ada-rail`（折叠窄轨），由 `internal/gateway/web/ui.go` 的侧栏组件与 `templates/shell.html.tmpl` 输出。
 
 品牌位：侧栏始终显示 logo + 品牌名（产品 `identity.name`，默认 `ada-go`）+ 产品徽标（产品名去掉品牌前缀，如 `Headless`）；页面 `<title>` 用品牌名，顶栏 chip 用产品徽标。品牌名与产品名都由 Gateway 从产品声明注入，模板不写死；登录页也带同一套品牌位。
@@ -154,6 +158,9 @@ data: {"threadId":"th_...","seq":128,"baseSeq":120,"ops":[
 - `slots`：插槽 + TSX 模板 + 排序；
 - `pages`：`/ext/{id}/{slug}` 独立页面；
 - `client` / `hydrate`（可选，P1）：插件浏览器 bundle 与贡献级 hydrate 开关；缺省仍是服务端渲染，旧插件不受影响；需要 `frontend.script` 能力且 trust 为 builtin/verified。框架目标与阶段见 [20-plugin-island-framework-plan.md](20-plugin-island-framework-plan.md)；
+- `clientOnly`（可选，需 `hydrate: true`）：服务端**不执行**该插槽模板，只输出带 `data-ada-client-only="1"` 的
+  `<div class="ada-island ada-island--client">` 空壳，浏览器用普通 `mount` 接管。**没有 SSR 回退**：
+  插件停用或 bundle 加载失败时该插槽保持空白（首个使用者是 `composer-telemetry`）。
 - `nav`：侧栏导航项；
 - `dashboard`：概览页卡片；
 - `actions`：读/写后端动作绑定；
@@ -378,6 +385,7 @@ Todo 卡片是插件的前端段，不是基座组件：`plugins/official/tools-
 | 路由 | 页面 | 数据来源 |
 |---|---|---|
 | `GET /`、`GET /threads`、`GET /threads/{id}` | 对话页 / 会话页（持久化行可用 AdaUI keyed patch；流式仍走 SSE + live-stream） | `thread.list`、`thread.get`、`thread.entries` |
+| `GET /threads/{id}/state` | 会话遥测投影（`run` / `context` / `usage`），供插件岛运行中轮询；不含任何插件 id，与 SSR 页面共用同一份 Core 调用 | `thread.get`（`itemLimit:1`）、`usage.get` |
 | `POST /threads/{id}/send`、`POST /threads/{id}/resend` | 发送 / 编辑并重发。`resend` 把 head 移到目标用户消息的父节点（首条则清空 head），再用新文本 `turn.start`；该消息之后的当前分支被舍弃，旧分支只留在存储里 | `turn.start`、`turn.steer`、`thread.branch` |
 | `GET /overview`、`GET /partials/dashboard.json` | 概览（统计卡、最近会话、插件卡片；AdaUI 岛每 5 秒轮询 JSON） | `thread.list`、`plugin.list`、`dashboard.widgets` 插槽 |
 | `GET /workspaces` | 打开工作区（从磁盘选择新目录；AdaUI 岛 + SSR 回退；目录浏览限制在当前工作区子树内）。切换已打开的工作区在侧栏完成 | Gateway 配置 + `os.ReadDir` |

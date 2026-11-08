@@ -174,6 +174,7 @@ agent.on("tool.beforeCall", async (event, ctx) => {
 | 提示词 | `persona-coding` | TS | `registerPrompt`：编码助手人格与领域规则 |
 | UI | `provider-admin` | TS + TSX + JS | 模型设置：Master-Detail 管理供应商/端点/API 格式/密钥/模型清单，拉取 `/models`，切换当前模型；页面经插件 route 调用，密钥只显示尾号；`composer.left` 插槽贡献模型设置入口（基座不写死插件 id/路由） |
 | UI | `token-usage` | TSX | 工作区/线程 Token 用量页面与概览卡片（`usage.get`） |
+| UI（纯客户端岛） | `composer-telemetry` | TSX + JS | 输入框下方辅助区整体（运行中 / 工作区 / 缓存命中 / 上下文环）：`composer.footer` 插槽 `clientOnly`，服务端只出空壳，浏览器挂载后轮询 `GET /threads/{id}/state`（运行中 2s、终态即停）；口径与基座同一套估算 |
 | 工具 + route | `plugin-helper` | TS | 插件脚手架：AI 在**对话**里经 `create_plugin` 工具（`access: write`）传入生成的入口源码，经 `plugin.admin` 安装桥写入全局 `~/.adago/plugins`（前端向导页已移除；route 保留给 CLI/测试）；随包技能 `plugin-manual`（插件手册：创建/检查/启停 + `adag-ui` 动态块用法）教模型完整流程；创建后需重载并启用 |
 | UI | `ui-hello-tsx` | TSX | 示例：页面、仪表盘、API、插槽 |
 

@@ -23,6 +23,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -340,9 +341,12 @@ func (b *Bridge) Slot(name string, r *http.Request) (template.HTML, int, error) 
 		}
 		var html template.HTML
 		var err error
-		if e.contrib.Hydrate {
+		switch {
+		case e.contrib.ClientOnly:
+			html, err = b.renderClientOnlyEntry(e.u, "slot", name, r)
+		case e.contrib.Hydrate:
 			html, err = b.renderIslandEntry(e.u, e.contrib.Template, "slot", name, r)
-		} else {
+		default:
 			html, err = b.renderEntry(e.u, e.contrib.Template, "slot", name, r, b.renderer.RenderTemplate)
 		}
 		if err != nil {
@@ -703,6 +707,50 @@ func (b *Bridge) renderIslandEntry(u *unit, templateName, kind, name string, r *
 	return b.wrapIslandHTML(u, vnode, stores, kind, name, props)
 }
 
+// renderClientOnlyEntry 渲染一个 clientOnly 贡献：**不执行模板**，只输出一个
+// 带岛屿标记的空壳，浏览器由 plugin-islands.js 用普通 mount 接管。
+//
+// 与 renderIslandEntry 的区别是刻意的：没有 SSR 内容，因此也没有「SSR 回退」。
+// 插件停用、client 缺失或脚本加载失败时该插槽保持空白——外壳本身带
+// `data-ada-client-only="1"`，让客户端知道该走 mount 而不是 hydrate。
+// props 仍走 publicIslandProps（剔除 CSRF），stores 恒为空：不渲染就不会
+// 实例化 defineStore，快照必然空。
+func (b *Bridge) renderClientOnlyEntry(u *unit, kind, name string, r *http.Request) (template.HTML, error) {
+	props, err := b.buildProps(u, r, kind, name)
+	if err != nil {
+		return "", err
+	}
+	client := b.clientURL(u)
+	if client == "" {
+		return "", fmt.Errorf("frontend: 插件 %s 的 clientOnly 贡献没有 client bundle", u.manifest.ID)
+	}
+	public, err := publicIslandProps(props, nil)
+	if err != nil {
+		return "", err
+	}
+	if len(public) > MaxStringBytes {
+		return "", fmt.Errorf("frontend: 插件 %s 的 %s:%s 首帧 props %d 字节超过 %d（clientOnly 无 SSR 可回退）",
+			u.manifest.ID, kind, name, len(public), MaxStringBytes)
+	}
+	root := Node{
+		T: "div",
+		P: map[string]any{
+			"class":                  "ada-island ada-island--client",
+			"data-ada-plugin-island": u.manifest.ID + ":" + kind + ":" + name,
+			"data-ada-plugin":        u.manifest.ID,
+			"data-ada-entry":         kind + ":" + name,
+			"data-ada-module":        client,
+			"data-ada-props":         string(public),
+			"data-ada-client-only":   "1",
+		},
+	}
+	raw, err := json.Marshal(root)
+	if err != nil {
+		return "", fmt.Errorf("frontend: 插件 %s 的 clientOnly 外壳无法编码: %w", u.manifest.ID, err)
+	}
+	return RenderHTML(raw)
+}
+
 // wrapIslandHTML 给根元素加 data-ada-* 标记；根是 $C/文本/null 时不加标记，
 // 保持纯 SSR（没有可挂载的宿主元素，硬包一层会破坏插槽布局）。
 func (b *Bridge) wrapIslandHTML(u *unit, vnode, stores json.RawMessage, kind, name string, props json.RawMessage) (template.HTML, error) {
@@ -785,6 +833,16 @@ func (b *Bridge) clientURL(u *unit) string {
 		base += "?v=" + hex.EncodeToString(sum[:4])
 	}
 	return base
+}
+
+// workspaceDisplayName 取工作区路径的显示名（最后一段）；规则与
+// web.workspaceName 一致：路径为空/根时原样返回。
+func workspaceDisplayName(path string) string {
+	name := filepath.Base(path)
+	if name == "" || name == "." || name == string(filepath.Separator) {
+		return path
+	}
+	return name
 }
 
 // pageIslandSlots 列出各页面实际会渲染的插槽；用于决定是否加载客户端引擎。
@@ -877,8 +935,11 @@ type pluginInfo struct {
 
 type appInfo struct {
 	Workspace string `json:"workspace"`
-	Product   string `json:"product"`
-	Route     string `json:"route"`
+	// WorkspaceName 是工作区的显示名（路径最后一段），与基座 baseData.WorkspaceName
+	// 同一规则；插件不必再自己拆 Windows/POSIX 分隔符。
+	WorkspaceName string `json:"workspaceName,omitempty"`
+	Product       string `json:"product"`
+	Route         string `json:"route"`
 	// CSRF 让插件页面的写表单能过双提交校验（与基座模板里的 csrf_token 同源）。
 	CSRF string `json:"csrf,omitempty"`
 }
@@ -892,9 +953,10 @@ func (b *Bridge) buildProps(u *unit, r *http.Request, kind, name string) (json.R
 	p := renderProps{
 		Plugin: pluginInfo{ID: u.manifest.ID, Name: u.manifest.Name, Version: u.manifest.Version},
 		App: appInfo{
-			Workspace: b.workspace(r),
-			Product:   b.product,
-			Route:     r.URL.Path,
+			Workspace:     b.workspace(r),
+			WorkspaceName: workspaceDisplayName(b.workspace(r)),
+			Product:       b.product,
+			Route:         r.URL.Path,
 		},
 	}
 	if b.csrf != nil {

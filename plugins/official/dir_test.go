@@ -46,7 +46,7 @@ func TestScriptsFromRepoDir(t *testing.T) {
 			fe[s.Manifest.ID] = true
 		}
 	}
-	for _, want := range []string{"tools-plan", "provider-admin", "token-usage", "ui-hello-tsx", "ui-charts", "mcp-client", "env-manager"} {
+	for _, want := range []string{"tools-plan", "provider-admin", "token-usage", "ui-hello-tsx", "ui-charts", "mcp-client", "env-manager", "composer-telemetry"} {
 		if !fe[want] {
 			t.Fatalf("前端插件缺少 %q（现有：%v）", want, fe)
 		}

@@ -14,7 +14,8 @@
     "token-usage",
     "ui-charts",
     "plugin-helper",
-    "env-manager"
+    "env-manager",
+    "composer-telemetry"
   ],
   "capabilities": {
     "skills": true,

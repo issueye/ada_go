@@ -277,7 +277,7 @@
   /* ── 「＋」菜单：点外面或按 Esc 收起 ────────────────────────────────── */
   /* details 自己只管开合：不处理"点别处"，菜单会一直挂在输入框上方。 */
   var plusBound = false;
-  /* ── 弹层互斥（19-ued §19.5.1）：＋菜单与行菜单同屏只开一个 ────────────
+  /* ── 弹层互斥（19-ued §19.5.1）：＋菜单、行菜单、上下文气泡同屏只开一个 ──
      toggle 事件不冒泡，但捕获阶段仍会路过 document，在这里统一裁决。 */
   var popoverExclusionBound = false;
   function bindPopoverExclusion() {
@@ -288,11 +288,44 @@
       function (event) {
         var target = event.target;
         if (!target || !target.open || !target.matches) return;
-        if (target.matches('details.ada-row-menu')) closePlusMenus();
-        else if (target.matches('details.ada-plus')) closeRowMenus();
+        if (target.matches('details.ada-row-menu')) {
+          closePlusMenus();
+          closeContextPopovers();
+        } else if (target.matches('details.ada-plus')) {
+          closeRowMenus();
+          closeContextPopovers();
+        } else if (target.matches('details.ada-context')) {
+          closePlusMenus();
+          closeRowMenus();
+        }
       },
       true
     );
+  }
+
+  /* ── 上下文环的 token 气泡：点外面或按 Esc 收起（19-ued §19.5.1）────── */
+  function closeContextPopovers() {
+    var list = document.querySelectorAll('details.ada-context[open]');
+    for (var i = 0; i < list.length; i += 1) list[i].open = false;
+  }
+
+  function bindContextPopover() {
+    document.addEventListener('click', function (event) {
+      var list = document.querySelectorAll('details.ada-context[open]');
+      for (var i = 0; i < list.length; i += 1) {
+        if (!list[i].contains(event.target)) list[i].open = false;
+      }
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') return;
+      // Esc 就近关闭：modal 在上面时先让路（19-ued §19.5.1 第 2 条）。
+      if (window.AdaComponents && window.AdaComponents.modalOpen && window.AdaComponents.modalOpen()) return;
+      var list = document.querySelectorAll('details.ada-context[open]');
+      if (!list.length) return;
+      var summary = list[0].querySelector('summary');
+      for (var i = 0; i < list.length; i += 1) list[i].open = false;
+      if (summary) summary.focus({ preventScroll: true });
+    });
   }
 
   function closePlusMenus() {
@@ -554,6 +587,7 @@
     bindToolOutputs();
     bindPlusMenu();
     bindPopoverExclusion();
+    bindContextPopover();
     openDialogFromQuery();
     // 运行中的工具/状态每秒刷新一次耗时：1s 粒度足够，也能让"它还在跑"看得见。
     window.setInterval(function () {

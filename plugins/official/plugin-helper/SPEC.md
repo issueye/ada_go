@@ -40,9 +40,15 @@
   },
   "frontend": {                  // 可选；当前仅随包官方插件被渲染桥装配（§8）
     "capabilities": ["backend.read"],
+    "client": "client.js",       // 浏览器 bundle（pluginbuild 产物，须提交）；hydrate 必需
     "nav": [{ "label": "入口", "slug": "main" }],
     "pages": [{ "slug": "main", "title": "标题", "template": "page.tsx" }],
-    "slots": [{ "slot": "chat.corner", "template": "slot.tsx", "order": 10 }],
+    "slots": [
+      { "slot": "chat.corner", "template": "slot.tsx", "order": 10 },
+      // 岛屿：hydrate 需 frontend.client + frontend.script + builtin/verified；
+      // clientOnly 还需 hydrate:true，表示服务端不渲染、浏览器普通 mount（无 SSR 回退）。
+      { "slot": "composer.footer", "template": "footer.tsx", "order": 10, "hydrate": true, "clientOnly": true }
+    ],
     "blocks": [{ "name": "usage-card", "schema": "schemas/usage-card.json",
                  "template": "blocks/usage-card.tsx", "profile": "display" }],
     "actions": { "binding": { "action": "plan", "read": true, "backend": "tools-plan" } },
@@ -52,6 +58,10 @@
   }
 }
 ```
+
+插件根目录只收 `*.tsx`（模板不能放子目录）。`client.tsx` 用 `export const islands = {...}`
+按服务端注入的 `data-ada-entry`（`kind:name`，如 `slot:composer.footer`）选择组件，
+`default` 兜底；产物 `static/client.js` 由 `go run ./tools/pluginbuild -dir <插件> -entry client.tsx -out static/client.js` 生成并提交（`-check` 校验同步）。详见 §8.2。
 
 信任级别：`builtin`（随包发布，只能启用/禁用）、`verified`（签名有效）、
 `third-party`（默认，受限）。
@@ -209,7 +219,35 @@ JSON 用 `JSON.parse(res.text)`；响应 ≤16MB。
   全局/工作区安装的插件（`~/.adago/plugins/`、`<ws>/.adago/plugins/`）只加载
   后端段 **+ `frontend.blocks`**——其余 `frontend` 字段不会报错，但页面/插槽不会出现。
 
-### 8.1 Markdown 动态块（`frontend.blocks`）
+### 8.2 插槽岛屿（`hydrate` / `clientOnly`）
+
+插槽贡献可以「进浏览器」，两级：
+
+| 声明 | 服务端 | 浏览器 |
+| --- | --- | --- |
+| 不声明（默认） | 执行 TSX，输出 SSR HTML | 不加载 |
+| `"hydrate": true` | 执行 TSX，输出 SSR HTML + `data-ada-*` 标记 | `plugin-islands.js` 用 `mount(el, {hydrate:true, rootElement:true})` 接管同一棵树 |
+| `"hydrate": true, "clientOnly": true` | **不执行 TSX**，只输出 `<div class="ada-island ada-island--client" data-ada-client-only="1" …>` 空壳 | 用普通 `mount(el)` 挂载；**没有 SSR 回退**（失败即空白） |
+
+- `hydrate` / `clientOnly` 都需要 `frontend.client`、`frontend.script` 能力，且 trust 为 builtin/verified。
+- 岛屿根元素必须是单个原生元素（`$C` 组件或纯文本根不会带标记）。
+- `data-ada-entry` 是 `kind:name`（`slot:composer.footer` / `page:usage`）；`client.tsx` 用
+  `export const islands = { "slot:composer.footer": X }` 映射，`default` 兜底。
+- 首帧数据只经 `props`（`props.app` / `props.data.thread` / 只读动作投影），CSRF 不进 `data-ada-props`。
+- clientOnly 岛的 DOM 不过 Go 的 VNode 白名单（白名单只约束 SSR），可以直接输出 `<svg>`；
+  但它同样受 CSP（`default-src 'self'`、无内联 script/style）与 512KB bundle 上限约束。
+- 现成例子：`plugins/official/composer-telemetry`（`composer.footer`，轮询 `GET /threads/{id}/state`）。
+
+新增一个插槽岛屿的顺序：
+
+1. `slot.tsx` / `footer.tsx`：`export default defineComponent({ render(h) { … } })`，放在插件根目录；
+2. `client.tsx`：`export const islands = { "slot:<插槽名>": 组件 }`（可多个 entry）+ `export default`；
+3. `plugin.json` 的 `frontend` 登记 `client` / `slots[].hydrate`（纯客户端再加 `clientOnly: true`）；
+4. `go run ./tools/pluginbuild -dir <插件> -entry client.tsx -out static/client.js`（产物须提交，
+   `app/client_bundles_test.go` 用 `-check` 防漂移）；
+5. 端到端测试：`adag verify` + 一条断言 `data-ada-plugin-island` / `data-ada-client-only` 的用例。
+
+### 8.3 Markdown 动态块（`frontend.blocks`）
 
 插件可以把一块**只读 UI** 嵌进助手 Markdown：清单声明 renderer，配一份数据
 Schema 与 TSX 模板；宿主校验 `data` 后渲染成 VNode，浏览器与无 JS 的
@@ -323,7 +361,7 @@ SVG 白名单，当前未开放，不要用 `svg`/`style` 绕过。
 任意工具/插件在结果里提示模型时，应给出 **确切的 renderer id + data 示例**，
 不要让模型猜。
 
-### 8.2 AI 在回答里如何使用动态块
+### 8.4 AI 在回答里如何使用动态块
 
 需要结构化展示（用量、统计、清单、状态卡）时，优先用**已启用插件提供的
 block**，不要在 Markdown 里手写 HTML（会被清洗）或伪造宿主组件。

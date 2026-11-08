@@ -92,9 +92,6 @@
                   </div>
                 </div>
               </div>
-              <div class="ada-aux ada-newtask__aux">
-                <span class="ada-aux__plugins">{{slot "composer.footer" .Slots.ComposerFooter .SlotCounts.ComposerFooter ""}}</span>
-              </div>
             </form>
           </div>
         </div>
@@ -162,19 +159,12 @@
         </div>
       </div>
     </div>
-    <div id="composer-aux">
-      <div class="ada-aux">
-        <span class="ada-aux__group">
-          {{if .Run.Active}}<span class="ada-aux__item ada-aux__item--brand">{{icon "i-wave" 12}}<span>{{.Run.Label}}</span></span>{{end}}
-          <span class="ada-aux__item ada-aux__item--neutral"><span>工作区：{{.WorkspaceName}}</span></span>
-        </span>
-        <div class="ada-aux__actions">
-          <span class="ada-aux__cache" title="缓存命中率：输入 token 中命中缓存的比例">{{icon "i-database" 12}}<span>缓存命中 {{if .HasCache}}{{.CacheHitPercent}}%{{else}}—{{end}}</span></span>
-          {{if .Context.Has}}<span class="ada-token-ring" title="{{.Context.Title}}" role="img" aria-label="{{.Context.Title}}"><svg class="ada-token-ring__svg" viewBox="0 0 36 36" aria-hidden="true"><circle class="ada-token-ring__track" cx="18" cy="18" r="15"></circle><circle class="ada-token-ring__value" cx="18" cy="18" r="15" transform="rotate(-90 18 18)" stroke-dasharray="{{.Context.DashArray}}" stroke-dashoffset="{{.Context.DashOffset}}"></circle></svg><span class="ada-token-ring__label">{{.Context.Percent}}%</span></span>{{end}}
-        </div>
-        <span class="ada-aux__plugins">{{slot "composer.footer" .Slots.ComposerFooter .SlotCounts.ComposerFooter ""}}</span>
-      </div>
-    </div>
+    {{/* 输入框下方辅助区整体交给插件岛（composer.footer + clientOnly）：
+       基座不渲染任何内容，插件停用或脚本加载失败时这里保持空白。数据来自
+       基座通用投影 GET /threads/{id}/state（run / context / usage）。
+       宿主外壳不能包额外布局层：.ada-slot 与 .ada-island--client 都是
+       display:contents，插件自己的 .ada-aux 直接落在 #composer-aux 里。 */}}
+    <div id="composer-aux">{{slot "composer.footer" .Slots.ComposerFooter .SlotCounts.ComposerFooter ""}}</div>
     <input type="hidden" name="idempotencyKey" value="{{.TurnKey}}">
   </form>
   <script src="{{asset "chat-live.js"}}" defer></script>

@@ -20,6 +20,7 @@ func TestOfficialClientBundlesInSync(t *testing.T) {
 		"plugins/official/ui-hello-tsx",
 		"plugins/official/token-usage",
 		"plugins/official/provider-admin",
+		"plugins/official/composer-telemetry",
 	} {
 		cmd := exec.Command("go", "run", "./tools/pluginbuild",
 			"-dir", dir,

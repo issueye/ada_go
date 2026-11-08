@@ -742,7 +742,11 @@ func TestThreadPageRendersTranscriptToolCardAndTray(t *testing.T) {
 	if got := strings.Count(body, `action="/threads/th_1/abort" data-confirm="确定中止当前轮次吗？"><input type="hidden" name="csrf_token"`); got != 1 {
 		t.Fatalf("带 CSRF 的中止表单 = %d，期望 1（仅顶栏）", got)
 	}
-	wantContains(t, body, "缓存命中")
+	// 辅助区整块由插件岛渲染：基座只留空壳宿主，不再输出缓存命中/上下文环。
+	wantContains(t, body, `<div id="composer-aux"><div class="ada-slot" data-slot="composer.footer"`)
+	if strings.Contains(body, "缓存命中") {
+		t.Fatal("缓存命中已迁到插件岛，基座页面不该再出现它（没有 SSR 回退）")
+	}
 
 	// Composer 表单。整页刷新（模型/工作区切换、桌面壳热更新）时草稿按会话恢复。
 	wantContains(t, body, `action="/threads/th_1/send"`)
@@ -763,7 +767,9 @@ func TestThreadPageRendersTranscriptToolCardAndTray(t *testing.T) {
 	}
 }
 
-func TestThreadPageRendersContextRingAndCacheHit(t *testing.T) {
+// 输入框辅助区已迁到插件岛：基座页面只输出空壳宿主，指标由
+// GET /threads/{id}/state 提供（见 TestThreadStateJSON）。
+func TestThreadPageLeavesComposerAuxToPluginIsland(t *testing.T) {
 	core := newFakeCore().
 		on("thread.get", `{"thread":{"id":"th_1","workspace":"","title":"指标会话","createdAt":"2026-10-28T09:00:00Z","updatedAt":"2026-10-28T10:00:00Z","archived":false},"items":[],"seq":1,"run":{"runId":"run_1","status":"terminal","terminal":"completed"},"context":{"tokens":705000,"window":1048576,"percent":67},"interactions":[],"hasMore":false}`).
 		on("thread.entries", `{"entries":[],"hasMore":false}`).
@@ -772,9 +778,82 @@ func TestThreadPageRendersContextRingAndCacheHit(t *testing.T) {
 	srv, _ := newServer(t, core)
 
 	body := serve(t, srv, "GET", "/threads/th_1", nil).Body.String()
-	wantContains(t, body, `ada-token-ring`)
-	wantContains(t, body, `aria-label="上下文已用 67% · 约 705K / 1M"`)
-	wantContains(t, body, "缓存命中 99%")
+	wantContains(t, body, `data-slot="composer.footer"`)
+	// 没有 SSR 回退：没有 JS / 插件停用时辅助区整块空白。
+	for _, absent := range []string{"ada-token-ring", "ada-context", "缓存命中", "工作区："} {
+		if strings.Contains(body, absent) {
+			t.Fatalf("基座不应再渲染辅助区内容 %q（已整体迁到插件岛）", absent)
+		}
+	}
+}
+
+// 遥测轮询端点：run / context / usage 三块只读数据，与 SSR 页面同一份 Core 调用。
+func TestThreadStateJSON(t *testing.T) {
+	core := newFakeCore().
+		on("thread.get", `{"thread":{"id":"th_1","workspace":"","title":"指标会话","createdAt":"2026-10-28T09:00:00Z","updatedAt":"2026-10-28T10:00:00Z","archived":false},"items":[],"seq":1,"run":{"runId":"run_1","status":"running","startedAt":"2026-10-28T10:00:00Z"},"context":{"tokens":215000,"messages":152000,"system":1500,"tools":7700,"window":1048576,"percent":21},"interactions":[],"hasMore":false}`).
+		on("usage.get", `{"thread":{"inputTokens":1000,"cacheTokens":990,"outputTokens":200,"costMicros":1200},"workspace":{"inputTokens":5000,"outputTokens":800,"cacheTokens":2000,"costMicros":9000}}`)
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "GET", "/threads/th_1/state", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /threads/th_1/state = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("Content-Type = %q", ct)
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Fatalf("Cache-Control = %q", cc)
+	}
+	var out struct {
+		Run struct {
+			Status    string `json:"status"`
+			StartedAt string `json:"startedAt"`
+		} `json:"run"`
+		Context *struct {
+			Tokens   int `json:"tokens"`
+			Messages int `json:"messages"`
+			Window   int `json:"window"`
+			Percent  int `json:"percent"`
+		} `json:"context"`
+		Usage *struct {
+			Thread struct {
+				InputTokens  int `json:"inputTokens"`
+				CacheTokens  int `json:"cacheTokens"`
+				OutputTokens int `json:"outputTokens"`
+				CostMicros   int `json:"costMicros"`
+			} `json:"thread"`
+			Workspace struct {
+				InputTokens int `json:"inputTokens"`
+			} `json:"workspace"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("响应不是合法 JSON: %v (body=%s)", err, rec.Body.String())
+	}
+	if out.Run.Status != "running" || out.Run.StartedAt != "2026-10-28T10:00:00Z" {
+		t.Fatalf("run = %+v", out.Run)
+	}
+	if out.Context == nil || out.Context.Tokens != 215000 || out.Context.Window != 1048576 || out.Context.Percent != 21 {
+		t.Fatalf("context = %+v", out.Context)
+	}
+	if out.Usage == nil || out.Usage.Thread.CacheTokens != 990 || out.Usage.Workspace.InputTokens != 5000 {
+		t.Fatalf("usage = %+v", out.Usage)
+	}
+	// 端点只拉投影所需的最小数据：thread.get 不应拉整份历史。
+	if call, ok := core.lastCall("thread.get"); !ok || call.Params["itemLimit"] != 1 {
+		t.Fatalf("thread.get 参数 = %+v，期望 itemLimit=1", call.Params)
+	}
+}
+
+// thread.get 失败时端点如实报错，不伪造空状态。
+func TestThreadStateJSONCoreError(t *testing.T) {
+	core := newFakeCore().fail("thread.get", errors.New("core down"))
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "GET", "/threads/th_1/state", nil)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("GET /threads/th_1/state = %d，期望 502", rec.Code)
+	}
 }
 
 func TestThreadPageExposesLiveStreamHooks(t *testing.T) {
@@ -1888,7 +1967,9 @@ func TestThreadPageUsesAdaShellAndComponentDOM(t *testing.T) {
 		`class="ada-composer__group ada-composer__group--left"`,
 		`class="ada-composer__group ada-composer__group--right"`,
 		`class="ada-send"`,
-		`class="ada-aux"`,
+		// 辅助区外壳由基座保留，内容由插件岛填充（插件未启用时这里是空壳）。
+		`id="composer-aux"`,
+		`data-slot="composer.footer"`,
 		`class="ada-msg ada-msg--user"`,
 		`class="ada-msg ada-msg--assistant"`,
 		`class="ada-disclosure" data-kind="tool"`,

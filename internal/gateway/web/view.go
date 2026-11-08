@@ -88,9 +88,13 @@ type interactionDTO struct {
 }
 
 type contextStatsDTO struct {
-	Tokens  int `json:"tokens"`
-	Window  int `json:"window"`
-	Percent int `json:"percent"`
+	// Tokens 是三段合计（系统提示 + 工具声明 + 对话消息），Percent 以它为准。
+	Tokens   int `json:"tokens"`
+	Messages int `json:"messages"`
+	System   int `json:"system"`
+	Tools    int `json:"tools"`
+	Window   int `json:"window"`
+	Percent  int `json:"percent"`
 }
 
 type threadGetResult struct {
@@ -707,14 +711,15 @@ func compactTokenCount(n int) string {
 
 // buildRun 把 Core 的运行状态翻译成界面文案。
 func buildRun(rs runStateDTO) runView {
+	detail := trimRunErrorDetail(rs.ErrorDetail)
 	v := runView{
 		Status:      rs.Status,
 		Terminal:    rs.Terminal,
 		StartedAt:   rs.StartedAt,
 		EndedAt:     rs.EndedAt,
 		ErrorCode:   rs.ErrorCode,
-		ErrorLabel:  runErrorLabel(rs.Terminal, rs.ErrorCode),
-		ErrorDetail: rs.ErrorDetail,
+		ErrorLabel:  runErrorLabel(rs.Terminal, rs.ErrorCode, detail),
+		ErrorDetail: detail,
 	}
 	switch rs.Status {
 	case "running":
@@ -747,19 +752,38 @@ func buildRun(rs runStateDTO) runView {
 }
 
 // runErrorLabel 把终态错误映射成给用户看的下一步；详情仍以诊断码为准。
-func runErrorLabel(terminal string, code int) string {
+func runErrorLabel(terminal string, code int, detail string) string {
 	switch terminal {
 	case "error":
 		if domain.Code(code) == domain.CodeProviderError {
 			return "供应商调用失败：请检查 Base URL 与 API Key，或切换到其他模型后重试。"
 		}
-		return "本轮执行失败；请检查供应商配置与 Core 日志后重试。"
+		if detail != "" {
+			return "本轮执行失败；原因见下方，请检查供应商配置后重试。"
+		}
+		return "本轮执行失败；请检查供应商配置后重试。"
 	case "interrupted":
 		return "本轮被中断（网关重启或进程退出），可以重新发送。"
 	case "budget_exceeded":
 		return "本轮超出配置的预算；调整预算或缩短任务后重试。"
 	}
 	return ""
+}
+
+// maxRunErrorDetail 是终态错误详情在页面上的上限：供应商原始响应可能是很长的
+// HTML/JSON，页面只保留能定位问题的那一段。
+const maxRunErrorDetail = 600
+
+// trimRunErrorDetail 去掉首尾空白并截断过长的错误详情。
+func trimRunErrorDetail(s string) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\r\n", "\n"))
+	if s == "" {
+		return ""
+	}
+	if utf8.RuneCountInString(s) > maxRunErrorDetail {
+		s = string([]rune(s)[:maxRunErrorDetail]) + "…"
+	}
+	return s
 }
 
 // buildThreadList 把线程列表投影成模板行。

@@ -1,0 +1,23 @@
+{
+  "id": "composer-telemetry",
+  "name": "Composer 遥测",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "输入框下方辅助区（运行中 / 工作区 / 缓存命中 / 上下文占用）的纯客户端岛屿：服务端不渲染内容，浏览器挂载后轮询基座通用投影 GET /threads/{id}/state。",
+  "trust": "builtin",
+  "frontend": {
+    "capabilities": ["frontend.script"],
+    "client": "client.js",
+    "slots": [
+      {
+        "slot": "composer.footer",
+        "template": "composer-footer.tsx",
+        "hydrate": true,
+        "clientOnly": true,
+        "order": 10
+      }
+    ],
+    "styles": ["telemetry.css"],
+    "assets": "static"
+  }
+}

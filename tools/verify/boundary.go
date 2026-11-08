@@ -20,6 +20,7 @@ var officialPluginIDs = []string{
 	"tools-fs", "tools-shell", "tools-git", "tools-plan", "tools-ask", "tools-skill", "tools-subagent",
 	"policy-default", "persona-coding", "provider-admin", "token-usage",
 	"plugin-helper", "ui-hello-tsx", "mcp-client", "browser-use", "env-manager",
+	"cron-manager", "composer-telemetry",
 }
 
 // goFileRe 匹配可能构成「平行 Go 注册入口」的导出函数（1.5.2「零协议扩展」「基座不提供 Go 插件注册 API」）。

@@ -76,6 +76,10 @@ type SlotContribution struct {
 	Order    int    `json:"order"`
 	// Hydrate 为 true 时，该插槽贡献在浏览器用 frontend.client hydrate。
 	Hydrate bool `json:"hydrate,omitempty"`
+	// ClientOnly 为 true 时服务端不渲染模板内容，只输出带岛屿标记的空壳，
+	// 由浏览器用 frontend.client 纯客户端 mount（没有 SSR 回退：插件未启用
+	// 或脚本加载失败时该插槽保持空白）。必须同时声明 hydrate 与 frontend.client。
+	ClientOnly bool `json:"clientOnly,omitempty"`
 }
 
 // PageContribution 是 /ext/{id}/{slug} 独立页面。
@@ -261,6 +265,9 @@ func (m *Manifest) validateFrontend() error {
 		}
 		if s.Hydrate && client == "" {
 			return fmt.Errorf("plugins: %s 的插槽 %s 声明了 hydrate 但没有 frontend.client", m.ID, s.Slot)
+		}
+		if s.ClientOnly && !s.Hydrate {
+			return fmt.Errorf("plugins: %s 的插槽 %s 声明了 clientOnly 但没有 hydrate（纯客户端挂载必须先声明 hydrate）", m.ID, s.Slot)
 		}
 		key := s.Slot + "\x00" + s.Template
 		if seenSlot[key] {

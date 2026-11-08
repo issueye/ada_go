@@ -1784,11 +1784,6 @@ html.js .ada-newtask__ws-native {
   display: none;
 }
 
-.ada-newtask__aux {
-  justify-content: space-between;
-  margin-top: 8px;
-}
-
 /* 下拉选项必须撑满菜单：<button> 的 width:auto 是收缩宽度，
    在宽菜单里会出现“只有文字那一小段能点/能高亮”的问题。 */
 .ada-select__option {
@@ -2815,9 +2810,130 @@ form[data-submitting] .ada-btn[type="submit"]::after {
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
+.ada-token-ring__value.is-high {
+  stroke: var(--ph-warn-ink);
+}
+
+/* 上下文环的点按气泡（原生 details，无 JS）：
+   环上只写百分比，点开后才给出三段分项 —— 系统提示词 / 工具定义 / 对话消息。
+   面板向上展开，压在输入卡上；宽度按 8 的倍数，避免和栅格对不齐。 */
+.ada-context {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.ada-context > summary {
+  list-style: none;
+  cursor: pointer;
+  border-radius: var(--ada-radius-pill);
+}
+.ada-context > summary::-webkit-details-marker {
+  display: none;
+}
+.ada-context > summary:focus-visible {
+  outline: 2px solid var(--ph-brand);
+  outline-offset: 2px;
+}
+.ada-context[open] > summary {
+  color: var(--ph-brand-ink);
+}
+.ada-context__panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 40;
+  width: 248px;
+  max-width: calc(100vw - 32px);
+  padding: 12px 14px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-elevated);
+  box-shadow: var(--ph-shadow);
+  color: var(--ph-muted);
+  font-size: var(--ada-text-xs);
+  line-height: 1.5;
+}
+.ada-context__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+.ada-context__head-main {
+  color: var(--ph-ink);
+  font-weight: 500;
+}
+.ada-context__head-total {
+  color: var(--ph-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ada-context__bar {
+  display: block;
+  width: 100%;
+  height: 4px;
+  margin: 0 0 10px;
+}
+.ada-context__bar-track {
+  stroke: var(--ph-line);
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+.ada-context__bar-value {
+  stroke: var(--ph-brand);
+  stroke-width: 4;
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--ada-duration-fast) ease;
+}
+.ada-context__bar-value.is-high {
+  stroke: var(--ph-warn-ink);
+}
+.ada-context__list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ada-context__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ada-context__dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--ph-faint);
+}
+.ada-context__dot--tools {
+  background: var(--ph-muted);
+}
+.ada-context__dot--messages {
+  background: var(--ph-brand);
+}
+.ada-context__name {
+  flex: 1;
+  min-width: 0;
+  color: var(--ph-muted);
+  white-space: nowrap;
+}
+.ada-context__value {
+  color: var(--ph-ink);
+  font-variant-numeric: tabular-nums;
+}
+.ada-context__hint {
+  margin: 10px 0 0;
+  color: var(--ph-warn-ink);
+}
 @media (max-width: 760px) {
   .ada-aux__actions {
     gap: 8px;
+  }
+  .ada-context__panel {
+    right: -8px;
   }
 }
 

@@ -109,12 +109,31 @@ plugin.tsx（单一源码，render(h)/TSX）
 服务端渲染贡献时，在根 VNode 上注入：
 
 ```html
-data-ada-plugin-island="tools-plan:chat.corner"
+data-ada-plugin-island="tools-plan:slot:chat.corner"   <!-- id:kind:name -->
 data-ada-plugin="tools-plan"
+data-ada-entry="slot:chat.corner"                       <!-- kind:name，用于 islands 映射 -->
 data-ada-module="/ext/tools-plan/static/client.js?v=<hash>"
 data-ada-props="<JSON>"
 ```
 
+`clientOnly: true` 的插槽贡献（见 §4.2）不执行模板，只输出空壳，另带一个标记：
+
+```html
+<div class="ada-island ada-island--client"
+     data-ada-plugin-island="composer-telemetry:slot:composer.footer"
+     data-ada-entry="slot:composer.footer"
+     data-ada-module="/ext/composer-telemetry/static/client.js?v=<hash>"
+     data-ada-client-only="1"
+     data-ada-props="<JSON>"></div>
+```
+
+- `plugin-islands.js` 读到 `data-ada-client-only="1"` 就用普通 `app.mount()`（不是 hydrate，
+  也没有 `rootElement`）；否则按 §3.4 的 `hydrate:true, rootElement:true` 接管。
+  `.ada-island--client` 在插槽样式里是 `display: contents`，所以外壳不改变插槽布局。
+- **clientOnly 没有 SSR 回退**：插件停用、`ADAG_DISABLE_ISLANDS`、bundle 加载失败时该槽空白。
+  这是刻意的取舍（远端数据类遥测不适合在服务端算一遍再丢给客户端）。
+- 纯客户端岛的 DOM 不过 Go 的 `ValidateNode`（白名单只在 SSR 阶段执行），因此可以直接输出
+  `<svg><use href="#i-wave">` 这类页面 sprite 引用；门槛仍是 `frontend.script`（builtin/verified）。
 - 优先给根节点注入属性，避免额外包裹层破坏插槽布局；根是 `$C` 时退化为 `display: contents` 容器。
 - `data-ada-props` 只放客户端首帧需要的投影：
   - 排除 `app.csrf`（写表单继续用页面已有隐藏字段）；
@@ -141,7 +160,8 @@ data-ada-props="<JSON>"
     "capabilities": ["backend.read", "frontend.script"],
     "client": "client.js",
     "slots": [
-      { "slot": "chat.corner", "template": "slot.tsx", "hydrate": true, "order": 10 }
+      { "slot": "chat.corner", "template": "slot.tsx", "hydrate": true, "order": 10 },
+      { "slot": "composer.footer", "template": "footer.tsx", "hydrate": true, "clientOnly": true, "order": 10 }
     ],
     "pages": [
       { "slug": "providers", "template": "page.tsx", "hydrate": true, "title": "供应商" }
@@ -152,7 +172,10 @@ data-ada-props="<JSON>"
 
 - `frontend.client`：插件浏览器 bundle 的静态资源名，必须在 `assets` 目录中；MVP 每插件一个。
 - `slots[].hydrate` / `pages[].hydrate`：该贡献是否 hydrate；缺省 false，完全向后兼容。
-- `frontend.script` 能力仍作为加载 JS 的门禁；`hydrate` 是新消费者。P2 再评估是否拆出独立的 `frontend.hydrate` 能力位。
+- `slots[].clientOnly`：**服务端不渲染模板**，只发空壳，浏览器普通 mount（见 §3.5）。必须与
+  `hydrate: true` 同时声明（`hydrate` 决定「这个贡献要进浏览器」，`clientOnly` 决定「服务端不画」）。
+  没有 SSR 回退是它的定义，不是缺陷：使用者要自己评估「没有 JS 时这块可以空着」。
+- `frontend.script` 能力仍作为加载 JS 的门禁；`hydrate` / `clientOnly` 是新消费者。P2 再评估是否拆出独立的 `frontend.hydrate` 能力位。
 - `adag verify` 增加：字段消费者、client 资源存在、hash 一致、无 `eval`/`new Function`、第三方声明即失败。
 
 **备选（零 schema 方案）**：不新增字段，复用 `frontend.scripts` + 模板输出约定（`data-ada-module`）。适合 P0 验证，但不可审计、容易被误用；仅作为过渡。
@@ -388,6 +411,14 @@ root.P["data-ada-props"] = string(publicPropsJSON)
 - **P2-4b-1 完成**：`provider-admin` 首屏骨架改为同构组件（SSR + hydrate），交互仍由 legacy `provider-admin.js` 在 `DOMContentLoaded` 后接管；`pluginbuild` 生成 `static/client.js`。`TestUIExtRoutes` 覆盖页面标记、legacy 脚本与 island 引导共存。
 - **P2-4b-2b 完成**：`providers` 页已替换为 `providers-next.tsx` 组件化实现；新增供应商、设为当前、启用/停用、删除、拉取/添加模型、模型新增/删除/编辑（显示名/上下文/推理等级/输入模态/工具/启停）与供应商信息/代理/请求头/API Key 编辑全部走组件状态。拉取模型改为勾选弹窗，只添加选中的模型；模型的添加/编辑也通过弹窗完成；推理等级为动态标签，输入模态为复选框。`provider-admin.js` 不再由清单加载；`page.tsx`/legacy 脚本保留作历史参考。页面通过 `backend.read` 动作 `state` 预取目录，SSR/无 JS 可显示供应商。`TestUIExtRoutes` 断言旧脚本不加载、SSR 预取生效、过渡页 404；`provider-next.test.js` 覆盖 SSR props、勾选弹窗、等级标签/模态复选框与全部写操作。
 - **P3-1 客户端 bundle 门禁完成**：`ui-hello-tsx` / `token-usage` / `provider-admin` 统一从 `client.tsx` 构建；`TestOfficialClientBundlesInSync` 在 `go test ./app` 里跑 `pluginbuild --check`，阻止提交产物漂移。
+- **P2-3b clientOnly 完成（composer-telemetry）**：清单新增 `slots[].clientOnly`（必须 `hydrate:true`）；桥新增
+  `renderClientOnlyEntry` —— 不执行模板，只输出 `<div class="ada-island ada-island--client" data-ada-client-only="1">`
+  空壳；`plugin-islands.js` 据此改用普通 `mount` 并记录 `diagnostics.mounted`。首个使用者是 `composer-telemetry`：
+  输入框下方辅助区（运行中/工作区/缓存命中/上下文环）整体迁入，基座删除 `contextView`/`cacheHitPercent` 与模板块，
+  数据改由基座通用投影 `GET /threads/{id}/state` 提供（岛挂载拉一次、运行中 2s 轮询、终态停止）。
+  测试：`TestClientOnlySlotRendersEmptyShell`、`TestClientOnlySlotReportsHasIslands`、
+  `TestClientOnlySlotWithoutClientIsError`、`TestComposerTelemetryIsClientOnlyShell`、`plugin-islands.test.js`
+  的 client-only 用例、`composer-telemetry/static/telemetry.test.js`。
 - **下一步**：P3-4 文档/安全复查、P3-5 特性开关/回滚/无 JS 验收。
 
 ## 15. P2 验收结果（2026-11-05）
@@ -511,6 +542,7 @@ go test ./plugins/official -run TestClientBundleSizes -v
 | props 上限 | ✅ | 32KB 超限降级纯 SSR（P1-4） |
 | CSP 无 eval/new Function | ✅ | `TestClientBundlesHonorCSP` 覆盖全部随包 client bundle；`pluginbuild` 构建期扫描 |
 | 第三方插件隔离 | ⚠️ 不支持 | 第三方不能用客户端岛屿；方案取舍见 [21-third-party-islands.md](21-third-party-islands.md) |
+| `clientOnly` 绕过 VNode 白名单 | ✅ 有界 | clientOnly 的 DOM 不在服务端校验（VNode 白名单只约束 SSR），因此可以直接输出 `<svg>`/`<use>` 等被 SSR 排除的标签；门槛与 `frontend.script` 相同（builtin/verified + CSP `default-src 'self'`）。当前唯一使用者是随包 `composer-telemetry`。 |
 | Electron 主世界 | ⚠️ 静态门禁 ✅ / 运行时手工 | `desktop/security.test.js` 钉住 contextIsolation/nodeIntegration/webSecurity/allowRunningInsecureContent 与外部导航拦截；真实 Electron 仍待手工 |
 
 结论：装配期与浏览器 bundle 边界有自动化门禁；Electron 静态配置已收紧，真实 Electron 运行时与第三方隔离仍是发布前手工复查项。

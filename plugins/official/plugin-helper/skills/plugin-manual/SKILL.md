@@ -68,6 +68,12 @@ description: 插件手册：创建、检查、修改、移除 ada-go 插件，�
   颜色只用 `--ph-*` 设计令牌。
 - 插件自带 JS（清单 `scripts`）默认不加载：需要 `frontend.script` 能力且仅
   builtin/verified 可用；第三方优先用表单/HTMX。
+- 岛屿（可选，仅 builtin/verified）：`frontend.client` + `slots[].hydrate: true` 让该插槽在
+  浏览器用同一份组件 hydrate；再加 `slots[].clientOnly: true` 表示**服务端不渲染**、只发空壳，
+  由浏览器普通 mount（没有 SSR 回退，失败即空白）。`client.tsx` 用
+  `export const islands = { "slot:<插槽名>": 组件 }` 映射，产物 `static/client.js` 由
+  `go run ./tools/pluginbuild -dir <插件> -entry client.tsx -out static/client.js` 生成并提交。
+  现成例子：`plugins/official/composer-telemetry`（输入框下方辅助区，轮询 `GET /threads/{id}/state`）。
 
 **当前边界（必须如实告诉用户）**：
 

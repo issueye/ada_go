@@ -138,3 +138,43 @@ test('plugin-islands：data-ada-props.stores 在 store 创建前恢复', async (
   assert.equal(root.getAttribute('data-ada-error'), null);
   assert.equal(root.textContent, '7', 'store 应在首次创建时恢复快照');
 });
+
+// clientOnly 贡献：服务端只发空壳（没有 SSR 内容），loader 必须走普通 mount
+// 而不是 hydrate；挂载后空壳内是插件 DOM，空壳本身与标记保留。
+test('plugin-islands：data-ada-client-only 走普通 mount 并接管空壳', async () => {
+  const moduleSource = `export default {
+    props: { app: { default: {} } },
+    render(h) { return h("span", { class: "shell" }, "client"); }
+  };`;
+  const moduleURL = 'data:text/javascript,' + encodeURIComponent(moduleSource);
+
+  const shell = global.document.createElement('div');
+  shell.setAttribute('class', 'ada-island ada-island--client');
+  shell.setAttribute('data-ada-plugin-island', 'demo:slot:client');
+  shell.setAttribute('data-ada-plugin', 'demo');
+  shell.setAttribute('data-ada-entry', 'slot:client');
+  shell.setAttribute('data-ada-module', moduleURL);
+  shell.setAttribute('data-ada-props', '{}');
+  shell.setAttribute('data-ada-client-only', '1');
+  assert.equal(shell.childNodes.length, 0, '空壳在服务端不应有任何内容');
+  global.document.body.appendChild(shell);
+
+  global.window.AdaPluginIslands.boot();
+  // data-ada-mounted 在 import 之前就置 1，不能用它判断完成；等诊断 pending 清零。
+  for (let i = 0; i < 50; i += 1) {
+    const d = global.window.AdaIslandsDiagnostics;
+    if (d && d.pending === 0 && shell.getAttribute('data-ada-mounted-mode')) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  assert.equal(shell.getAttribute('data-ada-mounted'), '1');
+  assert.equal(shell.getAttribute('data-ada-mounted-mode'), 'mount', 'clientOnly 必须走 mount');
+  assert.equal(shell.getAttribute('data-ada-error'), null);
+  assert.equal(shell.getAttribute('data-ada-client-only'), '1', '空壳标记应保留');
+  assert.equal(shell.childNodes.length, 1, '应只有一份客户端 DOM（没有 SSR 回退）');
+  assert.equal(shell.firstChild.className, 'shell');
+  assert.equal(shell.textContent, 'client');
+  const diag = global.window.AdaIslandsDiagnostics;
+  assert.ok(diag.mounted >= 1, 'diagnostics.mounted 应计数 clientOnly 岛');
+});
+

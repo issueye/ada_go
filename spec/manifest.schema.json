@@ -233,6 +233,12 @@
                 "description": "是否用 frontend.client 在浏览器 hydrate 该插槽贡献。缺省 false，保持现有 SSR-only 行为；声明 true 时插件必须同时声明 client、frontend.script 能力与 builtin/verified 信任。",
                 "x-consumer": "gateway/web: 给该插槽贡献注入 islands 标记并按需加载 client bundle；gateway/frontend: 校验 client 资源存在"
               },
+              "clientOnly": {
+                "type": "boolean",
+                "default": false,
+                "description": "纯客户端挂载：服务端不执行该插槽模板，只输出带 islands 标记的空壳，由 frontend.client 在浏览器 mount。没有 SSR 回退——插件停用或脚本加载失败时该插槽保持空白。必须与 hydrate=true 同时声明。",
+                "x-consumer": "gateway/frontend: 跳过模板渲染只发空壳与首帧 props；gateway/web: 在空壳上标 data-ada-client-only，plugin-islands.js 据此改用普通 mount"
+              },
               "order": {
                 "$ref": "#/$defs/orderValue",
                 "x-consumer": "gateway/web: 同一插槽内的渲染顺序（小者在前，同级按插件 id 稳定排序）"

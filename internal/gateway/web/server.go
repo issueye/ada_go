@@ -202,6 +202,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /partials/transcript/{id}", s.handleTranscriptJSON)
 	mux.HandleFunc("GET /partials/slot/{name}", s.handleSlotPartial)
 	mux.HandleFunc("GET /partials/workspace-threads", s.handleWorkspaceThreadsPartial)
+	// 会话遥测投影：run / context / usage 三块只读数据，供插件岛运行中轮询。
+	mux.HandleFunc("GET /threads/{id}/state", s.handleThreadState)
 	mux.HandleFunc("GET /threads/{id}", s.handleThread)
 	mux.HandleFunc("POST /threads/{id}/send", s.handleTurn)
 	mux.HandleFunc("POST /threads/{id}/resend", s.handleTurnResend)
