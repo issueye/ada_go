@@ -10,6 +10,9 @@
  *
  * 调度输入支持预设（每 N 分钟 / 每天 / 每周）与自定义 cron；预设最终都展开成
  * 5 段 cron 表达式，存储格式统一。编辑复用同一个表单。
+ *
+ * 页面观感与其它插件页一致：一次性反馈走底部 toast，警告走列表上方的
+ * 左侧色标提示条，状态筛选在汇总条的分段控件里（全在客户端过滤，不额外请求）。
  */
 (function () {
   "use strict";
@@ -18,9 +21,19 @@
   if (!root) return;
 
   var rowsNode = root.querySelector("[data-cm-rows]");
-  var statusNode = root.querySelector("[data-cm-status]");
+  var notesNode = root.querySelector("[data-cm-notes]");
+  var countNode = root.querySelector("[data-cm-count='all']");
+  var listCountNode = root.querySelector("[data-cm-list-count]");
+  var refreshedNode = root.querySelector("[data-cm-refreshed]");
+  var filterButtons = root.querySelectorAll("[data-cm-filter]");
+  var countNodes = {
+    all: root.querySelector("[data-cm-count-all]"),
+    active: root.querySelector("[data-cm-count-active]"),
+    paused: root.querySelector("[data-cm-count-paused]"),
+  };
   var refreshBtn = root.querySelector("[data-cm-refresh]");
   var form = root.querySelector("[data-cm-form]");
+  var formTitle = root.querySelector("[data-cm-form-title]");
   var nameInput = root.querySelector("[data-cm-name]");
   var presetSelect = root.querySelector("[data-cm-preset]");
   var cronInput = root.querySelector("[data-cm-cron]");
@@ -44,16 +57,34 @@
   var state = null;
   var busy = false;
   var editingId = null;
+  var filter = "all";
   // 工作区列表来自网关 GET /api/workspaces；空字符串代表默认工作区。
   var workspaceList = [];
   var workspaceDefault = "";
   var DEFAULT_WORKSPACE_LABEL = "综合工作区（默认）";
 
-  function status(message, tone) {
-    if (!statusNode) return;
-    statusNode.textContent = message || "";
-    if (tone) statusNode.setAttribute("data-tone", tone);
-    else statusNode.removeAttribute("data-tone");
+  // 一次性反馈：底部深色胶囊，与 tu-/mc-/pm-/em-toast 同参（见 CSS）。
+  var toastNode = null;
+  var toastTimer = 0;
+
+  function toast(message, tone) {
+    var text = String(message || "");
+    if (!text) return;
+    if (!toastNode) {
+      toastNode = document.createElement("div");
+      toastNode.className = "cm-toast";
+      toastNode.setAttribute("role", "status");
+      toastNode.setAttribute("aria-live", "polite");
+    }
+    toastNode.textContent = text;
+    if (tone === "error") toastNode.setAttribute("data-tone", "error");
+    else toastNode.removeAttribute("data-tone");
+    if (!toastNode.parentNode) root.appendChild(toastNode);
+    if (toastTimer) window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(function () {
+      toastTimer = 0;
+      if (toastNode && toastNode.parentNode) toastNode.parentNode.removeChild(toastNode);
+    }, tone === "error" ? 4200 : 2400);
   }
 
   function errorText(err) {
@@ -77,11 +108,21 @@
     return node;
   }
 
+  function clockText() {
+    var d = new Date();
+    var pad = function (n) { return n < 10 ? "0" + String(n) : String(n); };
+    return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+  }
+
   function formatTime(value) {
     if (!value) return "—";
     var d = new Date(value);
     if (isNaN(d.getTime())) return String(value);
-    return d.toLocaleString();
+    var pad = function (n) { return n < 10 ? "0" + String(n) : String(n); };
+    return (
+      pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+      " " + pad(d.getHours()) + ":" + pad(d.getMinutes())
+    );
   }
 
   function duration(ms) {
@@ -102,20 +143,17 @@
     return RUN_LABELS[status] || String(status || "—");
   }
 
-  function lastRunText(task) {
+  function lastRunOf(task) {
     var runs = (task && task.runs) || [];
-    if (!runs.length) return "—";
-    var last = runs[runs.length - 1];
-    return runLabel(last.status);
+    return runs.length ? runs[runs.length - 1] : null;
   }
 
   function lastRunTone(task) {
-    var runs = (task && task.runs) || [];
-    if (!runs.length) return "";
-    var s = runs[runs.length - 1].status;
-    if (s === "started") return "ok";
-    if (s === "busy" || s === "missed") return "warn";
-    return "bad";
+    var last = lastRunOf(task);
+    if (!last) return "none";
+    if (last.status === "started") return "ok";
+    if (last.status === "busy" || last.status === "missed") return "warn";
+    return last.status ? "bad" : "none";
   }
 
   // ---- 下拉组件（ada-select）----
@@ -310,75 +348,159 @@
     renderPresetFields();
   }
 
+  // ---- 汇总 / 筛选 ----
+
+  function tasksOf() {
+    return (state && state.tasks) || [];
+  }
+
+  function countsOf() {
+    var all = 0;
+    var active = 0;
+    var paused = 0;
+    tasksOf().forEach(function (t) {
+      all += 1;
+      if (t.enabled) active += 1;
+      else paused += 1;
+    });
+    return { all: all, active: active, paused: paused };
+  }
+
+  function renderSummary() {
+    var counts = countsOf();
+    if (countNode) countNode.textContent = String(counts.all);
+    if (listCountNode) listCountNode.textContent = String(visibleTasks().length);
+    if (countNodes.all) countNodes.all.textContent = String(counts.all);
+    if (countNodes.active) countNodes.active.textContent = String(counts.active);
+    if (countNodes.paused) countNodes.paused.textContent = String(counts.paused);
+  }
+
+  function setFilter(next) {
+    filter = next === "active" || next === "paused" ? next : "all";
+    for (var i = 0; i < filterButtons.length; i++) {
+      var on = filterButtons[i].getAttribute("data-cm-filter") === filter;
+      filterButtons[i].classList.toggle("is-active", on);
+      filterButtons[i].setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    renderTasks(tasksOf());
+  }
+
+  function visibleTasks() {
+    var tasks = tasksOf();
+    if (filter === "active") return tasks.filter(function (t) { return !!t.enabled; });
+    if (filter === "paused") return tasks.filter(function (t) { return !t.enabled; });
+    return tasks;
+  }
+
+  // ---- 提示条 ----
+
+  function renderNotes(warnings) {
+    if (!notesNode) return;
+    notesNode.textContent = "";
+    var list = warnings || [];
+    if (!list.length) {
+      notesNode.classList.add("cm-hidden");
+      return;
+    }
+    notesNode.classList.remove("cm-hidden");
+    list.forEach(function (item) {
+      notesNode.appendChild(el("li", null, String(item || "")));
+    });
+  }
+
   // ---- 任务列表渲染 ----
 
   function actionButtons(task) {
-    var td = el("td", "cm-col-actions");
-    var trigger = el("button", "ada-btn ada-btn--secondary ada-btn--sm", "立即运行");
+    var box = el("div", "cm-row__actions");
+
+    var trigger = el("button", "cm-action cm-action--primary", "运行");
     trigger.type = "button";
     trigger.setAttribute("data-cm-trigger", task.id);
     trigger.title = "立即运行一次（不受启停影响；由 cron 二进制下个 tick 消费）";
-    td.appendChild(trigger);
-    var edit = el("button", "ada-btn ada-btn--ghost ada-btn--sm", "编辑");
+    box.appendChild(trigger);
+
+    var edit = el("button", "cm-action", "编辑");
     edit.type = "button";
     edit.setAttribute("data-cm-edit", task.id);
-    td.appendChild(edit);
-    var runs = el("button", "ada-btn ada-btn--ghost ada-btn--sm", "历史");
+    box.appendChild(edit);
+
+    var runs = el("button", "cm-action", "历史");
     runs.type = "button";
     runs.setAttribute("data-cm-history", task.id);
-    td.appendChild(runs);
-    var remove = el("button", "ada-btn ada-btn--danger ada-btn--sm", "删除");
+    box.appendChild(runs);
+
+    var remove = el("button", "cm-action cm-action--danger", "删除");
     remove.type = "button";
     remove.setAttribute("data-cm-remove", task.id);
-    td.appendChild(remove);
-    return td;
+    box.appendChild(remove);
+
+    return box;
+  }
+
+  function switchButton(task) {
+    var toggle = el("button", "cm-switch");
+    toggle.type = "button";
+    toggle.setAttribute("role", "switch");
+    toggle.setAttribute("data-cm-toggle", task.id);
+    toggle.setAttribute("data-on", task.enabled ? "true" : "false");
+    toggle.setAttribute("aria-checked", task.enabled ? "true" : "false");
+    toggle.setAttribute("aria-label", (task.enabled ? "停用 " : "启用 ") + (task.name || task.id));
+    toggle.title = task.enabled ? "点击停用（停用只停周期调度）" : "点击启用";
+    toggle.appendChild(el("span", "cm-switch__knob"));
+    return toggle;
+  }
+
+  function emptyBlock(title, desc) {
+    var box = el("div", "cm-empty");
+    box.appendChild(el("p", "cm-empty__title", title));
+    if (desc) box.appendChild(el("p", "cm-empty__desc", desc));
+    return box;
   }
 
   function renderTasks(tasks, warnings) {
+    if (warnings !== undefined) renderNotes(warnings);
     if (!rowsNode) return;
     rowsNode.textContent = "";
-    if (warnings && warnings.length) {
-      status("部分任务被跳过：" + warnings.join("；"), "warn");
-    }
-    if (!tasks.length) {
-      var tr = document.createElement("tr");
-      var td = el("td", "cm-empty", "还没有定时任务。用上面的表单创建第一个 AI 任务。");
-      td.setAttribute("colspan", "7");
-      tr.appendChild(td);
-      rowsNode.appendChild(tr);
+    renderSummary();
+
+    var visible = visibleTasks();
+    if (!visible.length) {
+      rowsNode.appendChild(
+        countsOf().all
+          ? emptyBlock("这个筛选下没有任务", "切回「全部」查看其它任务。")
+          : emptyBlock("还没有定时任务", "用上面的表单创建第一个 AI 任务。")
+      );
       return;
     }
-    tasks.forEach(function (task) {
-      var tr = document.createElement("tr");
 
-      var enabledTd = el("td", "cm-col-enabled");
-      var toggle = el("button", "cm-toggle", task.enabled ? "启用" : "停用");
-      toggle.type = "button";
-      toggle.setAttribute("data-cm-toggle", task.id);
-      toggle.setAttribute("data-enabled", task.enabled ? "1" : "0");
-      toggle.title = task.enabled ? "点击停用" : "点击启用";
-      enabledTd.appendChild(toggle);
-      tr.appendChild(enabledTd);
+    visible.forEach(function (task) {
+      var row = el("div", "cm-row");
+      row.setAttribute("data-enabled", task.enabled ? "true" : "false");
 
-      var nameTd = el("td", "cm-col-name");
-      nameTd.appendChild(el("span", "cm-name", task.name || ""));
-      if (task.triggerRequested) nameTd.appendChild(el("span", "cm-chip", "待运行"));
-      tr.appendChild(nameTd);
+      var stateCell = el("span", "cm-row__state");
+      stateCell.appendChild(switchButton(task));
+      row.appendChild(stateCell);
+
+      var nameCell = el("div", "cm-row__name");
+      nameCell.appendChild(el("span", "cm-row__name-text", task.name || ""));
+      if (task.triggerRequested) nameCell.appendChild(el("span", "cm-chip cm-chip--warn", "待运行"));
+      row.appendChild(nameCell);
 
       var workspacePath = String(task.workspace || "");
-      var workspaceTd = el("td", "cm-col-workspace", workspacePath ? workspaceLabel(workspacePath) : "综合");
-      workspaceTd.title = workspacePath || (workspaceDefault ? "综合工作区（默认：" + workspaceDefault + "）" : DEFAULT_WORKSPACE_LABEL);
-      tr.appendChild(workspaceTd);
+      var workspaceCell = el("span", "cm-row__workspace", workspacePath ? workspaceLabel(workspacePath) : "综合");
+      workspaceCell.title = workspacePath || (workspaceDefault ? "综合工作区（默认：" + workspaceDefault + "）" : DEFAULT_WORKSPACE_LABEL);
+      row.appendChild(workspaceCell);
 
-      tr.appendChild(el("td", "cm-col-cron", task.cron || ""));
-      tr.appendChild(el("td", "cm-col-time", task.nextRunAt ? formatTime(task.nextRunAt) : "—"));
+      row.appendChild(el("span", "cm-row__cron", task.cron || "—"));
+      row.appendChild(el("span", "cm-row__time", task.nextRunAt ? formatTime(task.nextRunAt) : "—"));
 
-      var lastTd = el("td", "cm-col-time");
-      lastTd.appendChild(el("span", "cm-run cm-run--" + (lastRunTone(task) || "none"), lastRunText(task)));
-      tr.appendChild(lastTd);
+      var lastCell = el("span", "cm-row__last");
+      var tone = lastRunTone(task);
+      lastCell.appendChild(el("span", "cm-run cm-run--" + tone, tone === "none" ? "—" : runLabel(lastRunOf(task).status)));
+      row.appendChild(lastCell);
 
-      tr.appendChild(actionButtons(task));
-      rowsNode.appendChild(tr);
+      row.appendChild(actionButtons(task));
+      rowsNode.appendChild(row);
     });
   }
 
@@ -388,10 +510,11 @@
     try {
       var data = await api("/state");
       state = data || {};
-      renderTasks(state.tasks || [], state.warnings);
-      if (!silent) status(state.tasks && state.tasks.length ? "已加载 " + state.tasks.length + " 个任务。" : "暂无任务。");
+      renderTasks(tasksOf(), state.warnings);
+      if (refreshedNode) refreshedNode.textContent = clockText();
+      if (!silent) toast(state.tasks && state.tasks.length ? "已加载 " + state.tasks.length + " 个任务。" : "暂无任务。");
     } catch (err) {
-      status("读取失败：" + errorText(err), "bad");
+      toast("读取失败：" + errorText(err), "error");
     }
   }
 
@@ -402,7 +525,7 @@
 
   function taskByID(id) {
     var found = null;
-    ((state && state.tasks) || []).forEach(function (t) {
+    tasksOf().forEach(function (t) {
       if (t.id === id) found = t;
     });
     return found;
@@ -420,27 +543,24 @@
       var data = await api("/runs?id=" + encodeURIComponent(id) + "&limit=20");
       var runs = (data && data.runs) || [];
       if (!runs.length) {
-        var tr = document.createElement("tr");
-        var td = el("td", "cm-empty", "还没有运行记录。任务到期或点「立即运行」后这里会出现历史。");
-        td.setAttribute("colspan", "4");
-        tr.appendChild(td);
-        runsRows.appendChild(tr);
+        runsRows.appendChild(emptyBlock("还没有运行记录", "任务到期或点「运行」后这里会出现历史。"));
         return;
       }
       runs.forEach(function (run) {
-        var tr = document.createElement("tr");
-        tr.appendChild(el("td", "cm-col-time", formatTime(run.at)));
-        var st = el("td", "cm-col-status");
-        st.appendChild(el("span", "cm-run cm-run--" + (run.status === "started" ? "ok" : run.status === "busy" || run.status === "missed" ? "warn" : run.status ? "bad" : "none"), runLabel(run.status)));
-        tr.appendChild(st);
-        tr.appendChild(el("td", "cm-col-size", duration(run.durationMs)));
+        var row = el("div", "cm-row cm-row--runs");
+        row.appendChild(el("span", "cm-row__time", formatTime(run.at)));
+        var statusCell = el("span", "cm-row__last");
+        var tone = run.status === "started" ? "ok" : run.status === "busy" || run.status === "missed" ? "warn" : run.status ? "bad" : "none";
+        statusCell.appendChild(el("span", "cm-run cm-run--" + tone, runLabel(run.status)));
+        row.appendChild(statusCell);
+        row.appendChild(el("span", "cm-row__size", duration(run.durationMs)));
         var detail = run.detail || "";
         if (run.threadId) detail = (detail ? detail + " · " : "") + "线程 " + run.threadId;
-        tr.appendChild(el("td", "cm-value", detail || "—"));
-        runsRows.appendChild(tr);
+        row.appendChild(el("span", "cm-row__detail", detail || "—"));
+        runsRows.appendChild(row);
       });
     } catch (err) {
-      status("读取历史失败：" + errorText(err), "bad");
+      toast("读取历史失败：" + errorText(err), "error");
     }
   }
 
@@ -472,11 +592,11 @@
         if (runs.length > before) {
           var last = runs[runs.length - 1];
           var tone = last.status === "started" ? "ok" : last.status === "busy" || last.status === "missed" ? "warn" : "bad";
-          status("立即运行结果：" + runLabel(last.status) + (last.detail ? "（" + last.detail + "）" : ""), tone);
+          toast("立即运行结果：" + runLabel(last.status) + (last.detail ? "（" + last.detail + "）" : ""), tone === "bad" ? "error" : "info");
           return;
         }
         if (Date.now() > deadline) {
-          status("已触发；结果还没写入，稍后点「历史」查看。若一直为空，请确认 cron 调度器已启动。", "warn");
+          toast("已触发；结果还没写入，稍后点「历史」查看。", "error");
           return;
         }
         setTimeout(tick, 2000);
@@ -495,6 +615,7 @@
     var action = task.action || {};
     if (textInput) textInput.value = action.text || "";
     if (submitBtn) submitBtn.textContent = "保存修改";
+    if (formTitle) formTitle.textContent = "编辑任务";
     if (cancelBtn) cancelBtn.classList.remove("cm-hidden");
     if (editingHint) editingHint.classList.remove("cm-hidden");
     if (nameInput) nameInput.focus();
@@ -508,6 +629,7 @@
     renderPresetFields();
     setWorkspaceValue("");
     if (submitBtn) submitBtn.textContent = "创建任务";
+    if (formTitle) formTitle.textContent = "新建任务";
     if (cancelBtn) cancelBtn.classList.add("cm-hidden");
     if (editingHint) editingHint.classList.add("cm-hidden");
   }
@@ -517,19 +639,19 @@
     if (busy) return;
     var name = nameInput ? String(nameInput.value || "").trim() : "";
     if (!name) {
-      status("请填写任务名。", "warn");
+      toast("请填写任务名。", "error");
       return;
     }
     var cron;
     try {
       cron = cronForSave();
     } catch (err) {
-      status(errorText(err), "warn");
+      toast(errorText(err), "error");
       return;
     }
     var text = textInput ? String(textInput.value || "").trim() : "";
     if (!text) {
-      status("AI 任务需要提示词。", "warn");
+      toast("AI 任务需要提示词。", "error");
       return;
     }
     var workspace = selectValue(workspaceSelect);
@@ -538,15 +660,15 @@
     try {
       if (editingId) {
         await api("/update", { method: "POST", body: { id: editingId, task: payload } });
-        status("已保存修改。cron 二进制最迟约 5 秒内生效。", "ok");
+        toast("已保存修改，cron 二进制最迟约 5 秒内生效。");
       } else {
         await api("/create", { method: "POST", body: payload });
-        status("已创建任务。cron 二进制最迟约 5 秒内生效。", "ok");
+        toast("已创建任务，cron 二进制最迟约 5 秒内生效。");
       }
       resetForm();
       await loadState(true);
     } catch (err) {
-      status((editingId ? "保存失败：" : "创建失败：") + errorText(err), "bad");
+      toast((editingId ? "保存失败：" : "创建失败：") + errorText(err), "error");
     } finally {
       busy = false;
     }
@@ -559,14 +681,14 @@
     busy = true;
     try {
       var enabled = null;
-      ((state && state.tasks) || []).forEach(function (t) {
+      tasksOf().forEach(function (t) {
         if (t.id === id) enabled = !t.enabled;
       });
       await api("/toggle", { method: "POST", body: { id: id, enabled: enabled } });
       await loadState(true);
-      status(enabled ? "已启用。" : "已停用。", "ok");
+      toast(enabled ? "已启用。" : "已停用。");
     } catch (err) {
-      status("操作失败：" + errorText(err), "bad");
+      toast("操作失败：" + errorText(err), "error");
     } finally {
       busy = false;
     }
@@ -578,11 +700,11 @@
     try {
       var before = runCountOf(id);
       await api("/trigger", { method: "POST", body: { id: id } });
-      status("已标记立即运行，cron 二进制最迟约 5 秒内执行；正在等待结果…", "ok");
+      toast("已标记立即运行，正在等待结果…");
       await loadState(true);
       waitForTriggerResult(id, before);
     } catch (err) {
-      status("操作失败：" + errorText(err), "bad");
+      toast("操作失败：" + errorText(err), "error");
     } finally {
       busy = false;
     }
@@ -591,7 +713,7 @@
   function onRemove(id) {
     if (busy || typeof window.adaConfirm !== "function") return;
     var name = "";
-    ((state && state.tasks) || []).forEach(function (t) {
+    tasksOf().forEach(function (t) {
       if (t.id === id) name = t.name;
     });
     window.adaConfirm("删除定时任务「" + (name || id) + "」？运行历史会一并删除。", async function () {
@@ -599,10 +721,11 @@
       try {
         await api("/remove", { method: "POST", body: { id: id } });
         if (editingId === id) resetForm();
+        if (runsTaskId === id) hideRuns();
         await loadState(true);
-        status("已删除。", "ok");
+        toast("已删除。");
       } catch (err) {
-        status("删除失败：" + errorText(err), "bad");
+        toast("删除失败：" + errorText(err), "error");
       } finally {
         busy = false;
       }
@@ -610,7 +733,7 @@
   }
 
   function onEdit(id) {
-    ((state && state.tasks) || []).forEach(function (t) {
+    tasksOf().forEach(function (t) {
       if (t.id === id) fillForm(t);
     });
   }
@@ -625,11 +748,20 @@
   if (form) form.addEventListener("submit", submitForm);
   if (cancelBtn) cancelBtn.addEventListener("click", resetForm);
   if (runsClose) runsClose.addEventListener("click", hideRuns);
+  for (var i = 0; i < filterButtons.length; i++) {
+    filterButtons[i].addEventListener("click", function (event) {
+      var target = event && event.currentTarget ? event.currentTarget : null;
+      setFilter(target ? target.getAttribute("data-cm-filter") : "all");
+    });
+  }
   if (rowsNode) {
     rowsNode.addEventListener("click", function (event) {
       var target = event.target;
       if (!target || !target.getAttribute) return;
-      var id = target.getAttribute("data-cm-toggle");
+      // 开关的点击可能落在 knob 上，向上找最近一个带 data-cm-toggle 的元素。
+      var node = target;
+      while (node && node !== rowsNode && !node.getAttribute("data-cm-toggle")) node = node.parentNode;
+      var id = node && node.getAttribute ? node.getAttribute("data-cm-toggle") : null;
       if (id) return onToggle(id);
       id = target.getAttribute("data-cm-trigger");
       if (id) return onTrigger(id);
@@ -643,6 +775,7 @@
   }
 
   renderPresetFields();
+  renderSummary();
   loadWorkspaces();
-  loadState(false);
+  loadState(true);
 })();

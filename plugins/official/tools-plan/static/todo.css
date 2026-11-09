@@ -1,4 +1,7 @@
-/* Todo 列表（ui-todo 插件）：颜色/尺寸只引用 --ph-* / --ada-* 令牌。 */
+/* Todo 列表（ui-todo 插件）：颜色/尺寸只引用 --ph-* / --ada-* 令牌。
+   「透明度」：收起胶囊与展开卡都浮在对话流上，用半透明底 + 背景模糊，
+   让下面的正文隐约可见而不被整块盖住。先给不透明底作兜底，只在浏览器
+   真的支持 backdrop-filter 时才切成玻璃态，避免半透明+无模糊导致看不清。 */
 
 .todo-card {
   position: relative;
@@ -89,4 +92,45 @@
 
 .todo-card__body {
   padding: 10px 12px 12px;
+}
+
+/* ── 半透明（玻璃态）──────────────────────────────────────────────────
+   卡片浮在对话流右上角，底下是正文。默认不透明是为了「一定看得清」；
+   只有在浏览器支持背景模糊时才降到半透明，并把背景模糊上，避免
+   「半透明但没模糊」导致文字与正文叠在一起认不出来。
+   收起态更透（像一枚胶囊），展开态稍实一些（要读步骤清单）。 */
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .todo-card > summary {
+    background: color-mix(in srgb, var(--ph-elevated) 72%, transparent);
+    -webkit-backdrop-filter: blur(10px) saturate(1.12);
+    backdrop-filter: blur(10px) saturate(1.12);
+  }
+
+  .todo-card > summary:hover {
+    background: color-mix(in srgb, var(--ph-elevated) 86%, transparent);
+  }
+
+  .todo-card[open] {
+    background: color-mix(in srgb, var(--ph-elevated) 84%, transparent);
+    -webkit-backdrop-filter: blur(14px) saturate(1.12);
+    backdrop-filter: blur(14px) saturate(1.12);
+  }
+
+  /* 展开后外壳自己负责底色与模糊，头部条不再叠一层。 */
+  .todo-card[open] > summary {
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* 高对比度偏好下回到不透明：玻璃态在低视力场景下始终是「先牺牲的装饰」。 */
+@media (prefers-contrast: more) {
+  .todo-card > summary,
+  .todo-card[open] {
+    background: var(--ph-elevated);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }

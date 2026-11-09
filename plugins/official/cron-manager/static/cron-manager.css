@@ -1,22 +1,29 @@
-/* 定时任务管理页（cron-manager）：颜色/尺寸只引用 --ph-* / --ada-* 令牌。 */
+/* 定时任务管理页（cron-manager）：与其他官方插件页同一套页面语言
+   （供应商 / 环境变量 / MCP 服务端 / Token 用量）：暖色画布上的白卡、近黑主色、
+   ⓘ tooltip、状态筛选分段、卡片化列表、底部 toast。
+   颜色/尺寸只引用 --ph-* / --ada-* 令牌，随主题切换。 */
+
+/* ── 页面骨架 ───────────────────────────────────────────────────────── */
 
 .cm-page {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  max-width: 1080px;
-  padding-bottom: 32px;
+  gap: 14px;
+  max-width: 1040px;
+  padding-bottom: 24px;
 }
 
 .cm-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
 }
 
-.cm-head__text {
-  min-width: 0;
+.cm-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .cm-title {
@@ -26,57 +33,267 @@
   color: var(--ph-ink);
 }
 
-.cm-sub {
-  margin: 6px 0 0;
-  font-size: var(--ada-text-sm);
-  line-height: 1.7;
-  color: var(--ph-muted);
-}
-
-.cm-sub code,
-.cm-hint code {
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--ph-ink) 6%, transparent);
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-  font-size: 0.95em;
-}
-
-.cm-head__actions {
+.cm-actions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
 }
 
-.cm-status {
-  margin: 0;
-  min-height: 1.4em;
+/* ── ⓘ tooltip：向下展开，避免被 .ada-scroll 裁掉 ─────────────────── */
+
+.cm-tip {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  color: var(--ph-faint);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: help;
+  z-index: 5;
+}
+
+.cm-tip:hover,
+.cm-tip:focus-visible {
+  color: var(--ph-ink);
+  outline: none;
+}
+
+.cm-tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: -3px;
+  top: calc(100% + 7px);
+  z-index: 60;
+  width: max-content;
+  max-width: 320px;
+  padding: 7px 10px;
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-ink);
+  color: var(--ph-canvas);
+  font-size: var(--ada-text-xs);
+  font-weight: 400;
+  line-height: 1.6;
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  transform: translateY(-2px);
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.cm-tip:hover::after,
+.cm-tip:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── 按钮 / 分段 ───────────────────────────────────────────────────── */
+
+.cm-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 13px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-surface);
+  color: var(--ph-ink);
+  font: inherit;
   font-size: var(--ada-text-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cm-btn:hover:not(:disabled) {
+  border-color: var(--ph-line-strong);
+  background: var(--ph-subtle);
+}
+
+.cm-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.cm-btn--primary {
+  border-color: transparent;
+  background: var(--ph-ink);
+  color: var(--ph-canvas);
+  font-weight: 500;
+}
+
+.cm-btn--primary:hover:not(:disabled) {
+  background: var(--ph-brand-strong);
+}
+
+.cm-seg {
+  display: flex;
+  gap: 2px;
+  height: 26px;
+  padding: 3px;
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-subtle);
+  flex: 0 0 auto;
+}
+
+.cm-seg__item {
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--ada-radius-sm);
+  background: transparent;
+  color: var(--ph-muted);
+  font: inherit;
+  font-size: var(--ada-text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cm-seg__item:hover {
+  color: var(--ph-ink);
+}
+
+.cm-seg__item.is-active {
+  border-color: var(--ph-line);
+  background: var(--ph-surface);
+  color: var(--ph-ink);
+  font-weight: 500;
+}
+
+.cm-count {
+  padding: 1px 6px;
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-subtle);
+  color: var(--ph-muted);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+  font-weight: 400;
+}
+
+.cm-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ph-muted);
+  font: inherit;
+  font-size: var(--ada-text-xs);
+  cursor: pointer;
+}
+
+.cm-link:hover {
+  color: var(--ph-ink);
+  text-decoration: underline;
+}
+
+.cm-link--danger {
+  color: var(--ph-danger-ink);
+  font-weight: 500;
+}
+
+/* ── 汇总条 ──────────────────────────────────────────────────────────── */
+
+.cm-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 26px;
+  font-size: var(--ada-text-xs);
   color: var(--ph-muted);
 }
 
-.cm-status[data-tone="ok"] {
-  color: var(--ph-ok, #2f9e63);
+.cm-summary__time {
+  margin-left: auto;
+  color: var(--ph-faint);
+  font-family: var(--mono-font, Consolas, monospace);
 }
 
-.cm-status[data-tone="warn"] {
-  color: var(--ph-warn, #b7791f);
+/* 说明 / 警告：轻提示，只给一条左侧色标，不画满宽告警边框。 */
+.cm-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  padding: 8px 10px 8px 11px;
+  border-left: 2px solid var(--ph-warn-ink);
+  border-radius: 0 var(--ada-radius-sm) var(--ada-radius-sm) 0;
+  background: var(--ph-warn-soft);
+  list-style: none;
+  font-size: var(--ada-text-xs);
+  line-height: 1.65;
+  color: var(--ph-muted);
 }
 
-.cm-status[data-tone="bad"] {
-  color: var(--ph-bad, #c4402f);
+/* ── 卡片 ───────────────────────────────────────────────────────────── */
+
+.cm-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-lg);
+  background: var(--ph-surface);
+  overflow: hidden;
 }
 
-/* ---- 表单 ---- */
+/* 新建/编辑卡里是下拉：卡片不能裁剪子元素，否则工作区菜单被卡片下边缘切掉
+   （截图里只露两行）。单独放开 overflow 并抬一层，菜单可以盖在下面的列表卡上。 */
+.cm-card--form {
+  position: relative;
+  z-index: 2;
+  overflow: visible;
+}
+
+.cm-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px 10px;
+}
+
+.cm-card__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--ada-text-sm);
+  font-weight: 600;
+  color: var(--ph-ink);
+}
+
+/* 运行历史标题后面跟任务名：等宽弱化，不与标题抢层级。 */
+.cm-card__name {
+  min-width: 0;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ph-muted);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+  font-weight: 400;
+}
+
+.cm-card__hint {
+  color: var(--ph-faint);
+  font-size: var(--ada-text-xs);
+  text-align: right;
+}
+
+/* ── 表单 ───────────────────────────────────────────────────────────── */
 
 .cm-form {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 14px;
-  border: 1px solid color-mix(in srgb, var(--ph-ink) 10%, transparent);
-  border-radius: 10px;
+  padding: 0 18px 16px;
 }
 
 .cm-form__row {
@@ -90,11 +307,12 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  padding-top: 2px;
 }
 
 .cm-form__editing {
-  font-size: var(--ada-text-sm);
-  color: var(--ph-warn, #b7791f);
+  font-size: var(--ada-text-xs);
+  color: var(--ph-warn-ink);
 }
 
 .cm-field {
@@ -105,32 +323,73 @@
 }
 
 .cm-field--grow {
-  flex: 1 1 220px;
+  flex: 1 1 240px;
 }
 
 .cm-field--time {
-  min-width: 110px;
+  flex: 0 0 110px;
+  min-width: 96px;
+}
+
+/* 工作区选项是「名字 — 绝对路径」，比提示词窄不了多少：单独占一整行，
+   但触发器不用铺满（满宽的下拉在这张卡里看起来像标题栏）。
+   菜单按内容撑开，路径才能完整显示；上限按视口收，窄屏不出界。 */
+.cm-field--workspace {
+  flex: 0 1 460px;
+  min-width: 240px;
+}
+
+.cm-field--workspace .ada-select__menu {
+  width: max-content;
+  min-width: 100%;
+  max-width: min(620px, calc(100vw - 48px));
 }
 
 .cm-field__label {
+  color: var(--ph-faint);
   font-size: var(--ada-text-xs);
-  color: var(--ph-muted);
 }
 
 .cm-input {
   width: 100%;
-  padding: 6px 9px;
-  border: 1px solid color-mix(in srgb, var(--ph-ink) 16%, transparent);
-  border-radius: 8px;
-  background: var(--ph-surface, transparent);
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--ph-line);
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-canvas);
   color: var(--ph-ink);
+  font: inherit;
   font-size: var(--ada-text-sm);
 }
 
-/* 调度预设字段给足宽度：下拉菜单与触发器同宽收在卡片内，不再向右溢出/压住表格。 */
-.cm-field--preset {
-  flex: 0 0 220px;
+/* 宿主 Select 的触发器自带 34px 高度与 base 字号：这里压到和输入框同一档，
+   否则同一行里「任务名」比「调度预设」矮 2px，基线对不齐。 */
+.cm-form .ada-select__trigger {
+  height: 32px;
+  font-size: var(--ada-text-sm);
 }
+
+.cm-input:focus {
+  outline: none;
+  border-color: var(--ph-ink);
+  background: var(--ph-surface);
+}
+
+.cm-input::placeholder {
+  color: var(--ph-faint);
+}
+
+/* cron 表达式、时刻：等宽，列宽不会随数字字形跳。 */
+.cm-input--mono {
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+}
+
+/* 调度预设字段给足宽度：下拉菜单与触发器同宽收在卡片内，不向右溢出。 */
+.cm-field--preset {
+  flex: 0 0 190px;
+}
+
 .cm-field--preset .ada-select__menu {
   right: 0;
   width: 100%;
@@ -144,201 +403,405 @@
   text-overflow: ellipsis;
 }
 
-.cm-input:focus {
-  outline: none;
-  border-color: color-mix(in srgb, var(--ph-ink) 36%, transparent);
-}
-
 .cm-cron-preview {
-  font-size: var(--ada-text-sm);
-  color: var(--ph-muted);
   padding-bottom: 8px;
-  white-space: nowrap;
-}
-
-/* ---- 任务表 ---- */
-
-.cm-table-wrap {
-  overflow-x: auto;
-  border: 1px solid color-mix(in srgb, var(--ph-ink) 10%, transparent);
-  border-radius: 10px;
-}
-
-.cm-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--ada-text-sm);
-}
-
-.cm-table th,
-.cm-table td {
-  padding: 9px 12px;
-  text-align: left;
-  border-bottom: 1px solid color-mix(in srgb, var(--ph-ink) 7%, transparent);
-  vertical-align: middle;
-}
-
-.cm-table thead th {
-  font-size: var(--ada-text-xs);
-  font-weight: 600;
   color: var(--ph-muted);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
   white-space: nowrap;
 }
 
-.cm-table tbody tr:last-child td {
-  border-bottom: none;
+/* ── 任务列表 ───────────────────────────────────────────────────────── */
+
+.cm-list {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 8px;
 }
 
-.cm-col-enabled {
-  width: 72px;
+/* 表头与数据行共用一套网格：列宽写死在这里，行里多一个徽章也不会把
+   「下次运行 / 上次结果」整体顶右。 */
+.cm-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 112px 104px 112px 88px 208px;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 6px 18px;
+  border-top: 1px solid var(--ph-line);
 }
 
-.cm-col-name {
-  min-width: 140px;
+.cm-row--head {
+  min-height: 30px;
+  border-top: 0;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-xs);
 }
 
-.cm-col-workspace {
-  min-width: 90px;
-  max-width: 160px;
+.cm-row:not(.cm-row--head):hover {
+  background: var(--ph-subtle);
+}
+
+/* 停用的任务整体弱化：行的存在感降一档，开关仍是唯一高对比元素。 */
+.cm-row[data-enabled="false"] .cm-row__name-text {
+  color: var(--ph-muted);
+}
+
+.cm-row[data-enabled="false"] .cm-row__cron {
+  color: var(--ph-muted);
+}
+
+.cm-row__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cm-row__name-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.cm-col-size {
-  width: 90px;
-  white-space: nowrap;
-}
-
-.cm-col-cron {
-  min-width: 110px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  white-space: nowrap;
-}
-
-.cm-col-time {
-  white-space: nowrap;
-}
-
-.cm-col-status {
-  width: 90px;
-}
-
-.cm-col-actions {
-  width: 250px;
-  white-space: nowrap;
-}
-
-.cm-col-actions .ada-btn {
-  margin-right: 6px;
-}
-
-.cm-empty {
-  color: var(--ph-muted);
-  text-align: center;
-  padding: 22px 12px !important;
-}
-
-.cm-name {
-  font-weight: 600;
   color: var(--ph-ink);
-  margin-right: 6px;
+  font-size: var(--ada-text-sm);
+  font-weight: 500;
 }
 
-.cm-chip {
-  display: inline-block;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--ph-ink) 8%, transparent);
-  font-size: var(--ada-text-xs);
+.cm-row__workspace {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--ph-muted);
+  font-size: var(--ada-text-xs);
+}
+
+.cm-row__cron {
+  color: var(--ph-ink);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: 11.5px;
   white-space: nowrap;
 }
 
-.cm-toggle {
-  border: 1px solid color-mix(in srgb, var(--ph-ink) 16%, transparent);
-  border-radius: 999px;
-  padding: 2px 10px;
-  background: transparent;
+/* 上次结果 / 耗时：徽章各自占一列，列宽固定，徽章长度不影响对齐。 */
+.cm-row__last,
+.cm-row__size {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.cm-row__size {
+  color: var(--ph-muted);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: 10.5px;
+}
+
+/* 时间列统一等宽、弱化：现在与上次结果不是同一类信息，但字号一致。 */
+.cm-row__time {
+  color: var(--ph-muted);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.cm-row__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+/* 开关单独占最左一列：按钮 34px，列宽 64px，左右不留到贴边。 */
+.cm-row__state {
+  display: flex;
+  align-items: center;
+}
+
+/* 行内小动作：比页头按钮矮一档，避免一行四个大按钮把行撑高。 */
+.cm-action {
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--ph-line);
+  border-radius: 6px;
+  background: var(--ph-surface);
   color: var(--ph-ink);
+  font: inherit;
   font-size: var(--ada-text-xs);
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.cm-toggle[data-enabled="1"] {
-  background: color-mix(in srgb, var(--ph-ok, #2f9e63) 14%, transparent);
-  border-color: color-mix(in srgb, var(--ph-ok, #2f9e63) 40%, transparent);
+.cm-action:hover {
+  border-color: var(--ph-line-strong);
+  background: var(--ph-subtle);
 }
 
-.cm-toggle[data-enabled="0"] {
+.cm-action--primary {
+  border-color: transparent;
+  background: var(--ph-ink);
+  color: var(--ph-canvas);
+  font-weight: 500;
+}
+
+.cm-action--primary:hover {
+  background: var(--ph-brand-strong);
+}
+
+.cm-action--danger {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ph-danger-ink);
+}
+
+.cm-action--danger:hover {
+  background: var(--ph-danger-soft);
+  border-color: transparent;
+}
+
+/* 启停开关：与 MCP 页同一套 track/knob 形态，用原生 button 承载语义。
+   圆点用「面」色而轨道用「墨/线」色：浅色主题是深轨浅点、暗色主题是浅轨深点，
+   所以两种主题、两种状态都能区分，不需要写死白色（写死白色在暗色的
+   墨色轨道上会整块糊成一条白板）。 */
+.cm-switch {
+  position: relative;
+  display: block;
+  width: 34px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--ph-line-strong);
+  cursor: pointer;
+  transition: background var(--ada-transition);
+}
+
+.cm-switch[data-on="true"] {
+  background: var(--ph-ink);
+}
+
+.cm-switch__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--ph-surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  transition: transform var(--ada-transition);
+}
+
+.cm-switch[data-on="true"] .cm-switch__knob {
+  background: var(--ph-canvas);
+  transform: translateX(14px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cm-switch,
+  .cm-switch__knob {
+    transition: none;
+  }
+}
+
+/* ── 徽章 / 状态 ─────────────────────────────────────────────────────── */
+
+.cm-chip {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-subtle);
   color: var(--ph-muted);
+  font-size: var(--ada-text-xs);
+  line-height: 1.7;
+  white-space: nowrap;
+}
+
+.cm-chip--ok {
+  background: var(--ph-success-soft);
+  color: var(--ph-success-ink);
+}
+
+.cm-chip--warn {
+  background: var(--ph-warn-soft);
+  color: var(--ph-warn-ink);
+}
+
+.cm-chip--danger {
+  background: var(--ph-danger-soft);
+  color: var(--ph-danger-ink);
 }
 
 .cm-run {
+  display: inline-flex;
+  align-items: center;
   padding: 1px 8px;
-  border-radius: 999px;
+  border-radius: var(--ada-radius-sm);
   font-size: var(--ada-text-xs);
   white-space: nowrap;
 }
 
 .cm-run--ok {
-  background: color-mix(in srgb, var(--ph-ok, #2f9e63) 14%, transparent);
-  color: var(--ph-ok, #2f9e63);
-}
-
-.cm-run--started {
-  background: color-mix(in srgb, var(--ph-ok, #2f9e63) 14%, transparent);
-  color: var(--ph-ok, #2f9e63);
+  background: var(--ph-success-soft);
+  color: var(--ph-success-ink);
 }
 
 .cm-run--warn {
-  background: color-mix(in srgb, var(--ph-warn, #b7791f) 14%, transparent);
-  color: var(--ph-warn, #b7791f);
+  background: var(--ph-warn-soft);
+  color: var(--ph-warn-ink);
 }
 
 .cm-run--bad {
-  background: color-mix(in srgb, var(--ph-bad, #c4402f) 14%, transparent);
-  color: var(--ph-bad, #c4402f);
+  background: var(--ph-danger-soft);
+  color: var(--ph-danger-ink);
 }
 
 .cm-run--none {
-  color: var(--ph-muted);
+  background: transparent;
+  color: var(--ph-faint);
 }
 
-/* ---- 运行历史 ---- */
+/* ── 运行历史 ───────────────────────────────────────────────────────── */
 
-.cm-runs {
+.cm-row--runs {
+  grid-template-columns: 148px 88px 76px minmax(0, 1fr);
+}
+
+.cm-row__detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ph-muted);
+  font-size: var(--ada-text-xs);
+}
+
+/* ── 空态 / 底注 ─────────────────────────────────────────────────────── */
+
+.cm-empty {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-.cm-runs__head {
-  display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
+  padding: 26px 20px 22px;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-xs);
+  text-align: center;
 }
 
-.cm-runs__title {
+.cm-empty__title {
   margin: 0;
-  font-size: var(--ada-text-base);
-  font-weight: 600;
   color: var(--ph-ink);
+  font-size: var(--ada-text-sm);
+  font-weight: 600;
 }
 
-.cm-table--runs .cm-value {
-  color: var(--ph-muted);
-}
-
-.cm-hint {
+.cm-empty__desc {
   margin: 0;
+  color: var(--ph-faint);
+  font-size: var(--ada-text-xs);
+}
+
+.cm-foot {
+  margin: 0;
+  color: var(--ph-faint);
   font-size: var(--ada-text-xs);
   line-height: 1.8;
-  color: var(--ph-muted);
 }
 
-/* ---- 服务端渲染的初始显隐（VNode 白名单无 hidden 属性，用类切换） ---- */
+.cm-foot code {
+  padding: 1px 5px;
+  border-radius: var(--ada-radius-sm);
+  background: var(--ph-subtle);
+  color: var(--ph-muted);
+  font-family: var(--mono-font, Consolas, monospace);
+  font-size: var(--ada-text-xs);
+}
+
+/* ── toast（与 tu-/mc-/pm-/em-/pd-toast 同参）──────────────────────── */
+
+.cm-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 80;
+  max-width: min(460px, calc(100vw - 40px));
+  padding: 9px 14px;
+  border-radius: var(--ada-radius-md);
+  background: var(--ph-ink);
+  color: var(--ph-canvas);
+  font-size: var(--ada-text-sm);
+  line-height: 1.5;
+  text-align: center;
+  box-shadow: 0 10px 28px -14px rgba(22, 23, 26, 0.55);
+  pointer-events: none;
+  /* 只动位移：动画时钟被暂停时元素仍然可见。 */
+  transform: translate(-50%, 0);
+  animation: cm-toast-in 160ms ease-out;
+}
+
+.cm-toast[data-tone="error"] {
+  background: var(--ph-danger-ink);
+  color: #ffffff;
+}
+
+@keyframes cm-toast-in {
+  from {
+    transform: translate(-50%, 10px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cm-toast {
+    animation: none;
+  }
+}
+
+/* ── 初始显隐（VNode 白名单无 hidden 属性，用类切换）──────────────── */
 
 .cm-hidden {
   display: none !important;
+}
+
+/* ── 窄屏 ───────────────────────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .cm-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .cm-summary {
+    flex-wrap: wrap;
+  }
+
+  .cm-summary__time {
+    display: none;
+  }
+
+  .cm-card__hint {
+    display: none;
+  }
+
+  /* 窄屏先砍「工作区 / 上次结果」两列，操作仍留在行内。 */
+  .cm-row {
+    grid-template-columns: 64px minmax(0, 1fr) 104px 96px 176px;
+  }
+
+  .cm-row > .cm-row__workspace,
+  .cm-row > .cm-row__last {
+    display: none;
+  }
+
+  .cm-row--runs {
+    grid-template-columns: 132px 88px minmax(0, 1fr);
+  }
+
+  .cm-row--runs > .cm-row__size {
+    display: none;
+  }
 }

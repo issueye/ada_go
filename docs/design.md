@@ -39,6 +39,7 @@ ada-go 是本地优先、单二进制、插件优先的 Agent 系统：Gateway �
 | [20-plugin-island-framework-plan.md](20-plugin-island-framework-plan.md) | 开发计划 | 插件 SSR + 客户端渲染引擎框架：同构岛屿、状态、VNode patch、构建/安全/迁移任务分解 |
 | [21-third-party-islands.md](21-third-party-islands.md) | 评估 | 第三方插件岛屿隔离：服务端驱动、verified bundle、iframe 沙箱的取舍与 v1 决策 |
 | [22-islands-delivery.md](22-islands-delivery.md) | 交付说明 | 插件岛屿框架已交付能力、构建用法、验证指标与剩余手工项 |
+| [23-plugin-system-analysis.md](23-plugin-system-analysis.md) | 实现分析 | 插件系统实现层分析：契约、生命周期、边界执行、信任模型、扩展成本、缺口与建议 |
 | [development-plan.md](development-plan.md) | 实施计划 | M0–M5 任务分解、依赖与关键路径、工作量、质量门禁、发布节奏、交付状态盘点 |
 | [ui-optimization-plan.md](ui-optimization-plan.md) | 专项计划 | UI 优化：品牌设计语言（含多主题重构）、交互审计与修复批次、UED 规范落地路线图 |
 | [performance.md](performance.md) | §12 附件 | 性能基线：实测数字、采样方法、排查阈值（M5） |

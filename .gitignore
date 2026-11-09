@@ -35,3 +35,7 @@ desktop/node_modules/
 desktop/bin/
 desktop/products/
 desktop/dist/
+
+# 代理会话临时文件（计划草稿与工作记忆，不入版本库）
+.zcode/
+.workbuddy/
