@@ -232,6 +232,12 @@ type capsState struct {
 	policy *ModulePolicy
 
 	installed map[string]provider
+	// managedProcs 是本插件经 ctx.processes 注册、需要随 Runtime 关闭而注销的进程
+	// （name → scope）。由 cap_processsupervise.go 维护，CloseCapabilities 消费。
+	managedProcs map[string]string
+	// processes 是安装期捕获的进程监督桥：关闭时要靠它注销，不能依赖「最近一次调用」
+	// 的 Context（那个可能来自另一个插件或一个没有桥的测试上下文）。
+	processes ProcessSupervisor
 }
 
 // nodeCloser 是 *mojsnode.API 的最小依赖面（便于测试里断言关闭后不再泄漏句柄）。
@@ -267,6 +273,9 @@ func CloseCapabilities(rt *mojsRuntime) error {
 	}
 	st := v.(*capsState)
 	states.Delete(rt)
+	// 被管进程的引用挂在这个 Runtime 上：先释放，再关本 Runtime 自己的子进程。
+	// 顺序反过来没有坏处，但先放被管进程能让「插件禁用 → 调度停止」尽快生效。
+	st.releaseManagedProcesses()
 	st.mu.Lock()
 	ex, proc, api := st.ex, st.proc, st.api
 	st.mu.Unlock()

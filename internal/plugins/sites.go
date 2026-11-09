@@ -82,6 +82,12 @@ var installSites = map[Capability]InstallSite{
 		EnforcedBy:    "宿主经回环控制端点投递，令牌由网关签发给本 Core 进程且插件不可见；sender 由宿主盖章，脚本不能伪造；请求体/超时受限；仅 builtin（07 §7.9、05 §6.3）",
 		Milestone:     "v0.3 系统插件化 P2",
 	},
+	CapProcessSupervise: {
+		Capability: CapProcessSupervise, HostInstall: "安装 ctx.processes：把插件的长驻进程交给网关 ProcessManager（仅 builtin）",
+		ScriptSurface: "ctx.processes.register / ensure / stop / status / unregister",
+		EnforcedBy:    "宿主把 entry 解析到插件目录内并拒绝越界；owner 由能力集盖章；启动形态只有 node（宿主 runtime）与显式 binary；禁止 shell；环境剥掉宿主凭据；每 owner/全局进程数与日志环上限（09 §9.2、06 §6.10）",
+		Milestone:     "v0.3 系统插件化 P4",
+	},
 	CapState: {
 		Capability: CapState, HostInstall: "安装按插件 + 线程命名空间隔离的受限 KV",
 		ScriptSurface: "ctx.state.get/set/delete",

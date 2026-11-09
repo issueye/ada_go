@@ -67,7 +67,7 @@ func TestInternalSendRejectsBadRequest(t *testing.T) {
 	t.Parallel()
 	t.Run("缺令牌", func(t *testing.T) {
 		t.Parallel()
-		ep, sup := newEndpoint(t, &fakeCore{}, "tok", dispatch.Identity{Workspace: "/ws/a"})
+		ep, sup := newEndpoint(t, &fakeCore{}, "tok", dispatch.Identity{Workspace: "/ws/a", Scopes: []string{dispatch.ScopeDispatchSend}})
 		rec := serve(t, ep, http.MethodPost, "/internal/dispatch/send", "",
 			dispatch.ControlRequest{ThreadID: "th_1", Text: "你好"})
 		if rec.Code != http.StatusUnauthorized {
@@ -79,7 +79,7 @@ func TestInternalSendRejectsBadRequest(t *testing.T) {
 	})
 	t.Run("错令牌", func(t *testing.T) {
 		t.Parallel()
-		ep, _ := newEndpoint(t, &fakeCore{}, "tok", dispatch.Identity{Workspace: "/ws/a"})
+		ep, _ := newEndpoint(t, &fakeCore{}, "tok", dispatch.Identity{Workspace: "/ws/a", Scopes: []string{dispatch.ScopeDispatchSend}})
 		rec := serve(t, ep, http.MethodPost, "/internal/dispatch/send", "wrong",
 			dispatch.ControlRequest{ThreadID: "th_1", Text: "你好"})
 		if rec.Code != http.StatusUnauthorized {
@@ -88,7 +88,7 @@ func TestInternalSendRejectsBadRequest(t *testing.T) {
 	})
 	t.Run("坏 JSON", func(t *testing.T) {
 		t.Parallel()
-		ep, _ := newEndpoint(t, &fakeCore{}, "tok", dispatch.Identity{Workspace: "/ws/a"})
+		ep, _ := newEndpoint(t, &fakeCore{}, "tok", dispatch.Identity{Workspace: "/ws/a", Scopes: []string{dispatch.ScopeDispatchSend}})
 		req := httptest.NewRequest(http.MethodPost, "/internal/dispatch/send", strings.NewReader("{"))
 		req.RemoteAddr = "127.0.0.1:54321"
 		req.Header.Set("Authorization", "Bearer tok")
@@ -109,7 +109,7 @@ func TestInternalSendStampsSender(t *testing.T) {
 	core := &fakeCore{}
 	var audited []dispatch.Sender
 	d, _ := newDispatcher(t, core, twoWorkspaces())
-	ident := dispatch.Identity{Workspace: "/ws/a", CoreID: "core-1"}
+	ident := dispatch.Identity{Workspace: "/ws/a", CoreID: "core-1", Scopes: []string{dispatch.ScopeDispatchSend}}
 	tokens := dispatch.NewTokens()
 	if err := tokens.Issue("tok", ident); err != nil {
 		t.Fatal(err)
@@ -147,7 +147,7 @@ func TestInternalSendWithoutPluginIsSystemSender(t *testing.T) {
 	var audited []dispatch.Sender
 	d, _ := newDispatcher(t, core, twoWorkspaces())
 	tokens := dispatch.NewTokens()
-	if err := tokens.Issue("tok", dispatch.Identity{Workspace: "/ws/a"}); err != nil {
+	if err := tokens.Issue("tok", dispatch.Identity{Workspace: "/ws/a", Scopes: []string{dispatch.ScopeDispatchSend}}); err != nil {
 		t.Fatal(err)
 	}
 	ep, err := dispatch.NewEndpoint(dispatch.EndpointConfig{
@@ -188,7 +188,7 @@ func TestInternalSendMapsBusinessCodes(t *testing.T) {
 		core := &fakeCore{status: c.status}
 		d, _ := newDispatcher(t, core, twoWorkspaces())
 		tokens := dispatch.NewTokens()
-		if err := tokens.Issue("tok", dispatch.Identity{Workspace: "/ws/a"}); err != nil {
+		if err := tokens.Issue("tok", dispatch.Identity{Workspace: "/ws/a", Scopes: []string{dispatch.ScopeDispatchSend}}); err != nil {
 			t.Fatal(err)
 		}
 		ep, err := dispatch.NewEndpoint(dispatch.EndpointConfig{Dispatcher: d, Tokens: tokens})
@@ -210,7 +210,7 @@ func TestInternalSendMapsBusinessCodes(t *testing.T) {
 // 工作区不存在 → 400 workspace_missing，且不取 Core。
 func TestInternalSendWorkspaceMissing(t *testing.T) {
 	t.Parallel()
-	ep, sup := newEndpoint(t, &fakeCore{}, "tok", dispatch.Identity{Workspace: "/ws/a"})
+	ep, sup := newEndpoint(t, &fakeCore{}, "tok", dispatch.Identity{Workspace: "/ws/a", Scopes: []string{dispatch.ScopeDispatchSend}})
 	rec := serve(t, ep, http.MethodPost, "/internal/dispatch/send", "tok", dispatch.ControlRequest{
 		Workspace: "/nope", ThreadID: "th_1", Text: "你好",
 	})
@@ -228,7 +228,7 @@ func TestInternalSendWorkspaceMissing(t *testing.T) {
 // 工作区列表端点也只认令牌。
 func TestInternalWorkspacesRequiresToken(t *testing.T) {
 	t.Parallel()
-	ep, _ := newEndpoint(t, &fakeCore{}, "tok", dispatch.Identity{Workspace: "/ws/a"})
+	ep, _ := newEndpoint(t, &fakeCore{}, "tok", dispatch.Identity{Workspace: "/ws/a", Scopes: []string{dispatch.ScopeDispatchSend}})
 	if rec := serve(t, ep, http.MethodGet, "/internal/dispatch/workspaces", "", nil); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("无令牌 status = %d", rec.Code)
 	}
@@ -252,11 +252,11 @@ func TestInternalWorkspacesRequiresToken(t *testing.T) {
 func TestTokensIssueForRevokesPrevious(t *testing.T) {
 	t.Parallel()
 	tokens := dispatch.NewTokens()
-	first, err := tokens.IssueFor("/ws/a", dispatch.Identity{Workspace: "/ws/a", Key: "/ws/a"})
+	first, err := tokens.IssueFor("/ws/a", dispatch.Identity{Workspace: "/ws/a", Key: "/ws/a", Scopes: []string{dispatch.ScopeDispatchSend}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := tokens.IssueFor("/ws/a", dispatch.Identity{Workspace: "/ws/a", Key: "/ws/a"})
+	second, err := tokens.IssueFor("/ws/a", dispatch.Identity{Workspace: "/ws/a", Key: "/ws/a", Scopes: []string{dispatch.ScopeDispatchSend}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func TestTokensIssueForRevokesPrevious(t *testing.T) {
 // 非回环来源一律拒绝（网关只监听回环，但内部端点不依赖这个前提）。
 func TestInternalSendRejectsNonLoopback(t *testing.T) {
 	t.Parallel()
-	ep, _ := newEndpoint(t, &fakeCore{}, "tok", dispatch.Identity{Workspace: "/ws/a"})
+	ep, _ := newEndpoint(t, &fakeCore{}, "tok", dispatch.Identity{Workspace: "/ws/a", Scopes: []string{dispatch.ScopeDispatchSend}})
 	req := httptest.NewRequest(http.MethodPost, "/internal/dispatch/send",
 		strings.NewReader(`{"threadId":"th_1","text":"你好"}`))
 	req.RemoteAddr = "10.0.0.9:12345"

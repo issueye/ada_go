@@ -1,18 +1,24 @@
-// cron-manager 后端：定时任务的任务模型、调度与运行历史都在本插件。
+// cron-manager 后端：定时任务的任务模型与管理面。
 //
 // 数据：ctx.config 的 "tasks" 键（机器级命名空间，0600/原子写/跨进程锁由宿主负责）。
-// 调度：agent.every(30s, tick) 是通用定时器；本插件自己解析 5 段 cron 表达式、
-//       判断到期并调用 ctx.turn.invoke 触发一轮对话。
-// 运行历史：写回任务条目的 runs（最多 20 条）；threadId 复用一个专用线程。
+// 调度：装配期经 ctx.processes 注册一个 global 单例进程 cron-manager/scheduler
+//       （runtime=node，entry=dist/scheduler.js，start=on_enable，restart=on_failure）。
+//       该进程自己解析 5 段 cron、判断到期，并经网关调度层投递消息——所以多个工作区
+//       同时打开时也只有一份调度循环。禁用本插件后引用归零，进程随之停止。
+// 运行历史：scheduler 把 lastFiredAt/threadId/runs 合并回同一份配置；本插件页面只读。
 //
 // 基座不再读取 cron.json、不再解析 cron 表达式、不再调度任务，也不再暴露
-// /api/cron/fire；禁用本插件后定时任务整体消失。
+// /api/cron/fire。
+//
+// 管理工具（cron_*）全部 discovery=true：不注入模型工具清单，只经 find_tool/
+// exec_tool 使用；审批链、超时与循环检测沿用各自描述符。
 
 const MAX_TASKS = 200;
 const MAX_NAME = 128;
 const MAX_TEXT = 64 * 1024;
 const MAX_RUNS = 20;
-const TICK_MS = 30_000;
+const SCHEDULER_NAME = "scheduler";
+const SCHEDULER_ENTRY = "dist/scheduler.js";
 
 interface CronTask {
   id: string;
@@ -49,12 +55,71 @@ interface ConfigStore {
   path(): string;
 }
 
+interface ProcessStatus {
+  id: string;
+  owner: string;
+  name: string;
+  scope: string;
+  workspace?: string;
+  runtime: string;
+  pid: number;
+  running: boolean;
+  restarts: number;
+  refs: number;
+  startMode: string;
+  restart: string;
+  lastError?: string;
+  startedAt?: string;
+}
+
+interface ProcessesBridge {
+  register(spec: {
+    name: string;
+    scope?: "global" | "workspace";
+    runtime?: "node" | "binary";
+    entry: string;
+    args?: string[];
+    start?: "on_enable" | "lazy";
+    restart?: "no" | "on_failure" | "always";
+    stopTimeoutMs?: number;
+  }): Promise<ProcessStatus>;
+  ensure(name: string, scope?: string): Promise<ProcessStatus>;
+  stop(name: string, scope?: string): Promise<ProcessStatus>;
+  status(name: string, scope?: string): Promise<ProcessStatus | undefined>;
+  unregister(name: string, scope?: string): Promise<void>;
+  list(): Promise<ProcessStatus[]>;
+}
+
+interface DispatchBridge {
+  send(req: {
+    workspace?: string;
+    threadId?: string;
+    title?: string;
+    text: string;
+    mode?: "auto" | "start" | "steer";
+    idempotencyKey?: string;
+    taskId?: string;
+  }): Promise<{ workspace: string; threadId: string; runId?: string; mode: string }>;
+}
+
 interface CronContext {
   config: ConfigStore;
   fs: { readText(path: string): Promise<string> };
-  turn: {
-    invoke(req: { threadId?: string; title?: string; prompt: string }): Promise<{ threadId: string; runId: string }>;
-  };
+  dispatch?: DispatchBridge;
+  processes?: ProcessesBridge;
+}
+
+interface ToolContext extends CronContext {
+  threadId?: string;
+}
+
+interface ToolDef {
+  name: string;
+  description: string;
+  parameters: unknown;
+  access: "read" | "write" | "exec";
+  discovery?: boolean;
+  execute: (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
 }
 
 interface AgentAPI {
@@ -63,7 +128,7 @@ interface AgentAPI {
     path: string,
     handler: (req: RouteRequest, ctx: CronContext) => unknown,
   ): void;
-  every(ms: number, handler: (req: unknown, ctx: CronContext) => unknown): void;
+  registerTool(def: ToolDef): void;
 }
 
 function fail(message: string): never {
@@ -87,6 +152,9 @@ function idOf(body: Record<string, unknown>): string {
 }
 
 // ---- 5 段 cron 解析（分 时 日 月 周；支持 *、数字、a-b、*/n、列表）----
+//
+// 与 scheduler.ts 是同一套规则：两边各自独立实现，但语义必须一致，
+// 否则「页面显示下次运行」和「实际触发」会给出不同的时间。
 
 function fieldMatch(field: string, value: number, min: number, max: number): boolean {
   const parts = field.split(",");
@@ -135,10 +203,6 @@ function validateCron(expr: string): string[] {
   return fields;
 }
 
-function dowOf(date: Date): number {
-  return date.getDay();
-}
-
 function cronMatches(expr: string, date: Date): boolean {
   const f = validateCron(expr);
   if (!fieldMatch(f[0], date.getMinutes(), 0, 59)) return false;
@@ -147,7 +211,7 @@ function cronMatches(expr: string, date: Date): boolean {
   const domAny = f[2] === "*";
   const dowAny = f[4] === "*" || f[4] === "*/1";
   const dom = fieldMatch(f[2], date.getDate(), 1, 31);
-  const dowRaw = dowOf(date);
+  const dowRaw = date.getDay();
   const dow = fieldMatch(f[4], dowRaw, 0, 7) || (dowRaw === 0 && fieldMatch(f[4], 7, 0, 7));
   if (domAny && dowAny) return true;
   if (domAny) return dow;
@@ -166,14 +230,6 @@ function nextAfter(expr: string, after: Date): Date | null {
     d.setMinutes(d.getMinutes() + 1);
   }
   return null;
-}
-
-function sameMinute(a: Date, b: Date): boolean {
-  return a.getFullYear() === b.getFullYear()
-    && a.getMonth() === b.getMonth()
-    && a.getDate() === b.getDate()
-    && a.getHours() === b.getHours()
-    && a.getMinutes() === b.getMinutes();
 }
 
 // ---- 任务模型 ----
@@ -289,19 +345,27 @@ function addRun(task: CronTask, run: CronRun): void {
   task.runs = runs.slice(-MAX_RUNS);
 }
 
-async function fire(ctx: CronContext, task: CronTask, at: Date): Promise<void> {
+// fireOnce 是「立即运行」：直接经调度层投递，不依赖 scheduler 进程在跑。
+async function fireOnce(ctx: CronContext, task: CronTask, at: Date): Promise<void> {
   const started = Date.now();
+  const text = String(task.action && task.action.text || "").trim() || task.name;
   try {
-    const res = await ctx.turn.invoke({
-      threadId: task.threadId || undefined,
+    if (!ctx.dispatch) throw new Error("未接入网关调度层（dispatch.send 不可用）");
+    const receipt = await ctx.dispatch.send({
+      workspace: String(task.workspace || "").trim(),
+      threadId: String(task.threadId || "").trim() || undefined,
       title: task.name,
-      prompt: String(task.action && task.action.text || "").trim() || task.name,
+      text,
+      mode: "start",
+      idempotencyKey: `cron:${task.id}:${at.toISOString().slice(0, 16)}:manual`,
+      taskId: task.id,
     });
-    task.threadId = res.threadId;
+    if (receipt && receipt.threadId) task.threadId = receipt.threadId;
     task.lastFiredAt = at.toISOString();
     addRun(task, {
       at: at.toISOString(), status: "started", durationMs: Date.now() - started,
-      threadId: res.threadId, detail: res.runId,
+      threadId: String((receipt && receipt.threadId) || ""),
+      detail: String((receipt && receipt.runId) || ""),
     });
   } catch (e) {
     task.lastFiredAt = at.toISOString();
@@ -327,14 +391,50 @@ function withPreview(tasks: CronTask[], now: Date): unknown[] {
   });
 }
 
-export default function (agent: AgentAPI): void {
-  agent.route("GET", "/state", async (_req, ctx) => {
-    const { tasks, warnings } = await loadTasks(ctx);
-    return { tasks: withPreview(tasks, new Date()), warnings };
+// schedulerState 返回单例调度进程的状态（页面用来显示「调度器未运行」）。
+async function schedulerState(ctx: CronContext): Promise<ProcessStatus | null> {
+  if (!ctx.processes) return null;
+  try {
+    const st = await ctx.processes.status(SCHEDULER_NAME, "global");
+    return st || null;
+  } catch {
+    return null;
+  }
+}
+
+// ensureScheduler 在管理操作后确保调度进程在跑（崩溃后退避重启失败时也会在这里补一次）。
+async function ensureScheduler(ctx: CronContext): Promise<void> {
+  if (!ctx.processes) return;
+  try {
+    await ctx.processes.ensure(SCHEDULER_NAME, "global");
+  } catch {
+    // 调度器起不来不应让管理面整体失败：状态会显示 lastError。
+  }
+}
+
+function schedulerView(st: ProcessStatus | null): unknown {
+  if (!st) return { available: false };
+  return {
+    available: true,
+    running: st.running,
+    pid: st.pid,
+    restarts: st.restarts,
+    lastError: st.lastError || "",
+    startedAt: st.startedAt || "",
+  };
+}
+
+export default function (agent: AgentAPI, ctx: CronContext): void {
+  // ---- 管理页路由 ----
+
+  agent.route("GET", "/state", async (_req, rctx) => {
+    const { tasks, warnings } = await loadTasks(rctx);
+    const scheduler = await schedulerState(rctx);
+    return { tasks: withPreview(tasks, new Date()), warnings, scheduler: schedulerView(scheduler) };
   });
 
-  agent.route("POST", "/create", async (req, ctx) => {
-    const { tasks } = await loadTasks(ctx);
+  agent.route("POST", "/create", async (req, rctx) => {
+    const { tasks } = await loadTasks(rctx);
     if (tasks.length >= MAX_TASKS) throw fail(`任务数超过上限 ${MAX_TASKS}`);
     const now = new Date().toISOString();
     const task: CronTask = {
@@ -342,18 +442,19 @@ export default function (agent: AgentAPI): void {
       runs: [],
     };
     tasks.push(task);
-    await saveTasks(ctx, tasks);
+    await saveTasks(rctx, tasks);
+    await ensureScheduler(rctx);
     return { id: task.id };
   });
 
-  agent.route("POST", "/update", async (req, ctx) => {
+  agent.route("POST", "/update", async (req, rctx) => {
     const body = bodyOf(req);
     const id = idOf(body);
     const rawTask = body.task;
     if (!rawTask || typeof rawTask !== "object" || Array.isArray(rawTask)) {
       throw fail("需要任务定义（task）");
     }
-    const { tasks } = await loadTasks(ctx);
+    const { tasks } = await loadTasks(rctx);
     const idx = tasks.findIndex((t) => t.id === id);
     if (idx < 0) throw fail("任务不存在: " + id);
     const next = taskOf(rawTask as Record<string, unknown>);
@@ -367,65 +468,300 @@ export default function (agent: AgentAPI): void {
       runs: tasks[idx].runs, createdAt: tasks[idx].createdAt,
       updatedAt: new Date().toISOString(),
     };
-    await saveTasks(ctx, tasks);
+    await saveTasks(rctx, tasks);
+    await ensureScheduler(rctx);
     return { updated: true };
   });
 
-  agent.route("POST", "/remove", async (req, ctx) => {
+  agent.route("POST", "/remove", async (req, rctx) => {
     const id = idOf(bodyOf(req));
-    const { tasks } = await loadTasks(ctx);
+    const { tasks } = await loadTasks(rctx);
     const next = tasks.filter((t) => t.id !== id);
     if (next.length === tasks.length) throw fail("任务不存在: " + id);
-    await saveTasks(ctx, next);
+    await saveTasks(rctx, next);
     return { removed: true };
   });
 
-  agent.route("POST", "/toggle", async (req, ctx) => {
+  agent.route("POST", "/toggle", async (req, rctx) => {
     const body = bodyOf(req);
     const id = idOf(body);
-    const { tasks } = await loadTasks(ctx);
+    const { tasks } = await loadTasks(rctx);
     const task = tasks.find((t) => t.id === id);
     if (!task) throw fail("任务不存在: " + id);
     task.enabled = Boolean(body.enabled);
     task.updatedAt = new Date().toISOString();
-    await saveTasks(ctx, tasks);
+    await saveTasks(rctx, tasks);
+    if (task.enabled) await ensureScheduler(rctx);
     return { updated: true };
   });
 
-  agent.route("POST", "/trigger", async (req, ctx) => {
+  agent.route("POST", "/trigger", async (req, rctx) => {
     const id = idOf(bodyOf(req));
-    const { tasks } = await loadTasks(ctx);
+    const { tasks } = await loadTasks(rctx);
     const task = tasks.find((t) => t.id === id);
     if (!task) throw fail("任务不存在: " + id);
-    await fire(ctx, task, new Date());
-    await saveTasks(ctx, tasks);
+    await fireOnce(rctx, task, new Date());
+    await saveTasks(rctx, tasks);
     return { triggered: true };
   });
 
-  agent.route("GET", "/runs", async (req, ctx) => {
+  agent.route("GET", "/runs", async (req, rctx) => {
     const id = String(req.query.id || "").trim();
     if (!id) throw fail("需要任务 id");
     const limitRaw = Number(req.query.limit || "0");
     const limit = limitRaw > 0 ? Math.min(Math.floor(limitRaw), MAX_RUNS) : MAX_RUNS;
-    const { tasks } = await loadTasks(ctx);
+    const { tasks } = await loadTasks(rctx);
     const task = tasks.find((t) => t.id === id);
     if (!task) throw fail("任务不存在: " + id);
     return { runs: (task.runs || []).slice(-limit) };
   });
 
-  // 通用定时器：每 30s 检查一次到期任务；同一条任务同一分钟只触发一次。
-  agent.every(TICK_MS, async (_req, ctx) => {
-    const { tasks } = await loadTasks(ctx);
-    const now = new Date();
-    let changed = false;
-    for (const task of tasks) {
-      if (!task.enabled) continue;
-      if (!cronMatches(task.cron, now)) continue;
-      const last = task.lastFiredAt ? new Date(task.lastFiredAt) : null;
-      if (last && sameMinute(last, now)) continue;
-      await fire(ctx, task, now);
-      changed = true;
-    }
-    if (changed) await saveTasks(ctx, tasks);
+  // ---- 单例调度进程（on_enable；崩溃按 on_failure 退避重启）----
+  //
+  // 装配期上下文里的 ctx.processes 只在网关部署下存在（CLI 直连没有控制面，
+  // 能力不安装）。注册失败不阻塞装配：页面会显示「调度器不可用」。
+  if (ctx && ctx.processes) {
+    ctx.processes
+      .register({
+        name: SCHEDULER_NAME,
+        scope: "global",
+        runtime: "node",
+        entry: SCHEDULER_ENTRY,
+        start: "on_enable",
+        restart: "on_failure",
+      })
+      .catch(() => {
+        // 见上：装配不因此失败。
+      });
+  }
+
+  // ---- 管理工具（全部 discovery=true）----
+
+  agent.registerTool({
+    name: "cron_list",
+    description: "列出全部定时任务（名称、cron、启停、下次运行时间）与调度器状态。",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+    access: "read",
+    discovery: true,
+    async execute(_args, tctx) {
+      const { tasks, warnings } = await loadTasks(tctx);
+      const scheduler = await schedulerState(tctx);
+      const lines = tasks.map((t) => {
+        let next = "";
+        if (t.enabled) {
+          try {
+            const at = nextAfter(t.cron, new Date());
+            if (at) next = " 下次=" + at.toISOString();
+          } catch {
+            next = " (cron 非法)";
+          }
+        }
+        return `- ${t.id} ${t.name} [${t.cron}] ${t.enabled ? "启用" : "停用"}${next}`;
+      });
+      const head = `共 ${tasks.length} 个任务；调度器 ${JSON.stringify(schedulerView(scheduler))}`;
+      const tail = warnings.length ? "\n警告：\n- " + warnings.join("\n- ") : "";
+      return {
+        content: [{ type: "text", text: head + (lines.length ? "\n" + lines.join("\n") : "") + tail }],
+        details: { tasks: withPreview(tasks, new Date()), scheduler: schedulerView(scheduler), warnings },
+      };
+    },
+  });
+
+  agent.registerTool({
+    name: "cron_get",
+    description: "读取单个定时任务的定义与最近运行历史。",
+    parameters: {
+      type: "object",
+      properties: { id: { type: "string", description: "任务 id" } },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    access: "read",
+    discovery: true,
+    async execute(args, tctx) {
+      const id = String(args.id || "").trim();
+      const { tasks } = await loadTasks(tctx);
+      const task = tasks.find((t) => t.id === id);
+      if (!task) throw fail("任务不存在: " + id);
+      const runs = (task.runs || []).map(
+        (r) => `- ${r.at} ${r.status}${r.threadId ? " thread=" + r.threadId : ""}${r.detail ? " " + r.detail : ""}`,
+      );
+      return {
+        content: [{
+          type: "text",
+          text: `${task.name} [${task.cron}] ${task.enabled ? "启用" : "停用"}\n` +
+            `提示词：${task.action.text}\n运行历史：\n${runs.length ? runs.join("\n") : "（还没有运行记录）"}`,
+        }],
+        details: { task },
+      };
+    },
+  });
+
+  agent.registerTool({
+    name: "cron_create",
+    description: "新建定时任务（name/cron/workspace/action.text）。",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "任务名" },
+        cron: { type: "string", description: "5 段 cron（分 时 日 月 周）" },
+        workspace: { type: "string", description: "工作区绝对路径；空表示默认工作区" },
+        text: { type: "string", description: "到期发给模型的任务提示词" },
+        enabled: { type: "boolean", description: "是否立即启用，缺省 true" },
+      },
+      required: ["name", "cron", "text"],
+      additionalProperties: false,
+    },
+    access: "write",
+    discovery: true,
+    async execute(args, tctx) {
+      const { tasks } = await loadTasks(tctx);
+      if (tasks.length >= MAX_TASKS) fail(`任务数超过上限 ${MAX_TASKS}`);
+      const now = new Date().toISOString();
+      const task: CronTask = {
+        id: newID(),
+        ...taskOf({
+          name: args.name, cron: args.cron, workspace: args.workspace,
+          enabled: args.enabled, action: { type: "agent", text: args.text },
+        }),
+        createdAt: now, updatedAt: now, runs: [],
+      };
+      tasks.push(task);
+      await saveTasks(tctx, tasks);
+      await ensureScheduler(tctx);
+      return {
+        content: [{ type: "text", text: `已创建任务 ${task.id}（${task.name} [${task.cron}]）` }],
+        details: { id: task.id },
+      };
+    },
+  });
+
+  agent.registerTool({
+    name: "cron_update",
+    description: "修改任务定义；未传 enabled 时保留原启停状态。",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "任务 id" },
+        name: { type: "string" },
+        cron: { type: "string" },
+        workspace: { type: "string" },
+        text: { type: "string" },
+        enabled: { type: "boolean" },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    access: "write",
+    discovery: true,
+    async execute(args, tctx) {
+      const id = String(args.id || "").trim();
+      const { tasks } = await loadTasks(tctx);
+      const idx = tasks.findIndex((t) => t.id === id);
+      if (idx < 0) fail("任务不存在: " + id);
+      const prev = tasks[idx];
+      const next = taskOf({
+        name: args.name === undefined ? prev.name : args.name,
+        cron: args.cron === undefined ? prev.cron : args.cron,
+        workspace: args.workspace === undefined ? prev.workspace : args.workspace,
+        enabled: args.enabled,
+        action: { type: "agent", text: args.text === undefined ? prev.action.text : args.text },
+      });
+      if (args.enabled === undefined) next.enabled = prev.enabled;
+      tasks[idx] = {
+        ...prev, ...next, id,
+        threadId: prev.threadId, lastFiredAt: prev.lastFiredAt, runs: prev.runs,
+        createdAt: prev.createdAt, updatedAt: new Date().toISOString(),
+      };
+      await saveTasks(tctx, tasks);
+      await ensureScheduler(tctx);
+      return {
+        content: [{ type: "text", text: `已更新任务 ${id}` }],
+        details: { updated: true },
+      };
+    },
+  });
+
+  agent.registerTool({
+    name: "cron_delete",
+    description: "删除定时任务。",
+    parameters: {
+      type: "object",
+      properties: { id: { type: "string", description: "任务 id" } },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    access: "write",
+    discovery: true,
+    async execute(args, tctx) {
+      const id = String(args.id || "").trim();
+      const { tasks } = await loadTasks(tctx);
+      const next = tasks.filter((t) => t.id !== id);
+      if (next.length === tasks.length) fail("任务不存在: " + id);
+      await saveTasks(tctx, next);
+      return {
+        content: [{ type: "text", text: `已删除任务 ${id}` }],
+        details: { removed: true },
+      };
+    },
+  });
+
+  agent.registerTool({
+    name: "cron_set_enabled",
+    description: "启用或停用定时任务。",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "任务 id" },
+        enabled: { type: "boolean", description: "true 启用，false 停用" },
+      },
+      required: ["id", "enabled"],
+      additionalProperties: false,
+    },
+    access: "write",
+    discovery: true,
+    async execute(args, tctx) {
+      const id = String(args.id || "").trim();
+      const { tasks } = await loadTasks(tctx);
+      const task = tasks.find((t) => t.id === id);
+      if (!task) fail("任务不存在: " + id);
+      task.enabled = Boolean(args.enabled);
+      task.updatedAt = new Date().toISOString();
+      await saveTasks(tctx, tasks);
+      if (task.enabled) await ensureScheduler(tctx);
+      return {
+        content: [{ type: "text", text: `任务 ${id} 已${task.enabled ? "启用" : "停用"}` }],
+        details: { enabled: task.enabled },
+      };
+    },
+  });
+
+  agent.registerTool({
+    name: "cron_run",
+    description: "立即执行一次任务（不受启停状态影响，会触发一轮对话）。",
+    parameters: {
+      type: "object",
+      properties: { id: { type: "string", description: "任务 id" } },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    access: "exec",
+    discovery: true,
+    async execute(args, tctx) {
+      const id = String(args.id || "").trim();
+      const { tasks } = await loadTasks(tctx);
+      const task = tasks.find((t) => t.id === id);
+      if (!task) fail("任务不存在: " + id);
+      await fireOnce(tctx, task, new Date());
+      await saveTasks(tctx, tasks);
+      const last = (task.runs || []).slice(-1)[0];
+      return {
+        content: [{
+          type: "text",
+          text: `已触发任务 ${id}：${last ? last.status + (last.detail ? " " + last.detail : "") : "未记录"}`,
+        }],
+        details: { taskId: id, threadId: task.threadId || "", run: last || null },
+      };
+    },
   });
 }

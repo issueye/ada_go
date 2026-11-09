@@ -250,6 +250,12 @@ const (
 	// 指定工作区的调度层（建线程 / 排队 / 运行中 steer 由调度层决定）。
 	// 它不授予工具、文件或网络权限，也不采信脚本给的身份——sender 由宿主盖章。
 	CapDispatchSend Capability = "dispatch.send"
+	// CapProcessSupervise 是 builtin-only 的进程监督桥（ctx.processes）：把插件的长驻进程
+	// 交给网关 ProcessManager 拉起、重启与回收，而不是在 Core 内自己 spawn。
+	//
+	// 它不开放 stdin/stdout 句柄、不授予任意可执行文件：entry 由宿主解析到插件目录内，
+	// owner 由宿主按清单盖章，环境剥掉宿主凭据（09 §9.2、06 §6.10）。
+	CapProcessSupervise Capability = "process.supervise"
 	// CapBackendRead 是前端能力：预取只读后端动作结果。
 	CapBackendRead Capability = "backend.read"
 	// CapFrontendScript 是前端能力：加载插件自带 JS（默认关闭，仍受 CSP 限制）。
@@ -259,7 +265,7 @@ const (
 // backendCapabilities 是后端可声明的能力白名单。
 var backendCapabilities = []Capability{
 	CapFSRead, CapFSWrite, CapNetFetch, CapNetSSE,
-	CapExec, CapProcess, CapState, CapGlobalConfig, CapEventsRead, CapUIAsk, CapSubagentInvoke, CapModelAdmin, CapPluginAdmin, CapToolDiscovery, CapTurnInvoke, CapDispatchSend,
+	CapExec, CapProcess, CapState, CapGlobalConfig, CapEventsRead, CapUIAsk, CapSubagentInvoke, CapModelAdmin, CapPluginAdmin, CapToolDiscovery, CapTurnInvoke, CapDispatchSend, CapProcessSupervise,
 }
 
 // frontendCapabilities 是前端可声明的能力白名单。
@@ -288,7 +294,7 @@ func (c Capability) MinTrust() Trust {
 	switch c {
 	case CapExec, CapProcess, CapNetSSE, CapUIAsk, CapGlobalConfig:
 		return TrustVerified
-	case CapSubagentInvoke, CapModelAdmin, CapPluginAdmin, CapToolDiscovery, CapTurnInvoke, CapDispatchSend:
+	case CapSubagentInvoke, CapModelAdmin, CapPluginAdmin, CapToolDiscovery, CapTurnInvoke, CapDispatchSend, CapProcessSupervise:
 		return TrustBuiltin
 	default:
 		return TrustThirdParty

@@ -6,6 +6,10 @@
 /dist-cache/
 *.test
 *.log
+# 构建器/编辑器留下的备份与临时产物（如 cron.exe~）
+*~
+*.bak
+*.orig
 
 # 本地临时调试文件（.tmp* 由 go 工具链忽略，但不要进入版本库）
 .tmp*

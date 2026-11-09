@@ -110,6 +110,7 @@ plugins/my-plugin/
 | `tool.discovery` | 后端 | builtin | `ctx.catalog.list({query?})`、`ctx.tool.invoke({tool,args})` | 发现式工具宿主桥：目录只读投影 + 内层工具执行；宿主按内层描述符重跑 beforeCall/policy/Runner，仅 builtin |
 | `turn.invoke` | 后端 | builtin | `ctx.turn.invoke({threadId?, title?, prompt})` | 通用轮次触发桥：宿主建线程/生成 runId/后台执行，插件只拿受理回执；不授予工具/文件/网络权限，仅 builtin；只在本 Core 内开一轮 |
 | `dispatch.send` | 后端 | builtin | `ctx.dispatch.send({workspace?, threadId?, title?, text?, mode?, idempotencyKey?, taskId?})` | 内部发送桥：交给网关调度层，可跨工作区，与界面发送共用同一份投递规则（busy/steer/waiting_input 只有一处判定）；令牌由网关签发给本 Core 进程且插件不可见，sender 由宿主盖章；仅 builtin |
+| `process.supervise` | 后端 | builtin | `ctx.processes.register/ensure/stop/status/unregister/list` | 进程监督桥：把插件长驻进程交给网关 ProcessManager 拉起、退避重启与回收；entry 由宿主解析到插件目录内（越界/绝对路径拒绝），owner 由宿主盖章，无 stdin/stdout 句柄，环境剥掉宿主凭据；仅 builtin |
 | `ui.ask` | 后端 | verified | `ctx.ui.confirm/select/input/form/notify` | 交互桥；无 UI 时按拒绝（失败关闭） |
 | `subagent.invoke` | 后端 | builtin | `ctx.subagent.invoke` | v1.5；v1 不装配 |
 | `model.admin` | 后端 | builtin | `ctx.model.list/select` | **只读模型目录 + 切换当前模型**；供应商配置 CRUD 走 `global.config`，不在本能力里 |
@@ -117,7 +118,8 @@ plugins/my-plugin/
 | `backend.read` | 前端 | third-party | SSR 预取 `props.data.backend.<id>.<binding>` | Gateway 渲染桥：≤16 个、并发 4、单个 300ms、缓存 8s |
 | `frontend.script` | 前端 | third-party | `/ext/{id}/static/*`、hydrate、client bundle | CSP + nosniff + 安装确认；同源脚本风险见 [09](09-security-operations.md) |
 
-发现式工具宿主桥作为 builtin-only 能力 `tool.discovery` 暴露：`ctx.catalog`（目录只读投影）与 `ctx.tool.invoke`（按名执行内层工具，宿主重跑审批链）。通用轮次触发桥 `turn.invoke`（`ctx.turn.invoke`）已落地：宿主建线程/生成 runId/后台执行，插件只提交提示词并拿受理回执；新增桥必须同时提交消费者、审计与契约测试。内部发送桥 `dispatch.send`（`ctx.dispatch.send`）同样已落地：它把消息交给**网关调度层**（[07 §7.9](07-ssr-frontend.md#79-消息发送路径调度层)），可跨工作区，且与界面发送共用同一份投递规则；令牌由网关签给本 Core 进程并只经环境变量传递，插件既拿不到地址也拿不到凭据，sender 由宿主按能力集盖章。
+发现式工具宿主桥作为 builtin-only 能力 `tool.discovery` 暴露：`ctx.catalog`（目录只读投影）与 `ctx.tool.invoke`（按名执行内层工具，宿主重跑审批链）。通用轮次触发桥 `turn.invoke`（`ctx.turn.invoke`）已落地：宿主建线程/生成 runId/后台执行，插件只提交提示词并拿受理回执；新增桥必须同时提交消费者、审计与契约测试。内部发送桥 `dispatch.send`（`ctx.dispatch.send`）同样已落地：它把消息交给**网关调度层**（[07 §7.9](07-ssr-frontend.md#79-消息发送路径调度层)），可跨工作区，且与界面发送共用同一份投递规则；令牌由网关签给本 Core 进程并只经环境变量传递，插件既拿不到地址也拿不到凭据，sender 由宿主按能力集盖章。进程监督桥 `process.supervise`（`ctx.processes`）也已落地：它把插件的长驻进程交给**网关 ProcessManager**（[06 §6.10](06-plugin-runtime.md)），跨会话存活、崩溃按策略退避重启、按引用计数回收；entry 由宿主解析到插件目录内并拒绝越界，owner 由宿主盖章，没有 stdin/stdout 句柄。
+定时任务的调度已迁到单例进程：`cron-manager` 装配期用 `ctx.processes` 注册 `scheduler`（global、node、on_enable），由它解析 cron 并经 `ctx.dispatch.send` 同一条调度层投递；`agent.every` 循环已从插件删除。
 `env.admin` 已不存在：env 的变量读写/校验/管理页由 `env-manager` 系统插件经 `global.config` 实现，基座只保留“向子进程注入已配置环境”的通用执行点。`cron.admin` 已删除：cron 的任务模型/调度/历史由 `cron-manager` 经 `global.config` + `agent.every` 通用定时器 + `turn.invoke` 实现；基座不再读 `cron.json`、不调度、不暴露 `/api/cron/fire`。
 
 > 实现状态：`global.config` 已落地（`ctx.config` + `internal/globalconfig`）；`events.read` 已落地（`ctx.events.query` + Emitter 可回放缓冲，`ctx.events.usage` + SQLite 原始用量行）；`token-usage`/`composer-telemetry` 已改为插件内聚合，基座已删除展示用 `usage.get` 投影，只保留 `events.read` 的原始用量行；`turn.invoke` 轮次触发桥与 `agent.every` 通用定时器已落地；cron 已完成迁移。`dispatch.send` 已落地：网关侧 `internal/gateway/dispatch` 同时服务界面发送与 `ctx.dispatch.send`，内部端点只认回环来源 + 控制令牌，且摘掉了宿主环境里的 `ADAG_`/`ADAGO_` 变量（插件子进程拿不到宿主凭据）。路线见 [11 §16](11-structure-roadmap.md)。
@@ -311,6 +313,19 @@ interface ToolContext {
       workspace?: string; threadId?: string; title?: string; text: string;
       mode?: "auto" | "start" | "steer"; idempotencyKey?: string; taskId?: string;
     }): Promise<{ workspace: string; threadId: string; runId?: string; mode: string }>;
+  };
+  processes?: {                      // capability: process.supervise，仅 builtin
+    register(spec: {
+      name: string; scope?: "global" | "workspace"; runtime?: "node" | "binary";
+      entry: string; args?: string[]; env?: Record<string, string>;
+      start?: "on_enable" | "lazy"; restart?: "no" | "on_failure" | "always";
+      stopTimeoutMs?: number;
+    }): Promise<ProcessStatus>;
+    ensure(name: string, scope?: string): Promise<ProcessStatus>;
+    stop(name: string, scope?: string): Promise<ProcessStatus>;
+    status(name: string, scope?: string): Promise<ProcessStatus | undefined>;
+    unregister(name: string, scope?: string): Promise<void>;
+    list(): Promise<ProcessStatus[]>;
   };
   sse?: { send(data: unknown, event?: string): void }; // 仅 sse:true 的 route 处理器内存在
   secret?(name: string): string | null; // 仅在 manifest 声明 secrets 时存在

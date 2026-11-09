@@ -157,6 +157,8 @@ plugins/official/*（系统插件包：provider、fs、shell、git、plan、cron
 
 gateway
    ├── registry / supervisor / relay
+   ├── dispatch（唯一发送路径）
+   ├── processmgr（Gateway 名下的非 agent 进程）
    ├── auth
    └── web（SSR + 前端插件 + SSE）
              └── cmd/adag gateway
@@ -168,6 +170,7 @@ gateway
 - `engine` 只依赖 `ports` 与 `domain`。
 - Gateway 不 import Core 的执行内核（`engine`/`toolkit`/`adapters`）与系统插件包；允许复用共享基座包 `coreapp`（产品声明）、`plugins/host`（前端渲染类型）、`plugins`、`proto`、`domain`、`version`、`workspacepath`，但不得调用工具或模型。
 - 插件运行时只通过 `ports.ScriptHost` 进入引擎；引擎不知道 moejs 的存在。
+- Gateway 的进程分两类：`supervisor` 只管工作区 ↔ Core 的 lease/RPC；`processmgr` 只管插件注册的长驻进程（启动、退避重启、引用计数、进程树回收、日志环）。两者都不解释业务语义。
 
 ### 3.4 一次对话的时序
 
@@ -238,6 +241,17 @@ type Instance struct {
 - Core 在打开 `state.db` 前取得工作区独占锁；同一工作区第二个 Core 启动失败并返回 `workspace_locked`（含持有者 pid）。Gateway 不打开 `state.db`，因此不参与数据库锁竞争。
 - 空闲回收：默认 15 分钟无请求、无 SSE、无运行中轮次；上限 8 个 Core；每分钟扫描；LRU 驱逐。**有 SSE 连接、运行中、等待交互的实例永不回收**。
 - Gateway 退出：先停止接受新请求，通知 Core `system.shutdown`，10 秒后强杀；Core 若发现父进程消失或 30 秒无 Gateway 心跳，自行退出，避免孤儿进程。
+
+**被管进程（`internal/gateway/processmgr`）**：插件注册的长驻进程（如 cron scheduler）不归 Supervisor，而由 Gateway 的 ProcessManager 管：
+
+- 注册项按 `owner/name/workspace` 去重，引用计数；孤儿清理用 `UnregisterAll(owner, workspace)`。
+- `scope=global` 跨工作区单例，`scope=workspace` 每工作区一份（工作区同时是 cwd）。
+- 启动形态 `binary`/`node`（node 用宿主 `node` 执行 entry），**禁止 shell**，argv 原样传递。
+- 启动失败保留登记（`lastError`），`Ensure` 单飞重试；退出按 `restart=no/on_failure/always` 指数退避重启。
+- `on_enable` 注册即启动，`lazy` 等 `Ensure`；每 owner 默认 8 个、全局 32 个。
+- 输出进每进程日志环（默认 200 行、单行 2KB、截断 + 凭据脱敏），不默认暴露给浏览器。
+- 停止杀整棵进程树（Unix 进程组 / Windows `taskkill /T`）；`Gateway.Shutdown` 先停被管进程再关 Core；环境继承宿主但剥掉 `ADAG_`/`ADAGO_` 凭据，只保留 `ADAGO_HOME`/`ADAG_OFFICIAL_PLUGINS_DIR` 这类路径指针。
+- 需要发消息的被管进程（cron scheduler）由网关在启动时单独签一枚只带 `dispatch:send` 范围的令牌，经 `ADAGO_GATEWAY_CONTROL_*` 注入；sender 由令牌里的 `plugin:<owner>` 盖章，停止/注销/网关关闭即回收。
 
 **投影缓存**：每个线程一份 `ThreadView`，包含有序 items、运行状态、待处理交互、用量。Gateway 重启后缓存为空，首个请求用 `thread.get` + `thread.entries` 重建；不持久化投影，避免第二份真相。
 

@@ -33,6 +33,9 @@
 - 插件经 Node 兼容层执行命令时只有 `execFile`、不经过 shell；`fs` 的写与 `exec` cwd 固定工作区，`ctx.fs` 读成员不限制目标路径（agent 的 `read_file`/`list_files`/`search_files` 可读宿主任意文件，见 [6.12](12-node-compat.md)）；`process.env` 只有清单白名单（组合根未注入时按白名单从宿主环境取值）；`.node` 与 `node:http`/`net`/`dns` 不可用。
 - `process` 能力（长驻 stdin/stdout，仅 builtin/verified）在**装配期**就能启动子进程，这条路径不经过 `tool.beforeCall` / `policy-default` 审批，程序边界同样只由 `ExecPolicy` 约束；第三方插件不可声明该能力。需要审批的交互式命令仍走工具调用（`Access=exec`）。
 - 长驻进程与后台任务都按「每 Runtime 进程数 / 生命周期 / 输出上限」登记，Runtime 关闭或插件重载时杀整棵进程树。
+- `ctx.processes` 注册的被管进程记在插件 Runtime 上：Runtime 关闭（插件禁用/重载/禁用装配）时按「本插件注册过哪些」逐个注销，最后一个引用释放即停止；进程本身由网关拉起，杀的是网关名下的进程树。
+- **被管进程的控制凭据**：网关在每次启动被管进程时单独签发一枚只带 `dispatch:send` 范围的令牌（`processmgr.ControlIssuer`），经 `ADAGO_GATEWAY_CONTROL_URL/TOKEN` 交给那一个进程；令牌身份写死 `plugin:<owner>`，sender 由网关盖章，进程不能冒充别的插件，也不能反向调 `/internal/processes/*`。进程停止/注销/网关关闭即回收令牌。`ADAGO_HOME`、`ADAG_OFFICIAL_PLUGINS_DIR` 是路径指针而不是凭据，作为少数例外不被剥离。
+- **被管进程**与 `ctx.process.start` 是两条不同的链：`ctx.process.start` 由插件 Runtime 拥有（会话内、可写 stdin）；Gateway 的 `internal/gateway/processmgr` 管的是插件注册的跨会话长驻进程（cron scheduler 之类），不开放 stdin、不读插件状态，`owner` 由宿主盖章，环境剥掉 `ADAG_`/`ADAGO_` 凭据，日志环默认 200 行 / 单行 2KB 并做凭据脱敏。
 - 写工具执行前纳入检查点；回滚结果如实列出恢复/删除/跳过/失效。
 
 ### 9.3 Web 安全
@@ -73,6 +76,7 @@
 | 命令 | 默认 120s，输出截断 50KB/2000 行，可配置上限 |
 | 后台命令 | 每 Runtime 最多 8 个、生命周期 30m、单路输出 4MB；`check_task` 单路返回尾部 64KB，`wait_task` 单次等待上限 60s |
 | 长驻进程 | `process` 能力，仅 builtin/verified；每 Runtime 最多 8 个、生命周期 30m、单路缓冲 4MB；关闭/重载杀整棵进程树 |
+| 被管进程 | Gateway `processmgr`；`ctx.processes` 经 `/internal/processes/*`（回环 + 控制令牌）注册；每 owner 默认 8 个、全局 32 个；启动 5s、停止 5s、stopTimeoutMs ≤60s；退避重启 0.5s→30s；日志 200 行 / 单行 2KB；环境剥 `ADAG_`/`ADAGO_`；entry 必须是插件目录内的绝对路径；停止杀整棵进程树 |
 | 数据库 | WAL、`busy_timeout` 5s、单写者协程 + 工作区锁、CLI 只读连接、在线备份 |
 
 进程级兜底：`GOMEMLIMIT`（可按工作区配置）、Core 内存看门狗（超过 2GB 记录并拒绝新插件调用）、Gateway 连接数上限。

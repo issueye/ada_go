@@ -283,6 +283,8 @@ ctx.processes.unregister("scheduler");
 
 ### 5.5 内部 API
 
+> 状态：P3 已只实现宿主侧 `processmgr`（Go API）；下面的 loopback 端点与插件桥随 P4 落地。
+
 Gateway 暴露 loopback 控制端点（仅内部 token）：
 
 ```text

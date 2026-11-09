@@ -25,6 +25,7 @@ import (
 	"github.com/adag/ada-go/internal/gateway/contracts"
 	"github.com/adag/ada-go/internal/gateway/dispatch"
 	"github.com/adag/ada-go/internal/gateway/frontend"
+	"github.com/adag/ada-go/internal/gateway/processmgr"
 	"github.com/adag/ada-go/internal/gateway/relay"
 	"github.com/adag/ada-go/internal/gateway/security"
 	"github.com/adag/ada-go/internal/gateway/sse"
@@ -73,6 +74,9 @@ type Config struct {
 	// 会写到这里，下次启动再合并回列表。空表示不持久化。
 	// 显式传 DataDir 时忽略（隔离数据目录不共享用户级工作区列表）。
 	WorkspacesFile string
+	// Processes 是可选的进程管理器注入点（测试用）：非空时直接使用，
+	// 生命周期仍归 Gateway（Shutdown 会关闭它）。nil 时按默认参数创建一个。
+	Processes *processmgr.Manager
 }
 
 // Gateway 持有 HTTP handler 与它管理的 Core 进程。
@@ -87,6 +91,12 @@ type Gateway struct {
 	// control 给 Core 签发内部发送凭据；controlTokens 是这些凭据的表。
 	control       *controlPlane
 	controlTokens *dispatch.Tokens
+	// processes 是 Gateway 名下非 agent-worker 进程的唯一父进程（计划 P3）：
+	// 插件注册的 scheduler 之类由它 spawn/重启/回收，agent worker 仍归 Supervisor。
+	processes *processmgr.Manager
+	// processEndpoint 是 /internal/processes/* 的内部端点（P4 插件进程桥的服务端）。
+	// 同时持有「哪个 Core 注册了哪些进程」的索引，供 Core 退出/重签令牌时清理。
+	processEndpoint *processmgr.Endpoint
 }
 
 // frontendGate 提供「某工作区里某前端插件是否启用」的短期缓存。
@@ -264,12 +274,38 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 		}
 	}
 
-	var sup contracts.Supervisor
-	ownSup := false
 	// 内部发送凭据：给每个 Core 签一次，Core 侧据此安装 ctx.dispatch。
 	// 插件脚本永远看不到令牌；令牌只经环境变量交给刚拉起的那个进程。
 	controlTokens := dispatch.NewTokens()
 	control := newControlPlane(controlTokens)
+
+	// 进程管理器：插件注册的长驻进程（cron scheduler 等）挂在 Gateway 名下，
+	// 与 agent-worker（Supervisor）生命周期分开；任何启动失败都不得拖垮 HTTP 面。
+	//
+	// 注入 control 是为了让被管进程拿到「只能发消息」的专用令牌：
+	// scheduler 到点要经调度层投递，但它不该继承宿主凭据，也不该能反向注册进程。
+	processes := cfg.Processes
+	if processes == nil {
+		processes, err = processmgr.New(processmgr.Options{
+			Logf:    func(format string, args ...any) { log.Printf(format, args...) },
+			Control: control,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("gateway: 创建进程管理器失败: %w", err)
+		}
+	}
+	// 后续任一步装配失败都要回收已经拉起的 Core 与被管进程，否则会留下孤儿。
+	var sup contracts.Supervisor
+	ownSup := false
+	cleanupPartial := func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = processes.Shutdown(shutdownCtx)
+		if ownSup {
+			_ = sup.Shutdown(shutdownCtx)
+		}
+	}
+
 	if cfg.Supervisor != nil {
 		// 测试注入：不启动真实 Core，监督者生命周期归调用方。
 		sup = cfg.Supervisor
@@ -283,6 +319,7 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 			Control: control,
 		})
 		if err != nil {
+			cleanupPartial()
 			return nil, err
 		}
 		sup = realSup
@@ -297,9 +334,7 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 		MaxBodyBytes: 48 << 20,
 	})
 	if err != nil {
-		if ownSup {
-			_ = sup.Shutdown(context.Background())
-		}
+		cleanupPartial()
 		return nil, err
 	}
 
@@ -330,9 +365,7 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 			},
 		})
 		if err != nil {
-			if ownSup {
-				_ = sup.Shutdown(context.Background())
-			}
+			cleanupPartial()
 			return nil, fmt.Errorf("gateway: 前端插件装配失败: %w", err)
 		}
 		pluginUI = bridge
@@ -354,9 +387,7 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 		},
 	})
 	if err != nil {
-		if ownSup {
-			_ = sup.Shutdown(context.Background())
-		}
+		cleanupPartial()
 		return nil, err
 	}
 	requestWorkspace.Set(webSrv.WorkspaceForRequest)
@@ -374,8 +405,12 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 	})
 	root.Handle("/", webSrv.Handler())
 
-	// 内部发送端点：与用户鉴权**并列**而不是嵌套——进程没有会话 cookie，
+	// 内部端点：与用户鉴权**并列**而不是嵌套——进程没有会话 cookie，
 	// 也不该有；认证只靠控制令牌 + 回环来源。
+	//
+	// 两条内部链共用同一个 mux（/internal/* 前缀已被 internalGate 摘出用户鉴权）：
+	// 发送（dispatch）与进程监督（processes）。
+	internalMux := http.NewServeMux()
 	controlEndpoint, err := dispatch.NewEndpoint(dispatch.EndpointConfig{
 		Dispatcher: webSrv.Dispatch(),
 		Tokens:     controlTokens,
@@ -391,18 +426,49 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 		},
 	})
 	if err != nil {
-		if ownSup {
-			_ = sup.Shutdown(context.Background())
-		}
+		cleanupPartial()
 		return nil, err
 	}
-	controlHandler := controlEndpoint.Handler()
+	controlEndpoint.Register(internalMux)
+
+	// 进程监督端点：插件经 Core 宿主桥注册长驻进程，网关按 owner 与限额管理。
+	processEndpoint, err := processmgr.NewEndpoint(processmgr.EndpointConfig{
+		Manager: processes,
+		Tokens:  controlTokens,
+		Log: func(ident dispatch.Identity, op string, req processmgr.ProcessRequest,
+			st *processmgr.Status, opErr error) {
+			if opErr != nil {
+				log.Printf("processmgr: op=%s owner=%s name=%s workspace=%s error=%v",
+					op, req.PluginID, req.Name, ident.Workspace, opErr)
+				return
+			}
+			pid := 0
+			if st != nil {
+				pid = st.PID
+			}
+			log.Printf("processmgr: op=%s owner=%s name=%s workspace=%s pid=%d",
+				op, req.PluginID, req.Name, ident.Workspace, pid)
+		},
+	})
+	if err != nil {
+		cleanupPartial()
+		return nil, err
+	}
+	processEndpoint.Register(internalMux)
+	// 重签令牌 = 旧 Core 退场：先回收它注册过的被管进程，再签发新凭据。
+	// 这里在 Serve 之前接上，第一个 Core 拉起时一定已经就位。
+	control.onIssue = func(key string) {
+		if n := processEndpoint.CleanupKey(key); n > 0 {
+			log.Printf("processmgr: Core %s 重签前回收 %d 个被管进程", key, n)
+		}
+	}
 
 	g := &Gateway{
 		cfg: cfg, product: product, token: accessToken, sup: sup, ownSup: ownSup, web: webSrv,
-		control: control, controlTokens: controlTokens,
+		control: control, controlTokens: controlTokens, processes: processes,
+		processEndpoint: processEndpoint,
 		handler: internalGate{
-			internal: controlHandler,
+			internal: internalMux,
 			mw:       mw,
 			next:     tokenLoginGate{next: mw.Wrap(root), mw: mw},
 		},
@@ -488,7 +554,20 @@ func (g *Gateway) Workspaces() []string {
 // Product 返回已加载的产品声明。
 func (g *Gateway) Product() *coreapp.Product { return g.product }
 
-// Shutdown 停止 HTTP 之外的资源：Core 子进程与后台 janitor。
+// Processes 返回网关名下的进程管理器（P4 的插件进程桥与诊断都从这里接入）。
+//
+// 返回值可用于注册/查询，但生命周期归 Gateway：调用方不应自行 Shutdown。
+func (g *Gateway) Processes() *processmgr.Manager {
+	if g == nil {
+		return nil
+	}
+	return g.processes
+}
+
+// Shutdown 停止 HTTP 之外的资源：被管进程、Core 子进程与后台 janitor。
+//
+// 顺序是先停被管进程（它们是插件拉起的，可能正在向 Core 投递消息），
+// 再关 Supervisor：反过来会让最后一个在途投递撞上已关闭的 Core。
 func (g *Gateway) Shutdown(ctx context.Context) error {
 	if g == nil {
 		return nil
@@ -500,10 +579,20 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 	if g.control != nil {
 		g.control.revokeControls()
 	}
-	if g.sup != nil && g.ownSup {
-		return g.sup.Shutdown(ctx)
+	var procErr error
+	if g.processes != nil {
+		procErr = g.processes.Shutdown(ctx)
 	}
-	return nil
+	// 进程本身已由 Manager 回收；这里只丢掉「哪个 Core 注册过什么」的索引。
+	if g.processEndpoint != nil {
+		g.processEndpoint.CleanupAll()
+	}
+	if g.sup != nil && g.ownSup {
+		if err := g.sup.Shutdown(ctx); err != nil && procErr == nil {
+			return err
+		}
+	}
+	return procErr
 }
 
 // workspaceRequestResolver 允许 SSE 与前端插件桥在 web.Server 创建后

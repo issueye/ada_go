@@ -14,25 +14,29 @@
 - 插件系统、能力位、审计、global.config、events.read、turn.invoke、agent.every 已落地；
 - cron 已迁到系统插件，但仍是每 Core 一个调度器。
 
+已落地（后续阶段的前提）：
+
+- P1 Dispatcher 与 P2 内部发送端点：界面与插件共用一条发送路径；
+- P5 ToolManager：注册/可见性/快照/执行路由集中到 `internal/toolkit`；
+- P3 ProcessManager：注册、启动、停止、退避重启、引用计数、限额、日志环、进程树回收。
+
 待解决：
 
 - 多工作区下 cron 重复触发；
 - cron 的 `workspace` 字段未生效；
-- 普通消息与 cron 消息没有统一入口；
-- 插件进程没有 Gateway 级生命周期管理；
-- `turn.invoke` 无法跨工作区；
-- 工具管理分散在 `toolkit.Catalog`、`app.toolInvoker`、engine 与 `tool-discovery` 之间，`exec_tool` 缺少 discovery 执行约束。
+- 插件进程没有插件侧 API（`ctx.processes` 与 `process.supervise` 属 P4）；
+- cron 尚未切到单例 scheduler 进程；
 
 ## 2. 阶段划分
 
 | 阶段 | 目标 | 依赖 | 主要产物 |
 |---|---|---|---|
 | P0 | 决策与契约冻结 | 无 | 类型、错误码、能力位、审计字段 |
-| P1 | 抽 Dispatcher | P0 | `internal/gateway/dispatch`，Web 走统一入口 |
-| P2 | 内部发送 API + Sender | P1 | loopback 端点、token、sender 盖章、审计 |
-| P3 | ProcessManager | P0 | 进程注册/启动/停止/重启/引用计数 |
+| P1 | 抽 Dispatcher | P0 | `internal/gateway/dispatch`，Web 走统一入口 · 已完成 |
+| P2 | 内部发送 API + Sender | P1 | loopback 端点、token、sender 盖章、审计 · 已完成 |
+| P3 | ProcessManager | P0 | 进程注册/启动/停止/重启/引用计数 · 已完成 |
 | P4 | 插件进程桥 | P3 | `ctx.processes`、`process.supervise` |
-| P5 | 基座 ToolManager | P0 | 工具注册/可见性/快照/路由集中化，修复 discovery 执行约束 |
+| P5 | 基座 ToolManager | P0 | 工具注册/可见性/快照/路由集中化，修复 discovery 执行约束 · 已完成 |
 | P6 | cron 单进程与工具 | P2/P4/P5 | scheduler 进程、任务发送、`discovery` 管理工具、删除每 Core 定时器 |
 | P7 | 清理与文档 | 全部 | 删除旧 `turn.invoke` 依赖、测试、文档 |
 
@@ -136,6 +140,22 @@
 
 ## 6. P3：ProcessManager
 
+> 状态：已实现（2026-11-09）。`internal/gateway/processmgr`（`manager.go` / `process.go`
+> / `proc_*.go`）；Gateway 装配持有它并在 `Shutdown` 回收；`gateway.Config.Processes`
+> 是测试注入点。内部 HTTP 端点与插件桥（`ctx.processes`）仍归 P4。
+>
+> 落地时的补充决策：
+> - 进程环境继承宿主但剥掉 `ADAG_`/`ADAGO_` 前缀（宿主凭据不进被管进程，与 `ctx.exec` 一致）；
+> - `cmd.WaitDelay = 1s`：孙进程会继承 stdout/stderr 管道写端，没有它在 Windows 上
+>   `Wait` 会在进程已死后继续等 I/O；
+> - 注册形态（scope/runtime/start/restart）在注册期归一化并校验；同名不同形态返回
+>   `process_exists`，不静默覆盖；
+> - 启动失败保留登记（`lastError`），调用方可 `Ensure` 重试；`Ensure` 单飞，
+>   并发调用只拉起一次；
+> - `Stop` 保留登记与引用（`stoppedByUser`），`Unregister` 才删除；最后一个引用释放时停止；
+> - `UnregisterAll(owner, workspace)` 是断连清理：无视引用计数，直接摘除该 owner 在该工作区的全部登记并停止进程
+>   （workspace 为空只匹配 global 条目），供 P4 的 Core 断连/插件禁用清理。
+
 任务：
 
 - 新建 `internal/gateway/processmgr`；
@@ -152,15 +172,32 @@
 - `internal/gateway/processmgr/manager.go`
 - `internal/gateway/processmgr/process.go`
 - `internal/gateway/processmgr/manager_test.go`
+- `internal/gateway/processmgr/process_real_test.go`
+- `internal/gateway/processmgr/proc_unix.go` / `proc_windows.go`
 - `internal/gateway/gateway.go`
+- `internal/gateway/gateway_process_test.go`
 
-验收：
+验收（均已覆盖）：
 
-- 单测覆盖启动/停止/崩溃重启/引用计数/lazy/上限；
-- 进程树在停止后无残留；
-- Gateway 退出时全部回收。
+- 单测覆盖启动/停止/崩溃重启/引用计数/lazy/限额/单飞/日志脱敏；
+- 真实进程测试覆盖停止后进程树无残留（用测试二进制作 helper，含孙进程）；
+- Gateway Shutdown 回收全部被管进程，之后注册被拒绝。
 
 ## 7. P4：插件进程桥
+
+> 状态：已实现（2026-11-09）。能力位 `process.supervise`（builtin-only）；宿主桥 `ctx.processes`
+> （`internal/plugins/host/cap_processsupervise.go`）；网关端点 `internal/gateway/processmgr/endpoint.go`
+> （`/internal/processes/register|unregister|ensure|stop|status|list`，回环 + 控制令牌）；Core 侧
+> `internal/cli/plugin_processes.go` 用同一组 `ADAGO_GATEWAY_CONTROL_*` 环境变量。
+>
+> 落地时的补充决策：
+> - entry 由 Core 宿主解析到 `Script.Root` 内的绝对路径（`..`、绝对路径、空 Root 一律拒绝，
+>   `ERR_ACCESS_DENIED`）；网关再校验它存在且是文件——两道门，互不替代；
+> - 网关把请求体里的 `pluginId` 当 owner 并校验 `ValidID`；脚本传 `owner`/`pluginId` 无效；
+> - `scope=workspace` 的工作区只能取令牌绑定值，请求里的 `workspace` 被忽略；
+> - 请求体 `env` 不透传（宿主桥直接置空）：被管进程环境由网关按「宿主环境剥凭据」决定；
+> - Core 重签令牌（新 Core 拉起）时按签发键回收旧代注册，避免引用计数被旧代占住；
+> - 端点不提供 stdin/stdout 与日志流：`ctx.processes` 只有注册/确保/停止/状态/注销/列表。
 
 任务：
 
@@ -232,6 +269,24 @@
 
 ## 9. P6：cron 单进程与工具
 
+> 状态：已实现（2026-11-09）。`plugins/official/cron-manager/scheduler.ts` → `dist/scheduler.js`；
+> 插件在装配期 `ctx.processes.register({name:"scheduler", scope:"global", runtime:"node",
+> entry:"dist/scheduler.js", start:"on_enable", restart:"on_failure"})`；scheduler 直接读
+> `$ADAGO_HOME/config/cron.json`（与 `ctx.config` 同一份信封、跨进程文件锁），自己解析 5 段 cron、
+> 走 `POST /internal/dispatch/send` 投递，把 lastFiredAt/threadId/runs 按 task id 合并回配置。
+>
+> 落地时的补充决策：
+> - **调度进程的凭据**：processmgr 在每次启动时给被管进程签一枚只带发送范围的令牌（`ControlIssuer`），
+>   经 `ADAGO_GATEWAY_CONTROL_*` 注入；令牌身份写死 `plugin:<owner>`，sender 由网关盖章。这样既满足
+>   「插件不持有内部 token」，也让 scheduler 能投递。`Identity.Scopes` 把令牌切成
+>   `dispatch:send` / `processes:control` 两档：Core 的令牌两样都有，进程令牌只有前者。
+> - **`ADAGO_HOME` 不再被剥掉**：它是数据目录指针而不是凭据；被管进程要读同一份配置必须知道它。
+>   真实凭据（token 类）仍按前缀剥离，且只能由网关显式签发。
+> - **不整份覆盖配置**：scheduler 写回前重读一次，只按 task id 打补丁，避免与插件同时编辑时丢掉任务定义。
+> - **`/trigger` 改走 `ctx.dispatch`**（原 `ctx.turn.invoke`）：与 scheduler 同一条投递路径，幂等键 `cron:<id>:<minute>:manual`。
+> - **`agent.every` 循环已删除**：多工作区不再重复触发。
+> - 管理工具全部 `discovery: true`；`cron_run` 是 `exec`（会触发一轮对话），其余读写按语义分配。
+
 任务：
 
 - `cron-manager` 注册 `cron-manager/scheduler` 全局进程，`on_enable`；
@@ -270,7 +325,7 @@
 - 打开多个工作区只启动一个 scheduler；
 - 同一任务同一分钟只触发一次；
 - `workspace` 指向正确 worker；
-- 删除/禁用插件后 scheduler 停止；
+- 删除/禁用插件后 scheduler 停止（Core 宿主桥按「本插件注册过哪些进程」在 Runtime 关闭时注销）；
 - 线程被删/busy/错误有运行记录；
 - `find_tool` 能发现 `cron_*` 工具，`exec_tool` 可执行；
 - 模型默认工具清单里没有 `cron_*`；
@@ -353,4 +408,7 @@
 5. 进程日志是否需要在插件页展示？
 6. ToolManager 是否提供单工具启停，还是只随插件生命周期变化？
 7. `tool.list` 是否继续返回 discovery 工具，还是按调用方视图过滤？
-6. 是否保留 `turn.invoke` 作为兼容桥，还是直接删除？
+8. 是否保留 `turn.invoke` 作为兼容桥，还是直接删除？
+
+P3 已按「全局进程也可由插件注册」定案：`Scope` 只有 `global`/`workspace` 两档，
+进程上限按 owner 计而不按工作区计；verified 第三方是否可注册留给 P4 的能力位决策。

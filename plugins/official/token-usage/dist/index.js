@@ -1,11 +1,15 @@
-// token-usage 后端（预编译产物；源文件 index.ts）。
+// generated from index.ts (sha256:ee16f8ec6ab9a13e) by plugins/official/build.mjs — do not edit
+// token-usage 后端：用量页与卡片的数据面。
 //
 // 基座只持久化每轮原始用量行，并通过 ctx.events.usage 暴露；本插件自己
-// 按线程/工作区/模型聚合展示口径。
+// 按线程/工作区/模型聚合展示口径。禁用本插件后页面/卡片/导航消失，基座
+// 不再补一个 usage.get 展示投影。
+
 function number(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 }
+
 function summarize(rows) {
   const groups = new Map();
   let input = 0;
@@ -48,6 +52,7 @@ function summarize(rows) {
     groups: list,
   };
 }
+
 async function stateOf(ctx, threadId) {
   const workspaceRows = await ctx.events.usage({ limit: 1000 });
   const threadRows = threadId ? await ctx.events.usage({ threadId, limit: 1000 }) : [];
@@ -58,12 +63,16 @@ async function stateOf(ctx, threadId) {
     generatedAt: new Date().toISOString(),
   };
 }
+
 export default function (agent) {
+  // 页面 SSR 预取：路由带 threadId 时同时给出当前会话；否则只有工作区。
   agent.registerAction({
     name: "usage",
     mode: "read",
     execute: (_input, ctx) => stateOf(ctx, String(ctx.threadId || "")),
   });
+
+  // 浏览器刷新/导出用：与动作同源，避免首屏与刷新两套口径。
   agent.route("GET", "/usage", (req, ctx) => {
     const threadId = String((req && req.query && req.query.threadId) || ctx.threadId || "").trim();
     return stateOf(ctx, threadId);

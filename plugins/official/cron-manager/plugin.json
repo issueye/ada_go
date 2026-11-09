@@ -1,13 +1,18 @@
 {
   "id": "cron-manager",
   "name": "定时任务",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "apiVersion": 1,
-  "description": "管理定时任务（AI 任务）：任务存 global.config 的 cron 命名空间，插件用通用定时器解析 cron 并调用 turn.invoke 触发轮次；基座不读 cron.json、不调度、不暴露 cron 端点。",
+  "description": "管理定时任务（AI 任务）：任务存 global.config 的 cron 命名空间；插件注册一个全局单例 scheduler 进程解析 cron 并经网关调度层投递，基座不读 cron.json、不调度、不暴露 cron 端点。",
   "trust": "builtin",
   "backend": {
     "entry": "index.ts",
-    "capabilities": ["fs.read", "global.config", "turn.invoke"],
+    "capabilities": [
+      "fs.read",
+      "global.config",
+      "dispatch.send",
+      "process.supervise"
+    ],
     "configNamespace": "cron"
   },
   "frontend": {

@@ -39,10 +39,46 @@ const (
 //
 // Workspace 是该 Core 服务的默认工作区；CoreID 是诊断用的实例标识
 // （不参与授权判定，只进审计）；Key 是签发键，用于「同键重签作废旧令牌」。
+//
+// Scopes 是这个令牌能调的内部端点集合：Core 的宿主桥需要发送与进程监督两样，
+// 而网关注册的长驻进程（如 cron scheduler）只需要发送——它不该能反向注册进程。
 type Identity struct {
-	Workspace string `json:"workspace,omitempty"`
-	CoreID    string `json:"coreId,omitempty"`
-	Key       string `json:"-"`
+	Workspace string   `json:"workspace,omitempty"`
+	CoreID    string   `json:"coreId,omitempty"`
+	Key       string   `json:"-"`
+	Scopes    []string `json:"scopes,omitempty"`
+	// PluginID 是「这个令牌代表哪个插件」：网关注册的长驻进程（cron scheduler）
+	// 用它在投递时盖章 sender，进程自己不能自填身份。
+	//
+	// Core 的令牌没有 PluginID（它服务整个 Core），此时 sender 由请求体里的
+	// pluginId 决定，而那个值来自 Core 宿主按能力集盖章，同样不是脚本能给的。
+	PluginID string `json:"pluginId,omitempty"`
+}
+
+// 内部端点的访问范围（令牌级）。
+const (
+	// ScopeDispatchSend 允许调 /internal/dispatch/*。
+	ScopeDispatchSend = "dispatch:send"
+	// ScopeProcessControl 允许调 /internal/processes/*。
+	ScopeProcessControl = "processes:control"
+)
+
+// HasScope 报告令牌是否被授予某个范围。
+//
+// 默认拒绝：没有显式授予范围的令牌不能调任何内部端点。网关签发的两类令牌
+// （Core 与被管进程）都会显式列出范围，所以这条默认只影响「手工签发」的
+// 测试令牌与将来新增的签发点——它们必须自己说明要什么权限，而不是默认全给。
+func (i Identity) HasScope(scope string) bool {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return false
+	}
+	for _, s := range i.Scopes {
+		if s == scope {
+			return true
+		}
+	}
+	return false
 }
 
 // Tokens 是控制令牌表：网关签发、进程持有、插件看不到。
@@ -241,6 +277,11 @@ func (e *Endpoint) handleSend(w http.ResponseWriter, r *http.Request) {
 		writeControlError(w, http.StatusUnauthorized, "unauthorized", "缺少或无效的控制令牌")
 		return
 	}
+	if !ident.HasScope(ScopeDispatchSend) {
+		// 进程令牌只被授予它需要的范围：一个只能注册进程的令牌不能反过来发消息。
+		writeControlError(w, http.StatusForbidden, "forbidden", "该控制令牌没有被授予发送范围")
+		return
+	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, e.maxBody)
 	var body ControlRequest
@@ -288,6 +329,10 @@ func (e *Endpoint) handleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		writeControlError(w, http.StatusUnauthorized, "unauthorized", "缺少或无效的控制令牌")
 		return
 	}
+	if !ident.HasScope(ScopeDispatchSend) {
+		writeControlError(w, http.StatusForbidden, "forbidden", "该控制令牌没有被授予发送范围")
+		return
+	}
 	list := e.dispatcher.ListWorkspaces(r.Context(), senderOf(ident, ControlRequest{}))
 	if list == nil {
 		list = []Workspace{}
@@ -312,8 +357,14 @@ func (e *Endpoint) authenticate(r *http.Request) (Identity, bool) {
 
 // senderOf 由服务端盖章：kind 固定为 plugin/system，id 由 pluginId 派生。
 // body 里的 kind/id 不被读取——伪造它们没有任何效果。
+//
+// 令牌绑定了 PluginID 时（网关签给被管进程的令牌），身份以令牌为准，
+// body 里的 pluginId 一律忽略：进程不能冒充别的插件。
 func senderOf(ident Identity, body ControlRequest) Sender {
-	pluginID := strings.TrimSpace(body.PluginID)
+	pluginID := strings.TrimSpace(ident.PluginID)
+	if pluginID == "" {
+		pluginID = strings.TrimSpace(body.PluginID)
+	}
 	if pluginID == "" {
 		id := "control"
 		if ident.CoreID != "" {

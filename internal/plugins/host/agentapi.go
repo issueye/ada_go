@@ -757,6 +757,13 @@ func (p *Instance) assemblyContextObject(rt *mojsRuntime, c *call) moejs.Value {
 			return nil
 		})
 	}
+	// processes：cron scheduler 这类长驻进程在装配期就交给网关拉起（on_enable）。
+	if st, ok := stateFor(rt); ok && p.caps.Has(plugins.CapProcessSupervise) {
+		_ = addProcessSuperviseContextMember(st, hc, func(name string, v moejs.Value) error {
+			set(name, v)
+			return nil
+		})
+	}
 	return engine.ObjectValue(obj)
 }
 

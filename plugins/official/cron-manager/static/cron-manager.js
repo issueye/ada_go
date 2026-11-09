@@ -5,7 +5,7 @@
  *   GET  /state            任务列表（含下次运行预览）
  *   POST /create|update    新建 / 保存修改
  *   POST /remove|toggle    删除 / 启停
- *   POST /trigger          立即运行（插件直接调用 turn.invoke）
+ *   POST /trigger          立即运行（插件经 ctx.dispatch 交给网关调度层）
  *   GET  /runs?id=         运行历史（最新在前）
  *
  * 调度输入支持预设（每 N 分钟 / 每天 / 每周）与自定义 cron；预设最终都展开成
@@ -416,7 +416,7 @@
     var trigger = el("button", "cm-action cm-action--primary", "运行");
     trigger.type = "button";
     trigger.setAttribute("data-cm-trigger", task.id);
-    trigger.title = "立即运行一次（不受启停影响；由插件直接调用 turn.invoke）";
+    trigger.title = "立即运行一次（不受启停影响；经网关调度层投递）";
     box.appendChild(trigger);
 
     var edit = el("button", "cm-action", "编辑");
@@ -578,7 +578,7 @@
     if (runsSection) runsSection.classList.add("cm-hidden");
   }
 
-  // 「立即运行」是异步的（插件调用 turn.invoke 后轮次在后台执行），触发后轮询表格与历史，
+  // 「立即运行」是异步的（插件经调度层投递后轮次在后台执行），触发后轮询表格与历史，
   // 让用户看到「已启动/线程忙/失败」而不是一片安静。
   function waitForTriggerResult(id, before) {
     var token = ++triggerPollToken;

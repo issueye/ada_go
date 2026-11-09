@@ -451,6 +451,9 @@ func installContextMembers(rt *mojsRuntime, put func(name string, v moejs.Value)
 	if err := addDispatchContextMember(st, hc, put); err != nil {
 		keep(err)
 	}
+	if err := addProcessSuperviseContextMember(st, hc, put); err != nil {
+		keep(err)
+	}
 	return firstErr
 }
 

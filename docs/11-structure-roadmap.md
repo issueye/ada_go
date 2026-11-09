@@ -28,7 +28,7 @@ ada-go/
     corerpc/               JSON-RPC over WebSocket（只依赖 Session 接口）
     gateway/
       gateway.go            Gateway 装配、路由与生命周期
-      contracts/ security/ supervisor/ relay/ sse/
+      contracts/ security/ supervisor/ relay/ sse/ dispatch/ processmgr/
       web/                 SSR handlers、模板、静态资源、投影缓存、ui/
       frontend/            esbuild、moejs render、VNode、插槽注册表
     proto/                 生成的方法常量、DTO、错误码
@@ -207,6 +207,7 @@ go work init . ../moejs
 - cron 已完成迁移：`cron-manager` 用 `global.config` 存任务、`agent.every` 每 30s 调度、`ctx.turn.invoke` 触发轮次；基座 `cron.admin`/`cronstore`/`cronproc`/`/api/cron/fire` 与 `cron-sync` 门禁已删除。
 - 工具管理已集中化：`internal/toolkit` 的 `ToolManager` 包住目录与插件路由，提供 `Injected`/`Discovery`/`System`/`All` 四种视图与 turn 级快照；可见性规则收敛到 `domain.ToolVisibility`，模型声明、`find_tool` 目录投影与 `exec_tool` 内层校验同源；`exec_tool` 现在拒绝注入式工具（`tool_not_discoverable`），`owner` 由宿主盖章且与目录不一致时拒绝路由。
 - 调度层已落地：网关 `internal/gateway/dispatch` 是唯一发送路径（新建会话、发消息、编辑重发与 `/api/workspaces` 都走它），`auto`/`start`/`steer` 三种投递模式共用一份 busy/waiting/finishing 判定；builtin-only 能力 `dispatch.send` 让插件经 `ctx.dispatch.send` 交给同一调度层，网关用回环控制端点 + 每 Core 一次性令牌认证，`/internal/*` 不进用户鉴权链。
+- P3 进程管理已落地：`internal/gateway/processmgr` 是网关名下非 agent-worker 进程（插件注册的长驻进程）的唯一父进程——注册/`on_enable`/`lazy` 启动、`no`/`on_failure`/`always` 指数退避重启、引用计数、每 owner 8 / 全局 32 限额、日志环（200 行、单行 2KB、凭据脱敏）、停止杀整棵进程树；`Gateway.Shutdown` 先停被管进程再关 Core，`Gateway.Processes()` 供插件桥接入。P4 进程桥已落地：builtin-only 能力 `process.supervise`（`ctx.processes.register/ensure/stop/status/unregister/list`）经 `/internal/processes/*`（回环 + 控制令牌）交给同一份 ProcessManager；entry 由 Core 宿主解析到插件目录内并拒绝越界，网关再校验可读性，owner 由能力集盖章；Core 重签令牌时按签发键回收旧代注册。 P6 cron 单进程已落地：`cron-manager` 在装配期注册 `scheduler`（scope=global，runtime=node，on_enable/on_failure），scheduler 自己解析 cron、经 `/internal/dispatch/send` 投递、按 task id 把运行历史合并回 `$ADAGO_HOME/config/cron.json`；每 Core 的 `agent.every` 循环已删除，多工作区不再重复触发。调度进程的凭据由网关按进程签发（只带 `dispatch:send` 范围，sender 盖章为 `plugin:cron-manager`），`ADAGO_HOME`/`ADAG_OFFICIAL_PLUGINS_DIR` 作为路径指针不再被环境剥离。
 ### 16.1 剩余系统插件迁移的先决条件
 
 | 系统插件 | 当前基座依赖 | 先决条件 | 迁移后验收 |

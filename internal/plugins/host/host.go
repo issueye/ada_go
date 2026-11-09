@@ -238,6 +238,62 @@ type DispatchResult struct {
 	Mode      string `json:"mode"`
 }
 
+// ProcessSpec 是 ctx.processes.register 的入参（capability: process.supervise）。
+//
+// 刻意没有 owner 字段：归属由宿主按能力集盖章。Entry 是插件内相对路径，
+// 宿主负责解析到插件目录（越界或不存在直接拒绝），再交给网关的 ProcessManager。
+type ProcessSpec struct {
+	Name string `json:"name"`
+	// Scope 是 global|workspace；缺省 global。workspace 进程的 cwd 是当前工作区。
+	Scope string `json:"scope,omitempty"`
+	// Runtime 是 node|binary；缺省 node（插件脚本就是 JS）。
+	Runtime string `json:"runtime,omitempty"`
+	// Entry 是相对插件目录的脚本路径（node）或可执行文件名（binary）。
+	Entry string            `json:"entry"`
+	Args  []string          `json:"args,omitempty"`
+	Env   map[string]string `json:"env,omitempty"`
+	// Start 是 on_enable|lazy；缺省 lazy。
+	Start string `json:"start,omitempty"`
+	// Restart 是 no|on_failure|always；缺省 no。
+	Restart string `json:"restart,omitempty"`
+	// StopTimeoutMs 是停止等待上限；0 表示用网关默认值。
+	StopTimeoutMs int `json:"stopTimeoutMs,omitempty"`
+}
+
+// ProcessStatus 是进程的可观测快照（网关 ProcessManager 的子集）。
+type ProcessStatus struct {
+	ID        string `json:"id"`
+	Owner     string `json:"owner"`
+	Name      string `json:"name"`
+	Scope     string `json:"scope"`
+	Workspace string `json:"workspace,omitempty"`
+	Runtime   string `json:"runtime"`
+	PID       int    `json:"pid,omitempty"`
+	Running   bool   `json:"running"`
+	Restarts  int    `json:"restarts"`
+	Refs      int    `json:"refs"`
+	StartMode string `json:"startMode"`
+	Restart   string `json:"restart"`
+	LastError string `json:"lastError,omitempty"`
+	StartedAt string `json:"startedAt,omitempty"`
+}
+
+// ProcessSupervisor 是进程监督桥的宿主侧接口。
+//
+// 它只有注册/取消注册/确保运行/停止/查状态：没有 stdin/stdout、没有日志流、
+// 没有任意命令行。日志由网关侧持有，插件通过网关日志读，不在这里开通道。
+//
+// 每个方法都显式带 pluginID：归属由宿主按能力集盖章后传进来，而不是实现自己
+// 记住某一次装配的 id——Context 是每调用的，实现不能假设它不变。
+type ProcessSupervisor interface {
+	Register(ctx context.Context, pluginID string, spec ProcessSpec) (ProcessStatus, error)
+	Ensure(ctx context.Context, pluginID, name, scope string) (ProcessStatus, error)
+	Stop(ctx context.Context, pluginID, name, scope string) (ProcessStatus, error)
+	Status(ctx context.Context, pluginID, name, scope string) (ProcessStatus, bool)
+	Unregister(ctx context.Context, pluginID, name, scope string) error
+	List(ctx context.Context, pluginID string) ([]ProcessStatus, error)
+}
+
 func configNamespaceOf(m *plugins.Manifest) string {
 	if m == nil {
 		return ""
@@ -297,6 +353,12 @@ type Context struct {
 	// 插件给的是「发给谁、发什么」，身份由宿主盖章（PluginID 来自能力集，
 	// 脚本不能自填）；投递语义（建线程 / 空闲 start / 运行中 steer）由调度层决定。
 	Dispatch func(ctx context.Context, req DispatchRequest) (DispatchResult, error)
+	// Processes 是进程监督桥（capability: process.supervise，仅 builtin）；nil 表示
+	// 本 Core 未接入网关 ProcessManager（CLI 直连、无网关的部署）。
+	//
+	// 插件给的是「跑什么脚本、什么启动/重启策略」；owner 由宿主按能力集盖章，
+	// entry 由宿主解析到插件目录内并拒绝越界，进程本身由网关拉起（不走 Core 进程）。
+	Processes ProcessSupervisor
 	// UI 是通用交互桥（capability: ui.ask）；nil 表示未授予。
 	UI func(ctx context.Context, req UIRequest) (UIResolution, error)
 	// HTTP 是 provider 的出网桥（capability: net.fetch / net.sse）；nil 表示未授予。
