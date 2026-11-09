@@ -36,7 +36,10 @@ type Assembly struct {
 	Plugins []*host.Instance
 	// Tools 与 Hooks 是运行期目录，引擎直接消费。
 	Tools *toolkit.Catalog
-	Hooks *plugins.HookChain
+	// ToolManager 是工具管理的唯一入口（注册/摘除/可见性视图/执行路由）。
+	// Tools 是它背后的纯注册表；装配与诊断仍可能需要直接读目录。
+	manager *toolkit.ToolManager
+	Hooks   *plugins.HookChain
 	// Providers 是 provider 插件桥成的 ModelClient 目录（可能为空）。
 	Providers *provider.Registry
 	// Actions 是前端动作目录（pluginID → name → ActionDef，M4 的 action.invoke 数据面）。
@@ -48,8 +51,6 @@ type Assembly struct {
 	// skills 是本次装配的技能快照（6.7：插件贡献 + 工作区，同名工作区优先）。
 	// 装配完成后不可变；经 Skills / SkillConflicts 读取。
 	skills skillTable
-	// executor 是 tool 调用的路由（toolkit.Invoker）。
-	executor *toolInvoker
 }
 
 // PluginInstances 返回本次装配的插件实例（corecontracts.Assembly）。
@@ -66,6 +67,14 @@ func (a *Assembly) ToolCatalog() *toolkit.Catalog {
 		return nil
 	}
 	return a.Tools
+}
+
+// ToolManager 返回工具管理器（工具可见性视图与执行路由的唯一入口）。
+func (a *Assembly) ToolManager() *toolkit.ToolManager {
+	if a == nil {
+		return nil
+	}
+	return a.manager
 }
 
 // ProviderRegistry 返回 provider 目录。
@@ -341,8 +350,14 @@ func assembleSet(ctx context.Context, p *coreapp.Product, base, extras []host.Sc
 	frontend := newFrontendRegistry()
 	prompts := newPromptRegistry()
 	invoker := &toolInvoker{plugins: map[string]*host.Instance{}, base: deps.Context}
-	asm := &Assembly{Product: p, Tools: tools, Hooks: hooks, Providers: providers,
-		Actions: actions, Routes: routes, FrontendDecls: frontendDecls, executor: invoker}
+	// 工具管理器：Catalog 是它背后的注册表，工具执行路由（Owner → 插件实例）也是它。
+	// 装配期注册统一走 Manager，冻结后（运行期新注册）由 Catalog 记警告不生效。
+	toolMgr, err := toolkit.NewToolManager(tools, invoker)
+	if err != nil {
+		return nil, err
+	}
+	asm := &Assembly{Product: p, Tools: tools, manager: toolMgr, Hooks: hooks, Providers: providers,
+		Actions: actions, Routes: routes, FrontendDecls: frontendDecls}
 
 	// 技能表在插件加载前结算：插件注册期需要看到技能元数据（ctx.skills），
 	// 产品 capabilities.skills 是技能通道的唯一门控。
@@ -371,7 +386,7 @@ func assembleSet(ctx context.Context, p *coreapp.Product, base, extras []host.Sc
 		hc.PluginID = script.Manifest.ID
 		hc.Settings = deps.Settings[script.Manifest.ID]
 		inst, err := host.Load(ctx, script, caps, hc, host.Options{
-			Targets: host.Targets{Tools: tools, Hooks: hooks, Providers: providers,
+			Targets: host.Targets{Tools: toolMgr, Hooks: hooks, Providers: providers,
 				Actions: actions, Routes: routes, Frontend: frontend, Prompts: prompts},
 		})
 		if err != nil {
@@ -438,11 +453,14 @@ func (a *Assembly) Plugin(id string) (*host.Instance, bool) {
 }
 
 // ToolInvoker 返回 toolkit.Executor 需要的插件调用路由。
+//
+// 返回的是 ToolManager 而不是底层的 pluginInvoker：路由的归属以目录为准，
+// 上层传错 pluginID 会在 Manager 里被拒绝，而不是投给另一个插件。
 func (a *Assembly) ToolInvoker() toolkit.Invoker {
-	if a == nil {
+	if a == nil || a.manager == nil {
 		return nil
 	}
-	return a.executor
+	return a.manager
 }
 
 // toolInvoker 按「工具名 → 贡献它的插件实例」路由调用。

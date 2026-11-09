@@ -111,7 +111,8 @@
 `discovery` 标记「发现式」注册（05 §6.3 ToolDef.discovery）：缺省 `false`（注入式，
 声明随模型请求下发）；`true` 时不注入模型清单，模型经 `find_tool` 拿到
 名称/说明/参数 Schema 后用 `exec_tool` 按名执行——审批、超时、循环检测沿用
-该工具自己的描述符。`find_tool`/`exec_tool` 是**保留名**，由 `tool-discovery`
+该工具自己的描述符。`exec_tool` **只**执行发现式工具：注入式工具本来就随声明下发，
+经旁路执行会被拒（`tool_not_discoverable`）。`find_tool`/`exec_tool` 是**保留名**，由 `tool-discovery`
 系统插件提供，不进入普通工具目录，也不属于第三方插件；目录里没有发现式工具时，
 这两个入口不注入模型请求。宿主只向该 builtin 插件安装 `tool.discovery`
 （`ctx.catalog` 目录只读投影 + `ctx.tool.invoke` 内层执行）受控桥；内层执行仍走同一套

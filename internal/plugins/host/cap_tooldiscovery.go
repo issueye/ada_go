@@ -48,11 +48,11 @@ func addToolDiscoveryContextMembers(st *capsState, hc Context, put func(string, 
 		if err != nil {
 			return moejs.Undefined(), throwCoded(rr, codeOutOfRange, "ctx.catalog.list: "+err.Error(), nil)
 		}
-		out := make([]map[string]any, 0, len(list))
-		for _, d := range list {
-			if !d.Discovery {
-				continue
-			}
+		// 可见性规则只有一处（domain.ToolVisibleDiscovery）：这里不做二次判断，
+		// 否则「find_tool 列出的」与「exec_tool 能执行的」会各自漂移。
+		discoverable := domain.VisibleTools(list, domain.ToolVisibleDiscovery)
+		out := make([]map[string]any, 0, len(discoverable))
+		for _, d := range discoverable {
 			if query != "" && !strings.Contains(strings.ToLower(d.Name), query) && !strings.Contains(strings.ToLower(d.Description), query) {
 				continue
 			}

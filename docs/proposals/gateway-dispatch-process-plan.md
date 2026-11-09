@@ -188,6 +188,9 @@
 
 ## 8. P5：基座 ToolManager
 
+> 状态：已实现（2026-11-09）。`internal/toolkit/manager.go`、`internal/domain/toolview.go`；
+> `Catalog` 保留为纯注册表，`ToolManager` 负责 owner 归属、可见性视图、快照与执行路由。
+
 任务：
 
 - 新建/抽取 `internal/toolkit` 的 `ToolManager`，包住现有 `Catalog` + `toolInvoker`；

@@ -52,14 +52,11 @@ const (
 // 顺序而不是并发是默认口径：只有整批都 ParallelSafe 且产品策略允许才并发；
 // M1 先把语义做对（ParallelTools=1），并发留给 M5 按测量结果开放。
 func (r *run) runTools(calls []domain.ToolCall, catalog []domain.Descriptor) toolOutcome {
+	// 直呼映射只含注入式工具（规则在 domain.ToolVisibleInjected）。目录快照里
+	// 发现式工具仍然存在（exec_tool 的内层查找要靠完整快照），但模型直呼其名
+	// 必须 tool_not_found —— 它们的契约是「经 find_tool 发现、exec_tool 执行」。
 	byName := make(map[string]domain.Descriptor, len(catalog))
-	for _, d := range catalog {
-		// 发现式工具不进模型可见映射：目录快照里它们仍然存在（exec_tool 的内层
-		// 查找要靠完整快照），但模型直呼其名必须 tool_not_found —— 它们的契约
-		// 是「经 find_tool 发现、exec_tool 执行」，不是直接调用。
-		if d.Discovery {
-			continue
-		}
+	for _, d := range domain.VisibleTools(catalog, domain.ToolVisibleInjected) {
 		byName[d.Name] = d
 	}
 

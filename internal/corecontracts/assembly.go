@@ -36,6 +36,8 @@ type Assembly interface {
 	PluginInstances() []*host.Instance
 	Plugin(id string) (*host.Instance, bool)
 	ToolCatalog() *toolkit.Catalog
+	// ToolManager 是工具可见性视图与执行路由的唯一入口（工具管理集中化）。
+	ToolManager() *toolkit.ToolManager
 	ToolInvoker() toolkit.Invoker
 	ProviderRegistry() *provider.Registry
 	ProviderCount() int

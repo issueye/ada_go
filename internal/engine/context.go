@@ -145,16 +145,15 @@ func (r *run) params() ports.Params {
 	return p
 }
 
-// toolSchemas 把目录快照转成模型可见的工具声明：发现式工具不注入（模型经
-// find_tool/exec_tool 使用它们），目录里存在发现式工具时追加基座入口 find_tool
-// 与 exec_tool 的声明（否则模型拿不到入口，也不该为用不上的入口花 token）。
+// toolSchemas 把目录快照转成模型可见的工具声明。
+//
+// 过滤规则只有一个落点（domain.ToolVisibleInjected）：发现式工具不注入，模型经
+// find_tool/exec_tool 使用它们。find_tool/exec_tool 自身是注入式工具（由
+// tool-discovery 系统插件注册），所以它们照常出现在声明里。
 func toolSchemas(cat ports.ToolCatalog, ctx context.Context) []ports.ToolSchema {
-	list := cat.List(ctx)
+	list := domain.VisibleTools(cat.List(ctx), domain.ToolVisibleInjected)
 	out := make([]ports.ToolSchema, 0, len(list))
 	for _, d := range list {
-		if d.Discovery {
-			continue
-		}
 		out = append(out, ports.ToolSchema{Name: d.Name, Description: d.Description, Parameters: d.Parameters})
 	}
 	return out

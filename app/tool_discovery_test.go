@@ -122,4 +122,61 @@ func TestToolDiscoveryPluginFindAndExec(t *testing.T) {
 		t.Fatalf("exec_tool 没有上浮内层结果: %s", exec.Content[0].Text)
 	}
 
+	// exec_tool 只能执行发现式工具：注入式工具（read_file 这类）必须被拒，
+	// 否则模型多出一条绕过「只调用本轮声明工具」的旁路。
+	injected := ""
+	for _, d := range asm.ToolCatalog().List(context.Background()) {
+		if d.PluginID != "tool-discovery" && !d.Discovery {
+			injected = d.Name
+			break
+		}
+	}
+	if injected == "" {
+		t.Fatal("coding 产品应当有至少一个注入式工具")
+	}
+	deny, err := inv.Invoke(context.Background(), "tool-discovery", "exec_tool", json.RawMessage(`{"tool":"`+injected+`","args":{}}`))
+	if err != nil {
+		t.Fatalf("exec_tool 注入式: %v", err)
+	}
+	if !strings.Contains(deny.Content[0].Text, "tool_not_discoverable") {
+		t.Fatalf("注入式工具应被 exec_tool 拒绝，实得 %s", deny.Content[0].Text)
+	}
+
+	// 管理面视图与模型声明同源：发现式工具只在 Discovery 视图里，系统入口只在 System 视图里。
+	mgr := asm.ToolManager()
+	if mgr == nil {
+		t.Fatal("装配必须提供 ToolManager")
+	}
+	discovery := namesOf(mgr.View(context.Background(), domain.ToolVisibleDiscovery))
+	if !containsName(discovery, "lazy_probe") {
+		t.Fatalf("Discovery 视图缺少 lazy_probe: %v", discovery)
+	}
+	if containsName(discovery, "find_tool") {
+		t.Fatalf("Discovery 视图不应含系统入口: %v", discovery)
+	}
+	if system := namesOf(mgr.View(context.Background(), domain.ToolVisibleSystem)); len(system) != 2 ||
+		!containsName(system, domain.ToolFindName) || !containsName(system, domain.ToolExecName) {
+		t.Fatalf("System 视图应恰好是 find_tool/exec_tool: %v", system)
+	}
+	if injectedView := namesOf(mgr.View(context.Background(), domain.ToolVisibleInjected)); containsName(injectedView, "lazy_probe") {
+		t.Fatalf("注入式视图不应含发现式工具: %v", injectedView)
+	}
+}
+
+// namesOf 取视图里的工具名。
+func namesOf(list []domain.Descriptor) []string {
+	out := make([]string, 0, len(list))
+	for _, d := range list {
+		out = append(out, d.Name)
+	}
+	return out
+}
+
+func containsName(names []string, want string) bool {
+	for _, n := range names {
+		if n == want {
+			return true
+		}
+	}
+	return false
 }

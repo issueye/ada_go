@@ -256,7 +256,10 @@ func (t Targets) commit(c *Contribution, caps *CapabilitySet, hooks func(HookDef
 		undo = append(undo, func() { _ = t.Tools.Remove(c.PluginID) })
 		for _, tl := range c.Tools {
 			d := tl.Descriptor(c.PluginID)
-			if caps != nil && caps.Has(plugins.CapToolDiscovery) {
+			// 只有基座保留的发现桥入口才打 System 位（find_tool/exec_tool）：
+			// 它只用于「谁能注册这两个保留名」的校验，不是「该插件所有工具都算系统工具」。
+			if caps != nil && caps.Has(plugins.CapToolDiscovery) &&
+				(d.Name == domain.ToolFindName || d.Name == domain.ToolExecName) {
 				d.System = true
 			}
 			if err := t.Tools.Register(d); err != nil {

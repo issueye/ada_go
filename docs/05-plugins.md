@@ -337,6 +337,22 @@ interface ToolContext {
 
 这些插件由产品声明启用；基座不读取它们的配置格式，也不提供同名兜底。
 
+#### 6.3.4 工具管理集中化（ToolManager）
+
+工具不是各层各管一段，而是由 **Core 侧的基座内部组件 `ToolManager`**（`internal/toolkit`）统一负责：
+
+| 职责 | 说明 |
+|---|---|
+| 注册与摘除 | `RegisterOwner(owner, descriptor)` / `RemoveOwner(pluginID)`；owner 由宿主按清单盖章，声明与 owner 不一致直接拒绝 |
+| 描述符校验 | 名字规则、保留名（`find_tool`/`exec_tool`）、Schema、access、`discovery` 与 `terminatesTurn` 互斥 |
+| 可见性视图 | `Injected`（模型声明）/ `Discovery`（`find_tool`）/ `System`（保留入口）/ `All`（`tool.list`、诊断） |
+| 快照 | 每个 turn 取一份不可变快照，模型声明、执行查找与循环检测同源；中途禁用不让已发出的声明与执行目录错位 |
+| 执行路由 | 归属以目录为准：`pluginID` 与描述符不一致时拒绝，不把调用投给另一个插件 |
+
+可见性规则只有一处实现（`domain.ToolVisibility`），模型声明、`ctx.catalog.list` 与 `exec_tool` 的内层校验都问它，避免出现「`find_tool` 列出的工具」与「`exec_tool` 能执行的工具」两套口径。
+
+`ToolManager` 刻意**不做**审批：`tool.beforeCall`、策略失败关闭与回执仍只在引擎一份；它也不加载插件、不理解 cron/任务等业务语义。`tool-discovery` 仍是模型可见的入口，背后由 `ToolManager` 提供目录与路由。
+
 ---
 
 **相邻文档**：[← 会话、存储与子智能体](04-sessions-storage.md) · [索引](design.md) · [插件运行时与治理 →](06-plugin-runtime.md)
