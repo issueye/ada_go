@@ -22,7 +22,30 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/adag/ada-go/internal/domain"
+	"github.com/adag/ada-go/internal/gateway/dispatch"
 )
+
+// imageParts 把表单里的图片（map 形态，直接透传给 turn.start）转成调度层的
+// 强类型部件：转换只在这一处，避免同一份数据出现两种形状。
+func imageParts(images []map[string]any) []domain.Part {
+	if len(images) == 0 {
+		return nil
+	}
+	out := make([]domain.Part, 0, len(images))
+	for _, item := range images {
+		p := domain.Part{Type: domain.PartImage}
+		if v, ok := item["mime"].(string); ok {
+			p.Mime = v
+		}
+		if v, ok := item["data"].(string); ok {
+			p.Data = v
+		}
+		out = append(out, p)
+	}
+	return out
+}
 
 // pluginSummaryDTO 对应 Core plugin.list 的一行（只声明 SSR 用到的字段）。
 type pluginSummaryDTO struct {
@@ -469,41 +492,37 @@ func (s *Server) handleCreateThread(w http.ResponseWriter, r *http.Request) {
 		title = titleFromTask(text)
 	}
 
-	raw, err := s.callWorkspace(r, workspace, "thread.create", map[string]any{"title": title})
-	if err != nil {
+	// 建线程与首轮投递都交给调度层：页面不再自己拼 thread.create + turn.start。
+	receipt, err := s.dispatch.Send(r.Context(), dispatch.UserSender(), dispatch.SendRequest{
+		Workspace:      workspace,
+		Title:          title,
+		Text:           text,
+		Images:         imageParts(images),
+		Mode:           dispatch.DeliveryAuto,
+		IdempotencyKey: newIdempotencyKey(),
+		// 新建会话页允许只开空白会话（不投递首轮消息）。
+		AllowEmpty: true,
+	})
+	if receipt.ThreadID == "" {
+		if err == nil {
+			s.renderError(w, r, http.StatusBadGateway, "创建任务失败",
+				"Core 没有返回新会话 id。请返回后重试；若持续出现，请检查 Core 日志。",
+				"thread.create 返回值缺少 thread.id", "/", "返回")
+			return
+		}
 		s.renderCoreError(w, r, err, "/")
-		return
-	}
-	var res struct {
-		Thread struct {
-			ID string `json:"id"`
-		} `json:"thread"`
-	}
-	if err := json.Unmarshal(raw, &res); err != nil || res.Thread.ID == "" {
-		s.renderError(w, r, http.StatusBadGateway, "创建任务失败",
-			"Core 没有返回新会话 id。请返回后重试；若持续出现，请检查 Core 日志。",
-			"thread.create 返回值缺少 thread.id", "/", "返回")
 		return
 	}
 
 	// 后续页面、SSE 与会话请求都要落到同一个工作区：先写 cookie 再跳转。
 	s.setWorkspaceCookie(w, index)
 
-	if text != "" || len(images) > 0 {
-		params := map[string]any{
-			"threadId":       res.Thread.ID,
-			"idempotencyKey": newIdempotencyKey(),
-			"text":           text,
-		}
-		if len(images) > 0 {
-			params["images"] = images
-		}
-		if _, err := s.callWorkspace(r, workspace, "turn.start", params); err != nil {
-			redirect(w, flashRedirect(threadPath(res.Thread.ID), "error", cleanRPCError(err)))
-			return
-		}
+	if err != nil {
+		// 线程已经建好、消息没发出去：跳到会话页显示原因，而不是丢掉它。
+		redirect(w, flashRedirect(threadPath(receipt.ThreadID), "error", cleanRPCError(err)))
+		return
 	}
-	redirect(w, threadPath(res.Thread.ID))
+	redirect(w, threadPath(receipt.ThreadID))
 }
 
 // titleFromTask 用任务首行做标题；空任务回落为“新任务”。
@@ -925,44 +944,31 @@ func (s *Server) handleTurn(w http.ResponseWriter, r *http.Request) {
 	if key == "" {
 		key = newIdempotencyKey()
 	}
-	startParams := map[string]any{
-		"threadId":       id,
-		"idempotencyKey": key,
-		"text":           text,
-	}
-	if len(images) > 0 {
-		startParams["images"] = images
-	}
 
-	switch s.turnStatus(r, id) {
-	case "running":
-		steerParams := map[string]any{"threadId": id, "text": text}
-		if len(images) > 0 {
-			steerParams["images"] = images
+	// 投递只有一条路径（调度层）：空闲 start、运行中 steer、等待回答/收尾时
+	// 给提示。页面不再自己读 turn.get 再分支，避免与插件投递各写一份。
+	workspace, _ := s.resolveWorkspace(r)
+	receipt, err := s.dispatch.Send(r.Context(), dispatch.UserSender(), dispatch.SendRequest{
+		Workspace:      workspace,
+		ThreadID:       id,
+		Text:           text,
+		Images:         imageParts(images),
+		Mode:           dispatch.DeliveryAuto,
+		IdempotencyKey: key,
+	})
+	if err != nil {
+		switch dispatch.CodeOf(err) {
+		case dispatch.CodeWaitingInput:
+			redirect(w, flashRedirect(threadPath(id), "error", "请先回答待处理的问题，再发送新消息"))
+		case dispatch.CodeFinishing:
+			redirect(w, flashRedirect(threadPath(id), "error", "当前轮次正在收尾，请稍后再发送"))
+		default:
+			s.renderCoreError(w, r, err, threadPath(id))
 		}
-		if _, err := s.call(r, "turn.steer", steerParams); err != nil {
-			// 轮次可能在 turn.get 与 turn.steer 之间结束。此时消息并没有进队，
-			// 退回 turn.start 比把一条本来能发的消息变成错误页更合理。
-			if _, startErr := s.call(r, "turn.start", startParams); startErr != nil {
-				s.renderCoreError(w, r, startErr, threadPath(id))
-				return
-			}
-		} else {
-			redirect(w, flashRedirect(threadPath(id), "notice", "已加入队列，会在当前步骤后送达"))
-			return
-		}
-		redirect(w, threadPath(id))
-		return
-	case "waiting_input":
-		redirect(w, flashRedirect(threadPath(id), "error", "请先回答待处理的问题，再发送新消息"))
-		return
-	case "finishing":
-		redirect(w, flashRedirect(threadPath(id), "error", "当前轮次正在收尾，请稍后再发送"))
 		return
 	}
-
-	if _, err := s.call(r, "turn.start", startParams); err != nil {
-		s.renderCoreError(w, r, err, threadPath(id))
+	if receipt.Mode == dispatch.DeliverySteer {
+		redirect(w, flashRedirect(threadPath(id), "notice", "已加入队列，会在当前步骤后送达"))
 		return
 	}
 	redirect(w, threadPath(id))
@@ -1074,15 +1080,16 @@ func (s *Server) handleTurnResend(w http.ResponseWriter, r *http.Request) {
 	if len(key) < 8 || len(key) > 64 {
 		key = newIdempotencyKey()
 	}
-	startParams := map[string]any{
-		"threadId":       id,
-		"idempotencyKey": key,
-		"text":           text,
-	}
-	if len(images) > 0 {
-		startParams["images"] = images
-	}
-	if _, err := s.call(r, "turn.start", startParams); err != nil {
+	// 分支是业务操作（上面已做完），最后一步投递仍走调度层。
+	workspace, _ := s.resolveWorkspace(r)
+	if _, err := s.dispatch.Send(r.Context(), dispatch.UserSender(), dispatch.SendRequest{
+		Workspace:      workspace,
+		ThreadID:       id,
+		Text:           text,
+		Images:         imageParts(images),
+		Mode:           dispatch.DeliveryStart,
+		IdempotencyKey: key,
+	}); err != nil {
 		// 起轮失败时把 head 拨回原分支，别把会话停在半截。
 		_, _ = s.call(r, "thread.branch", map[string]any{"threadId": id, "entryId": oldHead})
 		s.renderCoreError(w, r, err, threadPath(id))
@@ -1525,14 +1532,14 @@ type workspaceAPIResponse struct {
 }
 
 // handleWorkspacesAPI 返回当前网关的工作区列表（与页面上的工作区选择器同源，
-// 包含 FilePicker 本次会话新登记的工作区）。
+// 包含 FilePicker 本次会话新登记的工作区）。数据面走调度层，插件侧看到的是同一份。
 func (s *Server) handleWorkspacesAPI(w http.ResponseWriter, r *http.Request) {
-	options := s.workspaceOptions()
-	items := make([]workspaceAPIItem, 0, len(options))
-	for _, opt := range options {
-		items = append(items, workspaceAPIItem{Name: opt.Name, Path: opt.Path})
+	list := s.dispatch.ListWorkspaces(r.Context(), dispatch.UserSender())
+	items := make([]workspaceAPIItem, 0, len(list))
+	for _, ws := range list {
+		items = append(items, workspaceAPIItem{Name: ws.Name, Path: ws.Path})
 	}
-	writeJSON(w, http.StatusOK, workspaceAPIResponse{Default: s.primaryWorkspace(), Workspaces: items})
+	writeJSON(w, http.StatusOK, workspaceAPIResponse{Default: s.dispatch.DefaultWorkspace(), Workspaces: items})
 }
 
 // primaryWorkspace 是没显式选择工作区时实际使用的工作区：列表第一个。

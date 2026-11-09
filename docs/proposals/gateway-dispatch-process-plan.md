@@ -78,6 +78,10 @@
 
 ## 4. P1：抽 Dispatcher
 
+> 状态：已实现（2026-11-09）。`internal/gateway/dispatch`（Sender / SendRequest / 投递模式 /
+> 业务错误码）；`web` 的新建会话、发消息、编辑重发与 `/api/workspaces` 都已改走它。
+> 工作区列表仍由页面持有，调度层通过 `Workspaces` 接口只读访问。
+
 任务：
 
 - 新建 `internal/gateway/dispatch`；

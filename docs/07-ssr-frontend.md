@@ -418,6 +418,28 @@ Todo 卡片是插件的前端段，不是基座组件：`plugins/official/tools-
 - 键盘：Tab 顺序自然；交互托盘打开时聚焦安全选项（确认框默认“拒绝”），Esc 关闭；`Ctrl/Cmd+K` 聚焦会话搜索，`Esc` 清空搜索。
 - 错误：页面级错误显示原因与下一步（重试/打开日志/重启 Core），不显示堆栈；开发模式可展开。
 
+### 7.9 消息发送路径（调度层）
+
+页面不自己拼「`thread.create` + `turn.start`」：新建会话、发消息、编辑重发都调用网关的
+调度层 `Dispatch.Send(ctx, sender, req)`（`internal/gateway/dispatch`）。调度层负责：
+
+1. 解析工作区（空 = 默认；显式路径必须已在工作区列表里）；
+2. 按工作区取 Core 客户端，请求结束即释放；
+3. `threadId` 为空时 `thread.create`；
+4. 读一次 `turn.get`，按投递模式决定动作：
+   - `auto`（界面默认）：空闲 `turn.start`，运行中 `turn.steer`；steer 撞上「轮次刚好结束」时退回 `turn.start`；
+   - `start`（定时任务等）：运行中直接返回 `thread_busy`，不偷偷排队；
+   - `steer`：空闲返回 `not_running`；
+5. `waiting_input` / `finishing` 不打断，也不排队，直接给出原因。
+
+两点边界：
+
+- `sender` 由宿主盖章（界面固定 `user:web`，插件由能力集填 `pluginId`），只用于审计、
+  限流与幂等命名空间，**不能作为授权绕过**；工具审批与能力位仍走原链路。
+- 幂等键由调用方给：表单每次提交生成一个（双击只生效一次），定时任务用「任务 + 时刻」
+  推导（同一分钟不重复触发）。调度层不会用「文本 + 线程」去猜，否则连发两条相同消息
+  会被当成重试吞掉第二条。
+
 ---
 
 **相邻文档**：[← 插件运行时与治理](06-plugin-runtime.md) · [索引](design.md) · [协议契约 →](08-protocol.md)

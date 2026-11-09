@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/adag/ada-go/internal/gateway/contracts"
+	"github.com/adag/ada-go/internal/gateway/dispatch"
 )
 
 //go:embed templates/*.html.tmpl
@@ -115,6 +116,10 @@ type Server struct {
 	// 索引仍是 cookie 的值；动态追加只在本次 Gateway 生命周期内有效。
 	workspaceMu sync.RWMutex
 	workspaces  []string
+
+	// dispatch 是唯一的消息发送路径（建线程 + turn.start/steer）。
+	// 页面处理器不再自己拼「先 thread.create 再 turn.start」。
+	dispatch *dispatch.Dispatcher
 }
 
 // New 解析内嵌模板并构造路由。Supervisor 是必需依赖。
@@ -175,6 +180,12 @@ func New(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("web: 解析内嵌模板失败: %w", err)
 	}
 	s := &Server{cfg: cfg, tmpl: tmpl, workspaces: append([]string(nil), cfg.Workspaces...)}
+	// 消息发送只有一条路径：页面处理器与（后续的）插件投递都走同一个 Dispatcher。
+	disp, err := dispatch.New(dispatch.Config{Supervisor: cfg.Supervisor, Workspaces: serverWorkspaces{s: s}})
+	if err != nil {
+		return nil, fmt.Errorf("web: 装配调度层失败: %w", err)
+	}
+	s.dispatch = disp
 	s.handler = s.routes()
 	if cfg.Protect != nil {
 		s.handler = cfg.Protect(s.handler)
@@ -509,6 +520,36 @@ func (s *Server) workspaceList() []string {
 	s.workspaceMu.RLock()
 	defer s.workspaceMu.RUnlock()
 	return append([]string(nil), s.workspaces...)
+}
+
+// serverWorkspaces 把页面自己的工作区列表接给调度层。
+//
+// 列表的所有权仍在页面（cookie 索引、FilePicker 动态登记），调度层只问不存：
+// 两处各存一份，切换工作区后必然有一处是旧的。
+type serverWorkspaces struct{ s *Server }
+
+func (w serverWorkspaces) Default() string { return w.s.primaryWorkspace() }
+
+func (w serverWorkspaces) List() []dispatch.Workspace {
+	options := w.s.workspaceOptions()
+	out := make([]dispatch.Workspace, 0, len(options))
+	for _, opt := range options {
+		out = append(out, dispatch.Workspace{Name: opt.Name, Path: opt.Path})
+	}
+	return out
+}
+
+// Resolve 只接受「当前已在列表里」的工作区：调度层不为调用方登记新工作区，
+// 那属于页面的 FilePicker 流程（要写 cookie、要回调 WorkspacesChanged）。
+//
+// 比较复用页面自己的 workspaceIndexFolded（大小写与真实落点都算同一处），
+// 否则同一工作区在页面能用、在调度层却被判成不存在。
+func (w serverWorkspaces) Resolve(path string) (string, bool) {
+	list := w.s.workspaceList()
+	if index := workspaceIndexFolded(list, path); index >= 0 {
+		return list[index], true
+	}
+	return "", false
 }
 
 // registerWorkspace 把 FilePicker 选中的目录登记成本次会话的工作区。
