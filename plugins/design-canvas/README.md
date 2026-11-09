@@ -7,7 +7,7 @@
 
 ada-go 里 **MCP 不是一个基座能力**，而是由官方 `mcp-client` 插件在**装配期**读取
 `.adago/mcp.json`、连接 server、把每个 MCP 工具注册成**普通工具描述符**（见
-[docs/18-mcp-plugin.md](../../docs/18-mcp-plugin.md)）。因此：
+[docs/15-extensions.md](../../docs/15-extensions.md)）。因此：
 
 ```
 模型 ──► mcp_adago_design_design_preview ──► mcp-client 插件 ──► adago_design MCP (stdio)

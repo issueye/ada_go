@@ -1385,33 +1385,6 @@
       "errors": ["invalid_params", "storage_busy", "internal_error"]
     },
     {
-      "name": "usage.get",
-      "group": "usage",
-      "summary": "线程/工作区用量（token 与成本聚合）",
-      "direction": "gateway->core",
-      "since": "1.0",
-      "idempotent": true,
-      "requiresReadyInstance": true,
-      "params": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "threadId": { "type": "string", "description": "给出时同时返回该线程聚合" },
-          "since": { "type": "string", "format": "date-time", "description": "工作区聚合的时间窗起点；缺省为全量" }
-        }
-      },
-      "result": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "thread": { "$ref": "#/definitions/Usage", "description": "threadId 给出时的线程聚合；未给出为 provider/model 均空串的零值" },
-          "workspace": { "$ref": "#/definitions/Usage", "description": "工作区聚合（跨线程）" }
-        },
-        "required": ["thread", "workspace"]
-      },
-      "errors": ["invalid_params", "storage_busy"]
-    },
-    {
       "name": "debug.state",
       "group": "debug",
       "summary": "本机调试快照（默认关闭；关闭时不注册进 dispatch 表，等同 method_not_found）",

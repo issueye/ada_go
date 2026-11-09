@@ -96,9 +96,10 @@ func TestPluginHelperInstallsGlobalPlugin(t *testing.T) {
 		t.Fatal("非法插件 id 没有被拒绝")
 	}
 
-	// 语义错误（MCP 风格的 run/inputSchema，没有 execute）在安装预检就会失败，
-	// 且不留下半个插件目录——而不是等用户点重载时才发现装不上。
-	badEntry := "export default function register(agent) { agent.registerTool({ name: \"mcp_shape_x\", inputSchema: { type: \"object\" }, run() {} }); }"
+	// 语法错误在静态预检就会失败，且不留下半个插件目录。
+	// 语义错误（如 registerTool 缺 execute）不再由预检执行入口工厂来发现，
+	// 而是留给启用/重载时的装配（P0：安装与体检不执行插件代码）。
+	badEntry := "export default function register(agent) {"
 	body, merr := json.Marshal(map[string]any{
 		"method": "POST", "path": "/create",
 		"body": map[string]any{
@@ -109,9 +110,8 @@ func TestPluginHelperInstallsGlobalPlugin(t *testing.T) {
 	if merr != nil {
 		t.Fatal(merr)
 	}
-	if _, err := sess.CallHTTPAPI(ctx, "plugin-helper", "POST", "/create", body, ""); err == nil ||
-		(!strings.Contains(err.Error(), "预加载失败") && !strings.Contains(err.Error(), "execute")) {
-		t.Fatalf("MCP 形状的入口没有被拒绝: %v", err)
+	if _, err := sess.CallHTTPAPI(ctx, "plugin-helper", "POST", "/create", body, ""); err == nil {
+		t.Fatal("非法入口没有被拒绝")
 	}
 	if _, statErr := os.Stat(filepath.Join(home, ".adago", "plugins", "mcp-shape")); !os.IsNotExist(statErr) {
 		t.Fatalf("预检失败的骨架不应落盘: %v", statErr)

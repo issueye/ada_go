@@ -147,12 +147,10 @@ func validateDescriptor(d domain.Descriptor) error {
 	if !namePattern.MatchString(d.Name) {
 		return fmt.Errorf("toolkit: 工具名 %q 不满足 ^[a-z][a-z0-9_]{1,63}$", d.Name)
 	}
-	// 基座保留名（domain.ToolFindName/ToolExecName）：引擎在目录查找之前拦截
-	// 这两个名字（发现式工具的 find/exec 入口），放行注册只会造出永远不可达的工具。
-	// TODO(插件化)：入口实现搬迁到插件后本条保留——两个名字改由宿主为插件
-	// 入口预留（见 internal/engine/discovery.go 的 TODO）。
-	if d.Name == domain.ToolFindName || d.Name == domain.ToolExecName {
-		return fmt.Errorf("toolkit: 工具名 %q 是基座保留名（发现式工具的 find/exec 入口），插件不能注册", d.Name)
+	// 基座保留名（domain.ToolFindName/ToolExecName）：只有持有 tool.discovery 的
+	// builtin 系统插件（宿主置位 d.System）可以注册；其它插件注册只会造出不可达的工具。
+	if (d.Name == domain.ToolFindName || d.Name == domain.ToolExecName) && !d.System {
+		return fmt.Errorf("toolkit: 工具名 %q 是基座保留名（发现式工具的 find/exec 入口），只有 tool.discovery 系统插件可注册", d.Name)
 	}
 	if strings.TrimSpace(d.PluginID) == "" {
 		return fmt.Errorf("toolkit: 工具 %q 缺少贡献者 pluginId（回执与审计要能追溯到插件）", d.Name)

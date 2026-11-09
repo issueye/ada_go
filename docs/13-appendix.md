@@ -2,11 +2,11 @@
 
 > 上级索引：[ada-go 设计文档](design.md)  
 > 对应章节：附录 A 插件示例、附录 B 配置示例、附录 C 与参考实现的差异、附录 D 术语  
-> 版本：0.1 · 2026-10-28
+> 版本：0.2 · 2026-11-09
 
 ## 附录 A：插件示例
 
-示例由两个插件组成：`tools-plan`（后端，builtin，TS）负责维护计划；`task-plan`（前端，third-party，TSX）只负责把计划渲染成悬浮卡。两者通过清单里的只读动作绑定连接，互不 import。官方包把同一思路收进了 `tools-plan` 自己的前端段（真实动作数据，无示例回退）；这里刻意用第三方版本，展示最小权限路径。
+示例由两个插件组成：`tools-plan`（后端，builtin，TS）负责维护计划；`task-plan`（前端，third-party，TSX）只负责把计划渲染成悬浮卡。两者通过清单里的只读动作绑定连接，互不 import。系统插件 `tools-plan` 把同一思路收进了自己的前端段（真实动作数据，无示例回退）；这里刻意用第三方版本，展示最小权限路径。第三方前端与系统插件同面：可以声明插槽、页面与脚本，但需要 `frontend.script` 能力并经过安装确认。
 
 ### A.1 `task-plan/plugin.json`（只有前端）
 
@@ -30,9 +30,9 @@
 }
 ```
 
-### A.2 `tools-plan`（后端，官方 TS）
+### A.2 `tools-plan`（后端，系统插件 TS）
 
-官方插件与第三方使用同一个入口；区别只有 `trust=builtin` 与随包发布。构建期把 `index.ts` 编成 `dist/index.js`，桌面打包随 Electron `resources` 发布，运行时仍由 moejs 执行。
+系统插件与第三方使用同一个入口；区别只有 `trust=builtin` 与随包发布。构建期把 `index.ts` 编成 `dist/index.js`，桌面打包随 Electron `resources` 发布，运行时仍由 moejs 执行。
 
 `plugin.json`：
 
@@ -219,7 +219,7 @@ plugin_route_kb = 64
 | 进程模型 | 网关 + 节点 | 网关 + Core，单二进制两角色 |
 | 插件贡献 | 装配期结算 | 同左，双代原子重载 |
 | Node 库 | 无（Boa，无 Node 兼容层） | Node API 形状子集：Go 原生库、按能力安装；无原生扩展/libuv/运行时 npm |
-| 工具实现 | 内置 Rust + TS | 基座零工具；官方与第三方都是 TS 插件，同一 moejs 引擎与注册契约 |
+| 工具实现 | 内置 Rust + TS | 基座零工具；系统与第三方都是 TS 插件，同一 moejs 引擎与注册契约 |
 | 可观测 | 日志/诊断点 | 日志 + 审计 + 指标 + `adag doctor` |
 
 ---

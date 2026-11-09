@@ -6,7 +6,7 @@
 //   - 官方插件与第三方插件走同一条加载路径，差别只有 trust 与随包发布。
 //   - 没有声明的能力在脚本里根本不存在；声明了但成员越权是「调用即抛 ERR_ACCESS_DENIED」。
 //
-// 与上游的对应关系（实测见 docs/decisions.md D-7、tools/moejspike）：
+// 与上游的对应关系（实测见 docs/11-structure-roadmap.md D-7、tools/moejspike）：
 // 模块白名单与能力位映射由本包的 resolver 负责；node:fs 用上游实现 + 宿主包装；
 // node:child_process 由宿主提供（上游 alpha.11 没有这个模块）。
 package host
@@ -82,9 +82,13 @@ type Script struct {
 //
 // 它是清单与信任级别求交的结果：清单写了 exec 但信任是 third-party，这里就没有 exec。
 type CapabilitySet struct {
-	Trust    plugins.Trust
-	Backend  map[plugins.Capability]bool
-	Frontend map[plugins.Capability]bool
+	// PluginID 是清单 id；fs 写插件目录时用于区分「自己的目录」与「别人的目录」。
+	PluginID string
+	// ConfigNamespace 是 ctx.config 的命名空间（缺省插件 id；可用清单 backend.configNamespace 覆盖）。
+	ConfigNamespace string
+	Trust           plugins.Trust
+	Backend         map[plugins.Capability]bool
+	Frontend        map[plugins.Capability]bool
 	// Secrets 是清单 backend.secrets 声明、且宿主确实配置了的密钥名。
 	Secrets []string
 	// Env 是清单 backend.env 白名单与宿主环境的交集；缺失的名字不注入（6.2）。
@@ -103,13 +107,15 @@ func NewCapabilitySet(m *plugins.Manifest, workspaceRoot string, hostEnv map[str
 		return nil, fmt.Errorf("host: 缺少清单")
 	}
 	c := &CapabilitySet{
-		Trust:         m.Trust,
-		Backend:       map[plugins.Capability]bool{},
-		Frontend:      map[plugins.Capability]bool{},
-		Hooks:         map[string]plugins.HookAction{},
-		Env:           map[string]string{},
-		WorkspaceRoot: workspaceRoot,
-		Mount:         DefaultMount,
+		PluginID:        m.ID,
+		ConfigNamespace: configNamespaceOf(m),
+		Trust:           m.Trust,
+		Backend:         map[plugins.Capability]bool{},
+		Frontend:        map[plugins.Capability]bool{},
+		Hooks:           map[string]plugins.HookAction{},
+		Env:             map[string]string{},
+		WorkspaceRoot:   workspaceRoot,
+		Mount:           DefaultMount,
 	}
 	if m.Backend != nil {
 		for _, cap := range m.Backend.Capabilities {
@@ -151,6 +157,71 @@ func NewCapabilitySet(m *plugins.Manifest, workspaceRoot string, hostEnv map[str
 	return c, nil
 }
 
+// CallMeta 是一次嵌套工具调用的归属（tool.discovery 宿主桥用）。
+type CallMeta struct {
+	ThreadID string
+	RunID    string
+	CallID   string
+}
+
+// EventQuery 是 ctx.events.query 的入参（字段与 05 §6.3 对齐）。
+type EventQuery struct {
+	ThreadID string
+	FromSeq  int64
+	Types    []string
+	Limit    int
+}
+
+// EventView 是一条只读事件投影；Data 原样是事件载荷 JSON。
+type EventView struct {
+	Seq      int64           `json:"seq"`
+	Type     string          `json:"type"`
+	ThreadID string          `json:"threadId,omitempty"`
+	At       time.Time       `json:"at"`
+	Data     json.RawMessage `json:"data,omitempty"`
+}
+
+// UsageQuery 是 ctx.events.usage 的入参：ThreadID 为空表示当前工作区全部原始行。
+type UsageQuery struct {
+	ThreadID string
+	Limit    int
+}
+
+// UsageRow 是一条原始用量行（每轮 provider/model 计数），基座不做展示口径聚合。
+type UsageRow struct {
+	ThreadID     string    `json:"threadId"`
+	Provider     string    `json:"provider"`
+	Model        string    `json:"model"`
+	InputTokens  int64     `json:"inputTokens"`
+	OutputTokens int64     `json:"outputTokens"`
+	CacheTokens  int64     `json:"cacheTokens"`
+	CostMicros   int64     `json:"costMicros"`
+	At           time.Time `json:"at"`
+}
+
+// TurnRequest 是 ctx.turn.invoke 的入参：threadId 为空时新建线程。
+type TurnRequest struct {
+	ThreadID string `json:"threadId,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Prompt   string `json:"prompt"`
+}
+
+// TurnResult 是轮次触发桥的即时回执：只表示已受理，不表示轮次结束。
+type TurnResult struct {
+	ThreadID string `json:"threadId"`
+	RunID    string `json:"runId"`
+}
+
+func configNamespaceOf(m *plugins.Manifest) string {
+	if m == nil {
+		return ""
+	}
+	if m.Backend != nil && m.Backend.ConfigNamespace != "" {
+		return m.Backend.ConfigNamespace
+	}
+	return m.ID
+}
+
 // DefaultMount 是脚本视图里工作区的挂载点（12 §6.12.1：宿主绝对路径不进脚本）。
 const DefaultMount = "/workspace"
 
@@ -162,6 +233,10 @@ func (c *CapabilitySet) Has(cap plugins.Capability) bool { return c.Backend[cap]
 // 引擎只交出这些字段，插件拿不到数据库句柄、密钥文件、原始 socket 或进程（1.5.2）。
 type Context struct {
 	Workspace string
+	// ConfigDir 是 ctx.config 的机器级配置根目录（显式 --data-dir 隔离）；空时用全局配置根。
+	ConfigDir string
+	// OnConfigChange 在 ctx.config 写/删后回调（命名空间名）；宿主可据此刷新派生缓存。
+	OnConfigChange func(namespace string)
 	// EnvVars 是用户管理的环境变量（~/.adago/env.json + <workspace>/.adago/env.json），
 	// 注入到插件启动的所有子进程（exec / 后台任务 / process.start），同名覆盖宿主环境；
 	// 不进入插件 process.env（那里仍按清单 backend.env 白名单）。值不写日志。
@@ -177,6 +252,19 @@ type Context struct {
 	Secret func(name string) (string, bool)
 	// State 是插件 KV（capability: state）。
 	State func(ctx context.Context, op StateOp) (json.RawMessage, error)
+	// Events 是只读事件/用量查询（capability: events.read）；nil 表示未授予。
+	// 查询被限制在调用线程上下文内，不能跨线程/工作区，也不能写事件。
+	Events func(ctx context.Context, q EventQuery) ([]EventView, error)
+	// Usage 返回工作区内的原始用量行（capability: events.read）；nil 表示未授予。
+	// threadID 为空表示整个工作区；基座不在这里做展示口径聚合。
+	Usage func(ctx context.Context, q UsageQuery) ([]UsageRow, error)
+	// TurnInvoke 触发一轮对话（capability: turn.invoke，仅 builtin）；nil 表示未授予。
+	// 宿主负责建线程/生成 runId/异步执行；调用只返回受理回执。
+	TurnInvoke func(ctx context.Context, req TurnRequest) (TurnResult, error)
+	// Catalog 返回当前工具目录快照（capability: tool.discovery，仅 builtin）。
+	Catalog func(ctx context.Context) ([]domain.Descriptor, error)
+	// InvokeTool 按内层工具描述符重跑审批链后执行（capability: tool.discovery，仅 builtin）。
+	InvokeTool func(ctx context.Context, meta CallMeta, call domain.ToolCall) (domain.Result, error)
 	// UI 是通用交互桥（capability: ui.ask）；nil 表示未授予。
 	UI func(ctx context.Context, req UIRequest) (UIResolution, error)
 	// HTTP 是 provider 的出网桥（capability: net.fetch / net.sse）；nil 表示未授予。
@@ -202,13 +290,6 @@ type Context struct {
 	// SelectModel 切换当前模型（capability: model.admin）。
 	// threadID 为空表示工作区级；否则先校验线程存在再写线程级覆盖。
 	SelectModel func(ctx context.Context, providerID, modelID, threadID string) (ModelRef, error)
-	// SaveProvider 新建/更新一个供应商（capability: model.admin）。
-	// APIKey 为空表示保留原值；ClearAPIKey 明确清空。
-	SaveProvider func(ctx context.Context, input ProviderInput) (ProviderInfo, error)
-	// RemoveProvider 删除供应商（capability: model.admin）。
-	RemoveProvider func(ctx context.Context, providerID string) error
-	// FetchProviderModels 用已保存的端点/密钥拉取 /models（capability: model.admin）。
-	FetchProviderModels func(ctx context.Context, providerID string) ([]ProviderModel, error)
 	// InstallPlugin 把一份插件骨架写入全局插件根（capability: plugin.admin；仅 builtin）。
 	// 宿主负责 id/相对路径校验、大小上限与「不覆盖已有插件」；脚本拿不到任意文件写权限。
 	InstallPlugin func(ctx context.Context, spec PluginInstallSpec) (PluginInstallResult, error)
@@ -313,9 +394,15 @@ type ProviderInfo struct {
 	Headers     map[string]string `json:"headers,omitempty"`
 	Disabled    bool              `json:"disabled,omitempty"`
 	Available   bool              `json:"available"`
-	HasAPIKey   bool              `json:"hasApiKey"`
-	APIKeyHint  string            `json:"apiKeyHint,omitempty"`
-	Models      []ProviderModel   `json:"models"`
+	// 下列字段只给供应商管理插件的 /models 拉取使用；不含密钥。
+	DefaultBaseURL   string          `json:"defaultBaseUrl,omitempty"`
+	AuthHeader       string          `json:"authHeader,omitempty"`
+	AuthPrefix       string          `json:"authPrefix,omitempty"`
+	APIVersionHeader string          `json:"apiVersionHeader,omitempty"`
+	APIVersion       string          `json:"apiVersion,omitempty"`
+	HasAPIKey        bool            `json:"hasApiKey"`
+	APIKeyHint       string          `json:"apiKeyHint,omitempty"`
+	Models           []ProviderModel `json:"models"`
 }
 
 // ProviderModel 是可编辑的模型配置（含启用状态）。
@@ -330,20 +417,6 @@ type ProviderModel struct {
 	// ThinkingLevels 是该模型可选的推理等级（从低到高）。
 	ThinkingLevels []string `json:"thinkingLevels,omitempty"`
 	Disabled       bool     `json:"disabled,omitempty"`
-}
-
-// ProviderInput 是保存供应商的入参（页面只传用户改过的密钥）。
-type ProviderInput struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Protocol    string            `json:"protocol"`
-	BaseURL     string            `json:"baseUrl,omitempty"`
-	APIKey      string            `json:"apiKey,omitempty"`
-	ClearAPIKey bool              `json:"clearApiKey,omitempty"`
-	Proxy       string            `json:"proxy,omitempty"`
-	Headers     map[string]string `json:"headers,omitempty"`
-	Disabled    bool              `json:"disabled,omitempty"`
-	Models      []ProviderModel   `json:"models"`
 }
 
 // CheckpointMeta 是一次检查点登记的归属（M5）。

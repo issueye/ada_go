@@ -159,7 +159,25 @@ func loadOne(dir, dirName, source string) (Plugin, *Warning) {
 	if err != nil {
 		return fail("%v", err)
 	}
+	// 来源→信任上限 + 验签：磁盘来源不得自声明 builtin；verified 只有验签通过
+	// 才保留，否则降级 third-party。降级后重新校验能力/钩子/前端，builtin-only
+	// 能力在 third-party 下非法时按失败关闭跳过（09 §9.1、6.9）。
+	origin := plugins.Origin(source)
+	reason := ""
+	if m.Trust == plugins.TrustVerified && origin != plugins.OriginOfficial {
+		if verr := plugins.VerifyManifestSignature(m, dir); verr != nil {
+			m.Trust = plugins.TrustThirdParty
+			reason = "验签失败，降级为 third-party: " + verr.Error()
+		}
+	}
+	if capped := plugins.CapTrust(m.Trust, origin); capped != m.Trust {
+		m.Trust = capped
+		reason = fmt.Sprintf("来源 %q 不允许更高信任，降级为 %s", source, capped)
+	}
 	if err := m.Validate(dirName); err != nil {
+		if reason != "" {
+			return fail("%s；降级后清单不合法: %v", reason, err)
+		}
 		return fail("%v", err)
 	}
 	if m.Backend == nil {

@@ -134,22 +134,27 @@ export default defineComponent({
       if (!this.threadId) return "";
       return "/threads/" + encodeURIComponent(this.threadId) + "/state";
     },
+    usageEndpoint(): string {
+      if (!this.threadId) return "";
+      return "/ext/composer-telemetry/api/usage?threadId=" + encodeURIComponent(this.threadId);
+    },
     refresh() {
       const url = this.endpoint();
+      const usageUrl = this.usageEndpoint();
       if (!url || this.inflight || typeof window.fetch !== "function") return;
       this.inflight = true;
-      window
-        .fetch(url, {
-          credentials: "same-origin",
-          headers: { Accept: "application/json" },
-        })
-        .then((res: any) => (res.ok ? res.json() : null))
-        .then((body: any) => {
+      const get = (target: string) =>
+        window
+          .fetch(target, { credentials: "same-origin", headers: { Accept: "application/json" } })
+          .then((res: any) => (res.ok ? res.json() : null));
+      Promise.all([get(url), usageUrl ? get(usageUrl) : Promise.resolve(null)])
+        .then(([body, usage]: any[]) => {
           this.inflight = false;
           if (body && typeof body === "object") {
             this.run = body.run || null;
             this.context = body.context || null;
-            this.usage = body.usage || null;
+            // 用量来自插件自己的 route；失败时保持上一次的值。
+            if (usage && typeof usage === "object") this.usage = usage;
             this.ready = true;
           } else {
             // 非 2xx 或空响应：保持上一次的值（首帧则仍是占位根），下个周期再试。

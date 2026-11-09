@@ -45,20 +45,6 @@ type modelRefProjection struct {
 	ModelID    string `json:"modelId"`
 }
 
-type usageProjection struct {
-	Thread    usageTotals `json:"thread"`
-	Workspace usageTotals `json:"workspace"`
-}
-
-type usageTotals struct {
-	Provider     string `json:"provider,omitempty"`
-	Model        string `json:"model,omitempty"`
-	InputTokens  int    `json:"inputTokens"`
-	OutputTokens int    `json:"outputTokens"`
-	CacheTokens  int    `json:"cacheTokens"`
-	CostMicros   int64  `json:"costMicros"`
-}
-
 type interactionProjection struct {
 	ID       string   `json:"id"`
 	ThreadID string   `json:"threadId"`
@@ -147,25 +133,6 @@ func (b *Bridge) loadProviders(r *http.Request) (*providersProjection, error) {
 		}
 	}
 	return out, nil
-}
-
-func (b *Bridge) loadUsage(r *http.Request, threadID string) (*usageProjection, error) {
-	params := map[string]any{}
-	if threadID != "" {
-		params["threadId"] = threadID
-	}
-	raw, err := b.callCore(r, "usage.get", params)
-	if err != nil {
-		return nil, err
-	}
-	var res struct {
-		Thread    usageTotals `json:"thread"`
-		Workspace usageTotals `json:"workspace"`
-	}
-	if err := json.Unmarshal(raw, &res); err != nil {
-		return nil, err
-	}
-	return &usageProjection{Thread: res.Thread, Workspace: res.Workspace}, nil
 }
 
 func (b *Bridge) loadInteractions(r *http.Request, threadID string) ([]interactionProjection, error) {

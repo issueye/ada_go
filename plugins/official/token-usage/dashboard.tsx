@@ -1,7 +1,8 @@
 /**
  * Token 用量卡片（official/token-usage 的 dashboard 贡献）。
  *
- * 只依赖 props.data.usage；没有数据时返回 null（概览页不留空卡）。
+ * 只依赖本插件页面动作预取结果 props.data.backend["token-usage"].page_usage；
+ * 没有数据时返回 null（概览页不留空卡）。
  */
 
 function formatNumber(value: any): string {
@@ -24,7 +25,9 @@ function formatCost(micros: any): string {
 
 export default function Dashboard(props: any) {
   const data = props && props.data ? props.data : null;
-  const usage = data && data.usage ? data.usage : null;
+  const backend = data && data.backend ? data.backend : {};
+  const mine = backend["token-usage"] || {};
+  const usage = mine.page_usage || mine.usage || null;
   const workspace = usage && usage.workspace ? usage.workspace : null;
   const thread = usage && usage.thread ? usage.thread : null;
   if (!workspace && !thread) return null;

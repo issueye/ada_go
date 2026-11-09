@@ -914,7 +914,6 @@ type renderProps struct {
 		Thread       *threadRef                            `json:"thread,omitempty"`
 		Backend      map[string]map[string]json.RawMessage `json:"backend,omitempty"`
 		Providers    *providersProjection                  `json:"providers,omitempty"`
-		Usage        *usageProjection                      `json:"usage,omitempty"`
 		Interactions []interactionProjection               `json:"interactions,omitempty"`
 	} `json:"data"`
 }
@@ -996,11 +995,6 @@ func (b *Bridge) buildProps(u *unit, r *http.Request, kind, name string) (json.R
 			p.Data.Providers = providers
 		} else {
 			log.Printf("frontend: 插件 %s 读取供应商投影失败: %v", u.manifest.ID, err)
-		}
-		if usage, err := b.loadUsage(r, threadID); err == nil {
-			p.Data.Usage = usage
-		} else {
-			log.Printf("frontend: 插件 %s 读取用量投影失败: %v", u.manifest.ID, err)
 		}
 		if threadID != "" {
 			if interactions, err := b.loadInteractions(r, threadID); err == nil {

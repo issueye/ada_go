@@ -7,7 +7,8 @@
   "trust": "builtin",
   "backend": {
     "entry": "index.ts",
-    "capabilities": ["model.admin"]
+    "capabilities": ["model.admin", "global.config", "net.fetch"],
+    "configNamespace": "provider-config"
   },
   "frontend": {
     "capabilities": ["frontend.script", "backend.read"],

@@ -63,7 +63,7 @@ const usage = `adag —— 本地优先的 Agent 系统（单二进制，两角�
                                                 轮次取消、检查点回滚等）
   adag version                                  版本与协议信息
 
-里程碑说明见 docs/development-plan.md。`
+里程碑说明见 docs/11-structure-roadmap.md。`
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
@@ -148,7 +148,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 // notImplemented 把「契约已冻结、实现未落地」说清楚：属于哪个里程碑、下一步做什么。
 func notImplemented(cmd, milestone string) error {
 	entry, _ := diag.For(proto.CodeCoreUnavailable)
-	return fmt.Errorf("adag %s 还没有实现（%s）。\n  诊断码 %s\n  下一步：见 docs/development-plan.md 对应里程碑；当前可用命令见 adag help",
+	return fmt.Errorf("adag %s 还没有实现（%s）。\n  诊断码 %s\n  下一步：见 docs/11-structure-roadmap.md 对应里程碑；当前可用命令见 adag help",
 		cmd, milestone, entry.Diag.String())
 }
 
@@ -417,7 +417,7 @@ func cmdDoctor(args []string, stdout io.Writer) error {
 		return fmt.Errorf("doctor 发现问题（首个：%w）；诊断码见 internal/diag", firstErr)
 	}
 	fmt.Fprintln(stdout, "doctor: 自检通过（M5 发布口径：Core RPC、Gateway 鉴权/SSR/SSE、插件平台、技能与审计已接通）。")
-	fmt.Fprintln(stdout, "       渲染回归与可访问性基线不在本次自检内（见 docs/release-m5.md 已知限制）。")
+	fmt.Fprintln(stdout, "       渲染回归与可访问性基线不在本次自检内（见 docs/09-security-operations.md 已知限制）。")
 	return nil
 }
 

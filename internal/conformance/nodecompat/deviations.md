@@ -1,6 +1,6 @@
 # Node 兼容子集偏差表（moejs v0.1.0-alpha.11 · M1-D 尖刺）
 
-> 上级：[设计 12 §6.11/§6.12/§6.13/§6.14](../../../docs/12-node-compat.md) · 决策：[D-7](../../../docs/decisions.md) · 语料：[corpus/](corpus/README.md)
+> 上级：[设计 12 §6.11/§6.12/§6.13/§6.14](../../../docs/12-node-compat.md) · 决策：[D-7](../../../docs/11-structure-roadmap.md) · 语料：[corpus/](corpus/README.md)
 >
 > **证据来源**：本表每一条的「实测」列都由 `go run ./tools/moejspike`（探针在 `tools/moejspike/`）
 > 与 `go test ./internal/conformance/nodecompat -run TestNodeCompat`（语料在 `corpus/`）生成，
@@ -167,7 +167,7 @@
 ## 3. 与 D-7 判定表的差异（以实测为准）
 
 D-7 的判定整体成立（E-1 落宿主 resolver、E-4 上游已具备、E-5 由 ada-go 自建、E-6/E-2 宿主夹上限、
-E-3/E-8 不可用）。以下是本轮重跑发现的**不一致**，请回写 `docs/decisions.md`：
+E-3/E-8 不可用）。以下是本轮重跑发现的**不一致**，请回写 `docs/11-structure-roadmap.md`：
 
 1. **D-7 的 E-1 行说「裸名 `events` 也能解析」—— 实测不成立。**
    `case=modules` 的 `E-1/裸名-events` 与语料 `mod-03-dynamic-unknown` 都是 LINK-FAIL /

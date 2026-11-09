@@ -49,5 +49,13 @@
 - 插件平台 API 规范：`plugins/official/plugin-helper/SPEC.md`；
   插件手册技能：`plugins/official/plugin-helper/skills/plugin-manual/SKILL.md`
   （创建/检查/启停 + `adag-ui` 动态块用法）。
-- 验证门禁：`go test ./...`、`go vet ./...`、staticcheck、`adag verify`（14 项，
+- 验证门禁：`go test ./...`、`go vet ./...`、staticcheck、`adag verify`（13 项，
   含定时任务双写镜像的 cron-sync）。
+
+## 基座边界与文档（2026-11-09 决策）
+
+- **基座零业务语义、零产品兜底**：系统插件（builtin，随产品发布）实现工具、provider、策略、人格、cron、env、供应商管理、用量展示；禁用后基座不补位。详细边界见 `docs/00-overview.md` §1.5。
+- **cron 是系统插件，不是基础设施**：基座不读 `cron.json`、不解析 cron 表达式、不调度任务、不提供 `/api/cron/fire`；`cronstore` 与相关基座端点已删除；调度由插件用 `agent.every` + `ctx.turn.invoke` 完成。
+- **第三方前端与系统插件同面**：slots/pages/scripts/client 都可声明，由 `frontend.script` 能力、安装确认、CSP 与审计控制风险；不再有「第三方只有 blocks」的特殊裁剪。
+- **内核默认实现 + 可替换 seam**：压缩、存储、模型、工具执行等默认用 Go 实现，同时保留受控接口；替换实现必须在装配期注入并通过契约测试，安全不变量不可替换。见 `docs/06-plugin-runtime.md` §6.10。
+- **文档收敛**：`docs/` 只保留 16 份设计正文（00–15）+ `design.md` 索引；不新增独立计划/评估/交付文档，相关内容并入 10/11 或对应章节。

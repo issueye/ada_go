@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -33,7 +32,6 @@ import (
 	"github.com/adag/ada-go/internal/devfake"
 	"github.com/adag/ada-go/internal/domain"
 	"github.com/adag/ada-go/internal/engine"
-	"github.com/adag/ada-go/internal/envstore"
 	"github.com/adag/ada-go/internal/plugins"
 	"github.com/adag/ada-go/internal/plugins/discovery"
 	"github.com/adag/ada-go/internal/plugins/host"
@@ -96,6 +94,22 @@ type Config struct {
 	Debug bool
 }
 
+// providerConfigStore 是供应商配置的存储接口：provider.Store 是 legacy 文件实现，
+// provider.GlobalStore 用 global.config 并兼容旧文件。
+type providerConfigStore interface {
+	Load() ([]provider.Config, bool, error)
+	Save([]provider.Config) error
+	Path() string
+}
+
+func newProviderConfigStore(path string) providerConfigStore {
+	if gs, err := provider.NewGlobalStore(path); err == nil {
+		return gs
+	} else {
+	}
+	return provider.NewStore(path)
+}
+
 // Session 是已装配的 Core 侧 CLI 会话。
 type Session struct {
 	cfg       Config
@@ -137,7 +151,7 @@ type Session struct {
 	failedPlugins   map[string]string
 	reloadMu        sync.Mutex // 串行化热重载（plugin.reload / plugin.setEnabled）
 	// 供应商配置（管理页）：文件在数据目录，改动后直接更新当前装配的 Registry。
-	providerStore   *provider.Store
+	providerStore   providerConfigStore
 	providersMu     sync.Mutex
 	providerConfigs []provider.Config
 
@@ -262,7 +276,7 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 	s := &Session{
 		cfg: cfg, store: store, ids: ids, clock: clock, secrets: secrets,
 		assembler:     cfg.Assembler,
-		providerStore: provider.NewStore(providersPath),
+		providerStore: newProviderConfigStore(providersPath),
 		steerQueues:   map[string][]domain.Message{},
 		turnActive:    map[string]int{},
 		in:            bufio.NewReader(cfg.In),
@@ -296,14 +310,33 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 		hc.UI = s.uiAsk
 	}
 	hc.State = s.stateOp
+	hc.ConfigDir = filepath.Join(filepath.Dir(s.cfg.ProvidersPath), "config")
+	hc.OnConfigChange = func(ns string) {
+		if ns == "provider-config" {
+			s.RefreshProviderConfigs()
+		}
+	}
+	// 只读事件投影（events.read）：绑定当前线程，见 plugin_events.go。
+	hc.Events = s.queryPluginEvents
+	// 原始用量行（events.read）：基座只给每轮计数，聚合由插件自己做。
+	hc.Usage = s.queryPluginUsage
+	// 通用轮次触发桥（turn.invoke，仅 builtin）：到期任务等由插件提交提示词。
+	hc.TurnInvoke = s.invokeTurnFromPlugin
+	// 发现式工具宿主桥（tool.discovery，仅 builtin）：目录只读投影 + 内层审批链。
+	hc.Catalog = func(ctx context.Context) ([]domain.Descriptor, error) {
+		if s.asm == nil {
+			return nil, nil
+		}
+		return s.asm.ToolCatalog().List(ctx), nil
+	}
+	hc.InvokeTool = func(ctx context.Context, meta host.CallMeta, call domain.ToolCall) (domain.Result, error) {
+		return engine.InvokeTool(ctx, s.deps, engine.TurnSpec{ThreadID: meta.ThreadID, RunID: meta.RunID}, call)
+	}
 	// 技能通道（6.7）由 Assembler 按产品 capabilities.skills 注入：
 	// ctx.skills 只给 name/description/path；正文由模型用 read_file 按路径读取。
 	// 供应商管理（model.admin）：目录只读、不含密钥；切换复用 model.set 的解析。
 	hc.Providers = s.providerCatalog
 	hc.SelectModel = s.selectModelFromPlugin
-	hc.SaveProvider = s.saveProviderFromPlugin
-	hc.RemoveProvider = s.removeProviderFromPlugin
-	hc.FetchProviderModels = s.fetchModelsFromPlugin
 	// 插件安装（plugin.admin）：骨架统一写入全局插件根 ~/.adago/plugins/<id>/。
 	hc.InstallPlugin = s.installPluginGlobally
 	// 插件健康检查（plugin.admin）：诊断报告（发现/启停/装配/入口预加载）。
@@ -1385,88 +1418,6 @@ func modelUsable(asm corecontracts.Assembly, providerID, modelID string) bool {
 	return false
 }
 
-// saveProviderFromPlugin 实现 host.Context.SaveProvider。
-// APIKey 留空表示保留旧值；ClearAPIKey 才清空。
-func (s *Session) saveProviderFromPlugin(ctx context.Context, in host.ProviderInput) (host.ProviderInfo, error) {
-	s.RefreshProviderConfigs()
-	s.providersMu.Lock()
-	defer s.providersMu.Unlock()
-	cfgs := cloneProviderConfigs(s.providerConfigs)
-
-	id := strings.TrimSpace(in.ID)
-	if id == "" {
-		generated, err := s.ids.NewULID(ctx)
-		if err != nil {
-			return host.ProviderInfo{}, fmt.Errorf("生成供应商 id 失败: %w", err)
-		}
-		id = "p_" + strings.ToLower(generated)
-	}
-	name := strings.TrimSpace(in.Name)
-	if name == "" {
-		name = id
-	}
-	protocol := provider.Protocol(strings.TrimSpace(in.Protocol))
-	if asm := s.Assembly(); asm == nil || asm.ProviderRegistry() == nil {
-		return host.ProviderInfo{}, errors.New("供应商适配器尚未装配")
-	} else if _, ok := asm.ProviderRegistry().AdapterIDForProtocol(protocol); !ok {
-		return host.ProviderInfo{}, fmt.Errorf("未知 API 格式: %s", in.Protocol)
-	}
-	baseURL := strings.TrimSpace(in.BaseURL)
-	if baseURL != "" {
-		u, err := url.Parse(baseURL)
-		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-			return host.ProviderInfo{}, errors.New("Base URL 必须是 http(s) 地址")
-		}
-	}
-	proxy, err := normalizeProviderProxy(in.Proxy)
-	if err != nil {
-		return host.ProviderInfo{}, err
-	}
-	headers, err := normalizeProviderHeaders(in.Headers)
-	if err != nil {
-		return host.ProviderInfo{}, err
-	}
-	models, err := normalizeProviderModels(in.Models)
-	if err != nil {
-		return host.ProviderInfo{}, err
-	}
-
-	idx := -1
-	for i := range cfgs {
-		if cfgs[i].ID == id {
-			idx = i
-			break
-		}
-	}
-	key := ""
-	if idx >= 0 {
-		key = cfgs[idx].APIKey
-	}
-	if in.ClearAPIKey {
-		key = ""
-	} else if v := strings.TrimSpace(in.APIKey); v != "" {
-		key = v
-	}
-	cfg := provider.Config{
-		ID: id, Name: name, Protocol: protocol, BaseURL: baseURL,
-		APIKey: key, Proxy: proxy, Headers: headers, Disabled: in.Disabled, Models: models,
-	}
-	if idx >= 0 {
-		cfgs[idx] = cfg
-	} else {
-		cfgs = append(cfgs, cfg)
-	}
-	if err := s.providerStore.Save(cfgs); err != nil {
-		return host.ProviderInfo{}, fmt.Errorf("保存供应商失败: %w", err)
-	}
-	s.providerConfigs = cloneProviderConfigs(cfgs)
-	if asm := s.Assembly(); asm != nil && asm.ProviderRegistry() != nil {
-		asm.ProviderRegistry().SetConfigs(cfgs)
-		s.ensureCurrentModel(asm)
-	}
-	return s.providerInfo(cfg), nil
-}
-
 // providerInfo 在配置信息上补充「环境变量/secrets 已提供密钥」的状态。
 func (s *Session) providerInfo(c provider.Config) host.ProviderInfo {
 	info := providerInfoOf(c)
@@ -1486,144 +1437,6 @@ func (s *Session) providerInfo(c provider.Config) host.ProviderInfo {
 		info.APIKeyHint = "环境变量/secrets"
 	}
 	return info
-}
-
-// removeProviderFromPlugin 实现 host.Context.RemoveProvider。
-func (s *Session) removeProviderFromPlugin(_ context.Context, providerID string) error {
-	s.RefreshProviderConfigs()
-	s.providersMu.Lock()
-	defer s.providersMu.Unlock()
-	providerID = strings.TrimSpace(providerID)
-	if providerID == "" {
-		return errors.New("缺少供应商 id")
-	}
-	cfgs := cloneProviderConfigs(s.providerConfigs)
-	out := cfgs[:0]
-	for _, c := range cfgs {
-		if c.ID != providerID {
-			out = append(out, c)
-		}
-	}
-	if len(out) == len(cfgs) {
-		return nil // 幂等
-	}
-	if err := s.providerStore.Save(out); err != nil {
-		return fmt.Errorf("删除供应商失败: %w", err)
-	}
-	s.providerConfigs = cloneProviderConfigs(out)
-	if asm := s.Assembly(); asm != nil && asm.ProviderRegistry() != nil {
-		asm.ProviderRegistry().SetConfigs(out)
-		s.ensureCurrentModel(asm)
-	}
-	return nil
-}
-
-// fetchModelsFromPlugin 实现 host.Context.FetchProviderModels：服务端用已保存的
-// 端点与密钥调用 /models，密钥不经过前端。
-func (s *Session) fetchModelsFromPlugin(ctx context.Context, providerID string) ([]host.ProviderModel, error) {
-	s.providersMu.Lock()
-	var cfg provider.Config
-	found := false
-	for _, c := range s.providerConfigs {
-		if c.ID == providerID {
-			cfg, found = c.Clone(), true
-			break
-		}
-	}
-	s.providersMu.Unlock()
-	if !found {
-		return nil, fmt.Errorf("没有供应商 %s", providerID)
-	}
-
-	meta, _ := s.adapterMetaForProtocol(cfg.Protocol)
-	baseURL := strings.TrimSpace(cfg.BaseURL)
-	if baseURL == "" {
-		baseURL = meta.DefaultBaseURL
-	}
-	key := strings.TrimSpace(cfg.APIKey)
-	if key == "" && meta.SecretName != "" {
-		if v, ok := s.secret(meta.SecretName); ok {
-			key = strings.TrimSpace(v)
-		}
-	}
-	if key == "" {
-		return nil, errors.New("请先填写 API Key（或配置对应的 secrets.toml/环境变量）")
-	}
-
-	endpoint := strings.TrimRight(baseURL, "/") + "/models"
-	reqCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, fmt.Errorf("模型列表地址非法: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
-	authHeader := meta.AuthHeader
-	authPrefix := meta.AuthPrefix
-	if authHeader == "" {
-		authHeader, authPrefix = "Authorization", "Bearer "
-	}
-	req.Header.Set(authHeader, authPrefix+key)
-	if meta.APIVersionHeader != "" {
-		req.Header.Set(meta.APIVersionHeader, meta.APIVersion)
-	}
-	for k, v := range cfg.Headers {
-		req.Header.Set(k, v)
-	}
-	client := &http.Client{Timeout: 20 * time.Second}
-	if strings.TrimSpace(cfg.Proxy) != "" {
-		proxyURL, err := url.Parse(cfg.Proxy)
-		if err != nil {
-			return nil, fmt.Errorf("代理地址不合法: %w", err)
-		}
-		client.Transport = &http.Transport{Proxy: http.ProxyURL(proxyURL)}
-	}
-	debugID := s.debug.NextID()
-	startedAt := time.Now()
-	s.debug.Request(debugID, http.MethodGet, endpoint, req.Header, nil)
-	res, err := client.Do(req)
-	if err != nil {
-		s.debug.Error(debugID, err, time.Since(startedAt))
-		return nil, fmt.Errorf("拉取模型列表失败: %w", err)
-	}
-	defer res.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(res.Body, 4<<20))
-	if err != nil {
-		s.debug.Error(debugID, err, time.Since(startedAt))
-		return nil, fmt.Errorf("读取模型列表失败: %w", err)
-	}
-	s.debug.Response(debugID, res.Status, res.Header, time.Since(startedAt), body)
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, fmt.Errorf("拉取模型列表失败：HTTP %d", res.StatusCode)
-	}
-
-	var payload struct {
-		Data []struct {
-			ID            string `json:"id"`
-			DisplayName   string `json:"display_name"`
-			ContextWindow int    `json:"context_window"`
-			MaxOutput     int    `json:"max_output"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, errors.New("模型列表不是预期的 JSON 形状")
-	}
-	out := make([]host.ProviderModel, 0, len(payload.Data))
-	seen := map[string]bool{}
-	for _, m := range payload.Data {
-		id := strings.TrimSpace(m.ID)
-		if id == "" || seen[id] {
-			continue
-		}
-		seen[id] = true
-		out = append(out, host.ProviderModel{
-			ID: id, DisplayName: m.DisplayName,
-			ContextWindow: m.ContextWindow, MaxOutput: m.MaxOutput,
-			Input: []string{"text"}, SupportsTools: true,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, nil
 }
 
 // normalizeProviderProxy 校验供应商代理地址；空表示直连。
@@ -2230,7 +2043,7 @@ func (s *Session) assembleInitial(ctx context.Context) (corecontracts.Assembly, 
 // <workspace>/.adago/env.json，工作区覆盖全局）：改完 env.json 后 plugin.reload
 // 重建装配即可生效。读取失败只记警告，不影响装配。
 func (s *Session) refreshEnvVars() {
-	vars, warnings := envstore.LoadForWorkspace(s.cfg.Workspace)
+	vars, warnings := loadManagedEnv(s.cfg.Workspace, s.cfg.ProvidersPath)
 	for _, w := range warnings {
 		if s.cfg.Log != nil {
 			s.cfg.Log("warn", "环境变量: "+w, nil)

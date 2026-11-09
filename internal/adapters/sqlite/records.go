@@ -519,38 +519,37 @@ func (st *Store) RecordUsage(ctx context.Context, u UsageRecord) error {
 	return st.w.submitUsage(u)
 }
 
-// UsageAggregate 是用量聚合的端口类型别名（08 usage.get）。
-// 规则在 ports 里定义，SQLite 只负责把行扫进这个结构。
-type UsageAggregate = ports.UsageAggregate
-
-// UsageByThread 返回线程的用量汇总（只读；provider+model 分组）。
-func (r *Reader) UsageByThread(ctx context.Context, threadID string) ([]UsageAggregate, error) {
-	return r.usageQuery(ctx, `WHERE thread_id = ?`, threadID)
-}
-
-// UsageWorkspace 返回整个工作区的用量汇总（08 usage.get 的工作区口径）。
-func (r *Reader) UsageWorkspace(ctx context.Context) ([]UsageAggregate, error) {
-	return r.usageQuery(ctx, `WHERE 1=1`)
-}
-
-func (r *Reader) usageQuery(ctx context.Context, where string, args ...any) ([]UsageAggregate, error) {
+// UsageRows 返回原始用量行（只读；按时间倒序）。threadID 为空表示整个工作区。
+//
+// 基座只暴露原始计数：分桶、按模型合并、成本折算等展示口径由插件自己算。
+func (r *Reader) UsageRows(ctx context.Context, threadID string, limit int) ([]UsageRecord, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
+	where := `WHERE 1=1`
+	args := []any{}
+	if threadID != "" {
+		where = `WHERE thread_id = ?`
+		args = append(args, threadID)
+	}
+	args = append(args, limit)
 	rows, err := r.read.QueryContext(ctx, `
-SELECT provider, model,
-       COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
-       COALESCE(SUM(cache_tokens),0), COALESCE(SUM(cost_micros),0)
-FROM usage `+where+`
-GROUP BY provider, model ORDER BY provider, model`, args...)
+SELECT thread_id, provider, model,
+       COALESCE(input_tokens,0), COALESCE(output_tokens,0),
+       COALESCE(cache_tokens,0), COALESCE(cost_micros,0), created_at
+FROM usage `+where+` ORDER BY created_at DESC, rowid DESC LIMIT ?`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("sqlite: 汇总用量失败: %w", err)
+		return nil, fmt.Errorf("sqlite: 读取用量行失败: %w", err)
 	}
 	defer rows.Close()
-	var out []UsageAggregate
+	var out []UsageRecord
 	for rows.Next() {
-		var a UsageAggregate
-		if err := rows.Scan(&a.Provider, &a.Model, &a.Input, &a.Output, &a.Cache, &a.Cost); err != nil {
-			return nil, fmt.Errorf("sqlite: 读取用量行失败: %w", err)
+		var rec UsageRecord
+		if err := rows.Scan(&rec.ThreadID, &rec.Provider, &rec.Model, &rec.InputTokens, &rec.OutputTokens, &rec.CacheTokens, &rec.CostMicros, &rec.CreatedAtMS); err != nil {
+			return nil, fmt.Errorf("sqlite: 扫描用量行失败: %w", err)
 		}
-		out = append(out, a)
+		rec.CreatedAt = time.UnixMilli(rec.CreatedAtMS).UTC()
+		out = append(out, rec)
 	}
 	return out, rows.Err()
 }

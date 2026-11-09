@@ -304,7 +304,7 @@ type sidebarData struct {
 	PluginNav []pluginNavLink
 }
 
-// 主题色板表（docs/19-ued.md §19.2.2）：id 与显示名驱动侧栏主题面板的色卡。
+// 主题色板表（docs/14-ui-runtime.md §19.2.2）：id 与显示名驱动侧栏主题面板的色卡。
 // 三色预览不放 Go 侧——CSP style-src 'self' 禁内联 style，色值在 ui/themes.css
 // 的 .ada-swatch--<id> 类里；改名/增删色板必须两边同步（见 themes.css 头注释）。
 type themePalette struct {

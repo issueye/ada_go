@@ -109,6 +109,16 @@ type RouteEvent struct {
 	Data  json.RawMessage
 }
 
+// TimerDef 是 agent.every(ms, fn) 登记的一条周期任务。
+//
+// 宿主用独立 goroutine 按固定间隔调用 handler；handler 收到 (req, ctx)，
+// 每次调用都是新的 Context，不会复用调用期捕获的 ctx。它只是通用定时器，
+// 不包含任何 cron/任务语义（cron 表达式、任务存储、运行历史都归插件）。
+type TimerDef struct {
+	IntervalMS int        `json:"intervalMs"`
+	Handler    HandlerRef `json:"-"`
+}
+
 // HookDef 是 agent.on(point, fn, opts) 登记的一个钩子。
 type HookDef struct {
 	Point    string `json:"point"`
@@ -136,6 +146,7 @@ type Contribution struct {
 	Prompts    []PromptDef
 	Actions    []ActionDef
 	Routes     []RouteDef
+	Timers     []TimerDef
 	Hooks      []HookDef
 	Frontend   FrontendContribution
 	Skills     []domain.SkillMeta

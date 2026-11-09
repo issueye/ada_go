@@ -32,8 +32,25 @@ func TestScriptsFromRepoDir(t *testing.T) {
 			t.Fatalf("后端插件缺少 %q（现有：%v）", want, backend)
 		}
 	}
-	if backend["token-usage"] {
-		t.Fatal("纯前端插件不应出现在后端脚本里")
+	for _, s := range scripts {
+		if s.Manifest != nil && s.Manifest.ID == "provider-admin" {
+			if s.Manifest.Backend == nil || s.Manifest.Backend.ConfigNamespace != "provider-config" {
+				t.Fatalf("provider-admin configNamespace = %+v", s.Manifest.Backend)
+			}
+		}
+		if s.Manifest != nil && (s.Manifest.ID == "token-usage" || s.Manifest.ID == "composer-telemetry") {
+			ok := false
+			if s.Manifest.Backend != nil {
+				for _, c := range s.Manifest.Backend.Capabilities {
+					if string(c) == "events.read" {
+						ok = true
+					}
+				}
+			}
+			if !ok {
+				t.Fatalf("%s 后端应声明 events.read: %+v", s.Manifest.ID, s.Manifest.Backend)
+			}
+		}
 	}
 
 	frontend, err := official.FrontendScriptsFromDir(root)

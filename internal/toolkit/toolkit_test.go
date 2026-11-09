@@ -153,6 +153,19 @@ func TestRegisterRejectsReservedNames(t *testing.T) {
 
 // 发现式与轮次终止互斥：exec_tool 的终止判定读的是它自己的描述符，
 // 内层工具的 terminatesTurn 会被吞掉——要终止轮次就必须注入式注册。
+// 持有 tool.discovery 的 builtin 系统插件由宿主置位 System 后才能注册保留名。
+func TestRegisterAllowsSystemReservedNames(t *testing.T) {
+	t.Parallel()
+	cat := toolkit.NewCatalog()
+	for _, name := range []string{domain.ToolFindName, domain.ToolExecName} {
+		d := descriptor(domain.AccessRead)
+		d.Name = name
+		d.System = true
+		if err := cat.Register(d); err != nil {
+			t.Fatalf("系统插件注册 %s 失败: %v", name, err)
+		}
+	}
+}
 func TestRegisterRejectsDiscoveryWithTerminatesTurn(t *testing.T) {
 	t.Parallel()
 	cat := toolkit.NewCatalog()

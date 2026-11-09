@@ -318,6 +318,36 @@ func buildAgentAPI(rt *mojsRuntime, owner func() *Instance) moejs.Value {
 	}
 	put("route", registerHTTP)
 
+	// every：登记一条通用周期任务（不是 cron：表达式、任务存储、运行历史归插件）。
+	// 宿主用独立 goroutine 按固定间隔调用 handler，每次调用注入新的 Context。
+	put("every", func(_ *engine.Realm, _ engine.Value, args []engine.Value) (engine.Value, error) {
+		p, st, err := inst()
+		if err != nil {
+			return moejs.Undefined(), err
+		}
+		if frozen(p, "every") {
+			return moejs.Undefined(), nil
+		}
+		ms, ok := jsInt(moejs.Arg(args, 0))
+		if !ok || ms < 1000 || ms > 3600000 {
+			return moejs.Undefined(), r.TypeError("every(ms, fn): ms 必须是 1000…3600000 的整数")
+		}
+		fn := moejs.Arg(args, 1)
+		if !engine.IsCallable(fn) {
+			return moejs.Undefined(), r.TypeError("every(ms, fn): fn 必须是函数")
+		}
+		if len(st.data.Timers) >= 8 {
+			return moejs.Undefined(), r.TypeError("every: 每个插件最多 8 条周期任务")
+		}
+		ident := fmt.Sprintf("timer#%d", len(st.data.Timers))
+		slot, err := st.add(slotKindTimer, ident, fn)
+		if err != nil {
+			return moejs.Undefined(), r.TypeError("%v", err)
+		}
+		st.data.Timers = append(st.data.Timers, TimerDef{IntervalMS: int(ms), Handler: HandlerRef{Slot: slot}})
+		return moejs.Undefined(), nil
+	})
+
 	put("on", func(_ *engine.Realm, _ engine.Value, args []engine.Value) (engine.Value, error) {
 		p, st, err := inst()
 		if err != nil {
@@ -553,49 +583,6 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 				}
 				return p.hostAsync(c, "providers.select", func(ctx context.Context) (any, error) {
 					return hc.SelectModel(ctx, providerID, modelID, hc.ThreadID)
-				}), nil
-			}))
-		_ = providers.SetProp(r, r.KeyFromGoString("save"), rt.Function("providers.save", 1,
-			func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
-				if hc.SaveProvider == nil {
-					return moejs.Undefined(), r.TypeError("providers.save: 宿主没有提供供应商保存")
-				}
-				raw, err := rt.AppendJSON(nil, moejs.Arg(args, 0))
-				if err != nil {
-					return moejs.Undefined(), r.TypeError("providers.save(input): input 不可 JSON 序列化: %v", err)
-				}
-				var input ProviderInput
-				if err := json.Unmarshal(raw, &input); err != nil {
-					return moejs.Undefined(), r.TypeError("providers.save(input): input 形状非法: %v", err)
-				}
-				return p.hostAsync(c, "providers.save", func(ctx context.Context) (any, error) {
-					return hc.SaveProvider(ctx, input)
-				}), nil
-			}))
-		_ = providers.SetProp(r, r.KeyFromGoString("remove"), rt.Function("providers.remove", 1,
-			func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
-				if hc.RemoveProvider == nil {
-					return moejs.Undefined(), r.TypeError("providers.remove: 宿主没有提供供应商删除")
-				}
-				id := strings.TrimSpace(moejs.Arg(args, 0).String())
-				if id == "" {
-					return moejs.Undefined(), r.TypeError("providers.remove(providerId): providerId 不能为空")
-				}
-				return p.hostAsync(c, "providers.remove", func(ctx context.Context) (any, error) {
-					return map[string]any{"removed": true}, hc.RemoveProvider(ctx, id)
-				}), nil
-			}))
-		_ = providers.SetProp(r, r.KeyFromGoString("fetchModels"), rt.Function("providers.fetchModels", 1,
-			func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
-				if hc.FetchProviderModels == nil {
-					return moejs.Undefined(), r.TypeError("providers.fetchModels: 宿主没有提供模型拉取")
-				}
-				id := strings.TrimSpace(moejs.Arg(args, 0).String())
-				if id == "" {
-					return moejs.Undefined(), r.TypeError("providers.fetchModels(providerId): providerId 不能为空")
-				}
-				return p.hostAsync(c, "providers.fetchModels", func(ctx context.Context) (any, error) {
-					return hc.FetchProviderModels(ctx, id)
 				}), nil
 			}))
 		set("providers", engine.ObjectValue(providers))
@@ -1001,6 +988,10 @@ func decodeToolResult(pluginID string, raw json.RawMessage, started time.Time) (
 		} `json:"content"`
 		Details   map[string]any `json:"details"`
 		Terminate bool           `json:"terminate"`
+		// Status 允许系统插件包装内层工具时保留 denied/timeout 等回执状态；
+		// 缺省仍是 ok。
+		Status string `json:"status,omitempty"`
+		Reason string `json:"reason,omitempty"`
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &body); err != nil {
@@ -1029,6 +1020,15 @@ func decodeToolResult(pluginID string, raw json.RawMessage, started time.Time) (
 		StartedAt:  started.UTC(),
 		FinishedAt: now,
 		DurationMS: now.Sub(started).Milliseconds(),
+	}
+	if body.Status != "" {
+		switch domain.ReceiptStatus(body.Status) {
+		case domain.ReceiptOK, domain.ReceiptError, domain.ReceiptDenied, domain.ReceiptTimeout, domain.ReceiptInterrupted:
+			out.Receipt.Status = domain.ReceiptStatus(body.Status)
+			out.Receipt.Reason = body.Reason
+		default:
+			return domain.Result{}, fmt.Errorf("host: 插件 %s 返回了未知工具状态 %q", pluginID, body.Status)
+		}
 	}
 	return out, nil
 }

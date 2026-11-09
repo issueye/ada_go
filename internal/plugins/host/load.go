@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -167,6 +168,51 @@ func (l *moduleLoader) importer() *moejs.Importer {
 
 func (l *moduleLoader) resolver() moejs.Resolver {
 	return moejs.Resolver(l.resolve)
+}
+
+// ValidateScript 做**不执行插件代码**的静态检查：清单形状、入口语法、模块链接
+// 与能力白名单。安装/体检的预检用它替代「运行入口工厂 + 完整装配」，
+// 避免一个只读工具/安装动作触发任意插件代码（09 §10.2、11 §16 P0）。
+//
+// 它不注册工具、不执行 handler、不触发网络/子进程；真正的贡献校验留给显式重载。
+func ValidateScript(s Script, caps *CapabilitySet) error {
+	if s.Manifest == nil {
+		return fmt.Errorf("host: 插件脚本缺少清单")
+	}
+	if caps == nil {
+		return fmt.Errorf("host: 插件 %s 缺少能力集合", s.Manifest.ID)
+	}
+	if err := s.validate(); err != nil {
+		return err
+	}
+	if err := validateStaticNodeImports(s, caps); err != nil {
+		return err
+	}
+	loader := newModuleLoader(s, caps)
+	_, err := loader.linkEntry()
+	return err
+}
+
+// nodeSpecRe 抓静态 import / side-effect import / import() 里的 node:* 说明符。
+// 链接器对宿主模块表是惰性的（尤其 child_process 的 provider 总会返回模块体），
+// 因此预检必须自己先按矩阵判定一次，避免「预检通过、装配时才抛」。
+var nodeSpecRe = regexp.MustCompile(`(?m)(?:from\s+|import\s*\(?\s*)["'](node:[^"']+)["']`)
+
+func validateStaticNodeImports(s Script, caps *CapabilitySet) error {
+	sources := make([]string, 0, len(s.Bundle)+1)
+	sources = append(sources, s.Source)
+	for _, src := range s.Bundle {
+		sources = append(sources, src)
+	}
+	for _, src := range sources {
+		for _, m := range nodeSpecRe.FindAllStringSubmatch(src, -1) {
+			spec := m[1]
+			if _, err := nodemod.Installable(spec, caps.Trust, caps.granted()); err != nil {
+				return fmt.Errorf("host: 插件 %s 静态检查导入 %s 被拒绝: %w", s.pluginID(), spec, err)
+			}
+		}
+	}
+	return nil
 }
 
 // linkEntry 编译并链接入口模块：链接期就把未知 import 判成装配失败（06 §6.5）。

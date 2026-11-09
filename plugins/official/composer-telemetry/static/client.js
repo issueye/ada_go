@@ -124,19 +124,22 @@ var composer_footer_default = defineComponent({
       if (!this.threadId) return "";
       return "/threads/" + encodeURIComponent(this.threadId) + "/state";
     },
+    usageEndpoint() {
+      if (!this.threadId) return "";
+      return "/ext/composer-telemetry/api/usage?threadId=" + encodeURIComponent(this.threadId);
+    },
     refresh() {
       const url = this.endpoint();
+      const usageUrl = this.usageEndpoint();
       if (!url || this.inflight || typeof window.fetch !== "function") return;
       this.inflight = true;
-      window.fetch(url, {
-        credentials: "same-origin",
-        headers: { Accept: "application/json" }
-      }).then((res) => res.ok ? res.json() : null).then((body) => {
+      const get = (target) => window.fetch(target, { credentials: "same-origin", headers: { Accept: "application/json" } }).then((res) => res.ok ? res.json() : null);
+      Promise.all([get(url), usageUrl ? get(usageUrl) : Promise.resolve(null)]).then(([body, usage]) => {
         this.inflight = false;
         if (body && typeof body === "object") {
           this.run = body.run || null;
           this.context = body.context || null;
-          this.usage = body.usage || null;
+          if (usage && typeof usage === "object") this.usage = usage;
           this.ready = true;
         } else {
           this.lastError = "读取会话遥测失败";

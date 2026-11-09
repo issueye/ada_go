@@ -52,17 +52,29 @@ var installSites = map[Capability]InstallSite{
 		EnforcedBy:    "ExecPolicy + cwd scope + env 白名单；每 Runtime 进程数/生命周期/输出上限；关闭杀整棵进程树（09 §9.2、12 §6.13）",
 		Milestone:     "v2 MCP stdio",
 	},
-	CapEnvAdmin: {
-		Capability: CapEnvAdmin, HostInstall: "安装 ctx.env（list/set/remove）：全局 ~/.adago/env.json 与工作区 .adago/env.json 的读写",
-		ScriptSurface: "ctx.env.list/set/remove",
-		EnforcedBy:    "键名校验、ADAG_ 保留前缀、值与文件大小上限、0600 原子写、值不写日志；仅 builtin（09 §9.2）",
-		Milestone:     "v2 环境变量管理",
+	CapTurnInvoke: {
+		Capability: CapTurnInvoke, HostInstall: "安装 ctx.turn.invoke：在指定线程或新线程触发一轮对话（仅 builtin）",
+		ScriptSurface: "ctx.turn.invoke({threadId?, title?, prompt})",
+		EnforcedBy:    "宿主建线程/生成 runId/执行轮次；插件只提交提示词，不等待轮次结果；不授予工具/文件/网络权限；仅 builtin",
+		Milestone:     "v0.3 系统插件化 P2",
 	},
-	CapCronAdmin: {
-		Capability: CapCronAdmin, HostInstall: "安装 ctx.cron（list/create/update/remove/setEnabled/trigger/runs）：全局 ~/.adago/cron.json 的定时任务管理",
-		ScriptSurface: "ctx.cron.list/create/update/remove/setEnabled/trigger/runs",
-		EnforcedBy:    "任务校验（cron 表达式/动作/大小上限）、0600 原子写 + 跨进程文件锁、审计只记 id 与名称；调度与执行在独立 cron 二进制，插件不能直接执行动作；仅 builtin",
-		Milestone:     "v2 定时任务",
+	CapGlobalConfig: {
+		Capability: CapGlobalConfig, HostInstall: "安装 ctx.config：机器级、按插件 id 命名空间隔离的 JSON 配置存储",
+		ScriptSurface: "ctx.config.get/set/delete/list",
+		EnforcedBy:    "固定路径（$ADAGO_HOME/config/<id>.json）、0600 原子写、跨进程文件锁、单值/总量/条目限额；仅 verified/builtin（09 §9.5）",
+		Milestone:     "v0.3 系统插件化 P1",
+	},
+	CapEventsRead: {
+		Capability: CapEventsRead, HostInstall: "安装 ctx.events.query：线程上下文内的只读事件/用量投影",
+		ScriptSurface: "ctx.events.query({fromSeq, types, threadId, limit})",
+		EnforcedBy:    "只读 Emitter 缓冲 + 线程上下文限制；不能写事件、不能跨线程/工作区；字段脱敏（09 §9.5）",
+		Milestone:     "v0.3 系统插件化 P1",
+	},
+	CapToolDiscovery: {
+		Capability: CapToolDiscovery, HostInstall: "安装 ctx.catalog（目录只读投影）与 ctx.tool.invoke（内层工具执行桥），仅 builtin",
+		ScriptSurface: "ctx.catalog.list({query?}) / ctx.tool.invoke({tool,args})",
+		EnforcedBy:    "宿主按内层描述符重跑 tool.beforeCall → policy 失败关闭 → Runner.Execute；脚本不能绕过审批/超时/截断；仅 builtin（05 §6.3、06 §6.6）",
+		Milestone:     "v0.3 系统插件化 P1",
 	},
 	CapState: {
 		Capability: CapState, HostInstall: "安装按插件 + 线程命名空间隔离的受限 KV",

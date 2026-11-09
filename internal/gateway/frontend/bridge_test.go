@@ -770,7 +770,7 @@ func TestBridgeMCPClientPageRenders(t *testing.T) {
 func TestBridgeTokenUsageDashboardProjection(t *testing.T) {
 	core := newFakeCore().
 		on("provider.list", `{"providers":[]}`).
-		on("usage.get", `{"thread":{"provider":"openai","model":"gpt-4o","inputTokens":1200,"outputTokens":300,"cacheTokens":400,"costMicros":1500},"workspace":{"inputTokens":5000,"outputTokens":800,"cacheTokens":2000,"costMicros":9000}}`)
+		on("action.invoke", `{"ok":true,"result":{"workspace":{"inputTokens":5000,"outputTokens":800,"cacheTokens":2000,"costMicros":9000},"thread":null}}`)
 	b := bridgeWithOnly(t, core, "token-usage", "")
 
 	html, count, err := b.Slot("dashboard.widgets", request(t, "/overview"))
@@ -778,7 +778,7 @@ func TestBridgeTokenUsageDashboardProjection(t *testing.T) {
 		t.Fatalf("Slot(dashboard.widgets) = %d, %v", count, err)
 	}
 	for _, want := range []string{
-		"Token 用量", "5,800", "1,200", "$0.0090",
+		"Token 用量", "5,800", "$0.0090",
 	} {
 		if !strings.Contains(string(html), want) {
 			t.Fatalf("Token 用量卡片缺少 %q\n%s", want, html)

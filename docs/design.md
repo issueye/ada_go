@@ -1,66 +1,50 @@
 # ada-go 设计文档
 
-> 状态：设计草案（待评审）  
-> 版本：0.1  
-> 日期：2026-10-28  
+> 状态：设计基线（2026-11-09 重整）
+> 版本：0.2
 > 范围：以插件为核心的 AI Agent；Gateway + Agent Core；Go + Gin + moejs；SSR 前端与前端插件化  
-> 工作名：`ada-go`（二进制 `adag`，模块路径暂定 `github.com/<org>/ada-go`，可随时改名）
+> 工作名：`ada-go`（二进制 `adag`，模块路径 `github.com/adag/ada-go`）
 
-这是一份**索引文档**。原单文件设计已按主题拆分；各章保留原编号（`0`–`15` 与附录 A–D），因此跨文档的“见 5.5”“见 6.3”等引用仍然成立。
+这是一份**索引文档**。设计按主题收敛为 16 份正文（`00`–`15`）+ 本索引；原 `14/15/19` 合并为 [14-ui-runtime.md](14-ui-runtime.md)，原 `16/18` 合并为 [15-extensions.md](15-extensions.md)。计划、评估、交付说明不再单独成文，统一并入 [11-structure-roadmap.md](11-structure-roadmap.md) 与对应设计章节。
 
-ada-go 是本地优先、单二进制、插件优先的 Agent 系统：Gateway 只负责 HTTP/SSR/SSE，Core 每个工作区一个进程跑唯一的 `RunTurn`；工具、provider、人格、策略、页面全部由插件贡献，官方插件也走同一 TS/moejs 契约。
+ada-go 是本地优先、单二进制、插件优先的 Agent 系统：Gateway 只负责 HTTP/SSR/SSE，Core 每个工作区一个进程跑唯一的 `RunTurn`；工具、provider、人格、策略、页面、定时任务、环境变量与用量展示全部由插件贡献。**基座零业务语义、零产品兜底**；随包发布、builtin 信任的是**系统插件**，不是基座。
 
-核心数字：**2 个进程角色、1 条 RPC 契约、34 个 RPC 方法、15 个钩子点、12 个前端插槽、1 份协议源文件**。
+核心数字：**2 个进程角色、1 条 RPC 契约、33 个 RPC 方法、15 个钩子点、12 个前端插槽、1 份协议源文件**。
 
 ## 文档地图
 
 | 文档 | 对应章节 | 内容 |
 |---|---|---|
-| [00-overview.md](00-overview.md) | §0–1 | 摘要、产品目标、非目标、设计原则、成功标准、基座边界与空基座验收 |
-| [01-architecture.md](01-architecture.md) | §2–5.2 | 参考项目取舍、进程拓扑、依赖方向、对话时序、Gateway、Core 分层与端口 |
-| [02-agent-loop.md](02-agent-loop.md) | §5.3–5.4 | `RunTurn` 状态机、终止条件、不变量、工具系统与官方工具 |
+| [00-overview.md](00-overview.md) | §0–1 | 摘要、目标、设计原则、成功标准、基座边界、系统插件层、内核 seam、空基座验收 |
+| [01-architecture.md](01-architecture.md) | §2–5.2 | 参考取舍、进程拓扑、依赖方向、对话时序、Gateway、Core 分层、端口、桌面壳 |
+| [02-agent-loop.md](02-agent-loop.md) | §5.3–5.4 | `RunTurn` 状态机、终止条件、不变量、工具系统、系统工具插件 |
 | [03-model-and-approval.md](03-model-and-approval.md) | §5.5–5.6 | 模型适配层、provider TS 契约、审批策略插件、交互桥与取消 |
-| [04-sessions-storage.md](04-sessions-storage.md) | §5.7–5.8 | 会话 DAG、压缩、SQLite 模式与并发/多进程访问、子智能体 |
-| [05-plugins.md](05-plugins.md) | §6.1–6.3 | 插件包形态、`plugin.json`、能力与信任、后端 `AgentAPI` |
-| [06-plugin-runtime.md](06-plugin-runtime.md) | §6.4–6.9 | moejs 沙箱、调用预算、装配期结算、钩子、技能、官方插件、签名与热重载 |
-| [07-ssr-frontend.md](07-ssr-frontend.md) | §7 | SSR 技术选型、a_da UI/设计元语直接复用、页面布局、组件与 VNode、SSE、前端插件化、动作桥、渐进增强 |
-| [08-protocol.md](08-protocol.md) | §8 | 传输、34 个 RPC 方法、快照与补丁、工具 DTO、错误码、产品声明 |
-| [09-security-operations.md](09-security-operations.md) | §9–10 | 威胁模型、路径/命令/Web 安全、提示注入边界、资源限制、可观测性与运维 |
-| [10-testing-performance.md](10-testing-performance.md) | §11–12 | 分层测试、门禁、关键用例、性能目标与优化顺序 |
-| [11-structure-roadmap.md](11-structure-roadmap.md) | §13–15 | 目录结构、Go workspace、依赖约束、里程碑、风险与开放问题 |
+| [04-sessions-storage.md](04-sessions-storage.md) | §5.7–5.8 | 会话 DAG、压缩与 `Compactor` seam、SQLite 并发、子智能体 |
+| [05-plugins.md](05-plugins.md) | §6.1–6.3 | 插件包形态、清单、能力与信任、后端 `AgentAPI`、`global.config` / `events.read` |
+| [06-plugin-runtime.md](06-plugin-runtime.md) | §6.4–6.10 | moejs 沙箱、装配期结算、钩子、技能、系统插件、信任与热重载、内核 seam |
+| [07-ssr-frontend.md](07-ssr-frontend.md) | §7 | SSR、插槽、VNode、SSE、前端插件化（第三方同面）、动作桥、渐进增强 |
+| [08-protocol.md](08-protocol.md) | §8 | 传输、RPC 方法、快照与补丁、工具 DTO、错误码、产品声明 |
+| [09-security-operations.md](09-security-operations.md) | §9–10 | 威胁模型、路径/命令/Web 安全、第三方前端风险、资源限制、可观测、发布与恢复 |
+| [10-testing-performance.md](10-testing-performance.md) | §11–12 | 分层测试、删除测试、门禁、关键用例、性能目标与实测基线 |
+| [11-structure-roadmap.md](11-structure-roadmap.md) | §13–17 | 目录结构、依赖、里程碑与交付状态、风险、开放问题、工程决策、系统插件迁移路线、文档治理 |
 | [12-node-compat.md](12-node-compat.md) | §6.10–6.14 | moejs 引擎能力、Node 兼容原生库、能力映射、安全边界与兼容性验证 |
 | [13-appendix.md](13-appendix.md) | 附录 A–D | 插件示例、配置示例、与参考实现的差异、术语 |
-| [14-render-engine.md](14-render-engine.md) | 扩展 | 单文件 VNode 渲染引擎：CSP 安全的模板解释器、hydrate、SSR 线格式与后端迁移路线 |
-| [15-ui-components.md](15-ui-components.md) | 扩展 | ada-ui 组件层：Button/Input/Select/Dropdown/Tabs/Card/Slider/Progress/Table/Modal/Message/Toast 等 |
-| [16-markdown-dynamic-blocks.md](16-markdown-dynamic-blocks.md) | 扩展 | Markdown 动态块：`adag-ui` fence、插件数据 Schema/TSX 渲染器、VNode block profile 与安全限额 |
-| [17-markdown-dynamic-blocks-plan.md](17-markdown-dynamic-blocks-plan.md) | 开发计划 | Markdown 动态块 MVP 任务分解、依赖、验收门禁、工作量与风险 |
-| [18-mcp-plugin.md](18-mcp-plugin.md) | 扩展 | MCP 插件化接入：装配期上下文、HTTP/stdio、工具映射、安全边界与分阶段交付 |
-| [19-ued.md](19-ued.md) | 扩展 | UED 规范：设计原则、品牌（命名/主题/文案/动效/资产）、令牌体系与主题准入、组件与 DOM、交互模式、可访问性、治理门禁 |
-| [20-plugin-island-framework-plan.md](20-plugin-island-framework-plan.md) | 开发计划 | 插件 SSR + 客户端渲染引擎框架：同构岛屿、状态、VNode patch、构建/安全/迁移任务分解 |
-| [21-third-party-islands.md](21-third-party-islands.md) | 评估 | 第三方插件岛屿隔离：服务端驱动、verified bundle、iframe 沙箱的取舍与 v1 决策 |
-| [22-islands-delivery.md](22-islands-delivery.md) | 交付说明 | 插件岛屿框架已交付能力、构建用法、验证指标与剩余手工项 |
-| [23-plugin-system-analysis.md](23-plugin-system-analysis.md) | 实现分析 | 插件系统实现层分析：契约、生命周期、边界执行、信任模型、扩展成本、缺口与建议 |
-| [development-plan.md](development-plan.md) | 实施计划 | M0–M5 任务分解、依赖与关键路径、工作量、质量门禁、发布节奏、交付状态盘点 |
-| [ui-optimization-plan.md](ui-optimization-plan.md) | 专项计划 | UI 优化：品牌设计语言（含多主题重构）、交互审计与修复批次、UED 规范落地路线图 |
-| [performance.md](performance.md) | §12 附件 | 性能基线：实测数字、采样方法、排查阈值（M5） |
-| [release-m5.md](release-m5.md) | §10 附件 | M5 发布清单：三平台产物、升级/备份/恢复步骤、审计接线、已知限制 |
-| [desktop-shell.md](desktop-shell.md) | 桌面壳 | Electron 壳（迁移自 a_da）：拉起网关、`?token=` 登录、无边框窗口控制、打包与已知限制 |
-| [decisions.md](decisions.md) | 工程决策 | 启动前开放项的钉定取值（模块路径、Go/moejs 基线、a_da commit、真源分层）与契约缺口台账 |
+| [14-ui-runtime.md](14-ui-runtime.md) | §14、§15、§19 | ada-render 运行时、ada-ui 组件层、UED 规范与主题/可访问性/治理 |
+| [15-extensions.md](15-extensions.md) | §16、§18 | Markdown 动态块（`adag-ui`）与 MCP 插件化接入 |
 
 ## 阅读路径
 
 - **评审设计**：00 → 01 → 02 → 03 → 05 → 06 → 12 → 08 → 09。
-- **制定与跟踪开发**：[development-plan.md](development-plan.md) → 11（里程碑/风险）→ 10（测试与性能）。
 - **实现内核**：01 → 02 → 03 → 04 → 05 → 06 → 12 → 08 → 10。
 - **写插件**：05 → 06 → 12（Node 兼容子集）→ 07 → 08 → 13（附录 A 是最小完整示例）。
-- **做 UI**：[19-ued.md](19-ued.md)（什么算对）→ 07 §7.7（复用与令牌细则）→ [15-ui-components.md](15-ui-components.md)（组件用法）；优化项见 [ui-optimization-plan.md](ui-optimization-plan.md)。
-- **做插件 UI 框架**：[20-plugin-island-framework-plan.md](20-plugin-island-framework-plan.md)（同构岛屿目标/阶段/门禁）→ 14（渲染引擎）→ 15（组件层）→ 07 §7.5（插件前端契约）。
+- **做 UI**：14（运行时、组件、UED）→ 07（SSR 与插槽）→ 15 §16（Markdown 动态块）。
+- **接 MCP**：05 → 06 → 15 §18。
 - **运维与排障**：09 → 04（SQLite 并发与备份）→ 08（错误码）→ 10（门禁）。
 
 ## 文档约定
 
-- **编号稳定**：章节号不随拆分变化；新增内容追加编号，不重排既有编号。
-- **单一事实源**：协议以 `spec/proto.json` 为准，本组文档解释设计意图；两者冲突时先改协议再改文档。
-- **边界优先**：任何“基座要不要做”的争论回到 [§1.5](00-overview.md#15-基座边界scope-boundary)；官方插件与第三方走同一 TS 契约。
-- **不重复正文**：跨主题只放摘要与链接，细节留在对应文档；修改设计时同步更新受影响文档与本索引。
-- **过期即缺陷**：`adag verify` 检查文档链接与方法/钩子/插槽数量；里程碑退出标准包含文档同步。
+- **编号稳定**：章节号不随合并变化；代码注释里的 `02 §5.3`、`06 §6.6`、`19 §19.5` 等引用继续有效。合并后的文档保留原子章节号（14/15/19、16/18）。
+- **单一事实源**：协议以 `spec/proto.json` 为准；能力位/钩子/插槽以 `internal/plugins/contract.go` 为准；清单以 `spec/manifest.schema.json` 为准。文档解释设计意图，冲突时先改源再改文档。
+- **边界优先**：任何“基座要不要做”的争论回到 [00 §1.5](00-overview.md#15-基座边界scope-boundary)；默认答案是“不做，交给系统插件”。
+- **不新增独立计划/评估文档**：开发计划、评估、交付说明、性能实测统一并入 11、10 或对应章节；一次性的分析不进入 `docs/`。
+- **过期即缺陷**：`adag verify` 检查文档链接、文档地图与核心数字；文档未登记或成为孤岛即失败。

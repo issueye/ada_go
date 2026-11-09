@@ -230,8 +230,6 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/workspace/select", s.handleWorkspaceOpen)
 	mux.HandleFunc("GET /api/workspaces", s.handleWorkspacesAPI)
 	mux.HandleFunc("GET /api/fs/list", s.handleFSList)
-	// 定时任务机器端点：独立 cron 二进制把 agent 动作送达 core（Bearer 鉴权）。
-	mux.HandleFunc("POST /api/cron/fire", s.handleCronFire)
 	mux.HandleFunc("GET /extensions", s.handleExtensions)
 	mux.HandleFunc("GET /extensions/{id}", s.handlePluginDetail)
 	mux.HandleFunc("GET /extensions/{id}/file", s.handlePluginFile)

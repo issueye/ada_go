@@ -787,11 +787,11 @@ func TestThreadPageLeavesComposerAuxToPluginIsland(t *testing.T) {
 	}
 }
 
-// 遥测轮询端点：run / context / usage 三块只读数据，与 SSR 页面同一份 Core 调用。
+// 遥测轮询端点：只返回 run / context 两块通用会话投影；用量由插件自己的
+// route 聚合（events.read），基座不再调用 usage.get。
 func TestThreadStateJSON(t *testing.T) {
 	core := newFakeCore().
-		on("thread.get", `{"thread":{"id":"th_1","workspace":"","title":"指标会话","createdAt":"2026-10-28T09:00:00Z","updatedAt":"2026-10-28T10:00:00Z","archived":false},"items":[],"seq":1,"run":{"runId":"run_1","status":"running","startedAt":"2026-10-28T10:00:00Z"},"context":{"tokens":215000,"messages":152000,"system":1500,"tools":7700,"window":1048576,"percent":21},"interactions":[],"hasMore":false}`).
-		on("usage.get", `{"thread":{"inputTokens":1000,"cacheTokens":990,"outputTokens":200,"costMicros":1200},"workspace":{"inputTokens":5000,"outputTokens":800,"cacheTokens":2000,"costMicros":9000}}`)
+		on("thread.get", `{"thread":{"id":"th_1","workspace":"","title":"指标会话","createdAt":"2026-10-28T09:00:00Z","updatedAt":"2026-10-28T10:00:00Z","archived":false},"items":[],"seq":1,"run":{"runId":"run_1","status":"running","startedAt":"2026-10-28T10:00:00Z"},"context":{"tokens":215000,"messages":152000,"system":1500,"tools":7700,"window":1048576,"percent":21},"interactions":[],"hasMore":false}`)
 	srv, _ := newServer(t, core)
 
 	rec := serve(t, srv, "GET", "/threads/th_1/state", nil)
@@ -815,17 +815,6 @@ func TestThreadStateJSON(t *testing.T) {
 			Window   int `json:"window"`
 			Percent  int `json:"percent"`
 		} `json:"context"`
-		Usage *struct {
-			Thread struct {
-				InputTokens  int `json:"inputTokens"`
-				CacheTokens  int `json:"cacheTokens"`
-				OutputTokens int `json:"outputTokens"`
-				CostMicros   int `json:"costMicros"`
-			} `json:"thread"`
-			Workspace struct {
-				InputTokens int `json:"inputTokens"`
-			} `json:"workspace"`
-		} `json:"usage"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("响应不是合法 JSON: %v (body=%s)", err, rec.Body.String())
@@ -836,8 +825,15 @@ func TestThreadStateJSON(t *testing.T) {
 	if out.Context == nil || out.Context.Tokens != 215000 || out.Context.Window != 1048576 || out.Context.Percent != 21 {
 		t.Fatalf("context = %+v", out.Context)
 	}
-	if out.Usage == nil || out.Usage.Thread.CacheTokens != 990 || out.Usage.Workspace.InputTokens != 5000 {
-		t.Fatalf("usage = %+v", out.Usage)
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["usage"]; ok {
+		t.Fatalf("基座不应再返回 usage 投影: %s", rec.Body.String())
+	}
+	if _, ok := core.lastCall("usage.get"); ok {
+		t.Fatal("端点不应再调用 usage.get")
 	}
 	// 端点只拉投影所需的最小数据：thread.get 不应拉整份历史。
 	if call, ok := core.lastCall("thread.get"); !ok || call.Params["itemLimit"] != 1 {

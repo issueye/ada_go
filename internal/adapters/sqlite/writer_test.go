@@ -221,11 +221,16 @@ func TestUsageCoalescingNeverLoses(t *testing.T) {
 		if err := st.Flush(ctx); err != nil {
 			t.Fatalf("Flush: %v", err)
 		}
-		agg, err := st.UsageByThread(ctx, th.ID)
+		rows, err := st.UsageRows(ctx, th.ID, 100)
 		if err != nil {
-			t.Fatalf("UsageByThread: %v", err)
+			t.Fatalf("UsageRows: %v", err)
 		}
-		if len(agg) == 1 && agg[0].Input == wantIn && agg[0].Output == wantOut {
+		var gotIn, gotOut int64
+		for _, row := range rows {
+			gotIn += row.InputTokens
+			gotOut += row.OutputTokens
+		}
+		if gotIn == wantIn && gotOut == wantOut {
 			stats := st.QueueStats()
 			if stats.UsageSeen != n {
 				t.Fatalf("usageSeen=%d，期望 %d", stats.UsageSeen, n)
@@ -234,7 +239,7 @@ func TestUsageCoalescingNeverLoses(t *testing.T) {
 				t.Fatalf("usageRows=%d：没有发生窗口合并（期望明显少于 %d）", stats.UsageRows, n)
 			}
 			t.Logf("%d 条用量合并成 %d 行，总量不丢（input=%d output=%d）",
-				stats.UsageSeen, stats.UsageRows, agg[0].Input, agg[0].Output)
+				stats.UsageSeen, stats.UsageRows, gotIn, gotOut)
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

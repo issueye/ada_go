@@ -37,6 +37,9 @@ type Backend struct {
 	// InitTimeoutMS 是入口工厂（含异步 Promise 结算）的装配预算，单位毫秒。
 	// 缺省 0 表示用宿主 DefaultCallTimeout；上限 60000，超过 5000 仅 builtin/verified 可声明。
 	InitTimeoutMS int `json:"initTimeoutMs,omitempty"`
+	// ConfigNamespace 是 ctx.config 的机器级命名空间；缺省等于插件 id。
+	// 仅声明 global.config 能力时有效，供多个插件共享同一份配置（如 provider-config）。
+	ConfigNamespace string `json:"configNamespace,omitempty"`
 }
 
 // Frontend 是前端清单段（7.5）。
@@ -197,6 +200,14 @@ func (m *Manifest) validateBackend() error {
 	}
 	if !validEntryPath(b.Entry) {
 		return fmt.Errorf("plugins: %s 的 backend.entry %q 必须是插件目录内的相对路径（禁止绝对路径、反斜杠、盘符与 . / .. 段）", m.ID, b.Entry)
+	}
+	if b.ConfigNamespace != "" {
+		if !ValidID(b.ConfigNamespace) {
+			return fmt.Errorf("plugins: %s 的 backend.configNamespace %q 不满足 ^[a-z][a-z0-9-]{1,63}$", m.ID, b.ConfigNamespace)
+		}
+		if !hasCap(b.Capabilities, CapGlobalConfig) {
+			return fmt.Errorf("plugins: %s 声明了 configNamespace 但没有 global.config 能力", m.ID)
+		}
 	}
 	if err := ValidateCapabilityList(b.Capabilities, m.Trust, true); err != nil {
 		return fmt.Errorf("plugins: %s: %w", m.ID, err)

@@ -101,20 +101,20 @@ func TestProviderAdminConfigLifecycle(t *testing.T) {
 		t.Fatalf("默认推理等级 = %q，期望第一档 low", ref.ThinkingLevel)
 	}
 
-	file := filepath.Join(dataDir, "providers.json")
+	file := filepath.Join(dataDir, "config", "provider-config.json")
 	raw, err := os.ReadFile(file)
 	if err != nil {
-		t.Fatalf("读取 providers.json: %v", err)
+		t.Fatalf("读取 provider-config.json: %v", err)
 	}
 	if !strings.Contains(string(raw), "sk-secret-1234") || !strings.Contains(string(raw), "p_test") {
-		t.Fatalf("providers.json 没有落盘密钥/供应商: %s", raw)
+		t.Fatalf("provider-config.json 没有落盘密钥/供应商: %s", raw)
 	}
 	if !strings.Contains(string(raw), "127.0.0.1:7890") || !strings.Contains(string(raw), "X-Test") ||
 		!strings.Contains(string(raw), `"thinkingLevels"`) {
-		t.Fatalf("providers.json 没有落盘代理/请求头/推理等级: %s", raw)
+		t.Fatalf("provider-config.json 没有落盘代理/请求头/推理等级: %s", raw)
 	}
 
-	// 非法配置必须由后端拒绝，而不是写进 providers.json。
+	// 非法配置必须由后端拒绝，而不是写进 provider-config.json。
 	for name, body := range map[string]string{
 		"proxy":   `{"id":"p_bad","name":"bad","protocol":"openai_chat","proxy":"ftp://example.com","models":[]}`,
 		"headers": `{"id":"p_bad","name":"bad","protocol":"openai_chat","headers":{"Host":"x"},"models":[]}`,
@@ -134,7 +134,7 @@ func TestProviderAdminConfigLifecycle(t *testing.T) {
 	}
 	raw, _ = os.ReadFile(file)
 	if strings.Contains(string(raw), "p_test") {
-		t.Fatalf("providers.json 仍包含已删除供应商: %s", raw)
+		t.Fatalf("provider-config.json 仍包含已删除供应商: %s", raw)
 	}
 }
 
@@ -207,7 +207,7 @@ func TestProviderConfigSharedAcrossWorkspaces(t *testing.T) {
 	if _, ok := b.ResolveModel("p_shared", "m1"); !ok {
 		t.Fatal("共享供应商的模型在另一个工作区不可解析")
 	}
-	global := filepath.Join(home, ".adago", "providers.json")
+	global := filepath.Join(home, ".adago", "config", "provider-config.json")
 	if _, err := os.Stat(global); err != nil {
 		t.Fatalf("共享配置没有写到 %s: %v", global, err)
 	}

@@ -12,7 +12,7 @@
  *
  * 本地补丁（相对 a_da 原文，先例见 app.js）：远程模型弹窗的 htmx 按需加载
  * 已随 htmx.min.js 一起移除（目标元素无任何渲染方）；新增弹层互斥裁决。
- * 详见 docs/07-ssr-frontend.md §7.7.1 与 docs/ui-optimization-plan.md 批次 C。
+ * 详见 docs/07-ssr-frontend.md §7.7.1 与 docs/14-ui-runtime.md。
  */
 (function () {
   'use strict';

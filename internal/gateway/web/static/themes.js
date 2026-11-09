@@ -14,7 +14,7 @@
  *   [data-theme-pick] 选色板。侧栏 rail 的快切按钮仍是 data-theme-toggle，
  *   由 theme.js 切类写旧键，本文件的委托注册在其后，读取切类结果回写 mode。
  *
- * 规则见 docs/19-ued.md §19.2.2 / §19.5.1（弹层四要素）。
+ * 规则见 docs/14-ui-runtime.md §19.2.2 / §19.5.1（弹层四要素）。
  */
 (function () {
   'use strict';

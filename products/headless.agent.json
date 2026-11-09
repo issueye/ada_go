@@ -9,6 +9,7 @@
     "tools-plan",
     "tools-ask",
     "tools-skill",
+    "tool-discovery",
     "policy-default",
     "provider-admin",
     "token-usage",
@@ -37,4 +38,3 @@
     "parallelTools": 1
   }
 }
-

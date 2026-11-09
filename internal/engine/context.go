@@ -149,7 +149,7 @@ func (r *run) params() ports.Params {
 // find_tool/exec_tool 使用它们），目录里存在发现式工具时追加基座入口 find_tool
 // 与 exec_tool 的声明（否则模型拿不到入口，也不该为用不上的入口花 token）。
 func toolSchemas(cat ports.ToolCatalog, ctx context.Context) []ports.ToolSchema {
-	list := withBaseTools(cat.List(ctx))
+	list := cat.List(ctx)
 	out := make([]ports.ToolSchema, 0, len(list))
 	for _, d := range list {
 		if d.Discovery {

@@ -88,7 +88,6 @@ const (
 	MethodActionInvoke          = "action.invoke"          // 前端动作 → 后端动作（用户点击触发；不进模型、不受 tool.beforeCall 约束）
 	MethodChangeList            = "change.list"            // 检查点与变更清单
 	MethodChangeRevert          = "change.revert"          // 回滚卡片/文件/全部；返回恢复/删除/跳过/失效四份清单，不谎报成功
-	MethodUsageGet              = "usage.get"              // 线程/工作区用量（token 与成本聚合）
 	MethodDebugState            = "debug.state"            // 本机调试快照（默认关闭；关闭时不注册进 dispatch 表，等同 method_not_found）
 )
 
@@ -180,7 +179,6 @@ var Methods = []MethodMeta{
 	{Name: "action.invoke", Group: "action", Summary: "前端动作 → 后端动作（用户点击触发；不进模型、不受 tool.beforeCall 约束）", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "change.list", Group: "change", Summary: "检查点与变更清单", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "change.revert", Group: "change", Summary: "回滚卡片/文件/全部；返回恢复/删除/跳过/失效四份清单，不谎报成功", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
-	{Name: "usage.get", Group: "usage", Summary: "线程/工作区用量（token 与成本聚合）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "debug.state", Group: "debug", Summary: "本机调试快照（默认关闭；关闭时不注册进 dispatch 表，等同 method_not_found）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: true},
 }
 
@@ -315,7 +313,6 @@ var MethodsByGroup = map[string][]string{
 	"thread":      {"thread.create", "thread.list", "thread.get", "thread.entries", "thread.rename", "thread.archive", "thread.branch", "thread.delete"},
 	"tool":        {"tool.list"},
 	"turn":        {"turn.start", "turn.cancel", "turn.steer", "turn.get"},
-	"usage":       {"usage.get"},
 	"workspace":   {"workspace.info", "workspace.updatePolicy"},
 }
 

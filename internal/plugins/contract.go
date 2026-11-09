@@ -224,13 +224,16 @@ const (
 	CapExec Capability = "exec"
 	// CapProcess 是长驻 stdin/stdout 子进程（无 shell），仅 builtin/verified。
 	CapProcess Capability = "process"
-	// CapEnvAdmin 允许插件经 ctx.env 管理全局/工作区环境变量（仅 builtin）。
-	CapEnvAdmin Capability = "env.admin"
-	// CapCronAdmin 允许插件经 ctx.cron 管理全局定时任务 ~/.adago/cron.json（仅 builtin）。
-	// 它只授予任务定义的读写与触发标记；真正的调度与执行在独立 cron 二进制。
-	CapCronAdmin Capability = "cron.admin"
+	// CapTurnInvoke 允许插件在指定线程（或新线程）触发一轮对话（仅 builtin）。
+	// 它是通用轮次触发桥：宿主负责建线程/生成 runId/执行轮次，插件只提交提示词；
+	// 不授予工具、文件或网络权限，也不等待轮次结束。
+	CapTurnInvoke Capability = "turn.invoke"
 	// CapState 是线程/工作区级受限 KV。
 	CapState Capability = "state"
+	// CapGlobalConfig 是机器级、按插件 id 命名空间隔离的配置存储（仅 verified/builtin）。
+	CapGlobalConfig Capability = "global.config"
+	// CapEventsRead 是只读事件/用量投影（线程上下文内，不能写事件）。
+	CapEventsRead Capability = "events.read"
 	// CapUIAsk 允许发起通用用户交互，不授予任何工具或文件权限；仅 builtin/verified。
 	CapUIAsk Capability = "ui.ask"
 	// CapSubagentInvoke 仅 builtin，供子智能体委派（v1.5）。
@@ -241,6 +244,8 @@ const (
 	// CapPluginAdmin 允许把插件骨架写入全局插件根 ~/.adago/plugins（仅 builtin）。
 	// 宿主负责 id/路径校验与「不覆盖」语义；它不授予任意文件写权限。
 	CapPluginAdmin Capability = "plugin.admin"
+	// CapToolDiscovery 是 builtin-only 的发现式工具宿主桥（ctx.catalog + ctx.tool.invoke）。
+	CapToolDiscovery Capability = "tool.discovery"
 	// CapBackendRead 是前端能力：预取只读后端动作结果。
 	CapBackendRead Capability = "backend.read"
 	// CapFrontendScript 是前端能力：加载插件自带 JS（默认关闭，仍受 CSP 限制）。
@@ -250,7 +255,7 @@ const (
 // backendCapabilities 是后端可声明的能力白名单。
 var backendCapabilities = []Capability{
 	CapFSRead, CapFSWrite, CapNetFetch, CapNetSSE,
-	CapExec, CapProcess, CapEnvAdmin, CapCronAdmin, CapState, CapUIAsk, CapSubagentInvoke, CapModelAdmin, CapPluginAdmin,
+	CapExec, CapProcess, CapState, CapGlobalConfig, CapEventsRead, CapUIAsk, CapSubagentInvoke, CapModelAdmin, CapPluginAdmin, CapToolDiscovery, CapTurnInvoke,
 }
 
 // frontendCapabilities 是前端可声明的能力白名单。
@@ -277,9 +282,9 @@ func capNames(cs []Capability) []string {
 // MinTrust 返回该能力要求的最低信任级别（6.2）。
 func (c Capability) MinTrust() Trust {
 	switch c {
-	case CapExec, CapProcess, CapNetSSE, CapUIAsk:
+	case CapExec, CapProcess, CapNetSSE, CapUIAsk, CapGlobalConfig:
 		return TrustVerified
-	case CapSubagentInvoke, CapModelAdmin, CapPluginAdmin, CapEnvAdmin, CapCronAdmin:
+	case CapSubagentInvoke, CapModelAdmin, CapPluginAdmin, CapToolDiscovery, CapTurnInvoke:
 		return TrustBuiltin
 	default:
 		return TrustThirdParty

@@ -1,11 +1,11 @@
 /**
  * Token 用量（official/token-usage）：工作区与当前会话的 token 聚合。
  *
- * 数据来自 Core usage.get 的只读投影 props.data.usage：
+ * 数据来自插件读取的每轮原始用量行（events.read），页面在插件内聚合：
  *   { thread: {provider,model,inputTokens,outputTokens,cacheTokens,costMicros}, workspace: {...} }
  * 插件只做展示与换算，不自己统计 token。
  *
- * 设计稿里画了「近 7 天趋势 / 按模型拆分 / 环比 +12.4%」，但 usage.get 只返回
+ * 设计稿里画了「近 7 天趋势 / 按模型拆分 / 环比 +12.4%」，但原始行只含每轮计数
  * 两个标量聚合（没有日期分桶、没有按模型分组、没有上期值），所以这一版全部换成
  * 真实可算的内容：
  *   - 时间范围分段 → 「工作区 / 当前会话」视图切换（两个对象都真实存在）；
@@ -90,15 +90,20 @@ export default defineComponent({
   computed: {
     usage(): any {
       const data: any = this.data || {};
-      const root: any = data.usage || {};
+      const mine: any = ((data.backend || {})["token-usage"] || {});
+      const root: any = mine.page_usage || mine.usage || {};
       return this.view === "thread" ? root.thread || null : root.workspace || null;
     },
     thread(): any {
-      const root: any = (this.data && (this.data as any).usage) || {};
+      const data: any = this.data || {};
+      const mine: any = ((data.backend || {})["token-usage"] || {});
+      const root: any = mine.page_usage || mine.usage || {};
       return root.thread || null;
     },
     workspace(): any {
-      const root: any = (this.data && (this.data as any).usage) || {};
+      const data: any = this.data || {};
+      const mine: any = ((data.backend || {})["token-usage"] || {});
+      const root: any = mine.page_usage || mine.usage || {};
       return root.workspace || null;
     },
     totals() {
@@ -202,7 +207,7 @@ export default defineComponent({
         <div class="tu-head">
           <div class="tu-title-row">
             <h1 class="tu-title">Token 用量</h1>
-            {tip("工作区聚合与当前会话累计，数据来自 Core 的 usage.get。usage.get 只返回两个聚合对象，没有按天分桶、按模型拆分或上期对比；成本按 costMicros 折算，为 0 时显示 —。")}
+            {tip("工作区聚合与当前会话累计，数据来自插件用 events.read 读取的每轮原始计数；聚合口径在插件内，基座不再提供展示投影。成本按 costMicros 折算，为 0 时显示 —。")}
           </div>
           <div class="tu-actions">
             <button class="tu-btn" type="button" onClick={this.copySummary}>复制汇总</button>
@@ -211,7 +216,7 @@ export default defineComponent({
         </div>
 
         <div class="tu-meta">
-          <span class="tu-meta__label">数据来自 Core 的 usage.get</span>
+          <span class="tu-meta__label">数据由插件聚合</span>
           <div class="tu-seg" role="group" aria-label="切换统计范围">
             <button
               type="button"
@@ -277,7 +282,7 @@ export default defineComponent({
               <p class="tu-panel__note">
                 {this.modelText
                   ? "单一 provider/model 分组时显示来源；多分组会被后端折叠成一个聚合值。"
-                  : "usage.get 会把多组 provider/model 折叠成单一聚合，这里不做按模型拆分。"}
+                  : "多组 provider/model 由插件聚合；这里不做按模型拆分。"}
               </p>
             </div>
           </section>
@@ -288,7 +293,7 @@ export default defineComponent({
             {tip("成本按 Core 记录的 costMicros 折算；为 0 时显示 —。缓存命中率 = cacheTokens / inputTokens。")}
             <span>成本按 Core 记录折算；缓存命中率 = 缓存 / 输入</span>
           </span>
-          <span class="tu-foot__right">usage.get · 只读投影</span>
+          <span class="tu-foot__right">events.read · 插件聚合</span>
         </div>
 
         {this.toast ? (

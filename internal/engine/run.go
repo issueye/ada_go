@@ -159,7 +159,7 @@ func (r *run) execute() (terminal domain.TerminalReason) {
 	// 3–5. 目录快照与 turn.before。
 	// 装配期定好，不在每轮扫盘（INV-3）；目录里有发现式工具时追加基座入口
 	// find_tool/exec_tool 的描述符（与 toolSchemas 的注入集合严格一致）。
-	tools := withBaseTools(r.deps.Tools.List(r.ctx))
+	tools := r.deps.Tools.List(r.ctx)
 	if verdict, err := r.hook(HookTurnBefore, nil); err == nil && verdict.Aborted {
 		r.emitNotice(domain.NoticeWarn, "轮次被控制面钩子中止: "+verdict.Reason)
 		terminate(TerminalError)

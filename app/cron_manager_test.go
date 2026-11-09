@@ -16,7 +16,15 @@ func TestCronManagerUpdateRouteReadsNestedTask(t *testing.T) {
 	t.Setenv("ADAGO_HOME", t.TempDir())
 	ctx := context.Background()
 	p := testProduct(t, "cron-manager")
-	asm := assemble(t, p, host.Context{Workspace: t.TempDir()}, nil)
+	var invoked []host.TurnRequest
+	asm := assemble(t, p, host.Context{
+		Workspace: t.TempDir(),
+		ConfigDir: t.TempDir(),
+		TurnInvoke: func(_ context.Context, req host.TurnRequest) (host.TurnResult, error) {
+			invoked = append(invoked, req)
+			return host.TurnResult{ThreadID: "th_cron", RunID: "run_cron"}, nil
+		},
+	}, nil)
 
 	createBody := json.RawMessage(`{"method":"POST","path":"/create","body":{
 		"name": "新闻",
@@ -34,6 +42,18 @@ func TestCronManagerUpdateRouteReadsNestedTask(t *testing.T) {
 	}
 	if err := json.Unmarshal(created, &createRes); err != nil || strings.TrimSpace(createRes.ID) == "" {
 		t.Fatalf("create 返回缺少 id: %s (%v)", created, err)
+	}
+
+	// 「立即运行」直接走 turn.invoke，并写一条 started 历史。
+	if _, err := asm.CallHTTPAPI(ctx, "cron-manager", "POST", "/trigger",
+		json.RawMessage(`{"method":"POST","path":"/trigger","body":{"id":"`+createRes.ID+`"}}`), ""); err != nil {
+		t.Fatalf("POST /trigger: %v", err)
+	}
+	if len(invoked) != 1 || invoked[0].Prompt != "获取当天热点新闻" || invoked[0].Title != "新闻" {
+		t.Fatalf("trigger 没有把任务交给 turn.invoke: %+v", invoked)
+	}
+	if invoked[0].ThreadID != "" {
+		t.Fatalf("首次触发应让宿主建线程，threadId = %q", invoked[0].ThreadID)
 	}
 
 	// 管理页的“保存修改”就是 { id, task: {...} }。

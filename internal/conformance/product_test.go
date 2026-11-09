@@ -12,7 +12,7 @@ import (
 )
 
 // codingPlugins 是 08 §8.6 与 development-plan §1.1 冻结的官方插件清单
-// （16 项；tools-plan/tools-ask 的后端与卡片同属一个插件，provider-admin 同时
+// （17 项；tools-plan/tools-ask 的后端与卡片同属一个插件，provider-admin 同时
 // 提供 route 后端与页面，plugin-helper 只有后端（对话创建），token-usage/
 // composer-telemetry 只有前端，ui-charts 是前端动态块 + 后端工具）。
 // 只出现在测试代码里：基座源码不认得它们（1.5.5 的硬边界），选择权在产品声明。
@@ -24,6 +24,7 @@ var codingPlugins = []string{
 	"tools-plan",
 	"tools-ask",
 	"tools-skill",
+	"tool-discovery",
 	"policy-default",
 	"persona-coding",
 	"provider-admin",
@@ -52,7 +53,7 @@ func TestProductDeclarations(t *testing.T) {
 		mustNoErr(t, "LoadProduct(coding)", err)
 		mustEqual(t, "产品 id", "coding", p.ID)
 		mustEqual(t, "产品名", "ada-go Coding", p.Name)
-		mustCount(t, "coding 的官方插件数", 16, len(p.Plugins))
+		mustCount(t, "coding 的官方插件数", 17, len(p.Plugins))
 		for i, want := range codingPlugins {
 			if p.Plugins[i] != want {
 				t.Errorf("第 %d 项插件: want=%s got=%s", i+1, want, p.Plugins[i])

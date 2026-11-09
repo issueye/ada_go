@@ -54,7 +54,7 @@ type CompactSummary struct {
 	Markdown    string   `json:"markdown"`
 	GeneratedAt string   `json:"generatedAt"`
 	// FirstKeptEntryID 是重放起点（04 §5.7：从 first_kept_entry_id 重放）。
-	// 设计文档只在散文里提到这个字段，形状由 M1-A 钉在这里并写进 decisions.md。
+	// 设计文档只在散文里提到这个字段，形状由 M1-A 钉在这里并写进 11-structure-roadmap.md。
 	FirstKeptEntryID string `json:"firstKeptEntryId,omitempty"`
 	Failed           bool   `json:"failed,omitempty"`
 }

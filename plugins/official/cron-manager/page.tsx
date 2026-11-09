@@ -12,11 +12,11 @@
  *   POST /update           保存任务修改
  *   POST /remove           删除任务
  *   POST /toggle           启停任务
- *   POST /trigger          立即运行（cron 二进制下个 tick 消费，最迟约 5 秒）
+ *   POST /trigger          立即运行（插件直接调用 turn.invoke，约 1 秒内）
  *   GET  /runs?id=         运行历史（最新在前）
  *
- * 任务定义存 ~/.adago/cron.json；调度与执行在独立 cron 二进制：
- *   - 任务只有 AI 任务一种，经网关 /api/cron/fire 送达 core
+ * 任务定义存 global.config 的 cron 命名空间；调度在插件内（agent.every + 5 段 cron 解析）：
+ *   - 任务只有 AI 任务一种，由插件调用 ctx.turn.invoke 触发 Core 轮次
  *     （thread.create + turn.start），每个任务复用一个专用线程；
  *     无人值守轮次的审批交互按 Core 现有超时过期。HTTP 动作已移除。
  */
@@ -30,7 +30,7 @@ export default function Page(_props: any) {
           <h1 class="cm-title">定时任务</h1>
           <span
             class="cm-tip cm-tip--below"
-            data-tip="到期后由独立 cron 二进制把 AI 任务经网关送达 core（thread.create + turn.start），每个任务复用一个专用线程。任务在选定的工作区里执行，不选时落在综合工作区；任务存于 ~/.adago/cron.json，新建或修改后最迟约 5 秒生效。"
+            data-tip="到期后由插件调用 ctx.turn.invoke 触发 Core 轮次（宿主建线程/生成 runId），每个任务复用一个专用线程。任务在 Core 当前工作区执行；任务存于 global.config 的 cron 命名空间，新建或修改后下一次 tick（≤30 秒）生效。"
             aria-label="定时任务说明"
             tabindex="0"
             role="img"
@@ -64,7 +64,7 @@ export default function Page(_props: any) {
           <div class="cm-card__title">
             <span data-cm-form-title>新建任务</span>
           </div>
-          <span class="cm-card__hint">到期后由 cron 二进制把 AI 任务送达 core，在工作区里新建会话执行</span>
+          <span class="cm-card__hint">到期后由插件调用 turn.invoke 触发 Core 轮次，在工作区里新建会话执行</span>
         </div>
 
         <form class="cm-form" data-cm-form>

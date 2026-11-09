@@ -1,13 +1,14 @@
 {
   "id": "cron-manager",
   "name": "定时任务",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "apiVersion": 1,
-  "description": "管理全局定时任务（AI 任务）；任务存于 ~/.adago/cron.json，调度由独立 cron 二进制执行，到期把提示词送达 core",
+  "description": "管理定时任务（AI 任务）：任务存 global.config 的 cron 命名空间，插件用通用定时器解析 cron 并调用 turn.invoke 触发轮次；基座不读 cron.json、不调度、不暴露 cron 端点。",
   "trust": "builtin",
   "backend": {
     "entry": "index.ts",
-    "capabilities": ["cron.admin"]
+    "capabilities": ["fs.read", "global.config", "turn.invoke"],
+    "configNamespace": "cron"
   },
   "frontend": {
     "capabilities": ["frontend.script"],

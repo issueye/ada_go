@@ -2,13 +2,13 @@
 
 > 上级索引：[ada-go 设计文档](design.md)  
 > 对应章节：§5.5 模型适配层、§5.6 审批（策略插件）与取消  
-> 版本：0.1 · 2026-10-28
+> 版本：0.2 · 2026-11-09
 
 ## 5.5 模型适配层
 
 基座只拥有 `ModelClient` 契约与归一化流 DTO；**具体供应商是官方 TS provider 插件**，通过 `agent.registerProvider` 注册，由宿主桥接成 `ModelClient`。基座不知道 OpenAI/Anthropic 的 URL、鉴权头、SSE 细节与工具调用格式。
 
-用户配置的供应商实例默认保存在机器级 `~/.adago/providers.json`（0600），切换工作区共享同一套供应商/模型设置；显式传 `--data-dir` 时仍可使用该数据目录下的 `providers.json` 做隔离。Registry 按 `Protocol` 选择适配器插件，把该实例的 `baseUrl`/`apiKey`/模型清单注入一次流式请求。首次启动只在已配置对应密钥（环境变量/secrets.toml）或显式 BaseURL 时播种默认实例；升级时会迁移旧工作区里确实含用户改动的配置，避免凭空出现未配置的 GPT/Claude 模型。API Key 不返回给页面，只显示是否配置与尾号。供应商端点由宿主 HTTP 桥直接访问，当前不做 host 黑白名单（后续以网络策略插件实现，见 `AGENTS.md`）；改端点不需要重启 Core。
+供应商配置是**系统插件 `provider-admin` 拥有的数据**，保存在机器级命名空间（`global.config` 的 `provider-config` 命名空间，默认落地 `~/.adago/config/provider-config.json`，0600），切换工作区共享；显式传 `--data-dir` 时使用该数据目录下的 `config/` 做隔离。`provider.GlobalStore` 只在首次加载时读取并迁移 legacy `providers.json`，之后只写 `global.config`；插件 CRUD 收敛仍待完成。基座只读取当前模型与供应商配置视图，按 `Protocol` 选择适配器插件，把 `baseUrl`/`apiKey`/模型清单注入一次流式请求；**基座不做供应商/模型的 CRUD、不拉 `/models`、不渲染管理页**。首次启动只在已配置对应密钥（环境变量/secrets.toml）或显式 BaseURL 时播种默认实例；升级迁移只搬运用户确实改过的配置。API Key 不返回给页面，只显示是否配置与尾号。供应商端点由宿主 HTTP 桥直接访问，当前不做 host 黑白名单（后续以网络策略插件实现，见 `AGENTS.md`）；改端点不需要重启 Core。
 
 ```go
 type ModelClient interface {
@@ -88,14 +88,14 @@ interface ProviderContext {
 }
 ```
 
-`http.sse` 是受信能力 `net.sse`，只授予 builtin/verified；TLS、代理、重定向、连接/空闲/总时长、取消与响应大小都由宿主执行，插件只做“SSE 事件 → 归一化增量”的协议映射。provider 的 `stream` 是长任务，不受 5s 脚本调用超时约束，受建连 15s、空闲 90s、总时长 30 分钟与轮次取消约束。provider 清单声明 `backend.capabilities: ["net.sse"]` 与 `secrets`，模型名、`base_url` 与参数由产品配置传入，插件不读全局配置。`ProviderDef` 的 `protocol` / `defaultBaseUrl` / `secretName` / `displayName` / `authHeader` / `authPrefix` / `apiVersionHeader` / `apiVersion` 用于宿主播种默认供应商、密钥提示与代发 `/models`；基座不写死具体供应商的端点、密钥名或鉴权头。
+`http.sse` 是受信能力 `net.sse`，只授予 builtin/verified；TLS、代理、重定向、连接/空闲/总时长、取消与响应大小都由宿主执行，插件只做“SSE 事件 → 归一化增量”的协议映射。provider 的 `stream` 是长任务，不受 5s 脚本调用超时约束，受建连 15s、空闲 90s、总时长 30 分钟与轮次取消约束。provider 清单声明 `backend.capabilities: ["net.sse"]` 与 `secrets`，模型名、`base_url` 与参数由产品配置传入，插件不读全局配置。`ProviderDef` 的 `protocol` / `defaultBaseUrl` / `secretName` / `displayName` / `authHeader` / `authPrefix` / `apiVersionHeader` / `apiVersion` 用于系统 provider 插件声明播种默认供应商、密钥提示与代发 `/models` 的元数据；基座不写死具体供应商的端点、密钥名或鉴权头。`ModelClient` 是内核 seam：默认实现由 provider 插件桥接，替换实现必须在装配期注入并通过流式契约测试。
 
 Node 兼容层**不安装** `node:http`/`node:https`/`node:net`/`node:tls`/`node:dns`。provider 只能用 `ctx.http.sse`/`ctx.http.json`，不能用全局 `fetch` 或自建连接；这样代理、证书、重定向、DNS 与超时都只有一个执行点。完整模块矩阵见 [6.12](12-node-compat.md#612-node-兼容原生库)。
 
 - 统一增量：`text.start/delta/end`、`thinking.start/delta/end`、`tool_call.start/delta/end`、`usage`、`finish`。
 - 工具调用参数按 `index` 累积 JSON 片段；流结束时整体校验，失败作为工具错误回执。
-- 官方 provider 插件：`provider-openai-chat`、`provider-anthropic-messages`、`provider-openai-responses`；任何 OpenAI 兼容端点（DeepSeek、Ollama、Moonshot 等）通过 `base_url` 复用 Chat 适配器。
-- 第三方 provider 不在 v1 开放：只允许官方 provider 插件；第三方仍可通过官方 Chat 插件的 `base_url` 接入兼容端点，不向工作区开放任意鉴权与长连接代码。
+- 系统 provider 插件：`provider-openai-chat`、`provider-anthropic-messages`、`provider-openai-responses`；任何 OpenAI 兼容端点（DeepSeek、Ollama、Moonshot 等）通过 `base_url` 复用 Chat 适配器。
+- 第三方 provider 不在 v1 开放：只允许系统 provider 插件；第三方仍可通过官方 Chat 插件的 `base_url` 接入兼容端点，不向工作区开放任意鉴权与长连接代码。
 - 终止信号必须显式：`[DONE]`、`message_stop`、`response.completed`。**EOF 不等于完成**；没有终止信号的 EOF 是错误。
 - 超时分层：建连 15s、空闲 90s（可通过 `ADAG_STREAM_IDLE` 调整）、总时长 30 分钟；取消贯穿到 HTTP 请求。
 - 重试：由基座的 `ModelClient` 包装层负责，provider 只实现单次流；只对 429/5xx/网络错误且在**首个增量之前**重试，指数退避 + 抖动，最多 3 次，尊重 `Retry-After`。已经开始输出后不自动重试，避免重复内容。
@@ -123,7 +123,7 @@ schema/scope 校验 → tool.beforeCall 钩子链（按 priority）
 - 一次交互恰好解析一次，状态为 `accepted | denied | cancelled | timeout | unavailable`；待处理交互持久化，Gateway/Core 重启后可恢复。
 - `interaction.respond` 必须同时匹配 `threadId` 与 `requestId`，且只接受 `pending`、未过期的请求；重复响应幂等返回首次结果，过期/伪造返回错误且不改变状态。
 
-**官方 `policy-default`（TS，builtin，`role=tool-policy`）**：
+**系统插件 `policy-default`（TS，builtin，`role=tool-policy`）**：
 
 | 模式 | 读 | 写 | 执行/网络 |
 |---|---|---|---|
@@ -132,7 +132,7 @@ schema/scope 校验 → tool.beforeCall 钩子链（按 priority）
 | `auto` | 允许 | 允许（scope 内） | 询问 |
 | `full` | 允许 | 允许（scope 内） | 允许（仍记录审计） |
 
-- 它订阅 `tool.beforeCall`，根据 `Access`、工具名、参数与线程/工作区 scope 决定是否 `ctx.ui.confirm`；询问时显示完整命令、cwd、原始参数（转义后）与风险说明。
+- 它订阅 `tool.beforeCall`，根据 `Access`、工具名、参数与线程/工作区 scope 决定是否 `ctx.ui.confirm`；询问时显示完整命令、cwd、原始参数（转义后）与风险说明。策略插件是系统插件，可替换为更严格/更宽松的实现；基座只保留失败关闭门禁。
 - 模式是策略插件自己的设置，不是基座配置；换一个策略插件就换一套规则，引擎不感知。
 - 非交互模式（CLI/print）没有 UI：`policy-default` 对写/执行/网络直接拒绝。
 - 拒绝理由作为工具结果回给模型（`denied: ...`），界面卡片显示 `denied`，不显示成成功。

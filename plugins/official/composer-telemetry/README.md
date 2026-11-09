@@ -13,18 +13,22 @@ SSR 搬进一个插件岛。清单里 `composer.footer` 声明了 `clientOnly: t
 
 ## 数据来源
 
-数据不来自插件后端（后端 route 拿不到 Core 的会话数据），而是基座的**通用只读投影**：
+运行状态/上下文来自基座的**通用只读投影**；token/缓存/成本来自插件自己的后端：
 
 ```
 GET /threads/{id}/state
 → { run: {status, terminal, startedAt, endedAt, errorCode, errorDetail},
-    context: {tokens, messages, system, tools, window, percent},
-    usage: { thread: {inputTokens, outputTokens, cacheTokens, costMicros}, workspace: {...} } }
+    context: {tokens, messages, system, tools, window, percent} }
+
+GET /ext/composer-telemetry/api/usage?threadId=…
+→ { thread: {inputTokens, outputTokens, cacheTokens, costMicros},
+    workspace: {inputTokens, outputTokens, cacheTokens, costMicros} }
 ```
 
-挂载时拉一次，运行中（`running` / `waiting_input`）每 2s 轮询，进入终态即停
-（终态后基座会整页 reload，那时再取新值）。`threadId` 来自 `props.data.thread.id`，
-工作区显示名来自 `props.app.workspaceName`（基座已算好，插件不用拆 Windows 路径）。
+用量 route 由 `index.ts` 用 `events.read` 读取 SQLite 每轮原始行后聚合；基座不再在
+`/threads/{id}/state` 里返回 `usage`。挂载时拉一次，运行中（`running` / `waiting_input`）
+每 2s 轮询，进入终态即停（终态后基座会整页 reload，那时再取新值）。`threadId` 来自
+`props.data.thread.id`，工作区显示名来自 `props.app.workspaceName`。
 
 ## 口径与基座一致
 

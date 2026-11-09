@@ -306,6 +306,7 @@ type Instance struct {
 	warnings   []string
 	contrib    *Contribution
 	loopPtr    *mojsLoop
+	timerStop  context.CancelFunc
 
 	// recoverMu 串行化半开探测：冷却到点后多个并发调用只做一次重建。
 	recoverMu sync.Mutex
@@ -362,7 +363,48 @@ func Load(ctx context.Context, script Script, caps *CapabilitySet, hc Context, o
 		_ = p.Close(context.Background())
 		return nil, o.err
 	}
+	p.startTimers()
 	return p, nil
+}
+
+// startTimers 为 agent.every 登记的每条周期任务起一个 goroutine。
+//
+// 每次调用都用新的 Context（不复用插件在路由里捕获的 ctx），并且有独立
+// 超时；插件 Close 时取消。它只是通用定时器，不解释 cron 表达式或任务。
+func (p *Instance) startTimers() {
+	c := p.Contribution()
+	if c == nil || len(c.Timers) == 0 {
+		return
+	}
+	base, cancel := context.WithCancel(context.Background())
+	p.mu.Lock()
+	p.timerStop = cancel
+	p.mu.Unlock()
+	for _, t := range c.Timers {
+		interval := time.Duration(t.IntervalMS) * time.Millisecond
+		handler := t.Handler
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-base.Done():
+					return
+				case <-p.quit:
+					return
+				case <-ticker.C:
+				}
+				ctx, stop := context.WithTimeout(base, 10*time.Second)
+				_, err := p.CallRoute(ctx, handler, json.RawMessage(`{"timer":true}`), p.baseContext(ctx))
+				stop()
+				if err != nil && !p.closed.Load() && p.hc.Log != nil {
+					p.hc.Log("warn", "host.timer.failed", map[string]any{
+						"pluginId": p.id, "error": err.Error(),
+					})
+				}
+			}
+		}()
+	}
 }
 
 // serve 是 owner goroutine：Runtime/Loop 只在它上面被使用。
@@ -1222,8 +1264,13 @@ func (p *Instance) Close(ctx context.Context) error {
 		close(p.quit)
 	}
 	p.mu.Lock()
+	stopTimers := p.timerStop
+	p.timerStop = nil
 	loop := p.loopPtr
 	p.mu.Unlock()
+	if stopTimers != nil {
+		stopTimers()
+	}
 	if loop != nil {
 		loop.Interrupt(errInterruptClosed)
 	}
@@ -1323,7 +1370,7 @@ func (p *Instance) openRuntime() error {
 	rt := moejs.NewRuntime(moejs.Options{
 		Importer: p.loader.importer(),
 		// 内存上限只到 MemoryLimit（64MB）；栈与调用深度的上限由 moejs 固定
-		// （alpha.11 没有 StackSize/MaxCallDepth 选项，见 docs/decisions.md D-7）。
+		// （alpha.11 没有 StackSize/MaxCallDepth 选项，见 docs/11-structure-roadmap.md D-7）。
 		MemoryLimit:        p.memoryLimit(),
 		DisableDynamicCode: p.caps.Trust != plugins.TrustBuiltin,
 		Locale:             "en-US",

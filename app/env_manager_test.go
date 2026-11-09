@@ -1,6 +1,6 @@
 package app_test
 
-// 环境变量管理页的数据面：env-manager 的 route 走 capability env.admin。
+// 环境变量管理页的数据面：env-manager 的 route 走 global.config（vars）与 ctx.fs（bins）。
 
 import (
 	"context"
@@ -107,11 +107,11 @@ func TestEnvManagerRoutes(t *testing.T) {
 	if _, err := call("POST", "/set", map[string]any{"scope": "global", "key": "G_TOKEN", "value": "g1"}); err != nil {
 		t.Fatalf("set global: %v", err)
 	}
-	wsRaw, err := os.ReadFile(filepath.Join(ws, ".adago", "env.json"))
+	wsRaw, err := os.ReadFile(filepath.Join(ws, ".adago", "config", "env.json"))
 	if err != nil || !strings.Contains(string(wsRaw), `"WS_TOKEN": "w1"`) {
 		t.Fatalf("工作区文件: %v %q", err, wsRaw)
 	}
-	globalRaw, err := os.ReadFile(filepath.Join(home, "env.json"))
+	globalRaw, err := os.ReadFile(filepath.Join(home, "config", "env.json"))
 	if err != nil || !strings.Contains(string(globalRaw), `"G_TOKEN": "g1"`) {
 		t.Fatalf("全局文件: %v %q", err, globalRaw)
 	}

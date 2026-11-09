@@ -1,135 +1,140 @@
 // env-manager 后端：环境变量管理页的数据面。
 //
-// 能力位 env.admin（仅 builtin）提供 ctx.env：
-//   - list()                 两层（global/workspace）原文 + 合并视图 + 警告；
-//   - set(scope, key, value) 写一份文件（scope 只能是 global / workspace）；
-//   - remove(scope, key)     删一个变量。
-// 宿主只接受固定路径（不接收脚本传路径），键名校验、大小上限、0600 原子写在
-// internal/envstore 里完成；页面通过本插件 route 调用，写操作受 CSRF 约束。
-//
-// 布局与交互都在 env-page.tsx（岛屿组件，SSR + hydrate）。
+// 数据面：
+//   - 变量存 global.config 的 env 命名空间：
+//       ctx.config           机器级（$ADAGO_HOME/config/env.json）
+//       ctx.config.workspace 工作区级（<workspace>/.adago/config/env.json）
+//   - 服务程序目录由插件用 ctx.fs 投影；变量校验、读写、合并全部在本插件。
+// 页面通过本插件 route 调用，写操作受 CSRF 约束。
 
-interface EnvLayer {
-  path: string;
-  vars: Record<string, string>;
-}
-
-interface EnvBinPath {
-  scope: string;
-  path: string;
-  exists: boolean;
-}
-
-interface EnvBinProgram {
-  scope: string;
-  name: string;
-  size: number;
-  modified: string;
-}
-
-interface EnvBins {
-  paths: EnvBinPath[];
-  programs: EnvBinProgram[];
-}
-
-interface EnvState {
-  global: EnvLayer;
-  workspace: EnvLayer;
-  merged: Record<string, string>;
-  warnings: string[];
-  bins: EnvBins;
-}
-
-interface EnvSetResult {
-  scope: string;
-  path: string;
-  key: string;
-  changed: boolean;
-}
-
-interface EnvRemoveResult {
-  scope: string;
-  path: string;
-  key: string;
-  removed: boolean;
-}
-
-interface RouteRequest {
-  method: "GET" | "POST";
-  path: string;
-  query: Record<string, string>;
-  body?: unknown;
-}
-
-interface RouteContext {
-  env: {
-    list(): EnvState;
-    set(scope: string, key: string, value: string): EnvSetResult;
-    remove(scope: string, key: string): EnvRemoveResult;
-  };
-}
-
-interface AgentAPI {
-  route(
-    method: "GET" | "POST",
-    path: string,
-    handler: (req: RouteRequest, ctx: RouteContext) => unknown,
-  ): void;
-  registerAction(def: {
-    name: string;
-    mode: "read" | "write";
-    execute: (input: unknown, ctx: RouteContext) => unknown;
-  }): void;
-}
-
-function fail(message: string): never {
-  const e = new Error(message);
-  (e as any).code = "ERR_INVALID_ARG_VALUE";
-  throw e;
-}
-
-function bodyOf(req: RouteRequest): Record<string, unknown> {
+function bodyOf(req) {
   const body = req.body;
   if (!body || typeof body !== "object" || Array.isArray(body)) {
-    throw fail("请求体必须是 JSON 对象");
+    throw new Error("请求体必须是 JSON 对象");
   }
-  return body as Record<string, unknown>;
+  return body;
 }
 
-function scopeOf(body: Record<string, unknown>): string {
+function scopeOf(body) {
   const scope = String(body.scope || "").trim();
   if (scope !== "global" && scope !== "workspace") {
-    throw fail(`scope 只能是 global 或 workspace（收到 ${JSON.stringify(scope)}）`);
+    throw new Error(`scope 只能是 global 或 workspace（收到 ${JSON.stringify(scope)}）`);
   }
   return scope;
 }
 
-function keyOf(body: Record<string, unknown>): string {
+function keyOf(body) {
   const key = String(body.key || "").trim();
-  if (!key) throw fail("需要变量名 key");
+  if (!key) throw new Error("需要变量名 key");
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+    throw new Error("变量名必须匹配 ^[A-Za-z_][A-Za-z0-9_]*$");
+  }
+  if (/^ADAG_/i.test(key)) throw new Error("ADAG_ 是宿主保留前缀");
   return key;
 }
 
-export default function (agent: AgentAPI): void {
-  agent.route("GET", "/state", (_req, ctx) => ctx.env.list());
+function valueOf(body) {
+  const value = body.value === undefined || body.value === null ? "" : String(body.value);
+  if (value.length > 32 * 1024) throw new Error("变量值超过 32KB");
+  if (value.includes("\0")) throw new Error("变量值不能包含 NUL");
+  return value;
+}
 
-  // 只读动作 state：供页面 SSR 预取（props.data.backend["env-manager"].page_settings），
-  // 首屏与无 JS 时也能看到两层变量与服务程序目录。
+async function varsOf(scope, ctx) {
+  const store = scope === "workspace" ? ctx.config.workspace : ctx.config;
+  const raw = await store.get("vars");
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+}
+
+async function saveVars(scope, ctx, vars) {
+  const store = scope === "workspace" ? ctx.config.workspace : ctx.config;
+  await store.set("vars", vars);
+}
+
+
+async function binsOf(ctx) {
+  const globalConfig = ctx.config.path();
+  const adagoHome = globalConfig.replace(/[\\/]config[\\/][^\\/]+$/, "");
+  const wsConfig = String(ctx.config.workspace.path() || "");
+  const wsRoot = wsConfig.replace(/[\\/]\.adago[\\/]config[\\/][^\\/]+$/, "");
+  const sep = wsRoot.includes("\\") ? "\\" : "/";
+  const wsBin = wsRoot.replace(/[\\/]+$/, "") + sep + ".adago" + sep + "bin";
+  const gsep = adagoHome.includes("\\") ? "\\" : "/";
+  const globalBin = adagoHome.replace(/[\\/]+$/, "") + gsep + "bin";
+  const paths = [];
+  const programs = [];
+  for (const item of [
+    { scope: "workspace", path: wsBin },
+    { scope: "global", path: globalBin },
+  ]) {
+    let exists = false;
+    try {
+      const entries = await ctx.fs.list(item.path);
+      exists = true;
+      for (const e of entries || []) {
+        if (e.dir) continue;
+        programs.push({ scope: item.scope, name: e.name, size: e.size, modified: "" });
+      }
+    } catch {
+      exists = false;
+    }
+    paths.push({ scope: item.scope, path: item.path, exists });
+  }
+  return { paths, programs };
+}
+
+export default function (agent) {
+  agent.route("GET", "/state", async (_req, ctx) => {
+    const g = await varsOf("global", ctx);
+    const w = await varsOf("workspace", ctx);
+    return {
+      global: { path: ctx.config.path(), vars: g },
+      workspace: { path: ctx.config.workspace.path(), vars: w },
+      merged: Object.assign({}, g, w),
+      warnings: [],
+      bins: await binsOf(ctx),
+    };
+  });
+
+  // 只读动作 state：供页面 SSR 预取，首屏/无 JS 也能看到两层变量与服务程序目录。
   agent.registerAction({
     name: "state",
     mode: "read",
-    execute: (_input, ctx) => ctx.env.list(),
+    execute: async (_input, ctx) => {
+      const g = await varsOf("global", ctx);
+      const w = await varsOf("workspace", ctx);
+      return {
+        global: { path: ctx.config.path(), vars: g },
+        workspace: { path: ctx.config.workspace.path(), vars: w },
+        merged: Object.assign({}, g, w),
+        warnings: [],
+        bins: await binsOf(ctx),
+      };
+    },
   });
 
-  agent.route("POST", "/set", (req, ctx) => {
+  agent.route("POST", "/set", async (req, ctx) => {
     const body = bodyOf(req);
-    const value = body.value === undefined || body.value === null ? "" : String(body.value);
-    return ctx.env.set(scopeOf(body), keyOf(body), value);
+    const scope = scopeOf(body);
+    const key = keyOf(body);
+    const value = valueOf(body);
+    const vars = await varsOf(scope, ctx);
+    vars[key] = value;
+    await saveVars(scope, ctx, vars);
+    const store = scope === "workspace" ? ctx.config.workspace : ctx.config;
+    return { scope, path: store.path(), key, changed: true };
   });
 
-  agent.route("POST", "/remove", (req, ctx) => {
+  agent.route("POST", "/remove", async (req, ctx) => {
     const body = bodyOf(req);
-    return ctx.env.remove(scopeOf(body), keyOf(body));
+    const scope = scopeOf(body);
+    const key = keyOf(body);
+    const vars = await varsOf(scope, ctx);
+    const removed = Object.prototype.hasOwnProperty.call(vars, key);
+    delete vars[key];
+    await saveVars(scope, ctx, vars);
+    const store = scope === "workspace" ? ctx.config.workspace : ctx.config;
+    return { scope, path: store.path(), key, removed };
   });
 }
 

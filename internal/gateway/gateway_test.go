@@ -141,7 +141,7 @@ func TestGatewayHandlerCoreErrorPage(t *testing.T) {
 	}
 }
 
-// TestGatewayTokenQueryLogin 钉「?token= 自动登录」语义（桌面壳/托盘，docs/desktop-shell.md）：
+// TestGatewayTokenQueryLogin 钉「?token= 自动登录」语义（桌面壳/托盘，docs/01-architecture.md）：
 // 匹配 → 下发 cookie 并 303 去掉 query；不匹配 → 走正常鉴权链（303 /login）。
 func TestGatewayTokenQueryLogin(t *testing.T) {
 	// 只验证登录链路：注入假监督者，避免把测试二进制当成 Core 拉起。

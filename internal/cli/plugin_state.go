@@ -24,8 +24,6 @@ import (
 	"time"
 
 	"github.com/adag/ada-go/internal/adapters/sqlite"
-	"github.com/adag/ada-go/internal/coreapp"
-	"github.com/adag/ada-go/internal/corecontracts"
 	"github.com/adag/ada-go/internal/plugins/discovery"
 	"github.com/adag/ada-go/internal/plugins/host"
 )
@@ -325,7 +323,7 @@ func (s *Session) installPluginGlobally(
 	// 而不是等用户点重载时才发现装不上。
 	if err := s.preflightPluginAssembly(ctx, dir); err != nil {
 		_ = os.RemoveAll(dir)
-		return host.PluginInstallResult{}, fmt.Errorf("插件 %s 预加载失败，已回滚安装: %w", id, err)
+		return host.PluginInstallResult{}, fmt.Errorf("插件 %s 静态预检失败，已回滚安装: %w", id, err)
 	}
 	names := make([]string, 0, len(cleaned))
 	for _, f := range cleaned {
@@ -335,11 +333,10 @@ func (s *Session) installPluginGlobally(
 	return host.PluginInstallResult{ID: id, Dir: dir, Files: names}, nil
 }
 
-// preflightPluginAssembly 用单插件产品做一次完整装配：入口工厂执行、工具/动作
-// 注册形状、能力信任矩阵都在这里收口；错误文本与真实重载一致。
+// preflightPluginAssembly 做**不执行插件代码**的静态预检：清单、入口语法、
+// 模块链接与能力白名单。它不再运行入口工厂，也不再触发网络/子进程副作用；
+// 真正的贡献校验（registerTool 形状、重名等）留给启用后的显式重载（09 §10.2、11 §16 P0）。
 func (s *Session) preflightPluginAssembly(ctx context.Context, dir string) error {
-	// LoadDirDetailed 以「父目录里的插件子目录」为单位扫描；dir 本身就是插件
-	// 目录，所以加载它的父目录再挑出目标项。
 	loaded, warnings, err := discovery.LoadDirDetailed(filepath.Dir(dir), "")
 	if err != nil {
 		return err
@@ -361,34 +358,11 @@ func (s *Session) preflightPluginAssembly(ctx context.Context, dir string) error
 		}
 		return errors.New("目录里没有可加载的插件")
 	}
-	productRaw, err := json.Marshal(map[string]any{
-		"id": "plugin-install-preview", "name": "插件安装预检",
-		"plugins":      []string{script.Manifest.ID},
-		"capabilities": map[string]any{"skills": false, "images": false, "subagents": false},
-		"identity":     map[string]any{"name": "ada-go", "locale": "zh-CN"},
-		"policies": map[string]any{
-			"toolTimeoutMs": 120000, "turnTimeoutMs": 0, "maxTurnTokens": 0,
-			"loopRepeatLimit": 3, "loopAbortLimit": 5, "parallelTools": 1,
-		},
-	})
+	caps, err := host.NewCapabilitySet(script.Manifest, dir, nil, nil)
 	if err != nil {
 		return err
 	}
-	p, err := coreapp.ParseProduct(productRaw)
-	if err != nil {
-		return err
-	}
-	asm, err := s.assembler.Assemble(ctx, p, []host.Script{script}, corecontracts.Deps{
-		Context: host.Context{
-			Workspace: dir,
-			Log:       func(string, string, map[string]any) {},
-			HTTP:      s.httpBridge,
-		},
-	})
-	if err != nil {
-		return err
-	}
-	return asm.Close(ctx)
+	return host.ValidateScript(script, caps)
 }
 
 // normalizePluginFileRel 校验安装骨架里的相对路径：拒绝绝对路径、反斜杠、
@@ -553,7 +527,7 @@ func (s *Session) checkPlugin(ctx context.Context, pluginID string) (host.Plugin
 		if err := s.preflightPluginAssembly(ctx, view.Path); err != nil {
 			addCheck("入口加载", false, err.Error())
 		} else {
-			addCheck("入口加载", true, "预检装配通过（入口工厂执行 + 注册形状合法）")
+			addCheck("入口加载", true, "静态检查通过（清单/入口/模块白名单；未执行插件代码）")
 		}
 	default:
 		addCheck("入口加载", true, "没有落盘目录，跳过预检")

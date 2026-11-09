@@ -5,11 +5,17 @@ package discovery
 
 import (
 	"archive/zip"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/adag/ada-go/internal/plugins"
 )
 
 const sampleManifest = `{
@@ -379,4 +385,157 @@ func TestInstallZipRejectsBadManifest(t *testing.T) {
 	if len(entries) != 0 {
 		t.Fatalf("失败安装留下残留: %d 项", len(entries))
 	}
+}
+
+// TestLoadDirCapsTrustBySource 钉住 P0 的来源→信任上限：磁盘插件不能靠清单
+// 自声明 builtin/verified；官方来源不受影响；降级后能力非法则失败关闭。
+func TestLoadDirCapsTrustBySource(t *testing.T) {
+	cases := []struct {
+		name      string
+		manifest  string
+		source    string
+		wantTrust plugins.Trust
+		wantSkip  bool
+	}{
+		{
+			name:      "workspace builtin 降级",
+			manifest:  `{"id":"hello-echo","name":"Hello","version":"0.1.0","apiVersion":1,"trust":"builtin","backend":{"entry":"index.ts","capabilities":[]}}`,
+			source:    SourceWorkspace,
+			wantTrust: plugins.TrustThirdParty,
+		},
+		{
+			name:      "global verified 未验签降级",
+			manifest:  `{"id":"hello-echo","name":"Hello","version":"0.1.0","apiVersion":1,"trust":"verified","sig":"fake-signature","backend":{"entry":"index.ts","capabilities":[]}}`,
+			source:    SourceGlobal,
+			wantTrust: plugins.TrustThirdParty,
+		},
+		{
+			name:     "builtin 声明 exec 降级后失败关闭",
+			manifest: `{"id":"hello-echo","name":"Hello","version":"0.1.0","apiVersion":1,"trust":"builtin","backend":{"entry":"index.ts","capabilities":["exec"]}}`,
+			source:   SourceGlobal,
+			wantSkip: true,
+		},
+		{
+			name:      "official 来源保留 builtin",
+			manifest:  `{"id":"hello-echo","name":"Hello","version":"0.1.0","apiVersion":1,"trust":"builtin","backend":{"entry":"index.ts","capabilities":["exec"]}}`,
+			source:    string(plugins.OriginOfficial),
+			wantTrust: plugins.TrustBuiltin,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			dir := writePlugin(t, root, "hello-echo")
+			if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(tc.manifest), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			loaded, warnings, err := LoadDirDetailed(root, tc.source)
+			if err != nil {
+				t.Fatalf("LoadDirDetailed: %v", err)
+			}
+			if tc.wantSkip {
+				if len(loaded) != 0 || len(warnings) != 1 {
+					t.Fatalf("期望失败关闭：loaded=%d warnings=%+v", len(loaded), warnings)
+				}
+				return
+			}
+			if len(warnings) != 0 || len(loaded) != 1 {
+				t.Fatalf("loaded=%d warnings=%+v", len(loaded), warnings)
+			}
+			if got := loaded[0].Script.Manifest.Trust; got != tc.wantTrust {
+				t.Fatalf("trust = %s，期望 %s", got, tc.wantTrust)
+			}
+		})
+	}
+}
+
+// TestVerifiedPluginRequiresValidSignature 钉住 Ed25519 验签：有效签名保留
+// verified，篡改目录/错误签名/无公钥都降级为 third-party。
+func TestVerifiedPluginRequiresValidSignature(t *testing.T) {
+	t.Setenv("ADAGO_HOME", t.TempDir())
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeVerified := func(t *testing.T, root, id string) (string, *plugins.Manifest) {
+		t.Helper()
+		dir := writePlugin(t, root, id)
+		m := &plugins.Manifest{
+			ID: id, Name: "Verified", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
+			Trust:   plugins.TrustVerified,
+			Backend: &plugins.Backend{Entry: "index.ts"},
+		}
+		sig, err := plugins.SignManifest(m, dir, priv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m.Sig = sig
+		raw, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "plugin.json"), raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return dir, m
+	}
+
+	t.Run("valid", func(t *testing.T) {
+		t.Setenv("ADAGO_PLUGIN_PUBKEYS", base64.StdEncoding.EncodeToString(pub))
+		root := t.TempDir()
+		writeVerified(t, root, "hello-echo")
+		loaded, warnings, err := LoadDirDetailed(root, SourceGlobal)
+		if err != nil || len(warnings) != 0 || len(loaded) != 1 {
+			t.Fatalf("loaded=%d warnings=%+v err=%v", len(loaded), warnings, err)
+		}
+		if got := loaded[0].Script.Manifest.Trust; got != plugins.TrustVerified {
+			t.Fatalf("有效签名应保留 verified，得到 %s", got)
+		}
+	})
+
+	t.Run("tampered", func(t *testing.T) {
+		t.Setenv("ADAGO_PLUGIN_PUBKEYS", base64.StdEncoding.EncodeToString(pub))
+		root := t.TempDir()
+		dir, _ := writeVerified(t, root, "hello-echo")
+		if err := os.WriteFile(filepath.Join(dir, "index.ts"), []byte(sampleSource+"\n// tampered\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		loaded, _, err := LoadDirDetailed(root, SourceGlobal)
+		if err != nil || len(loaded) != 1 {
+			t.Fatalf("loaded=%d err=%v", len(loaded), err)
+		}
+		if got := loaded[0].Script.Manifest.Trust; got != plugins.TrustThirdParty {
+			t.Fatalf("篡改目录应降级 third-party，得到 %s", got)
+		}
+	})
+
+	t.Run("wrong key", func(t *testing.T) {
+		otherPub, _, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("ADAGO_PLUGIN_PUBKEYS", base64.StdEncoding.EncodeToString(otherPub))
+		root := t.TempDir()
+		writeVerified(t, root, "hello-echo")
+		loaded, _, err := LoadDirDetailed(root, SourceGlobal)
+		if err != nil || len(loaded) != 1 {
+			t.Fatalf("loaded=%d err=%v", len(loaded), err)
+		}
+		if got := loaded[0].Script.Manifest.Trust; got != plugins.TrustThirdParty {
+			t.Fatalf("错误公钥应降级 third-party，得到 %s", got)
+		}
+	})
+
+	t.Run("no keys", func(t *testing.T) {
+		t.Setenv("ADAGO_PLUGIN_PUBKEYS", "")
+		root := t.TempDir()
+		writeVerified(t, root, "hello-echo")
+		loaded, _, err := LoadDirDetailed(root, SourceGlobal)
+		if err != nil || len(loaded) != 1 {
+			t.Fatalf("loaded=%d err=%v", len(loaded), err)
+		}
+		if got := loaded[0].Script.Manifest.Trust; got != plugins.TrustThirdParty {
+			t.Fatalf("没有公钥应降级 third-party，得到 %s", got)
+		}
+	})
 }

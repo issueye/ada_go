@@ -79,6 +79,9 @@ type Descriptor struct {
 	Discovery bool `json:"discovery"`
 	// PluginID 是贡献该工具的插件 id（“官方工具插件”或第三方；基座源码不出现具体插件 id）。
 	PluginID string `json:"pluginId"`
+	// System 标记宿主为内置发现桥预留的工具（find_tool/exec_tool）；
+	// 只有持有 tool.discovery 的 builtin 系统插件会被宿主置位，不进入 wire。
+	System bool `json:"-"`
 }
 
 // ToolCall 是模型发起的一次工具调用引用（08 §8.4 回执的 callId/tool；

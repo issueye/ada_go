@@ -2,7 +2,7 @@ package host
 
 // 本文件是 node:fs / node:fs/promises 的宿主守卫与 ctx.fs 的落点（12 §6.12.1(2)、6.13）。
 //
-// 分工（D-7 实测结论，见 docs/decisions.md）：
+// 分工（D-7 实测结论，见 docs/11-structure-roadmap.md）：
 //   - 根、只读、错误码形状由上游 moejs node 包的 FSOptions{Root, Mount, Write, Allow} 执行；
 //   - 宿主在这里补三件上游没有的事：被裁剪成员的「调用即抛」ERR_ACCESS_DENIED、
 //     16MB/10k 上限（E-6，上游只有 Runtime 的 MemoryLimit 兜底）、每次受控访问的审计。
@@ -38,6 +38,8 @@ type fsGuard struct {
 	promises    bool // 本次包装的是否是 fs/promises 模块
 	limits      Limits
 	pluginRoots []string // 允许写的已安装插件根（默认 ~/.adago/plugins）
+	pluginID    string   // 发起写入的插件 id（只能写自己的目录，builtin 例外）
+	trust       plugins.Trust
 }
 
 func init() {
@@ -73,7 +75,24 @@ func newFSGuard(st *capsState) (*fsGuard, error) {
 		write:       st.caps != nil && st.caps.Has(plugins.CapFSWrite),
 		limits:      st.limits,
 		pluginRoots: pluginWriteRoots(),
+		pluginID:    capsPluginID(st.caps),
+		trust:       capsTrust(st.caps),
 	}, nil
+}
+
+// capsPluginID / capsTrust 从能力集合取插件身份；nil 集合按「无身份、非 builtin」处理。
+func capsPluginID(caps *CapabilitySet) string {
+	if caps == nil {
+		return ""
+	}
+	return caps.PluginID
+}
+
+func capsTrust(caps *CapabilitySet) plugins.Trust {
+	if caps == nil {
+		return plugins.TrustThirdParty
+	}
+	return caps.Trust
 }
 
 // options 交给上游 node 包：根、挂载点、只读、逐次访问审批。
@@ -166,7 +185,7 @@ func (g *fsGuard) writePath(virtual string) (string, bool, error) {
 		real, err := g.realPath(virtual)
 		return real, false, err
 	}
-	allowed, err := allowPluginWrite(g.pluginRoots, abs)
+	allowed, err := allowPluginWrite(g.pluginRoots, abs, g.pluginID, g.trust)
 	if err != nil {
 		return "", true, throwCodedPathCap(g, fmt.Errorf(
 			"路径 %q 越出工作区根（挂载点 %s）：%v", baseForLog(virtual), g.mount, err), string(plugins.CapFSWrite))
@@ -417,10 +436,16 @@ func installContextMembers(rt *mojsRuntime, put func(name string, v moejs.Value)
 	if err := addProcessContextMember(st, hc, put); err != nil {
 		keep(err)
 	}
-	if err := addEnvAdminContextMember(st, hc, put); err != nil {
+	if err := addGlobalConfigContextMember(st, hc, put); err != nil {
 		keep(err)
 	}
-	if err := addCronAdminContextMember(st, hc, put); err != nil {
+	if err := addEventsContextMember(st, hc, put); err != nil {
+		keep(err)
+	}
+	if err := addTurnContextMember(st, hc, put); err != nil {
+		keep(err)
+	}
+	if err := addToolDiscoveryContextMembers(st, hc, put); err != nil {
 		keep(err)
 	}
 	return firstErr

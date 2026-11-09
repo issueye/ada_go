@@ -206,7 +206,7 @@ func TestCoreRPCThreadAndTurn(t *testing.T) {
 	if hello["productId"] != "headless" || hello["pid"] == nil {
 		t.Fatalf("hello = %v", hello)
 	}
-	if plugins, _ := hello["plugins"].([]any); len(plugins) != 11 {
+	if plugins, _ := hello["plugins"].([]any); len(plugins) != 14 {
 		t.Fatalf("plugins = %v", hello["plugins"])
 	}
 	if ws, _ := hello["workspace"].(map[string]any); ws["workspaceKey"] == "" {
@@ -872,61 +872,6 @@ func TestModelSetScopes(t *testing.T) {
 	c.callError(t, "model.set", map[string]any{
 		"model": map[string]any{"providerId": wsModel.ProviderID, "modelId": "no-such-model"},
 	})
-}
-
-type usageShape struct {
-	Provider     string `json:"provider"`
-	Model        string `json:"model"`
-	InputTokens  int    `json:"inputTokens"`
-	OutputTokens int    `json:"outputTokens"`
-	CacheTokens  int    `json:"cacheTokens"`
-	CostMicros   int64  `json:"costMicros"`
-}
-
-func (u usageShape) total() int { return u.InputTokens + u.OutputTokens + u.CacheTokens }
-
-func TestUsageGetAggregates(t *testing.T) {
-	sess := newSession(t, nil)
-	url, _ := startServer(t, sess, "")
-	c := dial(t, url, "")
-	threadID := createThread(t, c, "usage")
-	runTurn(t, c, threadID, "usage-0001", "hello usage")
-
-	var res struct {
-		Thread    usageShape `json:"thread"`
-		Workspace usageShape `json:"workspace"`
-	}
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		raw := c.call(t, "usage.get", map[string]any{"threadId": threadID})
-		if err := json.Unmarshal(raw, &res); err != nil {
-			t.Fatalf("usage.get = %s (%v)", raw, err)
-		}
-		if res.Thread.total() > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("thread 用量仍为零: %s", raw)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if res.Thread.Provider != "fake" || res.Thread.Model != "fake-1" {
-		t.Fatalf("thread 用量归属 = %+v", res.Thread)
-	}
-	if res.Workspace.total() < res.Thread.total() {
-		t.Fatalf("workspace=%+v thread=%+v", res.Workspace, res.Thread)
-	}
-
-	raw := c.call(t, "usage.get", map[string]any{})
-	if err := json.Unmarshal(raw, &res); err != nil {
-		t.Fatalf("usage.get workspace = %s (%v)", raw, err)
-	}
-	if res.Thread != (usageShape{}) {
-		t.Fatalf("未给 threadId 时 thread 应为零值: %+v", res.Thread)
-	}
-	if res.Workspace.total() == 0 {
-		t.Fatalf("workspace 用量为零: %s", raw)
-	}
 }
 
 func TestThreadGetItemsProjection(t *testing.T) {

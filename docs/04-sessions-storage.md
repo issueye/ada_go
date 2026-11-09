@@ -2,7 +2,7 @@
 
 > 上级索引：[ada-go 设计文档](design.md)  
 > 对应章节：§5.7 会话、分支与压缩（含 SQLite 并发）、§5.8 子智能体  
-> 版本：0.1 · 2026-10-28
+> 版本：0.2 · 2026-11-09
 
 ## 5.7 会话、分支与压缩
 
@@ -92,7 +92,7 @@ CREATE TABLE audit (
 - 线程 id 为 `th_<workspaceHash>_<ulid>`，entry id 为 ULID；Gateway 可由线程 id 前缀定位工作区。
 - entry 通过 `parent_id` 形成 DAG；线程只有 `head_entry_id` 一个指针。
 - “编辑并重发”追加一个同级的新用户 entry，并把 head 移到新分支；旧分支不删除。目标是首条消息时把 head 清空（`thread.branch` 的空 `entryId`），再从根追加；`thread.get`/`thread.entries` 只返回当前 head 路径，被舍弃的分支不进入界面与模型上下文。
-- 恢复会话：从 head 回溯到最近 `compaction` entry，放入摘要，再从 `first_kept_entry_id` 重放。
+- 恢复会话：从 head 回溯到最近 `compaction` entry，放入摘要，再从 `first_kept_entry_id` 重放。`SessionStore` 是内核 seam：SQLite 是默认实现，替换实现必须通过 DAG、游标、分支、压缩 entry 与单写者并发契约测试。
 - entry 一旦写入不可修改；分支切换只改指针，保证审计与回放。
 
 **压缩**：
@@ -101,7 +101,7 @@ CREATE TABLE audit (
 - 保留最近约 20k token；切点只允许落在 user/assistant 边界，绝不在工具调用与回执之间。
 - 摘要为结构化 Markdown：目标、已完成、未完成、改动文件、关键决策、风险；追加一条 `compaction` entry。
 - 单个超长轮次无法切分时，用“拆分轮次 + 两段摘要”；摘要失败不丢历史，只标记 `compaction_failed` 并继续，用裁剪兜底；若压缩 + 裁剪后仍超出窗口（例如单条工具结果不可拆），以 `context_overflow` 结束该轮。
-- 压缩是 Core 行为，不依赖插件；插件可以观察 `compaction.before/after`，但不能替代摘要（builtin 信任插件除外）。
+- 压缩的默认实现是内核的 `ModelCompactor`（用同一个 `ModelClient` 生成摘要），保证不装任何插件也能工作；插件只能观察 `compaction.before/after`。`Compactor` 是**内核 seam**：产品可以在装配期注入替换实现（例如更便宜的摘要模型、外部摘要服务或 builtin 系统插件），但必须通过压缩契约测试（保留切点、结构化摘要、失败不丢历史、`context_overflow` 语义），且不能绕过 `compaction.*` 审计。
 
 ## 5.8 子智能体（v1.5）
 

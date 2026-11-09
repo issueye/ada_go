@@ -162,7 +162,7 @@ agent.on("tool.beforeCall", fn, { priority?: 0, action?: "deny" });       // 策
 | --- | --- | --- | --- |
 | `fs.read` / `fs.write` / `state` / `net.fetch` | ✅ | ✅ | ✅ |
 | `net.sse` / `exec` / `ui.ask` | ❌ | ✅ | ✅ |
-| `model.admin` / `plugin.admin` / `env.admin` / `cron.admin` | ❌ | ❌ | ✅ |
+| `model.admin` / `plugin.admin` / `cron.admin` | ❌ | ❌ | ✅ |
 | 前端 `backend.read`（数据投影） | ✅ | ✅ | ✅ |
 | 前端 `frontend.script`（自带 JS） | ❌ | ✅ | ✅ |
 
@@ -260,7 +260,7 @@ JSON 用 `JSON.parse(res.text)`；响应 ≤16MB。
 
 插件可以把一块**只读 UI** 嵌进助手 Markdown：清单声明 renderer，配一份数据
 Schema 与 TSX 模板；宿主校验 `data` 后渲染成 VNode，浏览器与无 JS 的
-`/markdown` 共用同一份结果。方案与完整契约见 docs/16。
+`/markdown` 共用同一份结果。方案与完整契约见 docs/15-extensions.md §16。
 
 ```json
 "frontend": {
@@ -444,5 +444,4 @@ Route（CLI/测试用；前端向导页已移除）：
 随包技能：`skills/plugin-manual/SKILL.md` — 插件手册（工作流层）：创建/检查/启停/
 移除的操作指引，外加 `adag-ui` 动态块的使用说明（语法、可用 renderer、data 规则与
 降级）；本文件是契约层，两者配合使用。
-
 

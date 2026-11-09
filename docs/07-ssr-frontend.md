@@ -2,7 +2,7 @@
 
 > 上级索引：[ada-go 设计文档](design.md)  
 > 对应章节：§7 SSR 前端  
-> 版本：0.1 · 2026-10-28
+> 版本：0.2 · 2026-11-09
 
 ## 7. SSR 前端
 
@@ -19,7 +19,7 @@
 
 明确不做：SPA、客户端路由、React hydration、客户端插件运行时、CSS-in-JS、运行时 Tailwind 扫描。
 
-> 可选扩展：[14-render-engine.md](14-render-engine.md) 提供单文件 VNode 运行时，用于**标记过的交互岛**的 hydrate 与结构化增量；[15-ui-components.md](15-ui-components.md) 在其上提供 Button/Input/Select/Tabs/Table/Modal/Toast 等组件。目前 `/overview`、`/extensions` 已启用客户端岛，其它页面仍走本节 SSR/无 JS 基线。
+> 运行时与组件细节见 [14-ui-runtime.md](14-ui-runtime.md)：单文件 VNode 运行时负责**标记过的交互岛**的 hydrate 与结构化增量，组件层提供 Button/Input/Select/Tabs/Table/Modal/Toast 等。目前 `/overview`、`/extensions` 已启用客户端岛，其它页面仍走本节 SSR/无 JS 基线。
 
 **UI 来源**：视觉语言、设计令牌、组件、DOM 结构、class 名、插槽位置与交互规则全部以 `E:\codes\rust_projects\a_da` 的 `design/tokens.css` 与 `crates/agent-web` 为准；ada-go 只替换实现技术（Askama → `html/template`，Rust 组件 → Go 组件，OXC+Boa → esbuild+moejs），不重新设计界面。细节见 [7.7](#77-ui-与设计元语直接复用-a_da)。
 
@@ -43,7 +43,7 @@
 
 > 输入框下方的 `ComposerAux` 内容现在整体由 `composer-telemetry` 插件的纯客户端岛渲染
 > （`composer.footer` + `clientOnly`），基座只保留 `#composer-aux` 外壳；见 §7.5 与
-> [19-ued.md](19-ued.md) 的「输入区指标」。
+> [14-ui-runtime.md](14-ui-runtime.md) §19 的「输入区指标」。
 
 外壳尺寸、滚动归属与 a_da 完全一致：设计基准视口 1600×1000，视口锁定 `100dvh`（`100vh` 回退），页面本身不滚动，只有对话流、侧栏列表与二级内容滚动；侧栏 264px（≤960px 为 232px，≤760px 收为抽屉），主区最小 420px，顶栏 54px，Composer 固定底部，内容内边距 24–28px（窄屏 16–18px）。外壳 class 与 a_da 当前基线一致：`ada-shell` / `ada-sidebar` / `ada-main` / `ada-topbar` / `ada-scroll` / `ada-composer` / `ada-rail`（折叠窄轨），由 `internal/gateway/web/ui.go` 的侧栏组件与 `templates/shell.html.tmpl` 输出。
 
@@ -157,19 +157,19 @@ data: {"threadId":"th_...","seq":128,"baseSeq":120,"ops":[
 
 - `slots`：插槽 + TSX 模板 + 排序；
 - `pages`：`/ext/{id}/{slug}` 独立页面；
-- `client` / `hydrate`（可选，P1）：插件浏览器 bundle 与贡献级 hydrate 开关；缺省仍是服务端渲染，旧插件不受影响；需要 `frontend.script` 能力且 trust 为 builtin/verified。框架目标与阶段见 [20-plugin-island-framework-plan.md](20-plugin-island-framework-plan.md)；
+- `client` / `hydrate`（可选）：插件浏览器 bundle 与贡献级 hydrate 开关；缺省仍是服务端渲染，旧插件不受影响；需要 `frontend.script` 能力。**第三方与系统插件同面**，不再按 trust 拒绝；安装时展示脚本风险并取得确认。运行时见 [14 §14](14-ui-runtime.md)；
 - `clientOnly`（可选，需 `hydrate: true`）：服务端**不执行**该插槽模板，只输出带 `data-ada-client-only="1"` 的
   `<div class="ada-island ada-island--client">` 空壳，浏览器用普通 `mount` 接管。**没有 SSR 回退**：
   插件停用或 bundle 加载失败时该插槽保持空白（首个使用者是 `composer-telemetry`）。
 - `nav`：侧栏导航项；
 - `dashboard`：概览页卡片；
 - `actions`：读/写后端动作绑定；
-- `api`：插件自己的 JSON 端点（GET/POST，模板渲染或直接 JSON）；
-- `styles` / `scripts` / `assets`：静态资源。
+- `blocks`：Markdown `adag-ui` 动态块（见 [15 §16](15-extensions.md)）；
+- `styles` / `scripts` / `assets`：静态资源。插件自己的 JSON 端点走后端 `route()`，清单没有独立的 `api` 字段（G-9）。
 
-**渲染链路**：
+**渲染链路**（系统与第三方同一条）：
 
-1. 官方插件取构建期预编译的 `dist/*.js`；第三方在加载时用 esbuild 打包（bundle、ESM、external `ssr:components`），得到单个 JS 模块；
+1. 系统插件取构建期预编译的 `dist/*.js`；第三方在加载时用 esbuild 打包（bundle、ESM、external `ssr:components`），得到单个 JS 模块；
 2. 每个 Render Runtime 初始化时注册虚拟组件模块，执行页面/插槽模块取得导出函数；
 3. 请求时构造 `props`（服务端数据 + 预取动作结果），`CallContext` 执行 `Slot/Page`；
 4. 返回值 `Decode` 成 Go `any`，校验 VNode，渲染 HTML；
@@ -179,12 +179,12 @@ Render Runtime **不安装 Node 兼容层**：没有 `process`、`Buffer`、`fs`
 
 **只读数据投影**（`backend.read` 能力位，与只读动作预取同一个门禁）：
 
-- `data.providers`：`provider.list` + `model.list` 的供应商/模型清单与当前模型（不含 API Key）；
-- `data.usage`：`usage.get` 的工作区与当前线程聚合（输入/输出/缓存 token、成本）；
-- `data.interactions`：`thread.get` 返回的当前线程待答交互（审批/选择/输入）；
+- `data.providers`：供应商/模型目录与当前模型（不含 API Key）；这是通用配置视图，供应商 CRUD 归 `provider-admin` 系统插件。
+- `data.usage`：已移除。token/成本不再由基座注入；需要展示的插件声明 `backend.read` 动作，经 `events.read` 读取每轮原始行后自行聚合。
+- `data.interactions`：当前线程待答交互（审批/选择/输入）；这是内核交互投影，不属于业务语义。
 - `app.csrf`：写表单的双提交 token（与基座模板里的隐藏字段同源）。
 
-写操作仍走基座路由（如 `POST /model/select` 切换当前模型）或插件动作；投影只读，不改 Core 状态。当前渲染运行时的组件实现面是 `Icon` / `TodoList` / `Select`，其它组件名虽在白名单里，执行会返回「尚未实现」——官方插件优先用原生标签 + `ada-*` class；下拉一律用 `Select` 组件（SSR 成 `<ada-select>`），不要写原生 `<select>`。
+写操作仍走基座通用路由（如 `POST /model/select` 切换当前模型）或插件动作；投影只读，不改 Core 状态。当前渲染运行时的组件实现面是 `Icon` / `TodoList` / `Select`，其它组件名虽在白名单里，执行会返回「尚未实现」——系统插件优先用原生标签 + `ada-*` class；下拉一律用 `Select` 组件（SSR 成 `<ada-select>`），不要写原生 `<select>`。
 
 **Props**：
 
@@ -206,7 +206,7 @@ type SlotProps = {
 - 数据是**投影**，不是任意查询；插件不能借 props 读别的线程或文件。
 - 后端只读动作最多 16 个、并发 4、单个 300ms、结果缓存 8s；失败只影响对应 `backend.<id>.<name>`。
 - 写动作必须用户点击，走 CSRF + 确认；`read: false` 的动作不会在 SSR 时执行。
-- 插件 JS（`scripts`）默认不加载；需要 `frontend.script` 能力且信任级别为 builtin/verified。第三方 JS 同源运行，仍是风险点；v1.1 评估 iframe 隔离，v1 建议优先用 HTMX/表单。
+- 插件 JS（`scripts`/`client`）需要 `frontend.script` 能力；第三方与系统插件同面，安装时展示风险并取得确认。同源脚本仍是风险点；CSP、审计与可选 iframe/Worker 隔离见 [09 §9.3](09-security-operations.md)。
 
 ### 7.6 动作桥与动态接口
 
@@ -219,7 +219,7 @@ type SlotProps = {
   → 写动作 303 回页面；读动作返回 JSON
 ```
 
-- 动作不是工具：不进模型上下文，不受 `tool.beforeCall` 策略约束，但必须在界面上由用户点击确认，且受插件能力与 scope 约束；`exec` 能力不对第三方开放。
+- 动作不是工具：不进模型上下文，不受 `tool.beforeCall` 策略约束，但必须在界面上由用户点击确认，且受插件能力与 scope 约束；`exec` 能力仍受信任级别约束（仅 builtin/verified）。
 - 所有插件 HTTP 响应都带 `Cache-Control: no-store`（静态资源除外），避免跨用户缓存。
 
 #### 7.6.1 插件动态 HTTP API（route）
@@ -231,7 +231,7 @@ agent.route("GET", "/items/*", (req, ctx) => ({ items: [] }));
 agent.route({ method: "POST", path: "/items", handler(req, ctx) { return { ok: true }; } });
 ```
 
-官方 `provider-admin` 就是一个真实消费者：`GET /state` 读供应商/模型目录，`POST /select` 切换当前模型；页面脚本经 `window.adaAPI("provider-admin", …)` 调用，密钥与端点不经过插件。
+系统插件 `provider-admin` 就是一个真实消费者：`GET /state` 读供应商/模型目录，`POST /select` 切换当前模型；页面脚本经 `window.adaAPI("provider-admin", …)` 调用，密钥与端点由插件后端持有，页面不直接接触。
 
 ```
 浏览器 GET/POST /ext/{id}/api/{path}
@@ -243,7 +243,7 @@ agent.route({ method: "POST", path: "/items", handler(req, ctx) { return { ok: t
 
 - 只允许 GET/POST，只接受 JSON 请求体与 JSON 返回值；`body` 只对 POST 透传，单次响应上限 64KB（宿主强制）。
 - 线程上下文：`adaAPI` 在 `/threads/{id}` 页面自动带 `?threadId=`（可用 `options.threadId` 覆盖，传 `null` 关闭）；Gateway 也接受从 Referer 的会话页路径推断。route 的 `ctx.state` 按该线程命名空间读写，没有线程上下文时是工作区级操作。
-- 路由按插件隔离；同一方法+路径重复登记在加载期报错；`/*` 是前缀匹配，`Path` 保留剩余段由插件自行解析（[G-14](decisions.md)）。
+- 路由按插件隔离；同一方法+路径重复登记在加载期报错；`/*` 是前缀匹配，`Path` 保留剩余段由插件自行解析（G-14，见 [11 §15.3](11-structure-roadmap.md)）。
 - 接口不是工具、不进模型上下文；能力位与 scope 仍由插件清单决定，`exec` 等能力不因此放开。
 - 浏览器侧统一用 `window.adaAPI(pluginId, path, { method, body })`（`api.js`，自动带 CSRF），不要手写 `/ext/...` URL。需要确认再执行的操作（删除等）用 `window.adaConfirm(message, onConfirm)`（复用共享 ConfirmDialog），不要用 `window.confirm`/`alert`/`prompt`。
 
@@ -316,7 +316,7 @@ ada-go 的界面不是“参考 a_da 风格”，而是**直接使用 a_da 的 U
 - **Black Swan 主题**：宣纸暖白画布 `#F6F3EC` + 墨黑 `#16171A`；暗色反转为暖黑画布 + 暖白文字，品牌色随之反转。主按钮、选中、焦点都用品牌色，但不大面积铺底；单色品牌下链接必须带下划线。
 - **品牌底上的文字一律用 `--ph-on-brand`**，不写死 `#fff`。状态色成对使用“浅底 + 深字”，不能只换文字色。
 - **对比度**：正文 ≥ 4.5:1，大字/图标 ≥ 3:1；当前色板最低组合 4.87:1（faint/canvas）。浅色与深色都要逐项验收，不能只看浅色。
-- **主题 = 明暗 × 调色板，两维正交**（2026-11 扩展，细则与准入清单见 [19-ued.md](19-ued.md) §19.2.2/§19.3.3）：
+- **主题 = 明暗 × 调色板，两维正交**（2026-11 扩展，细则与准入清单见 [14-ui-runtime.md](14-ui-runtime.md) §19.2.2/§19.3.3）：
   明暗维维持上游机制——`theme.js` 原样复用，`localStorage` 键 `a_da_theme`，无存储时跟随系统，类名只切 `html.dark`/`html.light`；调色板维是本地叠加——`themes.js`（阻塞式，紧跟 theme.js 之后）读 `a_da_theme_mode`（light/dark/system，兼容迁移旧键）与 `a_da_theme_palette`，把 `html[data-theme="<id>"]` 设到根元素；`themes.css` 用 `html.light/dark[data-theme="<id>"]`（特异性 0,2,1）覆盖 `--ph-*`，**不设属性 = 默认 Black Swan**，`tokens.css` 原样生效。本地层与镜像文件（`theme.js`/`tokens.css`/`ui/*.css`）零改动，主题面板 DOM 由 `ui.go renderThemePanel` 输出（色板表 `themePalettes` 与 `themes.css` 色卡人工同步，`i-monitor` 图标为本地新增）。业务 CSS 禁止 `dark:` 变体，也禁止引用未在色板中全量定义的 `--ph-*` 令牌。
 - `--ph-glass` 只出现在 a_da 已经使用它的位置（如 `.app-header` 顶栏），不作为装饰性玻璃效果；不使用渐变、发光边框、彩虹标签。
 - 尺寸走 `components.css` 的 `--ada-*` 标尺：字号 10/12/14/16/20/24，圆角 6/10/14/20 + 胶囊，图标 12/14/18，间距 4/8/12/16/20/24。所有值都是 2 的倍数，不写 9px、11.5px 这类即兴值。
@@ -385,19 +385,19 @@ Todo 卡片是插件的前端段，不是基座组件：`plugins/official/tools-
 | 路由 | 页面 | 数据来源 |
 |---|---|---|
 | `GET /`、`GET /threads`、`GET /threads/{id}` | 对话页 / 会话页（持久化行可用 AdaUI keyed patch；流式仍走 SSE + live-stream） | `thread.list`、`thread.get`、`thread.entries` |
-| `GET /threads/{id}/state` | 会话遥测投影（`run` / `context` / `usage`），供插件岛运行中轮询；不含任何插件 id，与 SSR 页面共用同一份 Core 调用 | `thread.get`（`itemLimit:1`）、`usage.get` |
+| `GET /threads/{id}/state` | 会话遥测投影（`run` / `context`），供插件岛运行中轮询；不含任何插件 id，不返回用量 | `thread.get`（`itemLimit:1`） |
 | `POST /threads/{id}/send`、`POST /threads/{id}/resend` | 发送 / 编辑并重发。`resend` 把 head 移到目标用户消息的父节点（首条则清空 head），再用新文本 `turn.start`；该消息之后的当前分支被舍弃，旧分支只留在存储里 | `turn.start`、`turn.steer`、`thread.branch` |
 | `GET /overview`、`GET /partials/dashboard.json` | 概览（统计卡、最近会话、插件卡片；AdaUI 岛每 5 秒轮询 JSON） | `thread.list`、`plugin.list`、`dashboard.widgets` 插槽 |
 | `GET /workspaces` | 打开工作区（从磁盘选择新目录；AdaUI 岛 + SSR 回退；目录浏览限制在当前工作区子树内）。切换已打开的工作区在侧栏完成 | Gateway 配置 + `os.ReadDir` |
 | `GET /partials/workspace-threads?path=` | 侧栏其它工作区组展开时的会话片段（HTML，懒加载；只查目标工作区的 Core） | `thread.list` |
 | `GET /extensions` | 插件列表（AdaUI 岛 + SSR 回退；全部随包/已安装插件合并成一张表，不分区；产品未声明的随包插件显示为「未启用 / unused」，不误报 failed） | `PluginLister`、`plugin.list`、`extensions.list` 插槽 |
 | `GET /extensions/{id}` | 插件详情（AdaUI 岛 + SSR 回退；前端/后端归属、能力计数、启停、打开插件页面） | 同上 |
-| `GET/POST /ext/provider-admin/api/*` | 模型设置插件的 route：`/state` 读配置，`/save`、`/remove`、`/fetch-models`、`/select` 管理供应商与当前模型 | Core `plugin.http` → 插件 `ctx.providers` |
+| `GET/POST /ext/provider-admin/api/*` | 模型设置插件的 route：`/state` 读配置，`/save`、`/remove`、`/fetch-models`、`/select` 管理供应商与当前模型 | Core `plugin.http` → 插件 `ctx.config` / `ctx.model` |
 | `POST /model/select` | 切换当前模型（线程级/工作区级；输入框模型选择器也走这里） | `model.set` |
 | `GET /ext/{id}/{slug}` | 插件页 | `PluginUI.Page` |
 | `GET /login`、离线页、错误页 | 外壳页面 | — |
 
-二级页与聊天页共用侧栏，内容最大宽度 1040px，表格横向滚动。供应商管理是**统一官方插件**（backend `route` + TSX 骨架 + JS）：Master-Detail 管理供应商、端点、API 格式、API Key 与模型清单，可拉取 `/models`、启停供应商/模型；密钥由后端保存，页面只显示尾号。输入框旁的模型选择器通过 `POST /model/select` 切换线程级/工作区级模型，列表来自 `model.list`。有 JS 时选择即切换；无 JS 时 `<noscript>` 原生 select 随消息一起提交，基座在 `turn.start` 前调用 `model.set`。
+二级页与聊天页共用侧栏，内容最大宽度 1040px，表格横向滚动。供应商管理是**系统插件**（backend `route` + TSX 骨架 + JS）：Master-Detail 管理供应商、端点、API 格式、API Key 与模型清单，可拉取 `/models`、启停供应商/模型；密钥由后端保存，页面只显示尾号。输入框旁的模型选择器通过 `POST /model/select` 切换线程级/工作区级模型，列表来自 `model.list`。有 JS 时选择即切换；无 JS 时 `<noscript>` 原生 select 随消息一起提交，基座在 `turn.start` 前调用 `model.set`。
 
 与 a_da 的已知差异（如实声明）：工作区集合在 Gateway 启动时固定，目录选择器只能选用已配置的工作区（浏览子目录用于查看，不新增工作区）；前端插件在装配期加载，扩展页只提供 agent 插件的启用/停用与重载，前端插件变更需重启 Gateway。
 
@@ -421,4 +421,3 @@ Todo 卡片是插件的前端段，不是基座组件：`plugins/official/tools-
 ---
 
 **相邻文档**：[← 插件运行时与治理](06-plugin-runtime.md) · [索引](design.md) · [协议契约 →](08-protocol.md)
-

@@ -30,7 +30,12 @@ func pluginWriteRoots() []string {
 }
 
 // allowPluginWrite 判断 target 是否落在某个已安装插件目录内，返回规范化后的目标路径。
-func allowPluginWrite(roots []string, target string) (string, error) {
+//
+// P0 边界（09 §9.1、11 §16）：
+//   - 第三方插件只能写自己的插件目录；builtin 系统插件可维护其它插件源码；
+//   - 任何插件都不能写 plugin.json（信任/能力声明）与 dist/（可执行产物）；
+//   - 符号链接仍必须落在该插件目录内。
+func allowPluginWrite(roots []string, target, pluginID string, trust plugins.Trust) (string, error) {
 	abs, err := filepath.Abs(target)
 	if err != nil {
 		return "", err
@@ -54,6 +59,16 @@ func allowPluginWrite(roots []string, target string) (string, error) {
 		id := parts[0]
 		if !plugins.ValidID(id) {
 			return "", fmt.Errorf("插件目录名 %q 非法", id)
+		}
+		if id != pluginID && trust != plugins.TrustBuiltin {
+			return "", fmt.Errorf("第三方插件只能写自己的插件目录 %s，不能写 %s", pluginID, id)
+		}
+		inside := strings.Join(parts[1:], "/")
+		if strings.EqualFold(inside, "plugin.json") {
+			return "", fmt.Errorf("插件清单 plugin.json 是信任/能力声明，禁止经 ctx.fs 改写")
+		}
+		if inside == "dist" || strings.HasPrefix(inside, "dist/") {
+			return "", fmt.Errorf("插件可执行产物 dist/ 禁止经 ctx.fs 改写")
 		}
 		dir := filepath.Join(rootAbs, id)
 		info, err := os.Stat(dir)

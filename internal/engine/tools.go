@@ -134,14 +134,9 @@ func (r *run) runTools(calls []domain.ToolCall, catalog []domain.Descriptor) too
 			continue
 		}
 
-		// 分派执行：基座入口（find_tool/exec_tool）内联处理，其余走 Runner。
-		// 观察身份由分派决定（exec_tool 按内层工具做循环检测）。
-		res, obsDesc, obsArgs, abort := r.executeTool(call, desc, args)
-		if abort {
-			// 内层审批钩子中止了轮次：与注入式被钩子中止同形（不记结果，
-			// defer 补 interrupted 回执）。
-			return toolsErrored
-		}
+		// 所有工具（含 system 的 find_tool/exec_tool）都走同一条 Runner。
+		res := r.deps.Runner.Execute(r.ctx, domain.ToolCall{CallID: call.CallID, Tool: call.Tool, Args: args})
+		obsDesc, obsArgs := desc, args
 		record(call, res)
 		r.hook(HookToolAfterCall, mustJSON(map[string]any{
 			"callId": call.CallID, "tool": call.Tool, "status": string(res.Receipt.Status),

@@ -32,7 +32,7 @@ legacy `page.tsx` 与 `static/env-manager.js` 保留在仓库作历史参考，�
 
 ## 数据面
 
-页面经本插件 route 调用 `ctx.env`（capability `env.admin`，仅 builtin）：
+页面经本插件 route 调用 `ctx.config`（`env` 命名空间）与 `ctx.fs`（服务程序目录）：
 
 - `GET  /ext/env-manager/api/state` — 两层原文（含路径与错误）+ 合并视图；
 - `POST /ext/env-manager/api/set` — `{scope: "global"|"workspace", key, value}`；
@@ -77,5 +77,3 @@ go run ./tools/pluginbuild -dir plugins/official/env-manager -entry client.tsx -
 
 页面通过只读动作 state 预取 `/state`（落在 `props.data.backend["env-manager"].page_settings`），
 SSR 与无 JS 时也能看到两层变量与服务程序目录。
-
-

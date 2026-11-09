@@ -296,6 +296,11 @@ func TestOfficialDistInSync(t *testing.T) {
 	cmd.Dir = repoRoot(t)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		// build.mjs 使用 node:module 的 stripTypeScriptTypes（Node 22.6+）；旧 Node
+		// 可用但跑不了这个检查，按“没有可用 node”跳过，而不是伪造同步通过。
+		if strings.Contains(string(out), "stripTypeScriptTypes") {
+			t.Skipf("node 版本过旧，缺少 build.mjs 需要的 stripTypeScriptTypes：%s", strings.TrimSpace(string(out)))
+		}
 		t.Fatalf("dist 与源码不同步（运行 node plugins/official/build.mjs）：%v\n%s", err, out)
 	}
 }

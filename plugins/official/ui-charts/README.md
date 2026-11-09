@@ -79,6 +79,6 @@ Markdown 动态块的通用图表渲染器：**横向条**、**纵向柱**、**�
 
 ## 相关文档
 
-- [Markdown 动态块方案](../../docs/17-markdown-dynamic-blocks-plan.md)
+- [Markdown 动态块方案](../../docs/15-extensions.md)
 - [插件模型与后端 API](../../docs/05-plugins.md)
 - [插件平台 SPEC](../plugin-helper/SPEC.md)（§8.1 图表 class 速查、§8.2 adag-ui 语法）

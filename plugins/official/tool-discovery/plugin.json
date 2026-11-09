@@ -1,0 +1,12 @@
+{
+  "id": "tool-discovery",
+  "name": "工具发现",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "发现式工具的入口：find_tool 投影目录、exec_tool 按名执行；审批/超时/循环检测沿用内层工具自己的描述符。",
+  "trust": "builtin",
+  "backend": {
+    "entry": "index.ts",
+    "capabilities": ["tool.discovery"]
+  }
+}

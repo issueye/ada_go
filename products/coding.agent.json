@@ -9,6 +9,7 @@
     "tools-plan",
     "tools-ask",
     "tools-skill",
+    "tool-discovery",
     "policy-default",
     "persona-coding",
     "provider-admin",
@@ -39,4 +40,3 @@
     "parallelTools": 1
   }
 }
-

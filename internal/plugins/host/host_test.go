@@ -30,6 +30,7 @@ func testCaps(t *testing.T, trust plugins.Trust, caps ...plugins.Capability) *Ca
 		backend[c] = true
 	}
 	return &CapabilitySet{
+		PluginID:      "test-plugin",
 		Trust:         trust,
 		Backend:       backend,
 		Frontend:      map[plugins.Capability]bool{},

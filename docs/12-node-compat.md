@@ -2,7 +2,7 @@
 
 > 上级索引：[ada-go 设计文档](design.md)  
 > 对应章节：§6.10 定位与分层、§6.11 引擎能力契约、§6.12 Node 兼容原生库、§6.13 安全与资源边界、§6.14 兼容性验证  
-> 版本：0.1 · 2026-10-28
+> 版本：0.2 · 2026-11-09
 
 ## 6.10 定位：API 形状兼容，不是 Node 运行时
 
@@ -34,7 +34,7 @@
 - 不提供 `vm`、`inspector`、`repl`、`wasi`；`eval`/`new Function` 对第三方关闭。
 - 不承诺 Node 的版本号：`process.versions.node` 报兼容基线（如 `"20.0.0"`），`process.versions.ada` 与 `process.versions.moejs` 报真实值。
 
-**与基座边界的关系**：Node 兼容层是运行时基础设施，不是插件贡献。它不注册工具、不提供 provider、不读产品配置、不出现任何官方插件 id；它只把“已授予的能力”翻译成插件熟悉的模块形状。Gateway 的 Render Runtime 不安装任何 Node 兼容模块。
+**与基座边界的关系**：Node 兼容层是运行时基础设施，不是插件贡献。它不注册工具、不提供 provider、不读产品配置、不出现任何系统插件 id；它只把“已授予的能力”翻译成插件熟悉的模块形状。Gateway 的 Render Runtime 不安装任何 Node 兼容模块。
 
 ---
 
@@ -164,7 +164,7 @@ cfg := stdlib.Config{
 
 ### 6.12.3 解析与打包
 
-- 官方插件在构建期由 esbuild 预编译；第三方在安装/首次加载时编译。两者都以 `platform=node`、`format=esm` 打包，`node:*` 与裸内置名标记为 external，交给 Runtime 的模块表。
+- 系统插件在构建期由 esbuild 预编译；第三方在安装/首次加载时编译。两者都以 `platform=node`、`format=esm` 打包，`node:*` 与裸内置名标记为 external，交给 Runtime 的模块表。
 - CJS 依赖由 esbuild 转成 ESM 包裹，保留 `module.exports`/`exports`/`__dirname`/`__filename`；`__dirname` 是 `plugin://<id>/` 下的虚拟目录，不是宿主路径。`require` 只解析已安装的 `node:*` 或同包内联模块。
 - 推荐写 `node:` 前缀；`fs` 与 `node:fs` 解析到同一个模块实例，`require` 与 `import` 看到同一份导出。
 - 依赖在构建期全部内联；运行期**没有** npm 目录扫描、没有 `node_modules`、没有 `package.json` 的 `exports` 条件解析。缺失依赖在安装期报 `ERR_MODULE_NOT_FOUND`。
@@ -251,6 +251,3 @@ adag verify boundary            # Node 兼容层不注册工具/不出现插件 
 ---
 
 **相邻文档**：[← 目录、里程碑与风险](11-structure-roadmap.md) · [索引](design.md) · [附录 →](13-appendix.md)
-
-
-

@@ -2,7 +2,7 @@
 
 > 上级索引：[ada-go 设计文档](design.md)  
 > 对应章节：§8 协议契约  
-> 版本：0.1 · 2026-10-28
+> 版本：0.2 · 2026-11-09
 
 ## 8. 协议契约
 
@@ -52,7 +52,6 @@
 | action | `action.invoke` | 前端动作 → 后端动作 |
 | change | `change.list` | 检查点与变更 |
 | change | `change.revert` | 回滚卡片/文件/全部 |
-| usage | `usage.get` | 线程/工作区用量 |
 | debug | `debug.state` | 本机调试快照（默认关闭） |
 
 事件：
@@ -110,13 +109,13 @@
 ```
 
 `discovery` 标记「发现式」注册（05 §6.3 ToolDef.discovery）：缺省 `false`（注入式，
-声明随模型请求下发）；`true` 时不注入模型清单，模型经基座 `find_tool` 拿到
+声明随模型请求下发）；`true` 时不注入模型清单，模型经 `find_tool` 拿到
 名称/说明/参数 Schema 后用 `exec_tool` 按名执行——审批、超时、循环检测沿用
-该工具自己的描述符。`find_tool`/`exec_tool` 是基座保留名，不出现在 `tool.list`
-里，也不属于任何插件；目录里没有发现式工具时，这两个入口不注入模型请求。
-> TODO(插件化)：两个入口目前内联在引擎，计划搬迁到插件（前置是宿主提供
-> `catalog.read` / `tool.invoke` 受控桥，见 `internal/engine/discovery.go` 的 TODO）；
-> 搬迁不改变本节契约。
+该工具自己的描述符。`find_tool`/`exec_tool` 是**保留名**，由 `tool-discovery`
+系统插件提供，不进入普通工具目录，也不属于第三方插件；目录里没有发现式工具时，
+这两个入口不注入模型请求。宿主只向该 builtin 插件安装 `tool.discovery`
+（`ctx.catalog` 目录只读投影 + `ctx.tool.invoke` 内层执行）受控桥；内层执行仍走同一套
+`tool.beforeCall` → policy 失败关闭 → Runner 链路，脚本不能绕过审批。
 
 回执（工具结果 entry 的 payload）：
 
@@ -192,10 +191,16 @@ JSON-RPC 标准错误码用于传输层；业务错误用 4 位应用码：
     "tools-plan",
     "tools-ask",
     "tools-skill",
+    "tool-discovery",
     "policy-default",
     "persona-coding",
     "provider-admin",
-    "token-usage"
+    "token-usage",
+    "ui-charts",
+    "plugin-helper",
+    "env-manager",
+    "cron-manager",
+    "composer-telemetry"
   ],
   "capabilities": {
     "skills": true,
@@ -221,8 +226,8 @@ JSON-RPC 标准错误码用于传输层；业务错误用 4 位应用码：
 
 | 字段 | 消费者 |
 |---|---|
-| `plugins` | 随包官方插件的启用清单；第三方插件由发现目录与用户启用状态决定，装配时合并 |
-| `capabilities.skills/images/subagents` | 技能装配、图片输入门、子智能体装配 |
+| `plugins` | 系统插件（builtin）的启用清单；第三方插件由发现目录与用户启用状态决定，装配时合并 |
+| `capabilities.skills/images/subagents/markdownBlocks/pluginIslands` | 技能装配、图片输入门、子智能体装配、Markdown 动态块总开关、客户端岛开关 |
 | `identity.name/locale` | 界面品牌与语言；**不含人格**，人格来自 `persona-*` 插件 |
 | `policies` | 引擎并发、单工具超时、可选的墙钟/token 上限、循环检测阈值；**不含审批规则**，审批属于 `policy-*` 插件自己的设置 |
 

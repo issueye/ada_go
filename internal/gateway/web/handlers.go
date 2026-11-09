@@ -181,11 +181,11 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 	s.render(w, http.StatusOK, "chat", data)
 }
 
-// handleThreadState 是会话页的遥测轮询接口：一次 thread.get + 一次 usage.get，
-// 返回运行状态、上下文占用与用量三块只读数据，供插件岛在运行中反复取最新值。
+// handleThreadState 是会话页的遥测轮询接口：一次 thread.get，
+// 返回运行状态与上下文占用两块只读数据，供插件岛在运行中反复取最新值。
 //
-// 这里刻意不知道任何插件：数据是基座的通用投影（与 SSR 页面用的是同一份 Core
-// 调用），插件 id 只出现在插件自己的清单里（1.5.5 基座零插件 id）。
+// 这里刻意不知道任何插件：数据是基座的通用会话投影。token/成本等展示口径
+// 由插件自己的后端 route 聚合（events.read），基座不在这里补 usage.get。
 func (s *Server) handleThreadState(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" {
@@ -206,27 +206,10 @@ func (s *Server) handleThreadState(w http.ResponseWriter, r *http.Request) {
 	if get.Context != nil {
 		out["context"] = get.Context
 	}
-	// 用量的失败不致命：没有用量时只有 run/context，插件按缺字段退化显示。
-	if rawUsage, err := s.call(r, "usage.get", map[string]any{"threadId": id}); err == nil {
-		var usage struct {
-			Thread    usageTotalsDTO `json:"thread"`
-			Workspace usageTotalsDTO `json:"workspace"`
-		}
-		if json.Unmarshal(rawUsage, &usage) == nil {
-			out["usage"] = usage
-		}
-	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_ = json.NewEncoder(w).Encode(out)
-}
-
-type usageTotalsDTO struct {
-	InputTokens  int   `json:"inputTokens"`
-	OutputTokens int   `json:"outputTokens"`
-	CacheTokens  int   `json:"cacheTokens"`
-	CostMicros   int64 `json:"costMicros"`
 }
 
 // handleTranscriptJSON 只返回对话流行，供浏览器岛做 keyed patch；
@@ -1550,6 +1533,15 @@ func (s *Server) handleWorkspacesAPI(w http.ResponseWriter, r *http.Request) {
 		items = append(items, workspaceAPIItem{Name: opt.Name, Path: opt.Path})
 	}
 	writeJSON(w, http.StatusOK, workspaceAPIResponse{Default: s.primaryWorkspace(), Workspaces: items})
+}
+
+// primaryWorkspace 是没显式选择工作区时实际使用的工作区：列表第一个。
+func (s *Server) primaryWorkspace() string {
+	options := s.workspaceOptions()
+	if len(options) == 0 {
+		return ""
+	}
+	return options[0].Path
 }
 
 // ---- 文件系统 API（FilePicker） -------------------------------------------

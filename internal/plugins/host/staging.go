@@ -24,6 +24,7 @@ const (
 	slotKindTool     = "tool"
 	slotKindAction   = "action"
 	slotKindRoute    = "route"
+	slotKindTimer    = "timer"
 	slotKindProvider = "provider"
 	slotKindHook     = "hook"
 )
@@ -254,7 +255,11 @@ func (t Targets) commit(c *Contribution, caps *CapabilitySet, hooks func(HookDef
 		}
 		undo = append(undo, func() { _ = t.Tools.Remove(c.PluginID) })
 		for _, tl := range c.Tools {
-			if err := t.Tools.Register(tl.Descriptor(c.PluginID)); err != nil {
+			d := tl.Descriptor(c.PluginID)
+			if caps != nil && caps.Has(plugins.CapToolDiscovery) {
+				d.System = true
+			}
+			if err := t.Tools.Register(d); err != nil {
 				return fail(fmt.Errorf("host: 插件 %s 注册工具 %q 失败: %w", c.PluginID, tl.Name, err))
 			}
 		}
@@ -468,6 +473,9 @@ func (p *Instance) committedSlots() map[string]int {
 	}
 	for _, r := range c.Routes {
 		out[slotKey(slotKindRoute, routeIdent(r.Method, r.Path))] = r.Handler.Slot
+	}
+	for i, t := range c.Timers {
+		out[slotKey(slotKindTimer, fmt.Sprintf("timer#%d", i))] = t.Handler.Slot
 	}
 	for _, pr := range c.Providers {
 		out[slotKey(slotKindProvider, pr.ID)] = pr.Stream.Slot

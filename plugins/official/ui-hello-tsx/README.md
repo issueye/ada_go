@@ -48,6 +48,6 @@ go run ./tools/pluginbuild -dir plugins/official/ui-hello-tsx -entry client.tsx 
 ## 相关文档
 
 - [SSR 前端](../../../docs/07-ssr-frontend.md)
-- [渲染引擎](../../../docs/14-render-engine.md)
-- [UI 组件](../../../docs/15-ui-components.md)
-- [插件岛屿框架开发计划](../../../docs/20-plugin-island-framework-plan.md)
+- [渲染引擎](../../../docs/14-ui-runtime.md)
+- [UI 组件](../../../docs/14-ui-runtime.md)
+- [插件岛屿框架开发计划](../../../docs/07-ssr-frontend.md)

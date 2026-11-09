@@ -2,7 +2,7 @@
 
 > 上级索引：[ada-go 设计文档](design.md)  
 > 对应章节：§2 参考项目分析、§3 总体架构、§4 Gateway、§5.1–5.2 Core 分层与端口  
-> 版本：0.1 · 2026-10-28
+> 版本：0.2 · 2026-11-09
 
 ## 2. 参考项目分析
 
@@ -76,7 +76,7 @@ ada-go 的取舍：保留双层消息、统一流、树形会话、steering、co
 | 扩展安全 | 无隔离 | Boa + 能力开关，无内存上限 | moejs + 能力安装 + 内存/时间/深度上限 |
 | 工具来源 | 内置 + TS 扩展 | 内置 Rust + TS 插件 | 基座零工具；官方与第三方都是 TS 插件，走同一 moejs 引擎与目录契约 |
 | 会话存储 | JSONL 树 | 会话文件 | SQLite append-only DAG + 快照投影 |
-| 协议 | SDK/内部事件 | 83 个方法，多处手写 | 34 个方法，JSON 单源 + 生成常量 |
+| 协议 | SDK/内部事件 | 83 个方法，多处手写 | 33 个方法，JSON 单源 + 生成常量 |
 | 审批 | 扩展钩子 | 当前实现已移除 | 策略插件（`tool.beforeCall` + `ctx.ui`）+ 通用交互桥；基座无审批规则 |
 | 前端 | TUI | Askama + HTMX + TSX（Black Swan 设计系统） | html/template + HTMX + TSX（moejs），直接复用同一套 token、`ada-*` 组件与 DOM |
 | 产品装配 | 代码装配 | 声明式 spec | 声明式 spec + 逐字段消费者门禁 |
@@ -120,7 +120,7 @@ ada-go 的取舍：保留双层消息、统一流、树形会话、steering、co
 - Gateway 是唯一的公开监听者；Core 只监听 `127.0.0.1` 的临时端口，握手时用一次性 token。
 - 一个 Gateway 默认绑定一个工作区，也可以注册多个工作区；线程 id 形如 `th_<workspaceHash>_<ulid>`，自带工作区前缀，URL 不需要额外前缀。
 - 侧栏直接铺开**全部工作区与会话**：当前工作区默认展开、会话由服务端渲染；其它工作区折叠，展开时按需查询该工作区的 Core（`GET /partials/workspace-threads` 懒加载），不维护全局线程索引。切换在工作区组头就地完成，不再跳单独的工作区管理页。FilePicker 打开的工作区写入用户级 `~/.adago/workspaces.json`，重启 Gateway 后仍保留；显式 `--data-dir` 的隔离运行不共享该列表。
-- 打包时模板与网关静态资源通过 `go:embed` 进二进制；官方插件放进 Electron `resources/plugins/official`，第三方插件在工作区/用户目录。官方插件仍按插件装配，可禁用。
+- 打包时模板与网关静态资源通过 `go:embed` 进二进制；系统插件（builtin）放进 Electron `resources/plugins/official`，第三方插件在工作区/用户目录。系统插件仍按插件装配，可禁用；禁用后基座不补位。
 
 ### 3.2 为什么 Gateway 与 Core 分进程
 
@@ -151,7 +151,7 @@ domain（消息/工具/事件/错误）
              ├── coreproto（JSON-RPC 服务端）
              └── cmd/adag core
 
-plugins/official/*（官方 TS 插件包：provider、fs、shell、git、plan…；只用 agent:* 虚拟模块）
+plugins/official/*（系统插件包：provider、fs、shell、git、plan、cron、env…；只用 agent:* 虚拟模块）
    ▲
    └── app（唯一加载与装配点）
 
@@ -166,7 +166,7 @@ gateway
 
 - `domain` 不 import 任何适配器，不出现产品名。
 - `engine` 只依赖 `ports` 与 `domain`。
-- Gateway 不 import Core 的执行内核（`engine`/`toolkit`/`adapters`）与官方插件包；允许复用共享基座包 `coreapp`（产品声明）、`plugins/host`（前端渲染类型）、`plugins`、`proto`、`domain`、`version`、`workspacepath`，但不得调用工具或模型。
+- Gateway 不 import Core 的执行内核（`engine`/`toolkit`/`adapters`）与系统插件包；允许复用共享基座包 `coreapp`（产品声明）、`plugins/host`（前端渲染类型）、`plugins`、`proto`、`domain`、`version`、`workspacepath`，但不得调用工具或模型。
 - 插件运行时只通过 `ports.ScriptHost` 进入引擎；引擎不知道 moejs 的存在。
 
 ### 3.4 一次对话的时序
@@ -293,6 +293,16 @@ Core 的 WebSocket 使用独立的一次性 token（环境变量传入，不出�
 
 ---
 
+### 4.5 桌面壳（Electron）
+
+桌面壳是薄宿主：拉起 `adag gateway`，解析 stdout 的 JSON 握手行，再用无边框窗口加载 Gateway 的 SSR 界面。会话、审批、插件、技能等业务能力全部来自 Gateway + Core；Electron 只做窗口、生命周期、托盘与外部链接交给系统浏览器，不含业务逻辑。
+
+- 单实例锁；窗口 `contextIsolation: true`、`nodeIntegration: false`、`webSecurity: true`；CSP 仍由 Gateway 下发。
+- 网关只绑回环；一次性 token 经环境变量注入（不进命令行），`?token=` 登录 303 后即失效。
+- 打包产物：`adag-desktop.exe`、`resources/bin/adag.exe`、`resources/products/headless.agent.json`、`resources/plugins/official/`。系统插件目录不存在时拒绝启动，二进制不内嵌副本。
+- 无自动更新、无深链协议；Electron 下载/打包依赖网络。
+
+
 ## 5. Agent Core 设计
 
 ### 5.1 分层
@@ -308,7 +318,7 @@ coreapp         通用装配器：接收插件集合 → 工具目录 / 引擎 /
   └── domain    消息、Part、工具描述符/回执、事件、错误、失败方向
 ```
 
-依赖只能向下。`domain` 不知道 Gin，`engine` 不知道 moejs，`coreproto` 不知道模板。`adapters` 只放基础设施；具体 provider 与具体工具都在 `plugins/official/`，和第三方插件一样通过 `agent:*` 虚拟模块注册，由同一个 moejs 宿主执行。
+依赖只能向下。`domain` 不知道 Gin，`engine` 不知道 moejs，`coreproto` 不知道模板。`adapters` 只放基础设施；具体 provider、工具、策略、cron、env 与页面都在系统插件里，和第三方插件一样通过 `agent:*` 虚拟模块注册，由同一个 moejs 宿主执行。
 
 ### 5.2 端口
 
@@ -329,7 +339,7 @@ v1 保留 12 个端口，每个都有真实消费者；新增端口必须同时�
 | `StateStore` | 插件 KV、线程级状态 | SQLite |
 | `SecretBroker` | 按名字取密钥，日志脱敏 | 环境/文件 |
 
-`CancelToken` 直接用 `context.Context`，不单独造类型；`PromptSource` 合并系统提示词与技能元数据，作为 `engine` 的内部函数；`BlobStore` 等有真实需求再加，不预先抽象。
+`CancelToken` 直接用 `context.Context`，不单独造类型；`PromptSource`、`Compactor`、`ToolRunner`、`SteeringSource` 是消费方定义的 seam，默认实现分别是插件提示词、`ModelCompactor`、`toolkit.Executor` 与 steering 队列；`BlobStore` 等有真实需求再加，不预先抽象。
 
 ---
 
