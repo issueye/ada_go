@@ -37,7 +37,7 @@ type Options struct {
 	Model    string
 	BaseURL  string
 	DataDir  string
-	Fake       bool
+	Fake     bool
 	// Debug 给 Core 加 --debug，并把其 stderr 一并转发到网关 stderr。
 	Debug bool
 	// ParentPID 是传给 Core 的父进程 pid；0 表示取当前进程 pid。
@@ -58,6 +58,17 @@ type Options struct {
 	// Spawn 拉起 Core 子进程，可选。留空使用 exec.CommandContext 的生产实现；
 	// 测试注入假进程。
 	Spawn SpawnFunc
+	// Control 为每个 Core 签发一次性的内部发送凭据（插件投递消息用）。
+	// nil 表示本网关不提供该能力：Core 侧 dispatch.send 桥就不能安装。
+	Control ControlIssuer
+}
+
+// ControlIssuer 给一个工作区的 Core 签发内部发送凭据。
+//
+// workspace 是归一化后的工作区路径；返回空 URL/令牌表示不提供。
+type ControlIssuer interface {
+	// ControlAccess 返回控制面地址与令牌（同一签发给刚拉起的进程）。
+	ControlAccess(workspace string) (url, token string)
 }
 
 // Supervisor 是 contracts.Supervisor 的实现。

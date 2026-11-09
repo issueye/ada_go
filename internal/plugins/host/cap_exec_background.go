@@ -102,9 +102,10 @@ func (e *execState) startBackground(req *execRequest, maxTasks int) (*background
 		cmd.Dir = req.dir
 	}
 	// 与同步 execFile 同一份环境语义：继承/白名单 + 环境变量模块的用户变量。
+	// 同样先摘掉宿主内部变量（后台任务最容易被误当成「干净环境」）。
 	baseEnv := req.env
 	if len(baseEnv) == 0 {
-		baseEnv = os.Environ()
+		baseEnv = stripHostEnv(os.Environ())
 	}
 	cmd.Env = applyBinPath(mergeEnv(baseEnv, req.baseEnv), req.binDirs)
 	stdout := &capWriter{limit: req.maxBuffer}

@@ -91,6 +91,9 @@ func runGateway(args []string, stdout io.Writer) error {
 		return fmt.Errorf("adag gateway: 监听 %s 失败: %w", *addr, err)
 	}
 	defer ln.Close()
+	// 控制面地址在监听之后才知道；必须在第一个 Core 被拉起前设好
+	// （Core 是懒加载的，第一次请求一定发生在 Serve 之后）。
+	gw.SetControlURL("http://" + ln.Addr().String())
 	srv := &http.Server{
 		Handler:           gw.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,

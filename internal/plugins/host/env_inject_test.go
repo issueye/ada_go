@@ -11,20 +11,20 @@ import (
 )
 
 // TestEnvHelper 是被 exec / process 拉起的子进程助手：打印托管环境变量后退出。
-// 只有子进程里 ADAG_ENV_PROBE 非空时才进入（正常 go test 直接返回）。
+// 只有子进程里 ADA_PROBE_ENV 非空时才进入（正常 go test 直接返回）。
 func TestEnvHelper(t *testing.T) {
-	if os.Getenv("ADAG_ENV_PROBE") == "" {
+	if os.Getenv("ADA_PROBE_ENV") == "" {
 		return
 	}
-	_, _ = os.Stdout.WriteString("probe=" + os.Getenv("ADAG_ENV_PROBE") + ";host=" + os.Getenv("ADAG_ENV_HOST_ONLY") + "\n")
+	_, _ = os.Stdout.WriteString("probe=" + os.Getenv("ADA_PROBE_ENV") + ";host=" + os.Getenv("ADA_HOSTONLY_ENV") + "\n")
 	os.Exit(0)
 }
 
 // TestExecInjectsManagedEnv 钉住环境变量模块的注入：ctx.exec 的子进程看到托管变量
 // （同名覆盖宿主环境），未显式给 env 时仍继承宿主环境的其它变量。
 func TestExecInjectsManagedEnv(t *testing.T) {
-	t.Setenv("ADAG_ENV_PROBE", "host")
-	t.Setenv("ADAG_ENV_HOST_ONLY", "host-only")
+	t.Setenv("ADA_PROBE_ENV", "host")
+	t.Setenv("ADA_HOSTONLY_ENV", "host-only")
 
 	caps := testCaps(t, plugins.TrustVerified, plugins.CapExec)
 	src := `
@@ -42,7 +42,7 @@ export default function (agent) {
 }
 `
 	p, err := Load(context.Background(), testScript(t, caps, src), caps, Context{
-		EnvVars: map[string]string{"ADAG_ENV_PROBE": "managed"},
+		EnvVars: map[string]string{"ADA_PROBE_ENV": "managed"},
 	}, Options{Targets: Targets{Tools: &recordingTools{}}})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -71,7 +71,7 @@ export default function (agent) {
 // TestProcessInjectsManagedEnv 钉住 ctx.process.start 的注入：只给清单白名单
 // 与托管变量，不继承宿主环境。
 func TestProcessInjectsManagedEnv(t *testing.T) {
-	t.Setenv("ADAG_ENV_HOST_ONLY", "host-only")
+	t.Setenv("ADA_HOSTONLY_ENV", "host-only")
 
 	caps := testCaps(t, plugins.TrustVerified, plugins.CapProcess)
 	src := `
@@ -95,7 +95,7 @@ export default function (agent) {
 }
 `
 	p, err := Load(context.Background(), testScript(t, caps, src), caps, Context{
-		EnvVars: map[string]string{"ADAG_ENV_PROBE": "managed"},
+		EnvVars: map[string]string{"ADA_PROBE_ENV": "managed"},
 	}, Options{Targets: Targets{Tools: &recordingTools{}}})
 	if err != nil {
 		t.Fatalf("Load: %v", err)

@@ -76,6 +76,12 @@ var installSites = map[Capability]InstallSite{
 		EnforcedBy:    "宿主按内层描述符重跑 tool.beforeCall → policy 失败关闭 → Runner.Execute；脚本不能绕过审批/超时/截断；仅 builtin（05 §6.3、06 §6.6）",
 		Milestone:     "v0.3 系统插件化 P1",
 	},
+	CapDispatchSend: {
+		Capability: CapDispatchSend, HostInstall: "安装 ctx.dispatch：把消息投递到指定工作区的调度层（仅 builtin）",
+		ScriptSurface: "ctx.dispatch.send({workspace?, threadId?, title?, text?, mode?, idempotencyKey?})",
+		EnforcedBy:    "宿主经回环控制端点投递，令牌由网关签发给本 Core 进程且插件不可见；sender 由宿主盖章，脚本不能伪造；请求体/超时受限；仅 builtin（07 §7.9、05 §6.3）",
+		Milestone:     "v0.3 系统插件化 P2",
+	},
 	CapState: {
 		Capability: CapState, HostInstall: "安装按插件 + 线程命名空间隔离的受限 KV",
 		ScriptSurface: "ctx.state.get/set/delete",

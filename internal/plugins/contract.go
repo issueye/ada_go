@@ -246,6 +246,10 @@ const (
 	CapPluginAdmin Capability = "plugin.admin"
 	// CapToolDiscovery 是 builtin-only 的发现式工具宿主桥（ctx.catalog + ctx.tool.invoke）。
 	CapToolDiscovery Capability = "tool.discovery"
+	// CapDispatchSend 是 builtin-only 的内部发送桥（ctx.dispatch.send）：把消息投递给
+	// 指定工作区的调度层（建线程 / 排队 / 运行中 steer 由调度层决定）。
+	// 它不授予工具、文件或网络权限，也不采信脚本给的身份——sender 由宿主盖章。
+	CapDispatchSend Capability = "dispatch.send"
 	// CapBackendRead 是前端能力：预取只读后端动作结果。
 	CapBackendRead Capability = "backend.read"
 	// CapFrontendScript 是前端能力：加载插件自带 JS（默认关闭，仍受 CSP 限制）。
@@ -255,7 +259,7 @@ const (
 // backendCapabilities 是后端可声明的能力白名单。
 var backendCapabilities = []Capability{
 	CapFSRead, CapFSWrite, CapNetFetch, CapNetSSE,
-	CapExec, CapProcess, CapState, CapGlobalConfig, CapEventsRead, CapUIAsk, CapSubagentInvoke, CapModelAdmin, CapPluginAdmin, CapToolDiscovery, CapTurnInvoke,
+	CapExec, CapProcess, CapState, CapGlobalConfig, CapEventsRead, CapUIAsk, CapSubagentInvoke, CapModelAdmin, CapPluginAdmin, CapToolDiscovery, CapTurnInvoke, CapDispatchSend,
 }
 
 // frontendCapabilities 是前端可声明的能力白名单。
@@ -284,7 +288,7 @@ func (c Capability) MinTrust() Trust {
 	switch c {
 	case CapExec, CapProcess, CapNetSSE, CapUIAsk, CapGlobalConfig:
 		return TrustVerified
-	case CapSubagentInvoke, CapModelAdmin, CapPluginAdmin, CapToolDiscovery, CapTurnInvoke:
+	case CapSubagentInvoke, CapModelAdmin, CapPluginAdmin, CapToolDiscovery, CapTurnInvoke, CapDispatchSend:
 		return TrustBuiltin
 	default:
 		return TrustThirdParty

@@ -94,7 +94,7 @@ plugins/my-plugin/
 
 #### 6.2.1 能力位
 
-后端 15 项目标能力、前端 2 项；`MinTrust` 决定最低信任级别。**能力位是通用原语，不是产品功能**；没有一项叫 `cron`、`env` 或 `usage`。
+后端 16 项目标能力、前端 2 项；`MinTrust` 决定最低信任级别。**能力位是通用原语，不是产品功能**；没有一项叫 `cron`、`env` 或 `usage`。
 
 | 能力 | 端 | 最低信任 | 脚本可见面 | 执行点 |
 |---|---|---|---|---|
@@ -108,7 +108,8 @@ plugins/my-plugin/
 | `global.config` | 后端 | verified | `ctx.config.get/set/delete/list`、`ctx.config.workspace.*` | 机器级（`$ADAGO_HOME/config/<id>.json` 或 `~/.adago/config/<id>.json`）与工作区级（`<workspace>/.adago/config/<id>.json`）命名空间；0600、原子写、跨进程锁、限额 |
 | `events.read` | 后端 | third-party | `ctx.events.query({fromSeq, types, threadId, limit})`、`ctx.events.usage({threadId?, limit?})` | 只读事件/用量投影：Emitter 缓冲（线程内）+ 每轮原始用量行（工作区范围）；不能写事件、不能跨工作区；展示口径聚合归插件 |
 | `tool.discovery` | 后端 | builtin | `ctx.catalog.list({query?})`、`ctx.tool.invoke({tool,args})` | 发现式工具宿主桥：目录只读投影 + 内层工具执行；宿主按内层描述符重跑 beforeCall/policy/Runner，仅 builtin |
-| `turn.invoke` | 后端 | builtin | `ctx.turn.invoke({threadId?, title?, prompt})` | 通用轮次触发桥：宿主建线程/生成 runId/后台执行，插件只拿受理回执；不授予工具/文件/网络权限，仅 builtin |
+| `turn.invoke` | 后端 | builtin | `ctx.turn.invoke({threadId?, title?, prompt})` | 通用轮次触发桥：宿主建线程/生成 runId/后台执行，插件只拿受理回执；不授予工具/文件/网络权限，仅 builtin；只在本 Core 内开一轮 |
+| `dispatch.send` | 后端 | builtin | `ctx.dispatch.send({workspace?, threadId?, title?, text?, mode?, idempotencyKey?, taskId?})` | 内部发送桥：交给网关调度层，可跨工作区，与界面发送共用同一份投递规则（busy/steer/waiting_input 只有一处判定）；令牌由网关签发给本 Core 进程且插件不可见，sender 由宿主盖章；仅 builtin |
 | `ui.ask` | 后端 | verified | `ctx.ui.confirm/select/input/form/notify` | 交互桥；无 UI 时按拒绝（失败关闭） |
 | `subagent.invoke` | 后端 | builtin | `ctx.subagent.invoke` | v1.5；v1 不装配 |
 | `model.admin` | 后端 | builtin | `ctx.model.list/select` | **只读模型目录 + 切换当前模型**；供应商配置 CRUD 走 `global.config`，不在本能力里 |
@@ -116,10 +117,10 @@ plugins/my-plugin/
 | `backend.read` | 前端 | third-party | SSR 预取 `props.data.backend.<id>.<binding>` | Gateway 渲染桥：≤16 个、并发 4、单个 300ms、缓存 8s |
 | `frontend.script` | 前端 | third-party | `/ext/{id}/static/*`、hydrate、client bundle | CSP + nosniff + 安装确认；同源脚本风险见 [09](09-security-operations.md) |
 
-发现式工具宿主桥作为 builtin-only 能力 `tool.discovery` 暴露：`ctx.catalog`（目录只读投影）与 `ctx.tool.invoke`（按名执行内层工具，宿主重跑审批链）。通用轮次触发桥 `turn.invoke`（`ctx.turn.invoke`）已落地：宿主建线程/生成 runId/后台执行，插件只提交提示词并拿受理回执；新增桥必须同时提交消费者、审计与契约测试。
+发现式工具宿主桥作为 builtin-only 能力 `tool.discovery` 暴露：`ctx.catalog`（目录只读投影）与 `ctx.tool.invoke`（按名执行内层工具，宿主重跑审批链）。通用轮次触发桥 `turn.invoke`（`ctx.turn.invoke`）已落地：宿主建线程/生成 runId/后台执行，插件只提交提示词并拿受理回执；新增桥必须同时提交消费者、审计与契约测试。内部发送桥 `dispatch.send`（`ctx.dispatch.send`）同样已落地：它把消息交给**网关调度层**（[07 §7.9](07-ssr-frontend.md#79-消息发送路径调度层)），可跨工作区，且与界面发送共用同一份投递规则；令牌由网关签给本 Core 进程并只经环境变量传递，插件既拿不到地址也拿不到凭据，sender 由宿主按能力集盖章。
 `env.admin` 已不存在：env 的变量读写/校验/管理页由 `env-manager` 系统插件经 `global.config` 实现，基座只保留“向子进程注入已配置环境”的通用执行点。`cron.admin` 已删除：cron 的任务模型/调度/历史由 `cron-manager` 经 `global.config` + `agent.every` 通用定时器 + `turn.invoke` 实现；基座不再读 `cron.json`、不调度、不暴露 `/api/cron/fire`。
 
-> 实现状态：`global.config` 已落地（`ctx.config` + `internal/globalconfig`）；`events.read` 已落地（`ctx.events.query` + Emitter 可回放缓冲，`ctx.events.usage` + SQLite 原始用量行）；`token-usage`/`composer-telemetry` 已改为插件内聚合，基座已删除展示用 `usage.get` 投影，只保留 `events.read` 的原始用量行；`turn.invoke` 轮次触发桥与 `agent.every` 通用定时器已落地；cron 已完成迁移。路线见 [11 §16](11-structure-roadmap.md)。
+> 实现状态：`global.config` 已落地（`ctx.config` + `internal/globalconfig`）；`events.read` 已落地（`ctx.events.query` + Emitter 可回放缓冲，`ctx.events.usage` + SQLite 原始用量行）；`token-usage`/`composer-telemetry` 已改为插件内聚合，基座已删除展示用 `usage.get` 投影，只保留 `events.read` 的原始用量行；`turn.invoke` 轮次触发桥与 `agent.every` 通用定时器已落地；cron 已完成迁移。`dispatch.send` 已落地：网关侧 `internal/gateway/dispatch` 同时服务界面发送与 `ctx.dispatch.send`，内部端点只认回环来源 + 控制令牌，且摘掉了宿主环境里的 `ADAG_`/`ADAGO_` 变量（插件子进程拿不到宿主凭据）。路线见 [11 §16](11-structure-roadmap.md)。
 
 #### 6.2.2 信任级别
 
@@ -304,6 +305,12 @@ interface ToolContext {
   };
   turn?: {                           // capability: turn.invoke，仅 builtin
     invoke(req: { threadId?: string; title?: string; prompt: string }): Promise<{ threadId: string; runId: string }>;
+  };
+  dispatch?: {                       // capability: dispatch.send，仅 builtin
+    send(req: {
+      workspace?: string; threadId?: string; title?: string; text: string;
+      mode?: "auto" | "start" | "steer"; idempotencyKey?: string; taskId?: string;
+    }): Promise<{ workspace: string; threadId: string; runId?: string; mode: string }>;
   };
   sse?: { send(data: unknown, event?: string): void }; // 仅 sse:true 的 route 处理器内存在
   secret?(name: string): string | null; // 仅在 manifest 声明 secrets 时存在

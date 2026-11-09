@@ -53,6 +53,8 @@
 - 模型不能通过工具调用授予自己新能力；工具目录在轮次开始时冻结。
 - 策略插件展示原始参数（必要时脱敏），不展示模型对参数的“解释”；请求正文由基座原样转交，不加工。
 - 密钥只存在于 Core 的内存与配置（环境变量或 `~/.adago/secrets.toml`）；**值**不进入提示词、工具结果、日志、前端 props，也不进入 `process.env` 或插件启动的子进程环境。但 `ctx.fs` 读成员可读宿主路径，磁盘文件的保护只能依赖操作系统权限与部署边界（见 9.2），不能假设 agent 看不见。供应商管理页写入的 API Key 落在机器级 `~/.adago/providers.json`（0600；显式 `--data-dir` 时落在该数据目录），前端只看到 `hasApiKey` 与尾号。
+- 宿主内部凭据（`ADAG_CORE_TOKEN`、`ADAGO_GATEWAY_CONTROL_TOKEN` 等 `ADAG_`/`ADAGO_` 变量）只属于宿主进程：插件清单不能声明这些名字，且 `child_process`/后台任务/`process.start` 在继承 `os.Environ()` 时会先摘掉它们——否则一次 `exec` 就能拿到 Core RPC 令牌或网关控制令牌。
+- 网关内部端点 `/internal/*` 不套用会话鉴权，只接受**回环来源 + Bearer 控制令牌**；令牌由网关在拉起每个 Core 时一次性签发（同工作区重签即作废旧令牌），只经环境变量交给那个子进程，插件脚本拿不到。请求体里的身份字段一律不采信，`sender` 由服务端按令牌与能力集盖章。
 
 ### 9.5 资源限制
 
@@ -62,6 +64,7 @@
 | `global.config` | 每插件命名空间；单值 ≤256KB、总 ≤4MB、原子写、0600、跨进程锁 |
 | `events.read` | 单次 ≤1000 条、只读、线程/工作区范围、字段脱敏 |
 | `turn.invoke` | 仅 builtin；prompt ≤64KB、title ≤200 字符；宿主建线程/生成 runId/后台执行，插件只拿受理回执；不授予工具/文件/网络权限 |
+| `dispatch.send` | 仅 builtin；text ≤64KB、title ≤200 字符、idempotencyKey ≤200 字节；请求体 ≤16MB、单次 60s；网关侧只接受回环 + 控制令牌 |
 | `agent.every` | 每插件 ≤8 条；间隔 1s…1h；handler 用独立 goroutine + 10s 调用期限，每次注入新 Context，插件 Close 时取消 |
 | 插件 Node 兼容层 | `process.env` 仅 `backend.env`；`fs` 单次读写 16MB、目录 10k；`fetch` 响应 16MB；`child_process` 输出 4MB/120s；定时器 256；无网络监听 |
 | 前端 Render Runtime | 64MB、单插槽 100ms、页面 300ms、2000 节点、256KB 输出 |

@@ -23,6 +23,7 @@ import (
 
 	"github.com/adag/ada-go/internal/coreapp"
 	"github.com/adag/ada-go/internal/gateway/contracts"
+	"github.com/adag/ada-go/internal/gateway/dispatch"
 	"github.com/adag/ada-go/internal/gateway/frontend"
 	"github.com/adag/ada-go/internal/gateway/relay"
 	"github.com/adag/ada-go/internal/gateway/security"
@@ -83,6 +84,9 @@ type Gateway struct {
 	ownSup  bool
 	web     *web.Server
 	handler http.Handler
+	// control 给 Core 签发内部发送凭据；controlTokens 是这些凭据的表。
+	control       *controlPlane
+	controlTokens *dispatch.Tokens
 }
 
 // frontendGate 提供「某工作区里某前端插件是否启用」的短期缓存。
@@ -262,6 +266,10 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 
 	var sup contracts.Supervisor
 	ownSup := false
+	// 内部发送凭据：给每个 Core 签一次，Core 侧据此安装 ctx.dispatch。
+	// 插件脚本永远看不到令牌；令牌只经环境变量交给刚拉起的那个进程。
+	controlTokens := dispatch.NewTokens()
+	control := newControlPlane(controlTokens)
 	if cfg.Supervisor != nil {
 		// 测试注入：不启动真实 Core，监督者生命周期归调用方。
 		sup = cfg.Supervisor
@@ -271,7 +279,8 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 			BaseURL: cfg.BaseURL, DataDir: cfg.DataDir, Fake: cfg.Fake,
 			Debug: cfg.Debug,
 			Token: coreToken, MaxCores: cfg.MaxCores, IdleTimeout: cfg.Idle,
-			Dial: relay.Dial,
+			Dial:    relay.Dial,
+			Control: control,
 		})
 		if err != nil {
 			return nil, err
@@ -365,11 +374,58 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 	})
 	root.Handle("/", webSrv.Handler())
 
+	// 内部发送端点：与用户鉴权**并列**而不是嵌套——进程没有会话 cookie，
+	// 也不该有；认证只靠控制令牌 + 回环来源。
+	controlEndpoint, err := dispatch.NewEndpoint(dispatch.EndpointConfig{
+		Dispatcher: webSrv.Dispatch(),
+		Tokens:     controlTokens,
+		Log: func(ident dispatch.Identity, sender dispatch.Sender, req dispatch.SendRequest,
+			receipt dispatch.Receipt, sendErr error) {
+			if sendErr != nil {
+				log.Printf("dispatch: sender=%s workspace=%s thread=%s mode=%s error=%v",
+					sender.LogKey(), receipt.Workspace, receipt.ThreadID, receipt.Mode, sendErr)
+				return
+			}
+			log.Printf("dispatch: sender=%s workspace=%s thread=%s mode=%s",
+				sender.LogKey(), receipt.Workspace, receipt.ThreadID, receipt.Mode)
+		},
+	})
+	if err != nil {
+		if ownSup {
+			_ = sup.Shutdown(context.Background())
+		}
+		return nil, err
+	}
+	controlHandler := controlEndpoint.Handler()
+
 	g := &Gateway{
 		cfg: cfg, product: product, token: accessToken, sup: sup, ownSup: ownSup, web: webSrv,
-		handler: tokenLoginGate{next: mw.Wrap(root), mw: mw},
+		control: control, controlTokens: controlTokens,
+		handler: internalGate{
+			internal: controlHandler,
+			mw:       mw,
+			next:     tokenLoginGate{next: mw.Wrap(root), mw: mw},
+		},
 	}
 	return g, nil
+}
+
+// internalGate 把内部端点从用户鉴权链里摘出来：
+// /internal/* 只走控制令牌（端点自己校验），其余路径照旧走会话鉴权。
+//
+// 前缀判断而不是精确路由：将来内部端点增加时不需要再动组合根。
+type internalGate struct {
+	internal http.Handler
+	mw       *security.Middleware
+	next     http.Handler
+}
+
+func (g internalGate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/internal/") {
+		g.internal.ServeHTTP(w, r)
+		return
+	}
+	g.next.ServeHTTP(w, r)
 }
 
 // tokenLoginGate 支持「?token= 自动登录」（a_da 桌面壳/托盘的同款语义）：
@@ -401,6 +457,26 @@ func (g *Gateway) Handler() http.Handler { return g.handler }
 // AccessToken 返回本次 Gateway 的访问令牌（自动生成时用于首次配对展示）。
 func (g *Gateway) AccessToken() string { return g.token }
 
+// ControlAccess 返回内部发送端点的根地址与一个用于本工作区的控制令牌。
+//
+// 供组合根在监听地址确定后调用：网关自己签发、交给它拉起的 Core，
+// 不经任何 HTTP 面暴露给插件。
+func (g *Gateway) ControlAccess(workspace string) (string, string) {
+	if g == nil || g.control == nil {
+		return "", ""
+	}
+	return g.control.ControlAccess(workspace)
+}
+
+// SetControlURL 设置内部发送端点的根地址（形如 http://127.0.0.1:52353）。
+// 必须在第一个 Core 被拉起之前调用（cmd 在 net.Listen 之后、Serve 之前）。
+func (g *Gateway) SetControlURL(url string) {
+	if g == nil || g.control == nil {
+		return
+	}
+	g.control.SetURL(url)
+}
+
 // Workspace 返回第一个归一化后的工作区路径（单工作区兼容）。
 func (g *Gateway) Workspace() string { return g.cfg.Workspace }
 
@@ -419,6 +495,10 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 	}
 	if g.web != nil {
 		_ = g.web.Close()
+	}
+	// 控制令牌随网关闭而失效：即使有残留进程持有旧令牌，也调不通已关闭的网关。
+	if g.control != nil {
+		g.control.revokeControls()
 	}
 	if g.sup != nil && g.ownSup {
 		return g.sup.Shutdown(ctx)

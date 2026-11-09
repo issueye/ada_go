@@ -150,6 +150,9 @@ type Session struct {
 	discovered      []discovery.Plugin
 	failedPlugins   map[string]string
 	reloadMu        sync.Mutex // 串行化热重载（plugin.reload / plugin.setEnabled）
+	// dispatchClient 是 ctx.dispatch 的后端（网关控制面）；nil 表示本次部署
+	// 没有接入网关调度层（CLI 直连），此时插件拿不到 ctx.dispatch。
+	dispatchClient *gatewayDispatch
 	// 供应商配置（管理页）：文件在数据目录，改动后直接更新当前装配的 Registry。
 	providerStore   providerConfigStore
 	providersMu     sync.Mutex
@@ -346,6 +349,8 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 	s.changes = toolkit.NewChangeQueue()
 	s.changeStore = newChangeStore(dataDir)
 	hc.Checkpoint = s.checkpointWrite
+	// 内部发送桥（dispatch.send，仅 builtin）：网关注入控制面地址/令牌后才有。
+	s.wireDispatch(&hc)
 	s.hostBase = hc
 	// M4 前端插件：产品声明里允许出现、但由 Gateway 渲染桥装配的 id 集合。
 	frontend, ferr := sessionFrontendScripts(cfg)

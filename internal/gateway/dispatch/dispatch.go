@@ -60,6 +60,9 @@ func (s Sender) key() string {
 	return string(s.Kind) + ":" + s.ID
 }
 
+// LogKey 是审计日志用的身份串（与 key 同义，导出供网关侧日志使用）。
+func (s Sender) LogKey() string { return s.key() }
+
 // DeliveryMode 决定线程正在运行时的行为。
 type DeliveryMode string
 

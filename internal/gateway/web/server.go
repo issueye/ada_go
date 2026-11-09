@@ -196,6 +196,9 @@ func New(cfg Config) (*Server, error) {
 // Handler 返回可直接挂到 http.Server 的处理器（已套用外部 Protect）。
 func (s *Server) Handler() http.Handler { return s.handler }
 
+// Dispatch 返回本网关的调度层（内部发送端点与诊断共用同一份）。
+func (s *Server) Dispatch() *dispatch.Dispatcher { return s.dispatch }
+
 // Close 目前无需释放资源；SSE handler 的所有权在外部。
 func (s *Server) Close() error { return nil }
 

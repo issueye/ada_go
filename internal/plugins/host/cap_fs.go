@@ -448,6 +448,9 @@ func installContextMembers(rt *mojsRuntime, put func(name string, v moejs.Value)
 	if err := addToolDiscoveryContextMembers(st, hc, put); err != nil {
 		keep(err)
 	}
+	if err := addDispatchContextMember(st, hc, put); err != nil {
+		keep(err)
+	}
 	return firstErr
 }
 

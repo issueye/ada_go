@@ -75,3 +75,38 @@ func envKey(name string) string {
 	}
 	return name
 }
+
+// hostEnvPrefixes 是宿主内部变量前缀：它们只属于宿主进程（Core RPC 令牌、
+// 网关控制面凭据），绝不能随 os.Environ() 泄露给插件拉起的任何子进程。
+//
+// manifest 的 backend.env 白名单也禁止声明 ADAG_ 前缀的名字，但那条规则只拦
+// 「显式声明」；这里拦的是继承路径（child_process / 后台任务 / process.start
+// 在没给显式 env 时会克隆整个宿主环境）。
+var hostEnvPrefixes = []string{"ADAG_", "ADAGO_"}
+
+// stripHostEnv 从环境块里去掉宿主内部变量。返回新切片，不改入参。
+func stripHostEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, item := range env {
+		i := strings.IndexByte(item, '=')
+		if i <= 0 {
+			continue
+		}
+		if isHostEnvName(item[:i]) {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+// isHostEnvName 判断变量名是否属于宿主内部命名空间（Windows 大小写不敏感）。
+func isHostEnvName(name string) bool {
+	up := strings.ToUpper(name)
+	for _, prefix := range hostEnvPrefixes {
+		if strings.HasPrefix(up, prefix) {
+			return true
+		}
+	}
+	return false
+}

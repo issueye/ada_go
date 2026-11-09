@@ -193,6 +193,7 @@ go work init . ../moejs
 | P1 工具发现 | `tool-discovery` 系统插件；builtin-only `tool.discovery`（`ctx.catalog`/`ctx.tool.invoke`） | P1 原语 | 禁用后 find/exec 消失；内层审批链不绕过 |
 | P1 用量/遥测 | `token-usage`/`composer-telemetry` 改用 `events.read` 自聚合；基座只留每轮原始计数 | `events.read` | 禁用后页面/卡片消失；基座不再聚合展示 |
 | P1 工具管理 | 基座内部 `ToolManager` 集中工具注册/按 owner 摘除/可见性视图/turn 快照/执行路由；可见性规则收敛到 `domain.ToolVisibility` | P1 工具发现 | 模型声明、`find_tool`、`exec_tool` 与 `tool.list` 用同一份规则；`exec_tool` 不能执行注入式工具 |
+| P2 调度层 | 网关唯一发送路径 `Dispatcher`（界面与插件共用）；builtin-only `dispatch.send` 宿主桥 + 回环控制端点（token 认进程、sender 由宿主盖章） | P1 工具管理 | 伪造 sender 无效；非令牌 401；`/internal/*` 不走用户鉴权；插件子进程拿不到宿主凭据 |
 | P2 env | `env-manager` 用 `global.config` 管理命名空间；基座只保留子进程注入点 | `global.config` | 禁用后管理页/注入策略消失 |
 | P2 provider 管理 | `provider-admin` 用 `global.config` 管理供应商；基座只读配置视图 + `model.list/set` | `global.config` | 禁用后 CRUD 页面消失；`model.set` 仍可用 |
 | P2 cron | `cron-manager` 用 `global.config` + `agent.every` 通用定时器 + `turn.invoke` 轮次触发桥；基座删除 `cronstore`/`cronproc`/`/api/cron/fire` | 已完成 | 禁用后调度消失；`cron.json` 不再被基座读取 |
@@ -205,6 +206,7 @@ go work init . ../moejs
 - P1 通用原语：`global.config`（`ctx.config` + `internal/globalconfig`）与 `events.read`（`ctx.events.query` + Emitter 可回放缓冲，`ctx.events.usage` + SQLite 原始用量行）已落地；`tool-discovery` 系统插件已落地，引擎内联 `find_tool/exec_tool` 已删除；provider 配置存储已迁到 `global.config` 的 `provider-config` 命名空间（legacy `providers.json` 仅首次读取迁移，不再双写），`provider-admin` 已接管供应商 CRUD 与 `/models` 拉取（`ctx.fetch`）；基座 `model.admin` 只剩目录读取与当前模型切换，CRUD/预检桥已删除。`env-manager` 已完成迁移：变量读写/校验走 `ctx.config`（`env` 命名空间），bins 由 `ctx.fs` 投影，基座 `env.admin` 已删除；旧 `env.json` 仅迁移兜底读取。`token-usage`/`composer-telemetry` 已改为插件内聚合：页面动作/route 经 `events.read` 读取原始行，Gateway 不再注入 `data.usage`，`/threads/{id}/state` 只返回 `run`/`context`。下一阶段只剩 cron 迁移。
 - cron 已完成迁移：`cron-manager` 用 `global.config` 存任务、`agent.every` 每 30s 调度、`ctx.turn.invoke` 触发轮次；基座 `cron.admin`/`cronstore`/`cronproc`/`/api/cron/fire` 与 `cron-sync` 门禁已删除。
 - 工具管理已集中化：`internal/toolkit` 的 `ToolManager` 包住目录与插件路由，提供 `Injected`/`Discovery`/`System`/`All` 四种视图与 turn 级快照；可见性规则收敛到 `domain.ToolVisibility`，模型声明、`find_tool` 目录投影与 `exec_tool` 内层校验同源；`exec_tool` 现在拒绝注入式工具（`tool_not_discoverable`），`owner` 由宿主盖章且与目录不一致时拒绝路由。
+- 调度层已落地：网关 `internal/gateway/dispatch` 是唯一发送路径（新建会话、发消息、编辑重发与 `/api/workspaces` 都走它），`auto`/`start`/`steer` 三种投递模式共用一份 busy/waiting/finishing 判定；builtin-only 能力 `dispatch.send` 让插件经 `ctx.dispatch.send` 交给同一调度层，网关用回环控制端点 + 每 Core 一次性令牌认证，`/internal/*` 不进用户鉴权链。
 ### 16.1 剩余系统插件迁移的先决条件
 
 | 系统插件 | 当前基座依赖 | 先决条件 | 迁移后验收 |

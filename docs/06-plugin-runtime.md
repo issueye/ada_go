@@ -196,6 +196,7 @@ agent.on("tool.beforeCall", async (event, ctx) => {
 | 交互桥 | `InteractionBroker` | `ports.InteractionBroker` | 适配器 | 失败关闭、幂等、持久化、超时 |
 | 事件 | `EventSink` + 快照/补丁 | `ports.EventSink` | 适配器 | seq 单调、快照/补丁一致 |
 | 工具发现 | `tool-discovery` 系统插件 | `tool.discovery`（`ctx.catalog`/`ctx.tool.invoke`） | builtin 系统插件 | 目录只读、内层审批链不绕过 |
+| 消息投递 | 网关 `Dispatcher`（界面与插件共用一条路径） | `dispatch.send`（`ctx.dispatch.send`） | builtin 系统插件 | 令牌认进程、sender 由宿主盖章、`/internal/*` 不进用户鉴权 |
 | 定时任务 | `cron-manager` 系统插件 | `global.config` + `process` + 通用轮次触发桥 | builtin 系统插件 | 任务模型/调度/历史自持，基座无 cron |
 | 环境变量 | `env-manager` 系统插件 | `global.config` + 子进程注入点 | builtin 系统插件 | 键名/0600/不写日志，基座无 env 管理 |
 | 供应商配置 | `provider-admin` 系统插件 | `global.config` + `model.admin` | builtin 系统插件 | 密钥不回显、CRUD 归插件 |

@@ -153,7 +153,11 @@ agent.on("tool.beforeCall", fn, { priority?: 0, action?: "deny" });       // 策
 | `ui.available / confirm / select / input` | `ui.ask`（builtin/verified） | 通用用户交互 |
 | `skills()` | 产品 `skills: true` | 只读技能元数据 `{ name, description, path, origin }`；正文用 `read_file` 按 path 读取 |
 | `pluginAdmin.install({ id, files })` | `plugin.admin`（builtin） | 把骨架写入全局 `~/.adago/plugins/<id>/`；宿主校验 id/相对路径/大小并拒绝覆盖 |
-| `cron.list/create/update/remove/setEnabled/trigger/runs` | `cron.admin`（builtin） | 全局定时任务（`~/.adago/cron.json`）管理面；调度与执行在独立 cron 二进制（见 §5） |
+| `config.get/set/delete/list` | `global.config`（builtin/verified） | 机器级 + 工作区级命名空间存储；0600、原子写、跨进程锁 |
+| `events.query` / `events.usage` | `events.read` | 线程内只读事件投影 + 工作区原始用量行；不能写事件 |
+| `catalog.list` / `tool.invoke` | `tool.discovery`（builtin） | 目录只读投影（仅 discovery 工具）+ 按名执行内层工具（宿主重跑审批链） |
+| `turn.invoke({ threadId?, title?, prompt })` | `turn.invoke`（builtin） | 在本 Core 内触发一轮，只拿受理回执 |
+| `dispatch.send({ workspace?, threadId?, title?, text?, mode?, idempotencyKey?, taskId? })` | `dispatch.send`（builtin） | 交给网关调度层（可跨工作区），与界面发送共用 busy/steer 判定；sender 由宿主盖章 |
 | `http` / `emit` | provider 专用 | 出网桥与归一化增量（03 §5.5） |
 
 ## 5. 能力位 × 信任矩阵
@@ -161,17 +165,14 @@ agent.on("tool.beforeCall", fn, { priority?: 0, action?: "deny" });       // 策
 | 能力 | third-party | verified | builtin |
 | --- | --- | --- | --- |
 | `fs.read` / `fs.write` / `state` / `net.fetch` | ✅ | ✅ | ✅ |
-| `net.sse` / `exec` / `ui.ask` | ❌ | ✅ | ✅ |
-| `model.admin` / `plugin.admin` / `cron.admin` | ❌ | ❌ | ✅ |
+| `net.sse` / `exec` / `ui.ask` / `global.config` | ❌ | ✅ | ✅ |
+| `model.admin` / `plugin.admin` / `tool.discovery` / `turn.invoke` / `dispatch.send` | ❌ | ❌ | ✅ |
 | 前端 `backend.read`（数据投影） | ✅ | ✅ | ✅ |
 | 前端 `frontend.script`（自带 JS） | ❌ | ✅ | ✅ |
 
-`cron.admin`（仅 builtin）提供 `ctx.cron`：全局定时任务（`~/.adago/cron.json`）的
-`list/create/update/remove/setEnabled/trigger/runs`。它只是**管理面**——任务的调度与
-执行在独立 cron 二进制（网关拉起守护），任务只有 AI 任务一种（agent 动作），到期后
-经网关 `/api/cron/fire` 送达 core（`thread.create` + `turn.start`，每任务复用一个专用
-线程）；HTTP 动作已移除。任务可带 `workspace`（目标工作区绝对路径），为空时落在默认
-工作区（列表第一个，即「综合工作区」）；插件打不了执行动作，也拿不到执行结果之外的任何权限。
+基座**不提供** `cron`/`env`/`usage`/`provider` 这类业务能力位：定时任务、环境变量、
+用量展示与供应商管理都是系统插件（`cron-manager`/`env-manager`/`token-usage`/
+`provider-admin`），它们由上面的通用原语组合而成。禁用插件后对应能力消失，基座不补位。
 
 ### 运行时环境（全局对象与出网）
 

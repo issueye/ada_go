@@ -14,7 +14,7 @@ import (
 
 // TestPathHelper 是子进程助手：打印 PATH 后退出（父进程里未设置门禁变量，直接返回）。
 func TestPathHelper(t *testing.T) {
-	if os.Getenv("ADAG_PATH_HELPER") != "1" {
+	if os.Getenv("ADA_PATH_HELPER") != "1" {
 		return
 	}
 	fmt.Printf("PATH=%s\n", os.Getenv("PATH"))
@@ -24,7 +24,7 @@ func TestPathHelper(t *testing.T) {
 // ~/.adago/bin 前置到 PATH（工作区优先、去重），原有 PATH 保留在后面。
 func TestExecPrependsServiceBinPath(t *testing.T) {
 	t.Setenv("ADAGO_HOME", t.TempDir())
-	t.Setenv("ADAG_PATH_HELPER", "1")
+	t.Setenv("ADA_PATH_HELPER", "1")
 
 	caps := testCaps(t, plugins.TrustVerified, plugins.CapExec)
 	dirs, err := binpaths.Dirs(caps.WorkspaceRoot)
@@ -103,7 +103,7 @@ func TestProcessStartsWithServiceBinPath(t *testing.T) {
 	t.Setenv("ADAGO_HOME", t.TempDir())
 
 	caps := testCaps(t, plugins.TrustVerified, plugins.CapProcess)
-	caps.Env = map[string]string{"ADAG_PATH_HELPER": "1"}
+	caps.Env = map[string]string{"ADA_PATH_HELPER": "1"}
 	dirs, err := binpaths.Dirs(caps.WorkspaceRoot)
 	if err != nil {
 		t.Fatalf("binpaths.Dirs: %v", err)
@@ -116,7 +116,7 @@ export default function (agent) {
     parameters: { type: "object" },
     access: "exec",
     execute: async (args, ctx) => {
-      const p = await ctx.process.start(args.exe, args.argv, { timeoutMs: 20000, env: ["ADAG_PATH_HELPER"] });
+      const p = await ctx.process.start(args.exe, args.argv, { timeoutMs: 20000, env: ["ADA_PATH_HELPER"] });
       let text = "";
       for (let i = 0; i < 40; i++) {
         const r = await p.read({ timeoutMs: 1000, maxBytes: 65536 });

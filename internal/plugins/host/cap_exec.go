@@ -296,9 +296,11 @@ func (e *execState) run(req *execRequest) *runResult {
 	}
 	// 子进程环境 = 宿主/显式白名单 + 环境变量模块的用户变量（后者同名覆盖）。
 	// 没有显式 env 时保持原有继承语义（os.Environ），但用户变量始终生效。
+	// 继承路径必须先摘掉宿主内部变量（Core RPC 令牌、网关控制面凭据）：
+	// 插件能跑任意 exec 时，读 os.Environ() 是拿到宿主凭据最直接的办法。
 	baseEnv := req.env
 	if len(baseEnv) == 0 {
-		baseEnv = os.Environ()
+		baseEnv = stripHostEnv(os.Environ())
 	}
 	cmd.Env = applyBinPath(mergeEnv(baseEnv, req.baseEnv), req.binDirs)
 	out := &capWriter{limit: req.maxBuffer}

@@ -21,18 +21,24 @@ import (
 
 // SpawnSpec 是一次 Core 子进程启动所需的完整参数。
 type SpawnSpec struct {
-	Binary     string
-	Workspace  string // 归一化后的工作区路径
-	Product    string
-	Provider   string
-	Model      string
-	BaseURL    string
-	DataDir    string
-	Fake       bool
+	Binary    string
+	Workspace string // 归一化后的工作区路径
+	Product   string
+	Provider  string
+	Model     string
+	BaseURL   string
+	DataDir   string
+	Fake      bool
 	// Debug 给 Core 加 --debug；子进程 stderr 同时转发到网关 stderr。
 	Debug     bool
 	ParentPID int
 	Token     string
+	// ControlURL/ControlToken 是网关内部发送 API 的地址与凭据：Core 的插件进程
+	// 用它投递消息（capability: dispatch.send）。空表示本网关不提供该能力。
+	//
+	// 令牌只交给这一个子进程，不进命令行、不进日志；插件脚本永远看不到它。
+	ControlURL   string
+	ControlToken string
 }
 
 // Process 是 Supervisor 需要的最小进程抽象；测试可注入假实现。
@@ -65,17 +71,21 @@ func (s *Supervisor) startEntry(ctx context.Context, e *entry) (
 	contracts.CoreClient, Process, chan struct{}, string, int, error,
 ) {
 	spec := SpawnSpec{
-		Binary:     s.opts.Binary,
-		Workspace:  e.key,
-		Product:    s.opts.Product,
-		Provider:   s.opts.Provider,
-		Model:      s.opts.Model,
-		BaseURL:    s.opts.BaseURL,
-		DataDir:    s.opts.DataDir,
-		Fake:       s.opts.Fake,
-		Debug:      s.opts.Debug,
-		ParentPID:  s.opts.ParentPID,
-		Token:      s.opts.Token,
+		Binary:    s.opts.Binary,
+		Workspace: e.key,
+		Product:   s.opts.Product,
+		Provider:  s.opts.Provider,
+		Model:     s.opts.Model,
+		BaseURL:   s.opts.BaseURL,
+		DataDir:   s.opts.DataDir,
+		Fake:      s.opts.Fake,
+		Debug:     s.opts.Debug,
+		ParentPID: s.opts.ParentPID,
+		Token:     s.opts.Token,
+	}
+	if s.opts.Control != nil {
+		// 每次拉起都重新签发：Core 重启后旧凭据不该继续可用。
+		spec.ControlURL, spec.ControlToken = s.opts.Control.ControlAccess(e.key)
 	}
 	proc, err := s.spawn(s.baseCtx, spec)
 	if err != nil {
@@ -290,7 +300,15 @@ func execSpawn(ctx context.Context, spec SpawnSpec) (Process, error) {
 	}
 
 	cmd := exec.CommandContext(ctx, spec.Binary, args...)
-	cmd.Env = append(os.Environ(), "ADAG_CORE_TOKEN="+spec.Token)
+	env := []string{"ADAG_CORE_TOKEN=" + spec.Token}
+	// 控制面地址/令牌同样只走环境变量：命令行会出现在进程列表里。
+	if spec.ControlURL != "" {
+		env = append(env, "ADAGO_GATEWAY_CONTROL_URL="+spec.ControlURL)
+	}
+	if spec.ControlToken != "" {
+		env = append(env, "ADAGO_GATEWAY_CONTROL_TOKEN="+spec.ControlToken)
+	}
+	cmd.Env = append(os.Environ(), env...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("创建 stdout 管道失败: %w", err)

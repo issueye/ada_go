@@ -212,6 +212,32 @@ type TurnResult struct {
 	RunID    string `json:"runId"`
 }
 
+// DispatchRequest 是 ctx.dispatch.send 的入参（capability: dispatch.send）。
+//
+// 刻意没有 sender 字段：身份由宿主按能力集盖章，脚本给什么都不影响归属。
+type DispatchRequest struct {
+	// Workspace 为空表示当前工作区（Core 自己的默认工作区）。
+	Workspace string `json:"workspace,omitempty"`
+	// ThreadID 为空表示由调度层新建线程。
+	ThreadID string `json:"threadId,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Text     string `json:"text,omitempty"`
+	// Mode 是 auto|start|steer；空同 auto（插件通常用 start，避免插进别人的轮次）。
+	Mode string `json:"mode,omitempty"`
+	// IdempotencyKey 用于「同一任务同一时刻只触发一次」；空由调度层生成一次性键。
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
+	// TaskID 只进审计（如 cron 任务 id），不参与路由。
+	TaskID string `json:"taskId,omitempty"`
+}
+
+// DispatchResult 是投递回执：调度层已受理，不表示轮次结束。
+type DispatchResult struct {
+	Workspace string `json:"workspace"`
+	ThreadID  string `json:"threadId"`
+	RunID     string `json:"runId,omitempty"`
+	Mode      string `json:"mode"`
+}
+
 func configNamespaceOf(m *plugins.Manifest) string {
 	if m == nil {
 		return ""
@@ -265,6 +291,12 @@ type Context struct {
 	Catalog func(ctx context.Context) ([]domain.Descriptor, error)
 	// InvokeTool 按内层工具描述符重跑审批链后执行（capability: tool.discovery，仅 builtin）。
 	InvokeTool func(ctx context.Context, meta CallMeta, call domain.ToolCall) (domain.Result, error)
+	// Dispatch 把消息投递给调度层（capability: dispatch.send，仅 builtin）；nil 表示
+	// 本 Core 未接入网关调度层（CLI 直连、无网关的部署）。
+	//
+	// 插件给的是「发给谁、发什么」，身份由宿主盖章（PluginID 来自能力集，
+	// 脚本不能自填）；投递语义（建线程 / 空闲 start / 运行中 steer）由调度层决定。
+	Dispatch func(ctx context.Context, req DispatchRequest) (DispatchResult, error)
 	// UI 是通用交互桥（capability: ui.ask）；nil 表示未授予。
 	UI func(ctx context.Context, req UIRequest) (UIResolution, error)
 	// HTTP 是 provider 的出网桥（capability: net.fetch / net.sse）；nil 表示未授予。
