@@ -58,4 +58,3 @@ export default function (agent) {
 		t.Fatalf("配置文件未落盘 %s: %v", path, err)
 	}
 }
-

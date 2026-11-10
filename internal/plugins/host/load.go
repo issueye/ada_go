@@ -138,7 +138,6 @@ func checkVirtualName(id, name string) error {
 	return nil
 }
 
-
 // moduleLoader 是一个运行时的虚拟模块表（每 Runtime 一份缓存，12 §6.11 模块系统）。
 type moduleLoader struct {
 	script Script

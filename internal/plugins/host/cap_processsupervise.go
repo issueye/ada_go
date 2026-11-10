@@ -25,7 +25,6 @@ import (
 
 	"github.com/MoeForge/moejs"
 	"github.com/MoeForge/moejs/engine"
-
 )
 
 // 进程名字与 entry 的限额（与网关侧 spec 校验同一量级）。

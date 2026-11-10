@@ -42,8 +42,8 @@ func testScript(t *testing.T, caps *CapabilitySet, source string) Script {
 		ID: "test-plugin", Name: "测试插件", Version: "0.1.0",
 		APIVersion: plugins.APIVersionMajor, Trust: caps.Trust,
 		Backend: &plugins.Backend{
-			Entry:        "index.js",
-			Hooks:        map[string]plugins.HookAction{},
+			Entry: "index.js",
+			Hooks: map[string]plugins.HookAction{},
 		},
 	}
 	return Script{Manifest: m, EntryName: entryName(m.ID), Source: source}

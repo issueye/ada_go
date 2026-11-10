@@ -20,7 +20,6 @@ import (
 
 	"github.com/MoeForge/moejs"
 	"github.com/MoeForge/moejs/engine"
-
 )
 
 const (

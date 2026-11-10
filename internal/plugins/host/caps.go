@@ -26,7 +26,6 @@ import (
 //   - node:fs 的成员包装（上限、审计、工作区根）；
 //   - 审计：每次受控调用经 Context.Log 落一条结构化记录，密钥与 token 脱敏；
 //   - 超时、输出截断与取消贯穿。
-//
 func init() {
 	InstallCapabilities = installCapabilities
 	registerBuiltinModules()
@@ -161,7 +160,6 @@ func throwCoded(r *engine.Realm, code, message string, fields map[string]any) er
 	}
 	return r.Throw(v)
 }
-
 
 // baseForLog 只保留路径尾段：宿主绝对路径不进日志与脚本（12 §6.12.1、09 §9.2）。
 func baseForLog(p string) string {
@@ -432,8 +430,6 @@ func defineBinding(r *engine.Realm, meta *engine.Object, binding moejs.Value) er
 	return meta.DefinePropertyOrThrow(r, r.KeyFromGoString("binding"), d)
 }
 
-
-
 // signalOf 返回当前调用的取消信号（nil Context 时给 Background，绝不返回 nil ctx）。
 func (st *capsState) signalOf() context.Context {
 	if sc := st.currentContext().Signal; sc != nil {
@@ -525,7 +521,6 @@ func (st *capsState) auditError(module, method, target string, err error) {
 	}
 	st.audit(module, method, target, 0, result, nil)
 }
-
 
 // compileVirtualModule 编译（一次进程级）宿主自建的模块：与上游 node 包一致，
 // 模块实例由所有 Runtime 共享，每次 import 得到的差别只在 import.meta 的 binding。

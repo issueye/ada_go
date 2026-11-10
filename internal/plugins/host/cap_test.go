@@ -67,7 +67,6 @@ export default function (agent) {
 	}
 }
 
-
 // TestFSGuardReadsUnrestrictedWritesScoped 钉 2026-10-31 决策：
 // agent 的读（ctx.fs.readText/list/stat/exists）不限制目标路径；写路径仍受工作区 Scope 约束。
 func TestFSGuardReadsUnrestrictedWritesScoped(t *testing.T) {

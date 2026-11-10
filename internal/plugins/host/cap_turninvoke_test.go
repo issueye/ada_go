@@ -55,4 +55,3 @@ export default function (agent) {
 		t.Fatalf("回执/空 prompt 校验不对: %s", text)
 	}
 }
-

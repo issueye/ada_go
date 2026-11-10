@@ -114,7 +114,6 @@ export default function (agent) {
 	}
 }
 
-
 // 注册成功：entry 被解析成插件目录内的绝对路径，owner 由能力集盖章。
 func TestProcessesRegisterResolvesEntry(t *testing.T) {
 	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapProcessSupervise)

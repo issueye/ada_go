@@ -28,7 +28,6 @@ import (
 	"github.com/MoeForge/moejs/engine"
 
 	"github.com/adag/ada-go/internal/binpaths"
-	
 )
 
 // childProcessShim 是 node:child_process 的模块体：只读 import.meta.binding。

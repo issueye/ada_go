@@ -46,4 +46,3 @@ func TestValidateScriptRejectsSyntaxError(t *testing.T) {
 		t.Fatal("语法错误应被静态预检拒绝")
 	}
 }
-

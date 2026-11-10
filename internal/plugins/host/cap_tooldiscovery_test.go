@@ -66,4 +66,3 @@ export default function (agent) {
 		t.Fatalf("内层回执没有上浮: %s", text)
 	}
 }
-

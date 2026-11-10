@@ -20,7 +20,6 @@ import (
 
 	"github.com/MoeForge/moejs"
 	"github.com/MoeForge/moejs/engine"
-
 )
 
 func addEventsContextMember(st *capsState, hc Context, put func(string, moejs.Value) error) error {
