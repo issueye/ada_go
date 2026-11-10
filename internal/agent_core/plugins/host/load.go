@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 
@@ -52,6 +53,25 @@ func lookupModuleProvider(name string) (moduleProvider, bool) {
 	defer moduleProvidersMu.RUnlock()
 	fn, ok := moduleProviders[key]
 	return fn, ok
+}
+
+// BuiltinModules 返回宿主模块表里真的能装出来的 node 内建模块名（排序后、不含 agent:*）。
+//
+// 它是**诊断事实**而不是安装许可（安装矩阵已删除，宿主不再按清单裁剪模块）：
+// node:module 的 builtinModules / isBuiltin 用它回答「什么叫内置」，
+// 测试用它当完整性门禁。agent:host / agent:api 不是 node 内建，故排除。
+func BuiltinModules() []string {
+	moduleProvidersMu.RLock()
+	names := make([]string, 0, len(moduleProviders))
+	for name := range moduleProviders {
+		if strings.Contains(name, ":") {
+			continue
+		}
+		names = append(names, name)
+	}
+	moduleProvidersMu.RUnlock()
+	sort.Strings(names)
+	return names
 }
 
 // InstallContextMembers 是「把能力成员挂到每次调用的 ctx 对象上」的挂载点（可选）。

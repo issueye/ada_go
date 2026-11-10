@@ -199,7 +199,6 @@ type capsState struct {
 	child   moejs.Value
 	timers  *atomic.Int64
 
-	installed map[string]provider
 	// managedProcs 是本插件经 ctx.processes 注册、需要随 Runtime 关闭而注销的进程
 	// （name → scope）。由 cap_processsupervise.go 维护，CloseCapabilities 消费。
 	managedProcs map[string]string
@@ -296,7 +295,7 @@ func installCapabilities(rt *mojsRuntime, loop *mojsLoop, caps *CapabilitySet, h
 	}
 	st := &capsState{
 		rt: rt, loop: loop, caps: caps, hc: hc,
-		limits: currentLimits(), installed: map[string]provider{},
+		limits: currentLimits(),
 	}
 	if dirs, derr := binpaths.Dirs(st.caps.WorkspaceRoot); derr == nil {
 		st.binDirs = dirs

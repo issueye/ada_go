@@ -133,15 +133,22 @@ func (st *capsState) osBinding() moejs.Value {
 
 // moduleBindingInfo 是 node:module 的绑定：宿主可解析的内置模块清单 + 是否可解析。
 //
-// 模块白名单已移除：builtins 列出宿主真的能装出来的模块；isInstalled 对任意 node:* 返回 true。
+// 模块白名单已移除：builtins 列出宿主真的能装出来的模块（取自模块表本身），
+// isInstalled 对任意已登记或纯 JS 实现的 node:* 返回 true。
 func (st *capsState) moduleBindingInfo() moejs.Value {
 	r := st.rt.Realm()
 	obj := r.NewObject()
-	names := make([]string, 0, len(st.installed))
-	for name := range st.installed {
+	nameSet := map[string]struct{}{}
+	for _, name := range BuiltinModules() {
+		nameSet[name] = struct{}{}
+	}
+	for _, name := range nodemods.Modules() {
+		nameSet[name] = struct{}{}
+	}
+	names := make([]string, 0, len(nameSet))
+	for name := range nameSet {
 		names = append(names, name)
 	}
-	names = append(names, nodemods.Modules()...)
 	sortStrings(names)
 	if gv, err := r.FromGo(names); err == nil {
 		_ = obj.SetProp(r, r.KeyFromGoString("builtins"), gv)

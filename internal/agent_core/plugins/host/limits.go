@@ -20,9 +20,6 @@ const (
 	moduleBuffer       = "buffer"
 )
 
-// provider 说明一个已安装模块由谁实现（对账与诊断用）。
-type provider string
-
 // TrimModulePrefix 去掉 node: 前缀（模块表与绑定的键不带前缀）。
 func TrimModulePrefix(spec string) string {
 	const p = "node:"
