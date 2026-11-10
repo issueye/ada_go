@@ -67,29 +67,3 @@ export default function (agent) {
 	}
 }
 
-func TestToolDiscoveryBridgeRequiresBuiltin(t *testing.T) {
-	caps := testCaps(t, plugins.TrustVerified, plugins.CapToolDiscovery)
-	src := `
-export default function (agent) {
-  agent.registerTool({
-    name: "disc_probe", description: "发现桥探针", parameters: { type: "object" }, access: "read",
-    execute(args, ctx) { return { content: [{ type: "text", text: String(typeof ctx.catalog) + "/" + String(typeof ctx.tool) }] }; },
-  });
-}
-`
-	script := testScript(t, caps, src)
-	tools := &recordingTools{}
-	p, err := Load(context.Background(), script, caps, Context{}, Options{Targets: Targets{Tools: tools}})
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	defer func() { _ = p.Close(context.Background()) }()
-	def := p.Contribution().Tools[0]
-	res, err := p.CallTool(context.Background(), def.Handler, json.RawMessage(`{}`), Context{ThreadID: "th_1", Catalog: func(context.Context) ([]domain.Descriptor, error) { return nil, nil }, InvokeTool: func(context.Context, CallMeta, domain.ToolCall) (domain.Result, error) { return domain.Result{}, nil }})
-	if err != nil {
-		t.Fatalf("CallTool: %v", err)
-	}
-	if got := strings.TrimSpace(res.Content[0].Text); got != "undefined/undefined" {
-		t.Fatalf("非 builtin 不应拿到发现桥: %q", got)
-	}
-}

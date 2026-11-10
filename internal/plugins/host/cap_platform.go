@@ -13,6 +13,8 @@ import (
 
 	"github.com/MoeForge/moejs"
 	"github.com/MoeForge/moejs/engine"
+
+	"github.com/adag/ada-go/internal/plugins/host/nodemods"
 )
 
 // installConsole 装全局 console：模块没被 import 时插件也要能 console.log。
@@ -129,24 +131,30 @@ func (st *capsState) osBinding() moejs.Value {
 	return engine.ObjectValue(obj)
 }
 
-// moduleBindingInfo 是 node:module 的绑定：已安装的内置模块清单 + 是否可解析。
+// moduleBindingInfo 是 node:module 的绑定：宿主可解析的内置模块清单 + 是否可解析。
+//
+// 模块白名单已移除：builtins 列出宿主真的能装出来的模块；isInstalled 对任意 node:* 返回 true。
 func (st *capsState) moduleBindingInfo() moejs.Value {
 	r := st.rt.Realm()
 	obj := r.NewObject()
-	names := []string{}
-	policy := st.policy
-	if policy != nil {
-		names = policy.Installed()
+	names := make([]string, 0, len(st.installed))
+	for name := range st.installed {
+		names = append(names, name)
 	}
+	names = append(names, nodemods.Modules()...)
+	sortStrings(names)
 	if gv, err := r.FromGo(names); err == nil {
 		_ = obj.SetProp(r, r.KeyFromGoString("builtins"), gv)
 	}
 	isInstalled := st.rt.Function("module.isInstalled", 1, func(_ *engine.Realm, _ engine.Value, args []engine.Value) (moejs.Value, error) {
 		spec := moejs.Arg(args, 0).String()
-		if st.policy == nil {
-			return engine.Bool(false), nil
+		if _, ok := lookupModuleProvider(TrimModulePrefix(spec)); ok {
+			return engine.Bool(true), nil
 		}
-		return engine.Bool(st.policy.Allow(spec) == nil), nil
+		if _, ok := nodemods.Source(spec); ok {
+			return engine.Bool(true), nil
+		}
+		return engine.Bool(strings.HasPrefix(spec, "node:") || strings.HasPrefix(spec, "agent:")), nil
 	})
 	_ = obj.SetProp(r, r.KeyFromGoString("isInstalled"), isInstalled)
 	return engine.ObjectValue(obj)

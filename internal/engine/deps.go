@@ -44,10 +44,6 @@ type Deps struct {
 	// Steer 是可选的中途消息来源（steering 队列）。nil 表示不支持 steer：
 	// 引擎在工具批次后的安全点不会排空任何消息。
 	Steer SteeringSource
-
-	// HasPolicy 报告当前装配里是否存在 role=tool-policy 插件（02 §5.4 的失败关闭依据）。
-	// nil 视为「无策略」：安全判定默认关闭。
-	HasPolicy func() bool
 }
 
 // ToolRunner 执行一次工具调用并返回结构化结果（INV-5：拒绝与错误都是结果）。

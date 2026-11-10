@@ -15,16 +15,14 @@ import (
 
 	"github.com/adag/ada-go/app"
 	"github.com/adag/ada-go/internal/domain"
-	"github.com/adag/ada-go/internal/plugins"
 	"github.com/adag/ada-go/internal/plugins/host"
-	"github.com/adag/ada-go/internal/ports"
 )
 
 // TestToolsFS 钉 tools-fs 的五个工具在真实 fsGuard 下的行为。
 func TestToolsFS(t *testing.T) {
 	ws := tempDir(t)
 	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
-	asm := assemble(t, testProduct(t, "tools-fs", "policy-default"), hc, nil)
+	asm := assemble(t, testProduct(t, "tools-fs"), hc, nil)
 
 	if _, ok := asm.Tools.Lookup(context.Background(), "read_file"); !ok {
 		t.Fatalf("缺少 read_file，现有 %v", toolNames(asm))
@@ -106,7 +104,7 @@ func TestToolsFSWritesInstalledPlugin(t *testing.T) {
 
 	ws := tempDir(t)
 	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
-	asm := assemble(t, testProduct(t, "tools-fs", "policy-default"), hc, nil)
+	asm := assemble(t, testProduct(t, "tools-fs"), hc, nil)
 
 	target := filepath.Join(pluginDir, "blocks", "card.tsx")
 	text, res := callTool(t, asm, hc, "write_file", map[string]any{
@@ -132,7 +130,7 @@ func TestToolsFSWritesInstalledPlugin(t *testing.T) {
 func TestToolsShell(t *testing.T) {
 	ws := tempDir(t)
 	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
-	asm := assemble(t, testProduct(t, "tools-shell", "policy-default"), hc, nil)
+	asm := assemble(t, testProduct(t, "tools-shell"), hc, nil)
 
 	cmdName, argv := "cmd.exe", []string{"/c", "echo", "spike-out"}
 	if os.PathSeparator != '\\' {
@@ -190,7 +188,7 @@ func TestToolsShell(t *testing.T) {
 func TestToolsShellBackground(t *testing.T) {
 	ws := tempDir(t)
 	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
-	asm := assemble(t, testProduct(t, "tools-shell", "policy-default"), hc, nil)
+	asm := assemble(t, testProduct(t, "tools-shell"), hc, nil)
 
 	for _, name := range []string{"run_command", "run_background", "check_task", "wait_task", "kill_task"} {
 		if _, ok := asm.Tools.Lookup(context.Background(), name); !ok {
@@ -301,99 +299,9 @@ func waitTaskStatus(t *testing.T, asm *app.Assembly, hc host.Context, taskID int
 	return st
 }
 
-// TestPolicyDefaultModes 钉 policy-default 的四种模式与两条失败关闭。
-func TestPolicyDefaultModes(t *testing.T) {
-	writeEvt := ports.HookEvent{
-		Point:    ports.HookToolBeforeCall,
-		Tool:     "write_file",
-		Access:   domain.AccessWrite,
-		Snapshot: json.RawMessage(`{"input":{"path":"/workspace/a.txt","content":"x"}}`),
-	}
-	execEvt := ports.HookEvent{
-		Point:    ports.HookToolBeforeCall,
-		Tool:     "run_command",
-		Access:   domain.AccessExec,
-		Snapshot: json.RawMessage(`{"input":{"command":"git","args":["status"]}}`),
-	}
-	readEvt := ports.HookEvent{
-		Point:    ports.HookToolBeforeCall,
-		Tool:     "read_file",
-		Access:   domain.AccessRead,
-		Snapshot: json.RawMessage(`{"input":{"path":"/workspace/a.txt"}}`),
-	}
-	outsideEvt := ports.HookEvent{
-		Point:    ports.HookToolBeforeCall,
-		Tool:     "write_file",
-		Access:   domain.AccessWrite,
-		Snapshot: json.RawMessage(`{"input":{"path":"/etc/passwd"}}`),
-	}
-
-	// runIn 以给定模式装配一份「写工具 + 策略插件」的目录，并返回钩子链。
-	runIn := func(t *testing.T, mode string, ui host.Context) *plugins.HookChain {
-		t.Helper()
-		ws := tempDir(t)
-		hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
-		hc.UI = ui.UI
-		settings := map[string]map[string]any{"policy-default": {"mode": mode}}
-		asm := assemble(t, testProduct(t, "tools-fs", "policy-default"), hc, settings)
-		t.Cleanup(func() { _ = asm.Close(context.Background()) })
-		return asm.Hooks
-	}
-
-	// readonly：读放行，写/执行拒绝
-	ro := runIn(t, "readonly", host.Context{})
-	if v, err := ro.Run(context.Background(), readEvt); err != nil || !v.Allowed {
-		t.Fatalf("readonly 读应放行: %+v %v", v, err)
-	}
-	if v, _ := ro.Run(context.Background(), writeEvt); v.Allowed || !strings.Contains(v.Reason, "readonly") {
-		t.Fatalf("readonly 写应拒绝: %+v", v)
-	}
-	if v, _ := ro.Run(context.Background(), execEvt); v.Allowed {
-		t.Fatalf("readonly 执行应拒绝: %+v", v)
-	}
-
-	// full：写与执行放行，但工作区外路径仍拒绝
-	full := runIn(t, "full", host.Context{})
-	if v, _ := full.Run(context.Background(), writeEvt); !v.Allowed {
-		t.Fatalf("full 写应放行: %+v", v)
-	}
-	if v, _ := full.Run(context.Background(), execEvt); !v.Allowed {
-		t.Fatalf("full 执行应放行: %+v", v)
-	}
-	if v, _ := full.Run(context.Background(), outsideEvt); v.Allowed || !strings.Contains(v.Reason, "工作区") {
-		t.Fatalf("full 也必须拒绝工作区外路径: %+v", v)
-	}
-
-	// ask + 用户同意 / 拒绝
-	yes := runIn(t, "ask", host.Context{UI: func(context.Context, host.UIRequest) (host.UIResolution, error) {
-		return host.UIResolution{Status: domain.InteractionAccepted, Value: "yes"}, nil
-	}})
-	if v, _ := yes.Run(context.Background(), writeEvt); !v.Allowed {
-		t.Fatalf("ask + 同意应放行: %+v", v)
-	}
-	no := runIn(t, "ask", host.Context{UI: func(context.Context, host.UIRequest) (host.UIResolution, error) {
-		return host.UIResolution{Status: domain.InteractionDenied}, nil
-	}})
-	if v, _ := no.Run(context.Background(), writeEvt); v.Allowed || !strings.Contains(v.Reason, "拒绝") {
-		t.Fatalf("ask + 拒绝应拒绝: %+v", v)
-	}
-
-	// ask 但没有 UI：失败关闭
-	noUI := runIn(t, "ask", host.Context{})
-	if v, _ := noUI.Run(context.Background(), writeEvt); v.Allowed || !strings.Contains(v.Reason, "失败关闭") {
-		t.Fatalf("无 UI 时必须失败关闭: %+v", v)
-	}
-
-	// auto：写放行（工作区内），执行仍询问 → 无 UI 时拒绝
-	auto := runIn(t, "auto", host.Context{})
-	if v, _ := auto.Run(context.Background(), writeEvt); !v.Allowed {
-		t.Fatalf("auto 写应放行: %+v", v)
-	}
-	if v, _ := auto.Run(context.Background(), execEvt); v.Allowed {
-		t.Fatalf("auto 执行在无 UI 时应拒绝: %+v", v)
-	}
-}
-
+// 审批策略（policy-default）已整体移除：这里不再有「工具执行前询问/拒绝」的用例。
+// 写/执行工具直接走统一 Runner，边界只剩 ctx.fs 的工作区根、ctx.exec 的无 shell
+// 与程序策略。
 // tempDir 造工作区（可重试删除，避免 Windows 句柄竞争）。
 func tempDir(t *testing.T) string {
 	t.Helper()

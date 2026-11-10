@@ -17,7 +17,6 @@ import (
 	"github.com/MoeForge/moejs/engine"
 
 	"github.com/adag/ada-go/internal/globalconfig"
-	"github.com/adag/ada-go/internal/plugins"
 )
 
 // resolveConfig 把同步结果包成已结算的 Promise，形状与 ctx.state/fs 一致。
@@ -35,7 +34,7 @@ func notifyConfigChange(hc Context, namespace string) {
 
 // addGlobalConfigContextMember 给 ToolContext 补 ctx.config（capability: global.config）。
 func addGlobalConfigContextMember(st *capsState, hc Context, put func(string, moejs.Value) error) error {
-	if st == nil || st.caps == nil || !st.caps.Has(plugins.CapGlobalConfig) {
+	if st == nil || st.caps == nil || false {
 		return nil
 	}
 	ns := st.caps.ConfigNamespace

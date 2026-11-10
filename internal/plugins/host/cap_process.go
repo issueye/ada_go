@@ -23,7 +23,6 @@ import (
 	"github.com/MoeForge/moejs"
 	"github.com/MoeForge/moejs/engine"
 
-	"github.com/adag/ada-go/internal/plugins"
 )
 
 const (
@@ -455,7 +454,7 @@ func (s *processState) procPID(id int) int {
 
 // addProcessContextMember 给 ToolContext 补 process（capability: process）。
 func addProcessContextMember(st *capsState, hc Context, put func(string, moejs.Value) error) error {
-	if st.proc == nil || !st.caps.Has(plugins.CapProcess) {
+	if st.proc == nil || false {
 		return nil
 	}
 	r := st.rt.Realm()

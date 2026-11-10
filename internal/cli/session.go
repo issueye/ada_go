@@ -1905,8 +1905,7 @@ func (s *Session) installAssembly(asm corecontracts.Assembly) error {
 		Invoker: asm.ToolInvoker(),
 		Clock:   s.clock,
 		// Changes 跨热重载复用：检查点账本不随装配换代清零（M5）。
-		Changes:   s.changes,
-		HasPolicy: asm.PolicyPluginActive(),
+		Changes: s.changes,
 		// 检查点归属：threadId/runId 由轮次 ctx 携带（withThread/withRun）。
 		CtxMeta: func(ctx context.Context) (string, string) {
 			return threadFrom(ctx), runFrom(ctx)
@@ -1935,7 +1934,6 @@ func (s *Session) installAssembly(asm corecontracts.Assembly) error {
 	s.deps.Model = model
 	s.deps.Runner = exec
 	s.deps.Compactor = &engine.ModelCompactor{Model: model, Clock: s.clock, IDs: s.ids}
-	s.deps.HasPolicy = func() bool { return asm.PolicyPluginActive() }
 	s.deps.Prompts = prompts
 	s.deps.Skills = skillSrc
 	s.mu.Unlock()
@@ -2790,20 +2788,6 @@ func (s *Session) lookupPlugin(id string) (host.Script, string, string, bool) {
 	return host.Script{}, "", "", false
 }
 
-// hasToolPolicyRole 报告清单是否声明了审批策略角色（与组合根同口径；
-// 这里是 Session 侧的门禁预检，基座仍不解释策略规则，5.4）。
-func hasToolPolicyRole(m *plugins.Manifest) bool {
-	if m == nil || m.Backend == nil {
-		return false
-	}
-	for _, r := range m.Backend.Roles {
-		if r == plugins.RoleToolPolicy {
-			return true
-		}
-	}
-	return false
-}
-
 // hasNonReadToolsExcluding 报告当前目录里是否仍有其它插件贡献的非只读工具。
 func (s *Session) hasNonReadToolsExcluding(ctx context.Context, pluginID string) bool {
 	asm := s.Assembly()
@@ -2875,8 +2859,7 @@ func scopeOf(pluginID string) string {
 // SetPluginEnabled 启用/禁用插件（plugin.setEnabled）：先落 plugin_meta，再双代重载。
 //
 //   - 第三方禁用后从目录摘除（INV-11：禁用即能力消失），启用后恢复；
-//   - 随包插件禁用后本次装配容忍缺席，但禁用唯一策略插件且目录里仍有写/执行工具时
-//     直接拒绝（失败关闭，5.4）；
+//   - 随包插件禁用后本次装配容忍缺席（审批策略已移除，不存在「禁用策略插件」门禁）；
 //   - 重载失败时回滚 meta 并返回错误（运行中的旧代保持原样）。
 func (s *Session) SetPluginEnabled(ctx context.Context, pluginID string, enabled bool) (PluginView, error) {
 	pluginID = strings.TrimSpace(pluginID)
@@ -2885,13 +2868,8 @@ func (s *Session) SetPluginEnabled(ctx context.Context, pluginID string, enabled
 	}
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
-	script, _, _, ok := s.lookupPlugin(pluginID)
-	if !ok {
+	if _, _, _, ok := s.lookupPlugin(pluginID); !ok {
 		return PluginView{}, fmt.Errorf("cli: 没有发现插件 %q", pluginID)
-	}
-	if !enabled && hasToolPolicyRole(script.Manifest) && s.hasNonReadToolsExcluding(ctx, pluginID) {
-		return PluginView{}, domain.NewError(domain.CodePluginDenied,
-			fmt.Sprintf("插件 %s 是审批策略插件，目录里仍有写/执行工具，禁用会被拒绝（失败关闭，5.4）", pluginID))
 	}
 	// 启停状态的真源是 JSON：默认写全局（~/.adago/plugins.json，跨工作区共享）；
 	// 工作区已有覆盖文件（.adago/plugins.json）时继续写工作区，保持该工作区的

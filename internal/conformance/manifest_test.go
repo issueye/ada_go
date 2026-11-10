@@ -144,7 +144,7 @@ func TestManifestFixtures(t *testing.T) {
 		{"bad-thirdparty-uiask", "ui.ask", "5.6：第三方不能弹窗（钓鱼），必须报出该能力与所需信任级别"},
 		{"bad-reserved-env", "ADAG_", "6.13：ADAG_ 前缀由宿主保留，声明即拒绝并报出保留前缀"},
 		{"bad-pool-two", "pool=2", "6.4：v1 固定每插件 1 个 Runtime，pool>1 声明即装配失败"},
-		{"bad-unknown-hook", "tool.beforeExec", "6.6：15 个点位之外的名字必须拒绝，并报出该点位"},
+		{"bad-unknown-hook", "tool.beforeExec", "6.6：14 个点位之外的名字必须拒绝，并报出该点位"},
 		{"bad-api-version", "apiVersion=2", "6.2：主版本不匹配直接拒绝加载，并报出声明值与支持范围"},
 	}
 	for _, c := range cases {
@@ -187,10 +187,10 @@ func TestManifestFixtures(t *testing.T) {
 		// 清单校验依赖的两张表必须自洽：能力位都有安装消费者，点位与插槽数量固定。
 		mustNoErr(t, "CheckCapabilitySites", plugins.CheckCapabilitySites())
 		mustCount(t, "插槽数量", 12, len(plugins.Slots()))
-		mustCount(t, "钩子点位数量", 15, len(plugins.HookPoints()))
+		mustCount(t, "钩子点位数量", 14, len(plugins.HookPoints()))
 		mustCount(t, "后端能力位数量", 17, len(plugins.BackendCapabilities()))
 		mustCount(t, "前端能力位数量", 2, len(plugins.FrontendCapabilities()))
-		mustCount(t, "角色集合", 1, len(plugins.Roles()))
+		mustCount(t, "角色集合", 0, len(plugins.Roles()))
 	})
 }
 

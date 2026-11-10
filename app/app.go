@@ -93,11 +93,6 @@ func (a *Assembly) HookChain() *plugins.HookChain {
 	return a.Hooks
 }
 
-// PolicyPluginActive 报告本次装配是否有 role=tool-policy 插件。
-func (a *Assembly) PolicyPluginActive() bool {
-	return a != nil && a.Runtime != nil && a.Runtime.PolicyPluginActive
-}
-
 // Skills 返回本次装配的技能元数据（不含正文；deps.Skills 与 ctx.skills 用它）。
 func (a *Assembly) Skills() []domain.SkillMeta {
 	if a == nil {
@@ -216,8 +211,6 @@ func (Assembler) OfficialScripts() ([]host.Script, error) { return OfficialScrip
 func (Assembler) FrontendScripts() ([]host.Script, error) { return FrontendScripts() }
 
 func (Assembler) OfficialRoot() (string, error) { return OfficialRoot() }
-
-func (Assembler) IsPolicyPlugin(m *plugins.Manifest) bool { return isPolicyPlugin(m) }
 
 func assemblyOrNil(asm *Assembly, err error) (corecontracts.Assembly, error) {
 	if asm == nil {
@@ -415,9 +408,6 @@ func assembleSet(ctx context.Context, p *coreapp.Product, base, extras []host.Sc
 		if c := inst.Contribution(); c != nil {
 			rt.ProviderCount += len(c.Providers)
 		}
-		if isPolicyPlugin(inst.Manifest()) {
-			rt.PolicyPluginActive = true
-		}
 	}
 	if err := rt.Check(); err != nil {
 		_ = asm.Close(context.Background())
@@ -501,21 +491,6 @@ func (a *Assembly) ProviderCount() int {
 		return 0
 	}
 	return len(a.Providers.Providers())
-}
-
-// isPolicyPlugin 报告插件是不是审批策略角色（清单 backend.roles）。
-//
-// 基座只认「有没有策略插件」，不解释它的规则（05 §6.2、03 §5.6）。
-func isPolicyPlugin(m *plugins.Manifest) bool {
-	if m == nil || m.Backend == nil {
-		return false
-	}
-	for _, role := range m.Backend.Roles {
-		if role == plugins.RoleToolPolicy {
-			return true
-		}
-	}
-	return false
 }
 
 // FrontendScripts 返回官方前端脚本（M4；含同时声明 backend 的统一插件）。

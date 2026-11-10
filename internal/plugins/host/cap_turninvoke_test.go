@@ -56,28 +56,3 @@ export default function (agent) {
 	}
 }
 
-func TestTurnInvokeNotInstalledWithoutCapability(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin)
-	src := `
-export default function (agent) {
-  agent.registerTool({
-    name: "turn_probe", description: "轮次探针", parameters: { type: "object" }, access: "read",
-    execute(args, ctx) { return { content: [{ type: "text", text: String(typeof ctx.turn) }] }; },
-  });
-}
-`
-	script := testScript(t, caps, src)
-	tools := &recordingTools{}
-	p, err := Load(context.Background(), script, caps, Context{}, Options{Targets: Targets{Tools: tools}})
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	defer func() { _ = p.Close(context.Background()) }()
-	res, err := p.CallTool(context.Background(), p.Contribution().Tools[0].Handler, json.RawMessage(`{}`), Context{})
-	if err != nil {
-		t.Fatalf("CallTool: %v", err)
-	}
-	if got := strings.TrimSpace(res.Content[0].Text); got != "undefined" {
-		t.Fatalf("未授予时 ctx.turn 应为 undefined，得到 %q", got)
-	}
-}

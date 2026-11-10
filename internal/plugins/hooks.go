@@ -29,9 +29,9 @@ type HookHandler struct {
 }
 
 // HookChain 是 ports.HookRunner 的生产实现。
-//
-// 它负责的是「协调」：顺序、超时、动作分级、失败方向（设计 1.3 协调性 + 1.5.1 插件宿主）。
-// 具体规则（该不该问、问什么）在策略插件里，基座一律不解释（03 §5.6）。
+// 它负责的是「协调」：顺序、超时、动作分级（设计 1.3 协调性 + 1.5.1 插件宿主）。
+// 审批策略已整体移除：引擎在工具执行前不再询问任何插件。
+
 type HookChain struct {
 	mu       sync.RWMutex
 	handlers map[ports.HookPoint][]*HookHandler
@@ -48,7 +48,7 @@ func NewHookChain() *HookChain {
 	return &HookChain{handlers: map[ports.HookPoint][]*HookHandler{}}
 }
 
-// Register 登记处理器。点位必须是契约声明过的 15 个点位之一：
+// Register 登记处理器。点位必须是契约声明过的 14 个点位之一：
 // 未声明的点位运行期不允许出现（06 §6.6 全部点位都有真实调用方）。
 func (c *HookChain) Register(h *HookHandler) error {
 	if h == nil || h.Fn == nil {
@@ -109,15 +109,6 @@ func (c *HookChain) RemovePlugin(pluginID string) int {
 	return n
 }
 
-// FailureDirection 实现端口：安全点默认关闭，其余默认开放（06 §6.6）。
-func (c *HookChain) FailureDirection(point ports.HookPoint) domain.FailureDirection {
-	p, ok := LookupHookPoint(string(point))
-	if !ok || p.FailClosed {
-		return domain.FailClosed
-	}
-	return domain.FailOpen
-}
-
 // AllowedActions 实现端口：点位允许集合 ∩ 该信任级别可用集合。
 func (c *HookChain) AllowedActions(point ports.HookPoint, trust domain.Trust) []ports.HookAction {
 	p, ok := LookupHookPoint(string(point))
@@ -136,14 +127,13 @@ func (c *HookChain) AllowedActions(point ports.HookPoint, trust domain.Trust) []
 
 // Run 按顺序调用点位上的处理器并汇总裁决。
 //
-// 语义（06 §6.6、02 §5.4）：
+// 语义（06 §6.6 修订版：审批点位移除后无失败关闭点位）：
 //
-//	deny   → 只接受 tool.beforeCall 的 deny，裁决为不允许；
-//	abort  → 仅 builtin，且只在这三个点位有效；
+//	abort  → 仅 builtin，且只在 turn.before / model.beforeRequest 有效；
 //	replace→ 仅 builtin，载荷由引擎自行重新校验；
-//	超时/异常 → 按点位失败方向收敛：tool.beforeCall 拒绝，其余忽略并记警告。
+//	超时/异常 → 忽略该处理器并记警告，继续下一个；不阻塞主循环。
 func (c *HookChain) Run(ctx context.Context, evt ports.HookEvent) (ports.HookVerdict, error) {
-	verdict := ports.HookVerdict{Allowed: true}
+	verdict := ports.HookVerdict{}
 	if evt.Point == "" {
 		return verdict, fmt.Errorf("plugins: 钩子事件缺少点位")
 	}
@@ -151,6 +141,7 @@ func (c *HookChain) Run(ctx context.Context, evt ports.HookEvent) (ports.HookVer
 	if !ok {
 		return verdict, fmt.Errorf("plugins: 未知钩子点位 %q", evt.Point)
 	}
+	_ = point
 	if depth := ctxDepth(ctx); depth >= domain.HookRecursionDepthLimit {
 		return verdict, fmt.Errorf("plugins: 点位 %q 递归深度达到上限 %d（06 §6.6 防递归）",
 			evt.Point, domain.HookRecursionDepthLimit)
@@ -162,11 +153,7 @@ func (c *HookChain) Run(ctx context.Context, evt ports.HookEvent) (ports.HookVer
 
 	for _, h := range handlers {
 		if ctx.Err() != nil {
-			// 取消贯穿：安全点按拒绝收敛，其它点位保持原裁决。
-			if point.FailClosed {
-				verdict.Allowed = false
-				verdict.Reason = "轮次已取消"
-			}
+			// 取消贯穿：不改变裁决，直接停止遍历。
 			return verdict, ctx.Err()
 		}
 		deadline := h.Timeout
@@ -182,11 +169,6 @@ func (c *HookChain) Run(ctx context.Context, evt ports.HookEvent) (ports.HookVer
 				c.noteWarning(fmt.Sprintf("点位 %q 插件 %q 超时 %s", evt.Point, h.PluginID, deadline))
 				err = domain.NewError(domain.CodePluginTimeout, "钩子超时: "+h.PluginID)
 			}
-			if point.FailClosed {
-				verdict.Allowed = false
-				verdict.Reason = "策略插件未能给出允许判定（失败关闭）: " + err.Error()
-				return verdict, err
-			}
 			c.noteWarning(fmt.Sprintf("点位 %q 插件 %q 失败（失败方向为开，已忽略）: %v", evt.Point, h.PluginID, err))
 			continue
 		}
@@ -195,15 +177,6 @@ func (c *HookChain) Run(ctx context.Context, evt ports.HookEvent) (ports.HookVer
 		case "", ports.HookObserve:
 		case ports.HookNote:
 			verdict.Notes = append(verdict.Notes, mergeNotes(outcome.Note)...)
-		case ports.HookDeny:
-			if !point.AllowsAction(HookAction(ports.HookDeny), h.Trust == domain.TrustBuiltin) {
-				c.noteWarning(fmt.Sprintf("插件 %q 在点位 %q 返回 deny 越权，按不允许处理", h.PluginID, evt.Point))
-			}
-			verdict.Allowed = false
-			verdict.Reason = denyReason(outcome)
-			if point.FailClosed {
-				return verdict, nil
-			}
 		case ports.HookReplace:
 			if !point.AllowsAction(HookAction(ports.HookReplace), h.Trust == domain.TrustBuiltin) {
 				c.noteWarning(fmt.Sprintf("插件 %q（trust=%s）无权在 %q 替换，忽略该动作（06 §6.6）",
@@ -214,9 +187,9 @@ func (c *HookChain) Run(ctx context.Context, evt ports.HookEvent) (ports.HookVer
 				continue
 			}
 			if !json.Valid(outcome.Replacement) {
-				verdict.Allowed = false
 				verdict.Reason = "替换载荷不是合法 JSON"
-				return verdict, nil
+				return verdict, fmt.Errorf("plugins: 点位 %q 插件 %q 的替换载荷不是合法 JSON",
+					evt.Point, h.PluginID)
 			}
 			verdict.Replacements = outcome.Replacement
 		case ports.HookAbort:
@@ -225,7 +198,6 @@ func (c *HookChain) Run(ctx context.Context, evt ports.HookEvent) (ports.HookVer
 				continue
 			}
 			verdict.Aborted = true
-			verdict.Allowed = false
 			verdict.Reason = firstNonEmpty(outcome.Reason, "控制面中止")
 			return verdict, nil
 		default:
@@ -260,13 +232,6 @@ func (c *HookChain) invoke(ctx context.Context, h *HookHandler, evt ports.HookEv
 		}
 	}()
 	return h.Fn(ctx, evt)
-}
-
-func denyReason(o ports.HookOutcome) string {
-	if o.Reason != "" {
-		return o.Reason
-	}
-	return "策略插件拒绝"
 }
 
 func mergeNotes(note string) []string {

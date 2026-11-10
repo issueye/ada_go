@@ -42,7 +42,6 @@ type Assembly interface {
 	ProviderRegistry() *provider.Registry
 	ProviderCount() int
 	HookChain() *plugins.HookChain
-	PolicyPluginActive() bool
 	Skills() []domain.SkillMeta
 	SkillConflicts() []string
 	ActionDef(pluginID, name string) (host.ActionDef, bool)
@@ -60,7 +59,6 @@ type Assembler interface {
 	OfficialScripts() ([]host.Script, error)
 	FrontendScripts() ([]host.Script, error)
 	OfficialRoot() (string, error)
-	IsPolicyPlugin(*plugins.Manifest) bool
 }
 
 var (

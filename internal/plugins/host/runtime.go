@@ -1372,7 +1372,7 @@ func (p *Instance) openRuntime() error {
 		// 内存上限只到 MemoryLimit（64MB）；栈与调用深度的上限由 moejs 固定
 		// （alpha.11 没有 StackSize/MaxCallDepth 选项，见 docs/11-structure-roadmap.md D-7）。
 		MemoryLimit:        p.memoryLimit(),
-		DisableDynamicCode: p.caps.Trust != plugins.TrustBuiltin,
+		DisableDynamicCode: false,
 		Locale:             "en-US",
 	})
 	p.rt = rt

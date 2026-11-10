@@ -49,16 +49,15 @@ func (t Trust) Valid() bool {
 // AllowsUIAsk 报告该信任级别能否拿到 ui.ask / net.sse（6.2、5.6：第三方不能弹窗，避免钓鱼）。
 func (t Trust) AllowsUIAsk() bool { return t == TrustBuiltin || t == TrustVerified }
 
-// Role 是清单声明的插件角色；只用于产品装配校验与「无策略时失败关闭」，基座不解释规则（6.2）。
+// Role 是清单声明的插件角色。审批策略角色（tool-policy）已整体移除：
+// v1 不再定义任何角色，字段保留只为清单兼容（声明非空即装配失败）。
 type Role string
 
-// RoleToolPolicy 是 v1 唯一定义的角色：订阅 tool.beforeCall 并自行决定放行规则。
-const RoleToolPolicy Role = "tool-policy"
+// Roles 返回全部合法角色（当前为空：审批策略移除后没有内置角色语义）。
+func Roles() []Role { return nil }
 
-// Roles 返回全部合法角色。
-func Roles() []Role { return []Role{RoleToolPolicy} }
-
-// Access 是工具的外部效果分类；只是声明，基座不据此自动放行或拒绝（5.4、5.6）。
+// Access 是工具的外部效果分类；只是声明，供 UI 徽标与审计使用（5.4、5.6）。
+// 基座不再据此做任何放行/拒绝判定（审批策略已移除）。
 type Access string
 
 const (
@@ -68,27 +67,22 @@ const (
 	AccessNetwork Access = "network"
 )
 
-// NeedsPolicy 报告该效果在没有 tool-policy 插件时是否必须失败关闭（5.4：只读工具仍可用）。
-func (a Access) NeedsPolicy() bool { return a != AccessRead }
-
 // HookAction 是钩子允许返回的动作等级（6.6）。
 type HookAction string
 
 const (
 	ActionObserve HookAction = "observe" // 只读，任何插件
 	ActionNote    HookAction = "note"    // 附加说明，不改数据面
-	ActionDeny    HookAction = "deny"    // 仅 tool.beforeCall
-	ActionReplace HookAction = "replace" // 仅 builtin：tool.beforeCall / model.beforeRequest
-	ActionAbort   HookAction = "abort"   // 仅 builtin：turn.before / model.beforeRequest / tool.beforeCall
+	ActionReplace HookAction = "replace" // 仅 builtin：model.beforeRequest
+	ActionAbort   HookAction = "abort"   // 仅 builtin：turn.before / model.beforeRequest
 )
 
 // actionRank 用于「清单声明的最高动作等级」比较；越大权限越高。
 var actionRank = map[HookAction]int{
 	ActionObserve: 0,
 	ActionNote:    1,
-	ActionDeny:    2,
-	ActionReplace: 3,
-	ActionAbort:   4,
+	ActionReplace: 2,
+	ActionAbort:   3,
 }
 
 // Rank 返回动作等级的权限序。未知等级返回 -1。
@@ -103,7 +97,7 @@ func (a HookAction) Rank() int {
 func ActionsAtOrBelow(max HookAction) []HookAction {
 	limit := max.Rank()
 	out := make([]HookAction, 0, len(actionRank))
-	for _, a := range []HookAction{ActionObserve, ActionNote, ActionDeny, ActionReplace, ActionAbort} {
+	for _, a := range []HookAction{ActionObserve, ActionNote, ActionReplace, ActionAbort} {
 		if actionRank[a] <= limit {
 			out = append(out, a)
 		}
@@ -121,13 +115,11 @@ type HookPoint struct {
 	Allowed []HookAction
 	// BuiltinOnlyActions 是仅 builtin 信任插件可用的动作子集。
 	BuiltinOnlyActions []HookAction
-	// FailClosed 报告该点位是否为安全点：超时/异常按拒绝处理（唯一 true 的是 tool.beforeCall）。
-	FailClosed bool
 	// Pair 是成对点位（可空）。
 	Pair string
 }
 
-// hookPoints 是 15 个点位的唯一声明。
+// hookPoints 是 14 个点位的唯一声明。
 var hookPoints = []HookPoint{
 	{Name: "session.start", Summary: "Core 装配完成、会话加载后", Allowed: []HookAction{ActionObserve, ActionNote}},
 	{Name: "session.end", Summary: "Core 关闭前", Allowed: []HookAction{ActionObserve, ActionNote}},
@@ -147,14 +139,7 @@ var hookPoints = []HookPoint{
 		Pair:               "model.afterResponse",
 	},
 	{Name: "model.afterResponse", Summary: "收到终止信号后", Allowed: []HookAction{ActionObserve, ActionNote}, Pair: "model.beforeRequest"},
-	{
-		Name: "tool.beforeCall", Summary: "参数校验后、执行前",
-		Allowed:            []HookAction{ActionObserve, ActionNote, ActionDeny, ActionReplace, ActionAbort},
-		BuiltinOnlyActions: []HookAction{ActionReplace, ActionAbort},
-		FailClosed:         true,
-		Pair:               "tool.afterCall",
-	},
-	{Name: "tool.afterCall", Summary: "工具回执生成后", Allowed: []HookAction{ActionObserve, ActionNote}, Pair: "tool.beforeCall"},
+	{Name: "tool.afterCall", Summary: "工具回执生成后", Allowed: []HookAction{ActionObserve, ActionNote}},
 	{Name: "compaction.before", Summary: "生成摘要前", Allowed: []HookAction{ActionObserve, ActionNote}, Pair: "compaction.after"},
 	{Name: "compaction.after", Summary: "压缩 entry 写入后", Allowed: []HookAction{ActionObserve, ActionNote}, Pair: "compaction.before"},
 	{Name: "interaction.requested", Summary: "交互请求发出后", Allowed: []HookAction{ActionObserve, ActionNote}},

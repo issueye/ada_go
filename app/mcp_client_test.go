@@ -164,7 +164,7 @@ func TestMCPClientHTTP(t *testing.T) {
 		Log:       func(string, string, map[string]any) {},
 		HTTP:      bridge,
 	}
-	asm := assemble(t, testProduct(t, "mcp-client", "policy-default"), hc, nil)
+	asm := assemble(t, testProduct(t, "mcp-client"), hc, nil)
 
 	echo, ok := asm.Tools.Lookup(context.Background(), "mcp_demo_echo")
 	if !ok {
@@ -250,7 +250,7 @@ func TestMCPClientServerUnavailable(t *testing.T) {
 		HTTP:      bridge,
 	}
 	// 单 server 不可达不能让装配失败；插件应加载成功但贡献 0 个 MCP 工具。
-	asm := assemble(t, testProduct(t, "mcp-client", "policy-default"), hc, nil)
+	asm := assemble(t, testProduct(t, "mcp-client"), hc, nil)
 	for _, name := range toolNames(asm) {
 		if strings.HasPrefix(name, "mcp_dead_") {
 			t.Fatalf("不可达 server 不应贡献工具：%s", name)
@@ -337,7 +337,7 @@ func TestMCPClientStdio(t *testing.T) {
 		t.Fatal(err)
 	}
 	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
-	asm, err := adagapp.Assemble(context.Background(), testProduct(t, "mcp-client", "policy-default"), scripts, adagapp.Deps{
+	asm, err := adagapp.Assemble(context.Background(), testProduct(t, "mcp-client"), scripts, adagapp.Deps{
 		Context: hc,
 		HostEnv: map[string]string{"ADAG_MCP_STDIO_HELPER": "1"},
 	})
@@ -447,7 +447,7 @@ func TestMCPClientStdioLargeResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
-	asm, err := adagapp.Assemble(context.Background(), testProduct(t, "mcp-client", "policy-default"), scripts, adagapp.Deps{
+	asm, err := adagapp.Assemble(context.Background(), testProduct(t, "mcp-client"), scripts, adagapp.Deps{
 		Context: hc,
 		HostEnv: map[string]string{"ADAG_MCP_STDIO_HELPER": "1"},
 	})
@@ -501,7 +501,7 @@ func TestMCPClientInvalidConfigDegrades(t *testing.T) {
 		Log:       func(string, string, map[string]any) {},
 		HTTP:      bridge,
 	}
-	asm := assemble(t, testProduct(t, "mcp-client", "policy-default"), hc, nil)
+	asm := assemble(t, testProduct(t, "mcp-client"), hc, nil)
 	if _, ok := asm.Tools.Lookup(context.Background(), "mcp_demo_echo"); !ok {
 		t.Fatalf("非法配置项不应拖垮整份配置，现有工具 %v", toolNames(asm))
 	}
@@ -548,7 +548,7 @@ func TestMCPClientHangingServerDegrades(t *testing.T) {
 		HTTP:      bridge,
 	}
 	begin := time.Now()
-	asm := assemble(t, testProduct(t, "mcp-client", "policy-default"), hc, nil)
+	asm := assemble(t, testProduct(t, "mcp-client"), hc, nil)
 	elapsed := time.Since(begin)
 	if _, ok := asm.Tools.Lookup(context.Background(), "mcp_demo_echo"); !ok {
 		t.Fatalf("挂起 server 不应拖垮其它 server，现有工具 %v", toolNames(asm))
@@ -592,7 +592,7 @@ func TestMCPClientSessionExpiryReinit(t *testing.T) {
 		Log:       func(string, string, map[string]any) {},
 		HTTP:      bridge,
 	}
-	asm := assemble(t, testProduct(t, "mcp-client", "policy-default"), hc, nil)
+	asm := assemble(t, testProduct(t, "mcp-client"), hc, nil)
 	text, res := callTool(t, asm, hc, "mcp_demo_echo", map[string]any{"text": "hi"})
 	if res.Details["mcpError"] == true {
 		t.Fatalf("会话过期后应重连并成功，实际：%s", text)
@@ -644,7 +644,7 @@ func TestMCPClientCallTimeoutBounded(t *testing.T) {
 		Log:       func(string, string, map[string]any) {},
 		HTTP:      bridge,
 	}
-	asm := assemble(t, testProduct(t, "mcp-client", "policy-default"), hc, nil)
+	asm := assemble(t, testProduct(t, "mcp-client"), hc, nil)
 
 	begin := time.Now()
 	text, res := callTool(t, asm, hc, "mcp_demo_echo", map[string]any{"text": "hi"})
@@ -690,7 +690,7 @@ func TestMCPClientAdminRoutes(t *testing.T) {
 		Log:       func(string, string, map[string]any) {},
 		HTTP:      bridge,
 	}
-	asm := assemble(t, testProduct(t, "mcp-client", "policy-default"), hc, nil)
+	asm := assemble(t, testProduct(t, "mcp-client"), hc, nil)
 	ctx := context.Background()
 
 	out, err := asm.CallHTTPAPI(ctx, "mcp-client", "GET", "/servers", nil, "")
@@ -855,7 +855,7 @@ func TestMCPClientAdminRoutes(t *testing.T) {
 func TestMCPClientAdminConfigBootstrap(t *testing.T) {
 	ws := tempDir(t)
 	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
-	asm := assemble(t, testProduct(t, "mcp-client", "policy-default"), hc, nil)
+	asm := assemble(t, testProduct(t, "mcp-client"), hc, nil)
 	ctx := context.Background()
 
 	out, err := asm.CallHTTPAPI(ctx, "mcp-client", "GET", "/config", nil, "")
@@ -907,7 +907,7 @@ func TestMCPClientAdminLegacyConfig(t *testing.T) {
 	}
 
 	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
-	asm := assemble(t, testProduct(t, "mcp-client", "policy-default"), hc, nil)
+	asm := assemble(t, testProduct(t, "mcp-client"), hc, nil)
 	ctx := context.Background()
 
 	out, err := asm.CallHTTPAPI(ctx, "mcp-client", "GET", "/config", nil, "")
@@ -985,7 +985,7 @@ func TestMCPClientAdminLegacyConfig(t *testing.T) {
 func TestMCPClientSkill(t *testing.T) {
 	ws := tempDir(t)
 	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
-	asm := assemble(t, testProduct(t, "mcp-client", "policy-default"), hc, nil)
+	asm := assemble(t, testProduct(t, "mcp-client"), hc, nil)
 
 	found := false
 	for _, skill := range asm.Skills() {

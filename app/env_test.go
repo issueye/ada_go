@@ -55,7 +55,7 @@ export default function (agent) {
 		t.Fatalf("official.Scripts: %v", err)
 	}
 	scripts := append(officialScripts, script)
-	asm, err := app.Assemble(context.Background(), testProduct(t, "env-fixture", "policy-default"), scripts, app.Deps{
+	asm, err := app.Assemble(context.Background(), testProduct(t, "env-fixture"), scripts, app.Deps{
 		Context: hc,
 		EnvVars: map[string]string{"ADAG_ENV_PROBE": "from-deps"},
 	})

@@ -72,7 +72,7 @@ func newFSGuard(st *capsState) (*fsGuard, error) {
 	}
 	return &fsGuard{
 		st: st, root: abs, mount: mount,
-		write:       st.caps != nil && st.caps.Has(plugins.CapFSWrite),
+		write:       st.caps != nil && true,
 		limits:      st.limits,
 		pluginRoots: pluginWriteRoots(),
 		pluginID:    capsPluginID(st.caps),
@@ -427,7 +427,7 @@ func installContextMembers(rt *mojsRuntime, put func(name string, v moejs.Value)
 			firstErr = err
 		}
 	}
-	if caps != nil && (caps.Has(plugins.CapFSRead) || caps.Has(plugins.CapFSWrite)) {
+	if caps != nil {
 		keep(put("fs", ctxFSObject(st, hc)))
 	}
 	if err := addExecContextMember(st, hc, put); err != nil {

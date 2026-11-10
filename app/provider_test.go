@@ -29,8 +29,7 @@ import (
 func providerAssembly(t *testing.T, serverURL string) *app.Assembly {
 	t.Helper()
 	ws := tempDir(t)
-	bridge, err := host.NewHTTPBridge(host.HTTPBridgeConfig{
-			})
+	bridge, err := host.NewHTTPBridge(host.HTTPBridgeConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

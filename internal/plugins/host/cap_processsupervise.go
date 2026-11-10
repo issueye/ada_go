@@ -26,7 +26,6 @@ import (
 	"github.com/MoeForge/moejs"
 	"github.com/MoeForge/moejs/engine"
 
-	"github.com/adag/ada-go/internal/plugins"
 )
 
 // 进程名字与 entry 的限额（与网关侧 spec 校验同一量级）。
@@ -40,7 +39,7 @@ const (
 )
 
 func addProcessSuperviseContextMember(st *capsState, hc Context, put func(string, moejs.Value) error) error {
-	if st == nil || st.caps == nil || !st.caps.Has(plugins.CapProcessSupervise) || st.caps.Trust != plugins.TrustBuiltin {
+	if st == nil || st.caps == nil {
 		return nil
 	}
 	if hc.Processes == nil {

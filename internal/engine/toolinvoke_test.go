@@ -7,15 +7,13 @@ import (
 
 	"github.com/adag/ada-go/internal/domain"
 	"github.com/adag/ada-go/internal/engine"
-	"github.com/adag/ada-go/internal/plugins"
-	"github.com/adag/ada-go/internal/ports"
 )
 
-// InvokeTool 必须重跑内层描述符的审批链，而不是直接 Runner.Execute。
+// InvokeTool 在轮次外直接复用同一份 Runner（审批策略已移除，没有执行前钩子）。
 //
 // 内层工具用发现式描述符：exec_tool 的契约就是「执行 find_tool 列出的工具」，
 // 注入式工具经这条旁路执行会被拒（见 TestInvokeToolRejectsInjectedTool）。
-func TestInvokeToolRunsBeforeCallPolicy(t *testing.T) {
+func TestInvokeToolRunsThroughRunner(t *testing.T) {
 	t.Parallel()
 	danger := discoveryDescriptor("danger", domain.AccessWrite)
 	h := newHarness(t, nil, danger)
@@ -29,24 +27,8 @@ func TestInvokeToolRunsBeforeCallPolicy(t *testing.T) {
 	if res.Content[0].Text != "ran" || len(h.runner.called()) != 1 {
 		t.Fatalf("未走 Runner: %+v / %+v", res, h.runner.called())
 	}
-
-	// 策略 deny：Runner 不得执行，返回 denied 回执。
-	if err := h.hooks.Register(&plugins.HookHandler{
-		PluginID: "policy-test", Trust: domain.TrustBuiltin,
-		Point: ports.HookToolBeforeCall, MaxAction: plugins.ActionDeny,
-		Fn: func(context.Context, ports.HookEvent) (ports.HookOutcome, error) {
-			return ports.HookOutcome{PluginID: "policy-test", Action: ports.HookDeny, Reason: "不允许写"}, nil
-		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	res, err = engine.InvokeTool(context.Background(), h.deps, engine.TurnSpec{ThreadID: "th_1", RunID: "run_1"},
-		domain.ToolCall{Tool: "danger", CallID: "call_2", Args: json.RawMessage(`{}`)})
-	if err != nil {
-		t.Fatalf("InvokeTool deny: %v", err)
-	}
-	if res.Receipt.Status != domain.ReceiptDenied || len(h.runner.called()) != 1 {
-		t.Fatalf("deny 后不应再执行 Runner: %+v / calls=%d", res, len(h.runner.called()))
+	if res.Receipt.Status == domain.ReceiptDenied {
+		t.Fatalf("审批策略已移除，不应出现 denied 回执: %+v", res.Receipt)
 	}
 }
 

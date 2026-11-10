@@ -21,7 +21,7 @@ ada-go 是一个**本地优先、单二进制、插件优先**的 AI Agent 系�
 
 前端是**服务端渲染**：Go `html/template` + 组件库 + HTMX + SSE。插件用 TSX 写界面，但 TSX 在服务端执行：esbuild 去类型并转换 JSX，moejs 执行得到 VNode JSON，再由 Go 组件库渲染成 HTML。客户端岛只在显式声明 `hydrate`/`clientOnly` 时启用。界面与设计元语直接复用 a_da：Black Swan `--ph-*` token、`ada-*` 组件样式、DOM 结构、12 个插槽位置与交互规则。
 
-核心数字：**2 个进程角色、1 条 RPC 契约、33 个 RPC 方法、15 个钩子点、12 个前端插槽、1 份协议源文件**。
+核心数字：**2 个进程角色、1 条 RPC 契约、33 个 RPC 方法、14 个钩子点、12 个前端插槽、1 份协议源文件**。
 
 ---
 

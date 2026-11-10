@@ -231,11 +231,7 @@ func TestInvariants(t *testing.T) {
 				t.Errorf("回执状态缺失")
 			}
 		}
-		// 无策略插件时的失败关闭文案（03 §5.6 / coreapp.Check）。
-		p, err := coreapp.LoadProduct(repoPath(t, "products", "coding.agent.json"))
-		mustNoErr(t, "LoadProduct", err)
-		err = (&coreapp.Runtime{Product: p, AccessesInUse: []string{"write"}}).Check()
-		mustErrContains(t, "无策略插件", err, "denied: no policy")
+		// 审批策略已移除：写工具不再有「无策略插件即失败关闭」的文案。
 	})
 
 	// ---------------------------------------------------------------

@@ -13,14 +13,12 @@ import (
 	"fmt"
 	"path"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 
 	"github.com/MoeForge/moejs"
 
 	"github.com/adag/ada-go/internal/plugins"
-	nodemod "github.com/adag/ada-go/internal/plugins/host/node"
 )
 
 // AgentAPIModule 是类型声明用的虚拟模块名（05 §6.3：后端插件从 agent:api 导入类型）。
@@ -140,15 +138,6 @@ func checkVirtualName(id, name string) error {
 	return nil
 }
 
-// granted 返回后端授予列表（矩阵比对口径）。
-func (c *CapabilitySet) granted() []plugins.Capability {
-	out := make([]plugins.Capability, 0, len(c.Backend))
-	for cap := range c.Backend {
-		out = append(out, cap)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
-	return out
-}
 
 // moduleLoader 是一个运行时的虚拟模块表（每 Runtime 一份缓存，12 §6.11 模块系统）。
 type moduleLoader struct {
@@ -193,23 +182,18 @@ func ValidateScript(s Script, caps *CapabilitySet) error {
 	return err
 }
 
-// nodeSpecRe 抓静态 import / side-effect import / import() 里的 node:* 说明符。
-// 链接器对宿主模块表是惰性的（尤其 child_process 的 provider 总会返回模块体），
-// 因此预检必须自己先按矩阵判定一次，避免「预检通过、装配时才抛」。
-var nodeSpecRe = regexp.MustCompile(`(?m)(?:from\s+|import\s*\(?\s*)["'](node:[^"']+)["']`)
+// validateStaticNodeImports 只检查 `.node` 原生扩展（链接期一律拒绝）；模块白名单已移除。
+var nativeAddonRe = regexp.MustCompile(`(?m)(?:from\s+|import\s*\(?\s*)["']([^"']+\.node)["']`)
 
-func validateStaticNodeImports(s Script, caps *CapabilitySet) error {
+func validateStaticNodeImports(s Script, _ *CapabilitySet) error {
 	sources := make([]string, 0, len(s.Bundle)+1)
 	sources = append(sources, s.Source)
 	for _, src := range s.Bundle {
 		sources = append(sources, src)
 	}
 	for _, src := range sources {
-		for _, m := range nodeSpecRe.FindAllStringSubmatch(src, -1) {
-			spec := m[1]
-			if _, err := nodemod.Installable(spec, caps.Trust, caps.granted()); err != nil {
-				return fmt.Errorf("host: 插件 %s 静态检查导入 %s 被拒绝: %w", s.pluginID(), spec, err)
-			}
+		if m := nativeAddonRe.FindStringSubmatch(src); m != nil {
+			return fmt.Errorf("host: 插件 %s 静态检查导入 %s 被拒绝: 原生扩展不支持（12 §6.10）", s.pluginID(), m[1])
 		}
 	}
 	return nil
@@ -305,7 +289,7 @@ func (l *moduleLoader) compileOnce(name, src string) (*moejs.Module, error) {
 	return m, nil
 }
 
-// hostModule 找宿主提供的模块：必须同时过安装矩阵（能力位与信任级别）。
+// hostModule 找宿主提供的模块；模块白名单已移除，宿主表里没有的模块按 npm/原生扩展报错。
 func (l *moduleLoader) hostModule(spec string) (*moejs.Module, error) {
 	trimmed := strings.TrimPrefix(spec, "node:")
 	if fn, ok := lookupModuleProvider(trimmed); ok {
@@ -314,46 +298,21 @@ func (l *moduleLoader) hostModule(spec string) (*moejs.Module, error) {
 			return nil, fmt.Errorf("host: 插件 %s 导入 %s 失败: %w", l.script.pluginID(), spec, err)
 		}
 		if m == nil {
-			return nil, l.matrixError(spec)
+			return nil, l.missingModuleError(spec)
 		}
 		return m, nil
 	}
-	return nil, l.matrixError(spec)
+	return nil, l.missingModuleError(spec)
 }
 
-// matrixError 按安装矩阵解释「为什么这个模块在链接期不可用」，文案直接点名缺失能力
-// （12 §6.14 要求报错指向缺失能力，而不是一个笼统的 Cannot find module）。
-func (l *moduleLoader) matrixError(spec string) error {
+// missingModuleError 解释「宿主表里没有这个模块」：不再按安装矩阵分层，
+// 只剩「原生扩展 / npm 包」两种事实。
+func (l *moduleLoader) missingModuleError(spec string) error {
 	id := l.script.pluginID()
-	trimmed := strings.TrimPrefix(spec, "node:")
-	if !strings.HasPrefix(spec, "node:") && strings.Contains(trimmed, "/") && !knownBare(trimmed) {
-		// 带斜杠又不是已知名：当作 npm 包路径处理。
-		return npmSpecifierError(id, spec)
+	if strings.HasSuffix(spec, ".node") {
+		return fmt.Errorf("host: 插件 %s 导入 %s 被拒绝：原生扩展不支持（12 §6.10）", id, spec)
 	}
-	m, ok := nodemod.Lookup(spec)
-	if !ok {
-		return npmSpecifierError(id, spec)
-	}
-	switch m.Tier {
-	case nodemod.TierNever:
-		return fmt.Errorf("host: 插件 %s 导入 %s 被拒绝：该模块 v1 不安装（%s，12 §6.12.2）", id, spec, m.Deviation)
-	case nodemod.TierCapability:
-		if _, err := nodemod.Installable(spec, l.caps.Trust, l.caps.granted()); err != nil {
-			return fmt.Errorf("host: 插件 %s 导入 %s 被拒绝：%v（清单 backend.capabilities 需要补 %q，06 §6.2）",
-				id, spec, err, m.Capability)
-		}
-		return fmt.Errorf("host: 插件 %s 导入 %s：清单已授权 %q，但宿主尚未提供该模块实现（M1-D 安装点未接线，12 §6.11.1 %s）",
-			id, spec, m.Capability, gapOr(m.Gap, "E-1"))
-	default:
-		return fmt.Errorf("host: 插件 %s 导入 %s：模块在矩阵里属于 %s 层，但宿主尚未提供实现（M1-D 待补，12 §6.11.1 E-1）",
-			id, spec, m.Tier)
-	}
-}
-
-// knownBare 判断裸名是否落在矩阵里（path、fs、fs/promises、timers/promises…）。
-func knownBare(name string) bool {
-	_, ok := nodemod.Lookup(name)
-	return ok
+	return npmSpecifierError(id, spec)
 }
 
 func npmSpecifierError(id, spec string) error {
@@ -361,13 +320,6 @@ func npmSpecifierError(id, spec string) error {
 		return fmt.Errorf("host: 插件 %s 导入 %q：随包 Bundle 里没有这个模块（入口的相对依赖必须内联，06 §6.10）", id, spec)
 	}
 	return fmt.Errorf("host: 插件 %s 导入 %q：宿主不解析 node_modules，请把依赖在构建期打进 Bundle（05 §6.1、06 §6.10）", id, spec)
-}
-
-func gapOr(gap, fallback string) string {
-	if gap != "" {
-		return gap
-	}
-	return fallback
 }
 
 // describeLinkError 把 moejs 的链接错误翻成「缺什么」的一句话。

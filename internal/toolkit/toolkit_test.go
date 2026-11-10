@@ -28,7 +28,7 @@ func (s stubInvoker) Invoke(ctx context.Context, pluginID, tool string, args jso
 	return s.fn(ctx, pluginID, tool, args)
 }
 
-func newExecutor(t *testing.T, inv toolkit.Invoker, hasPolicy bool) (*toolkit.Catalog, *toolkit.Executor) {
+func newExecutor(t *testing.T, inv toolkit.Invoker) (*toolkit.Catalog, *toolkit.Executor) {
 	t.Helper()
 	cat := toolkit.NewCatalog()
 	if err := cat.Register(descriptor(domain.AccessWrite)); err != nil {
@@ -38,7 +38,7 @@ func newExecutor(t *testing.T, inv toolkit.Invoker, hasPolicy bool) (*toolkit.Ca
 		t.Fatal(err)
 	}
 	cat.Freeze()
-	ex, err := toolkit.NewExecutor(toolkit.ExecutorConfig{Catalog: cat, Invoker: inv, Clock: fakeClock{}, HasPolicy: hasPolicy})
+	ex, err := toolkit.NewExecutor(toolkit.ExecutorConfig{Catalog: cat, Invoker: inv, Clock: fakeClock{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,30 +232,30 @@ func TestRemovePluginMakesToolsDisappear(t *testing.T) {
 	}
 }
 
-// TestExecutorFailsClosedWithoutPolicy 是 02 §5.4 的空策略失败关闭。
-func TestExecutorFailsClosedWithoutPolicy(t *testing.T) {
+// TestExecutorRunsWriteTools：审批策略已移除，写工具不再有失败关闭，
+// 直接交给 Invoker 执行（只读工具同样照常执行）。
+func TestExecutorRunsWriteTools(t *testing.T) {
 	t.Parallel()
-	invoked := false
-	_, ex := newExecutor(t, stubInvoker{func(_ context.Context, _, _ string, _ json.RawMessage) (domain.Result, error) {
-		invoked = true
-		return domain.Result{}, nil
-	}}, false)
+	var calls []string
+	_, ex := newExecutor(t, stubInvoker{func(_ context.Context, _, tool string, _ json.RawMessage) (domain.Result, error) {
+		calls = append(calls, tool)
+		return domain.Result{Content: []domain.Part{{Type: domain.PartText, Text: "ok"}}}, nil
+	}})
 
 	res := ex.Execute(context.Background(), domain.ToolCall{CallID: "c1", Tool: "write_file", Args: json.RawMessage(`{"path":"a.txt"}`)})
-	if res.Receipt.Status != domain.ReceiptDenied {
-		t.Fatalf("状态 = %q，期望 denied", res.Receipt.Status)
+	if res.Receipt.Status != domain.ReceiptOK {
+		t.Fatalf("状态 = %q，期望 ok（审批策略已移除）", res.Receipt.Status)
 	}
-	if res.Receipt.Reason != "no policy" {
-		t.Fatalf("reason = %q", res.Receipt.Reason)
-	}
-	if invoked {
-		t.Fatal("被拒绝的工具仍然执行了")
+	if res.Receipt.Status == domain.ReceiptDenied {
+		t.Fatal("不该出现 denied 回执")
 	}
 
-	// 只读工具不受影响。
 	ro := ex.Execute(context.Background(), domain.ToolCall{CallID: "c2", Tool: "read_file", Args: json.RawMessage(`{"path":"a.txt"}`)})
 	if ro.Receipt.Status != domain.ReceiptOK {
-		t.Fatalf("只读工具被误拦：%+v", ro.Receipt)
+		t.Fatalf("只读工具应照常执行：%+v", ro.Receipt)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("两次调用都应进 Invoker，实际 %v", calls)
 	}
 }
 
@@ -266,7 +266,7 @@ func TestExecutorValidatesArgs(t *testing.T) {
 	_, ex := newExecutor(t, stubInvoker{func(context.Context, string, string, json.RawMessage) (domain.Result, error) {
 		invoked = true
 		return domain.Result{}, nil
-	}}, true)
+	}})
 
 	for _, tc := range []struct{ args, want string }{
 		{`{}`, "required"},
@@ -295,7 +295,7 @@ func TestExecutorUnknownTool(t *testing.T) {
 	_, ex := newExecutor(t, stubInvoker{func(context.Context, string, string, json.RawMessage) (domain.Result, error) {
 		t.Error("未知工具不应执行")
 		return domain.Result{}, nil
-	}}, true)
+	}})
 	res := ex.Execute(context.Background(), domain.ToolCall{CallID: "c", Tool: "nope", Args: json.RawMessage(`{}`)})
 	if res.Receipt.Status != domain.ReceiptError || !strings.Contains(res.Content[0].Text, "tool_not_found") {
 		t.Fatalf("回执 = %+v", res)
@@ -319,7 +319,7 @@ func TestExecutorTimeoutAndPanic(t *testing.T) {
 	}
 	cat.Freeze()
 
-	ex, err := toolkit.NewExecutor(toolkit.ExecutorConfig{Catalog: cat, Clock: fakeClock{}, HasPolicy: true,
+	ex, err := toolkit.NewExecutor(toolkit.ExecutorConfig{Catalog: cat, Clock: fakeClock{},
 		Invoker: stubInvoker{func(ctx context.Context, _, tool string, _ json.RawMessage) (domain.Result, error) {
 			if tool == "boom" {
 				panic("插件炸了")
@@ -356,7 +356,7 @@ func TestExecutorTruncatesLongOutput(t *testing.T) {
 	}
 	cat.Freeze()
 	long := strings.Repeat("行内容\n", 3000)
-	ex, err := toolkit.NewExecutor(toolkit.ExecutorConfig{Catalog: cat, Clock: fakeClock{}, HasPolicy: true,
+	ex, err := toolkit.NewExecutor(toolkit.ExecutorConfig{Catalog: cat, Clock: fakeClock{},
 		Invoker: stubInvoker{func(context.Context, string, string, json.RawMessage) (domain.Result, error) {
 			return domain.Result{Content: []domain.Part{{Type: domain.PartText, Text: long}},
 				Receipt: domain.Receipt{Status: domain.ReceiptOK}}, nil
@@ -383,7 +383,7 @@ func TestExecutorRejectsOversizeResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	cat.Freeze()
-	ex, err := toolkit.NewExecutor(toolkit.ExecutorConfig{Catalog: cat, Clock: fakeClock{}, HasPolicy: true,
+	ex, err := toolkit.NewExecutor(toolkit.ExecutorConfig{Catalog: cat, Clock: fakeClock{},
 		Invoker: stubInvoker{func(context.Context, string, string, json.RawMessage) (domain.Result, error) {
 			return domain.Result{
 				Content: []domain.Part{{Type: domain.PartText, Text: strings.Repeat("x", 60000)}},
@@ -458,7 +458,7 @@ func TestExecutorErrorsAreTyped(t *testing.T) {
 	t.Parallel()
 	_, ex := newExecutor(t, stubInvoker{func(context.Context, string, string, json.RawMessage) (domain.Result, error) {
 		return domain.Result{}, errors.New("底层炸了")
-	}}, true)
+	}})
 	res := ex.Execute(context.Background(), domain.ToolCall{CallID: "c", Tool: "read_file", Args: json.RawMessage(`{"path":"a"}`)})
 	if res.Receipt.Status != domain.ReceiptError {
 		t.Fatalf("状态 = %q", res.Receipt.Status)

@@ -21,7 +21,7 @@ import (
 // 所以必须同时装配审批策略插件（否则装配期直接拒绝，见 5.4 失败关闭）。
 func cronProduct(t *testing.T) *coreapp.Product {
 	t.Helper()
-	return testProduct(t, "cron-manager", "policy-default")
+	return testProduct(t, "cron-manager")
 }
 
 // cronHarness 记录 stub 掉的调度/进程桥调用。

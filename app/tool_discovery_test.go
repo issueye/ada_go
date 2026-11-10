@@ -94,7 +94,6 @@ func TestToolDiscoveryPluginFindAndExec(t *testing.T) {
 					Content: []domain.Part{{Type: domain.PartText, Text: "lazy-inner"}},
 					Receipt: domain.Receipt{Status: domain.ReceiptOK},
 				}},
-				HasPolicy: func() bool { return true },
 			}, engine.TurnSpec{ThreadID: meta.ThreadID, RunID: meta.RunID}, call)
 		},
 	}

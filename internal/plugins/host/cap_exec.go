@@ -28,7 +28,7 @@ import (
 	"github.com/MoeForge/moejs/engine"
 
 	"github.com/adag/ada-go/internal/binpaths"
-	"github.com/adag/ada-go/internal/plugins"
+	
 )
 
 // childProcessShim 是 node:child_process 的模块体：只读 import.meta.binding。
@@ -125,12 +125,7 @@ func (e *execState) cancel(id int) {
 
 // installExec 装 node:child_process（能力位 exec + 至少 verified，矩阵已判过一遍）。
 func (st *capsState) installExec() error {
-	if !st.caps.Has(plugins.CapExec) {
-		return nil // 未声明 exec：模块由 ModulePolicy 在链接期拒绝，这里不装绑定
-	}
-	if !trustAtLeast(st.caps.Trust, plugins.TrustVerified) {
-		return nil
-	}
+	// 能力位与信任级别门禁已移除：node:child_process 与 ctx.exec 总是安装。
 	ex := newExecState()
 	r := st.rt.Realm()
 	rt := st.rt
@@ -572,7 +567,7 @@ func truthyJS(v moejs.Value) (bool, bool) {
 // （05 §6.3；能力位 exec，仅 verified/builtin）。
 func addExecContextMember(st *capsState, hc Context, put func(string, moejs.Value) error) error {
 	ex := st.ex
-	if ex == nil || !st.caps.Has(plugins.CapExec) {
+	if ex == nil {
 		return nil
 	}
 	if err := put("exec", st.rt.Function("exec", 3, func(r *engine.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {

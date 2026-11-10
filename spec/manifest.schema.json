@@ -91,10 +91,10 @@
         },
         "roles": {
           "type": "array",
-          "items": { "enum": ["tool-policy"] },
+          "items": { "type": "string" },
           "uniqueItems": true,
-          "description": "插件角色声明；v1 只定义 tool-policy（审批策略角色，如 policy-default）。仅用于产品装配校验与「无策略时失败关闭」，基座不解释具体规则（§6.2）。未启用任何 tool-policy 插件时基座直接拒绝写/执行工具（§9.2）。",
-          "x-consumer": "coreapp: 产品装配校验（tool-policy 存在性）与失败关闭判定；adag verify: 角色消费者核对"
+          "description": "插件角色声明；审批策略（tool-policy）已整体移除，v1 不再定义任何角色：声明任意角色即装配失败（§6.2）。字段保留只为清单兼容。",
+          "x-consumer": "manifest: 未知角色即装配失败（当前合法集合为空）；adag verify: 角色枚举核对"
         },
         "secrets": {
           "type": "array",
@@ -106,7 +106,7 @@
         "hooks": {
           "type": "object",
           "additionalProperties": false,
-          "description": "钩子声明：点位名 → 该插件在此点位使用的最高动作等级（如 {\"tool.beforeCall\":\"deny\"}）。未声明的点位在调用时被引擎拒绝（§6.2）；声明的等级超出该点位允许集合（§6.6 表）或超出信任授予（replace/abort 仅 builtin，见根 x-trust-rule T2）即装配失败。15 个点位全部有真实调用方；成对点位（turn.before/after 等）由 adag verify 核对调用方存在。",
+          "description": "钩子声明：点位名 → 该插件在此点位使用的最高动作等级（如 {\"model.beforeRequest\":\"note\"}）。未声明的点位在调用时被引擎拒绝（§6.2）；声明的等级超出该点位允许集合（§6.6 表）或超出信任授予（replace/abort 仅 builtin，见根 x-trust-rule T2）即装配失败。14 个点位全部有真实调用方；成对点位（turn.before/after 等）由 adag verify 核对调用方存在。审批点位移除后不再有 tool.beforeCall。",
           "x-consumer": "engine: 钩子派发前比对——未声明点位直接拒绝；声明等级为运行时上限，超出信任授予在装配期失败",
           "properties": {
             "session.start": {
@@ -141,11 +141,6 @@
             },
             "model.afterResponse": {
               "enum": ["observe", "note"],
-              "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
-            },
-            "tool.beforeCall": {
-              "enum": ["observe", "note", "deny", "replace", "abort"],
-              "description": "策略主战场（失败方向=关/拒绝）；deny 对第三方开放，replace/abort 仅 builtin（x-trust-rule T2）。事件载荷 { callId, tool, access, input, threadId }（§6.6）。",
               "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
             },
             "tool.afterCall": {
@@ -444,7 +439,7 @@
               }
             }
           },
-          "description": "动作绑定：binding 名 → 后端动作。读/写语义与预取见 §7.5；动作不进模型上下文、不受 tool.beforeCall 策略约束，但写动作必须用户点击确认且受能力与 scope 约束（§7.6）。",
+          "description": "动作绑定：binding 名 → 后端动作。读/写语义与预取见 §7.5；动作不进模型上下文、不受任何执行前审批约束，但写动作必须用户点击确认且受能力与 scope 约束（§7.6）。",
           "x-consumer": "gateway/web: 为每个绑定渲染控件与动作桥入口 POST /ext/{id}/action/{binding}；coreapp: 装配期校验绑定目标存在"
         },
         "styles": {
@@ -490,7 +485,7 @@
       "then": { "required": ["sig"] }
     },
     {
-      "x-trust-rule": "T2：abort/replace 动作等级仅 builtin 信任插件（§6.6：replace 仅 tool.beforeCall/model.beforeRequest、abort 仅 turn.before/model.beforeRequest/tool.beforeCall）。third-party/verified 在对应点位声明 replace/abort 即装配失败；非 builtin 的 tool.beforeCall 最高到 deny。",
+      "x-trust-rule": "T2：abort/replace 动作等级仅 builtin 信任插件（§6.6：replace 仅 model.beforeRequest、abort 仅 turn.before/model.beforeRequest）。third-party/verified 在对应点位声明 replace/abort 即装配失败。",
       "if": {
         "required": ["trust"],
         "properties": {
@@ -516,10 +511,6 @@
                   "model.beforeRequest": {
                     "x-consumer": "engine: 信任规则 T2（非 builtin 在 model.beforeRequest 至多 observe/note，不能 replace/abort）",
                     "enum": ["observe", "note"]
-                  },
-                  "tool.beforeCall": {
-                    "x-consumer": "engine: 信任规则 T2（非 builtin 在 tool.beforeCall 至多 deny，不能 replace/abort）",
-                    "enum": ["observe", "note", "deny"]
                   }
                 }
               }

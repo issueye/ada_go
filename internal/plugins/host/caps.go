@@ -16,26 +16,17 @@ import (
 	mojsnode "github.com/MoeForge/moejs/node"
 
 	"github.com/adag/ada-go/internal/binpaths"
-	"github.com/adag/ada-go/internal/plugins"
 	"github.com/adag/ada-go/internal/plugins/host/nodemods"
 )
 
-// 本文件实现 host.InstallCapabilities：把 CapabilitySet 翻译成「这个 Runtime 里到底装了什么」。
+// 本文件实现 host.InstallCapabilities：把每个 Runtime 需要的宿主桥与 node 模块装上。
 //
-// 安装三件事（12 §6.12.1）在此的落点：
-//  1. 链接期检查 → module_policy.go 的 ModulePolicy（resolver），本文件的 chainImportHooks
-//     再把同一份判定挂到求值期与动态 import()，即使宿主解析器漏了也装不上第二条路。
-//  2. 成员裁剪 → guard 脚本按 fs.read / fs.write 包装 node:fs 与 node:fs/promises 的成员。
-//  3. 审计     → 每次受控调用经 Context.Log 落一条结构化记录，密钥与 token 脱敏。
+// 能力位与模块白名单已整体移除（2026-11-10 决策）：宿主不再按清单裁剪「装什么」，
+// 也不再有链接期 ERR_ACCESS_DENIED。仍然保留的是**功能边界**本身：
+//   - node:fs 的成员包装（上限、审计、工作区根）；
+//   - 审计：每次受控调用经 Context.Log 落一条结构化记录，密钥与 token 脱敏；
+//   - 超时、输出截断与取消贯穿。
 //
-// 与 12 §6.12.1(2) 的一处**有意偏差**（D-7 E-4 实测）：
-// 设计要求被裁剪的成员「访问即抛」（Proxy 的 get 陷阱）。实测上游 `node:fs` 的模块体是
-// `export const writeFile = binding.writeFile` 一次性读全部成员：任一成员在 *访问* 时抛错
-// 就让整个 `node:fs` 求值失败，只用了 readFile 的插件也跟着装不上
-// （复现见 tools/moejspike -case=fs 第 4 条）。因此这里退成「**调用即抛** ERR_ACCESS_DENIED」：
-// 成员存在、调用即失败、错误带 capability 字段，不出现 `typeof === "undefined"` 的静默差异。
-// 上游需要把 binding 成员惰性化后才能回到「访问即抛」，见本里程碑汇报的 issue 草案。
-
 func init() {
 	InstallCapabilities = installCapabilities
 	registerBuiltinModules()
@@ -44,7 +35,7 @@ func init() {
 // registerBuiltinModules 把「宿主能装出哪些模块」登记进模块表（load.go 的 Registry）。
 //
 // 静态 import 走 moduleLoader.hostModule → 这里；动态 import()/import.meta 走
-// ModulePolicy.Resolver → hostModuleSource。两条路必须给出同一份模块实例，
+// Importer.Resolver → hostModuleSource。两条路必须给出同一份模块实例，
 // 否则同一个 node:fs 会拿到两个绑定（12 §6.12.3）。
 func registerBuiltinModules() {
 	upstream := func(spec string) func(*CapabilitySet) (*moejs.Module, error) {
@@ -53,16 +44,10 @@ func registerBuiltinModules() {
 			return mojsnode.Resolver(nil)(nil, spec)
 		}
 	}
-	fsProvider := func(caps *CapabilitySet) (*moejs.Module, error) {
-		if !fsGranted(caps) {
-			return nil, nil // 交给 matrixError 给出「缺哪个能力位」的链接期错误
-		}
+	fsProvider := func(*CapabilitySet) (*moejs.Module, error) {
 		return mojsnode.Resolver(nil)(nil, "node:fs")
 	}
-	fsPromisesProvider := func(caps *CapabilitySet) (*moejs.Module, error) {
-		if !fsGranted(caps) {
-			return nil, nil
-		}
+	fsPromisesProvider := func(*CapabilitySet) (*moejs.Module, error) {
 		return mojsnode.Resolver(nil)(nil, "node:fs/promises")
 	}
 	virtual := func(name, src string) func(*CapabilitySet) (*moejs.Module, error) {
@@ -84,11 +69,6 @@ func registerBuiltinModules() {
 		}
 		RegisterModuleProvider(name, virtual(name, src))
 	}
-}
-
-// fsGranted 报告该授予集合能否装 node:fs（fs.read 或 fs.write）。
-func fsGranted(caps *CapabilitySet) bool {
-	return caps != nil && (caps.Has(plugins.CapFSRead) || caps.Has(plugins.CapFSWrite))
 }
 
 // 错误码（12 §6.12.4 与 node/matrix.go 的错误码表逐条对应，不新增码）。
@@ -182,14 +162,6 @@ func throwCoded(r *engine.Realm, code, message string, fields map[string]any) er
 	return r.Throw(v)
 }
 
-// throwPolicy 把 ModulePolicy 的判定结果还原成 JS 侧的编码错误。
-func throwPolicy(r *engine.Realm, err error) error {
-	var pe *policyError
-	if errors.As(err, &pe) {
-		return throwCoded(r, pe.Code, pe.Message, pe.Fields)
-	}
-	return throwCoded(r, codeModuleNotFound, err.Error(), nil)
-}
 
 // baseForLog 只保留路径尾段：宿主绝对路径不进日志与脚本（12 §6.12.1、09 §9.2）。
 func baseForLog(p string) string {
@@ -228,8 +200,6 @@ type capsState struct {
 	agent   moejs.Value
 	child   moejs.Value
 	timers  *atomic.Int64
-	// policy 是本次装配的模块判定器：node:module 的 builtinModules 与 isBuiltin 读它。
-	policy *ModulePolicy
 
 	installed map[string]provider
 	// managedProcs 是本插件经 ctx.processes 注册、需要随 Runtime 关闭而注销的进程
@@ -339,14 +309,9 @@ func installCapabilities(rt *mojsRuntime, loop *mojsLoop, caps *CapabilitySet, h
 			st.baseEnv[key] = value
 		}
 	}
-	policy := NewModulePolicy(caps)
-	st.policy = policy
-	for _, name := range policy.Installed() {
-		st.installed[name] = policy.Provider(name)
-	}
 
-	// 1) 上游 stdlib：node:fs / node:fs/promises / node:buffer（无 fs 能力时 FS 为 nil）。
-	if err := st.installUpstream(policy); err != nil {
+	// 1) 上游 stdlib：node:fs / node:fs/promises / node:buffer（总是安装，写成员不再按能力裁剪）。
+	if err := st.installUpstream(); err != nil {
 		return err
 	}
 	// 2) 宿主自建模块的 Go 侧实现（顺序：guard 原语 → process → agent:host → child_process）。
@@ -367,14 +332,13 @@ func installCapabilities(rt *mojsRuntime, loop *mojsLoop, caps *CapabilitySet, h
 		return err
 	}
 	st.proc = newProcessState()
-	// 3) 求值期兜底：import.meta 填 binding、未安装模块否决、node:fs 成员按能力包装。
-	if err := st.chainImportHooks(policy); err != nil {
+	// 3) 求值期：import.meta 填 binding、node:fs 成员包装（上限与审计）。
+	if err := st.chainImportHooks(); err != nil {
 		return err
 	}
 	registerState(rt, st)
 	st.audit("host", "install", capsID(caps), 0, "ok", map[string]any{
-		"modules": strings.Join(policy.Installed(), ","),
-		"trust":   string(caps.Trust),
+		"trust": string(caps.Trust),
 	})
 	return nil
 }
@@ -386,17 +350,15 @@ func capsID(caps *CapabilitySet) string {
 	return string(caps.Trust)
 }
 
-// installUpstream 装 moejs node 包给的那三个模块，并把 fs 的边界交给同一份 fsGuard。
-func (st *capsState) installUpstream(policy *ModulePolicy) error {
+// installUpstream 装 moejs node 包给的三个模块，并把 fs 的上限与审计交给 fsGuard。
+func (st *capsState) installUpstream() error {
 	opts := mojsnode.Options{Buffer: true}
-	if _, ok := policy.installs[moduleFS]; ok {
-		guard, err := newFSGuard(st)
-		if err != nil {
-			return err
-		}
-		st.fs = guard
-		opts.FS = guard.options()
+	guard, err := newFSGuard(st)
+	if err != nil {
+		return err
 	}
+	st.fs = guard
+	opts.FS = guard.options()
 	api, err := mojsnode.InstallLoop(st.loop, opts)
 	if err != nil {
 		return fmt.Errorf("host: 安装 node:fs/node:buffer 失败: %w", err)
@@ -405,30 +367,28 @@ func (st *capsState) installUpstream(policy *ModulePolicy) error {
 	return nil
 }
 
-// chainImportHooks 把白名单与成员包装挂到本 Runtime 的 import.meta / import()。
+// chainImportHooks 把 import.meta / import() 的包装挂到本 Runtime。
 //
-// 上游的 node.Install 已经包过一层（填 node:fs 的 binding），这里是第三层：
-//   - 先按 policy 否决未安装模块（求值期兜底，与链接期同一份判定）；
-//   - 再让上一层填自己的 binding；
-//   - 最后填宿主自建模块的 binding、并对 node:fs 系做成员包装。
+// 上游的 node.Install 已经包过一层（填 node:fs 的 binding），这里是第二层：
+//   - 先让上一层填它自己的 binding；
+//   - 再填宿主自建模块的 binding、并对 node:fs 系做成员包装（上限与审计）。
+//
+// 模块白名单已移除：宿主不再否决任何 node:* 模块。
 //
 // 注意不要直接改 Importer 的 hooks 结构体：它被同进程内所有 Runtime 共享（moejs 文档），
 // 因此必须复制一份再 SetImportHooks。
-func (st *capsState) chainImportHooks(policy *ModulePolicy) error {
+func (st *capsState) chainImportHooks() error {
 	re := st.rt.Realm()
 	h := &engine.ImportHooks{}
 	if prev := re.ImportHooks(); prev != nil {
 		*h = *prev
 	}
-	prevMeta, prevLoad := h.Meta, h.Load
+	prevMeta := h.Meta
 
 	h.Meta = func(r *engine.Realm, module any, meta *engine.Object) error {
 		name := ""
 		if m, ok := module.(*moejs.Module); ok {
 			name = m.Name()
-		}
-		if err := policy.Allow(name); err != nil {
-			return throwPolicy(r, err)
 		}
 		if prevMeta != nil {
 			if err := prevMeta(r, module, meta); err != nil {
@@ -437,20 +397,11 @@ func (st *capsState) chainImportHooks(policy *ModulePolicy) error {
 		}
 		return st.fillMeta(r, name, meta)
 	}
-	if prevLoad != nil {
-		load := prevLoad
-		h.Load = func(r *engine.Realm, referrer any, specifier string) (any, error) {
-			if err := policy.Allow(specifier); err != nil {
-				return nil, throwPolicy(r, err)
-			}
-			return load(r, referrer, specifier)
-		}
-	}
 	re.SetImportHooks(h)
 	return nil
 }
 
-// fillMeta 填宿主自建模块的 binding，并对上游 fs 的 binding 做能力包装。
+// fillMeta 填宿主自建模块的 binding，并对上游 fs 的 binding 加上限与审计。
 func (st *capsState) fillMeta(r *engine.Realm, name string, meta *engine.Object) error {
 	binding, ok := st.moduleBinding(TrimModulePrefix(name))
 	if ok {
@@ -481,8 +432,7 @@ func defineBinding(r *engine.Realm, meta *engine.Object, binding moejs.Value) er
 	return meta.DefinePropertyOrThrow(r, r.KeyFromGoString("binding"), d)
 }
 
-// granted 报告后端能力是否授予（agent:host 与成员裁剪共用）。
-func (st *capsState) granted(cap plugins.Capability) bool { return st.caps.Has(cap) }
+
 
 // signalOf 返回当前调用的取消信号（nil Context 时给 Background，绝不返回 nil ctx）。
 func (st *capsState) signalOf() context.Context {
@@ -574,4 +524,15 @@ func (st *capsState) auditError(module, method, target string, err error) {
 		}
 	}
 	st.audit(module, method, target, 0, result, nil)
+}
+
+
+// compileVirtualModule 编译（一次进程级）宿主自建的模块：与上游 node 包一致，
+// 模块实例由所有 Runtime 共享，每次 import 得到的差别只在 import.meta 的 binding。
+func compileVirtualModule(name, source string) (*moejs.Module, error) {
+	m, err := moejs.Compile(name, source)
+	if err != nil {
+		return nil, fmt.Errorf("host: 编译模块 %s 失败: %w", name, err)
+	}
+	return m, nil
 }

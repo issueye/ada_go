@@ -20,4 +20,3 @@ func TestGlobalConfigCapabilityTrust(t *testing.T) {
 		t.Fatal("third-party 声明 global.config 应被拒绝")
 	}
 }
-

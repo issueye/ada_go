@@ -114,33 +114,6 @@ export default function (agent) {
 	}
 }
 
-// 非 builtin 拿不到桥。
-func TestProcessesRequiresBuiltin(t *testing.T) {
-	caps := testCaps(t, plugins.TrustVerified, plugins.CapProcessSupervise)
-	src := `
-export default function (agent) {
-  agent.registerTool({
-    name: "proc_probe", description: "进程探针", parameters: { type: "object" }, access: "read",
-    execute(args, ctx) { return { content: [{ type: "text", text: String(typeof ctx.processes) }] }; },
-  });
-}
-`
-	script := testScript(t, caps, src)
-	sup := &fakeSupervisor{}
-	p, err := Load(context.Background(), script, caps, Context{Processes: sup},
-		Options{Targets: Targets{Tools: &recordingTools{}}})
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	defer func() { _ = p.Close(context.Background()) }()
-	res, callErr := p.CallTool(context.Background(), p.Contribution().Tools[0].Handler, json.RawMessage(`{}`), Context{Processes: sup})
-	if callErr != nil {
-		t.Fatalf("CallTool: %v", callErr)
-	}
-	if got := strings.TrimSpace(res.Content[0].Text); got != "undefined" {
-		t.Fatalf("verified 不应拿到 ctx.processes: %q", got)
-	}
-}
 
 // 注册成功：entry 被解析成插件目录内的绝对路径，owner 由能力集盖章。
 func TestProcessesRegisterResolvesEntry(t *testing.T) {

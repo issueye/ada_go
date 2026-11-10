@@ -3,7 +3,6 @@ package host
 // 静态预检的边界：只编译/链接，不执行入口工厂；语法错误与未授权模块在预检期失败。
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/adag/ada-go/internal/plugins"
@@ -48,10 +47,3 @@ func TestValidateScriptRejectsSyntaxError(t *testing.T) {
 	}
 }
 
-func TestValidateScriptRejectsUndeclaredModule(t *testing.T) {
-	s, caps := staticScript(t, `import { execFileSync } from "node:child_process";
-export default function () {}`, nil)
-	if err := ValidateScript(s, caps); err == nil || !strings.Contains(err.Error(), "exec") {
-		t.Fatalf("未声明的模块应在静态预检被拒绝（错误要点名能力）: %v", err)
-	}
-}

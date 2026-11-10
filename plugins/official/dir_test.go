@@ -27,7 +27,7 @@ func TestScriptsFromRepoDir(t *testing.T) {
 			backend[s.Manifest.ID] = true
 		}
 	}
-	for _, want := range []string{"tools-plan", "tools-fs", "provider-openai-chat", "policy-default", "plugin-helper", "ui-charts", "mcp-client", "env-manager"} {
+	for _, want := range []string{"tools-plan", "tools-fs", "provider-openai-chat", "plugin-helper", "ui-charts", "mcp-client", "env-manager"} {
 		if !backend[want] {
 			t.Fatalf("后端插件缺少 %q（现有：%v）", want, backend)
 		}

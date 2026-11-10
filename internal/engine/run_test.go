@@ -96,7 +96,6 @@ func newHarness(t *testing.T, model *testkit.ScriptedModel, descs ...domain.Desc
 	deps := engine.Deps{
 		Clock: clock, IDs: ids, Events: events, Session: store, Model: provider,
 		Tools: catalog, Interactions: inter, Hooks: hooks, Runner: runner,
-		HasPolicy: func() bool { return true },
 	}
 	return &harness{
 		workspace: strings.ReplaceAll(t.Name(), "/", "_"),
@@ -380,74 +379,38 @@ func TestThreadBusyRejectsSecondRun(t *testing.T) {
 
 // ---------- 失败方向与数据边界 ----------
 
-// TestDenyIsResultNotException 是 INV-5：策略拒绝变成 denied 回执，轮次继续。
-func TestDenyIsResultNotException(t *testing.T) {
+// TestWriteToolRunsWithoutApproval：审批策略已整体移除，write 工具不再经过
+// 任何执行前询问/拒绝，直接走统一 Runner（INV-5 只剩「拒绝是结果」的通用形态）。
+func TestWriteToolRunsWithoutApproval(t *testing.T) {
 	t.Parallel()
 	model := testkit.NewScriptedModel(
 		testkit.ToolTurn("call_w", "write_file", `{"path":"x.txt"}`),
-		testkit.TextTurn("被拒后我换个说法"),
+		testkit.TextTurn("写完了"),
 	)
 	h := newHarness(t, model, testkit.Descriptor("write_file", "tools-fs", domain.AccessWrite))
-	if err := h.hooks.Register(&plugins.HookHandler{
-		PluginID: "policy-test", Trust: domain.TrustBuiltin,
-		Point: ports.HookToolBeforeCall, MaxAction: plugins.ActionDeny,
-		Fn: func(context.Context, ports.HookEvent) (ports.HookOutcome, error) {
-			return ports.HookOutcome{PluginID: "policy-test", Action: ports.HookDeny, Reason: "不允许写"}, nil
-		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	th, _ := h.store.CreateThread(context.Background(), h.workspace, "deny")
+	th, _ := h.store.CreateThread(context.Background(), h.workspace, "no-approval")
 
 	if got := h.run(t, context.Background(), th.ID, "写文件"); got != domain.TerminalCompleted {
-		t.Fatalf("终态 = %q，期望 completed（拒绝不终止轮次）", got)
+		t.Fatalf("终态 = %q，期望 completed", got)
 	}
-	if len(h.runner.called()) != 0 {
-		t.Fatal("被拒的工具仍然执行了")
+	if len(h.runner.called()) != 1 {
+		t.Fatalf("write 工具应直接执行一次，实际 %d", len(h.runner.called()))
 	}
-	var denied bool
 	for _, e := range h.store.Entries(th.ID) {
 		if strings.Contains(string(e.Payload), "denied") {
-			denied = true
+			t.Fatalf("会话里不该出现 denied 回执：%s", e.Payload)
 		}
 	}
-	if !denied {
-		t.Fatal("会话里没有 denied 回执 entry")
-	}
 }
 
-// TestNoPolicyBlocksWriteTools 是 02 §5.4 的空策略失败关闭。
-func TestNoPolicyBlocksWriteTools(t *testing.T) {
-	t.Parallel()
-	model := testkit.NewScriptedModel(
-		testkit.ToolTurn("call_w", "write_file", `{"path":"x.txt"}`),
-		testkit.TextTurn("没有策略插件时写操作被拒"),
-	)
-	h := newHarness(t, model, testkit.Descriptor("write_file", "tools-fs", domain.AccessWrite))
-	h.deps.HasPolicy = func() bool { return false }
-	th, _ := h.store.CreateThread(context.Background(), h.workspace, "nopolicy")
-
-	if got := h.run(t, context.Background(), th.ID, "写"); got != domain.TerminalCompleted {
-		t.Fatalf("终态 = %q", got)
-	}
-	if len(h.runner.called()) != 0 {
-		t.Fatal("无策略插件时写工具被执行（INV-4）")
-	}
-	entries := h.store.Entries(th.ID)
-	if !strings.Contains(string(entries[2].Payload), "no policy") {
-		t.Fatalf("回执应写明 no policy，实际：%s", entries[2].Payload)
-	}
-}
-
-// TestReadOnlyToolAllowedWithoutPolicy 说明只读工具不受空策略影响（02 §5.4）。
-func TestReadOnlyToolAllowedWithoutPolicy(t *testing.T) {
+// TestReadOnlyToolRuns 说明只读工具照常执行（审批策略已移除，不再有失败关闭）。
+func TestReadOnlyToolRuns(t *testing.T) {
 	t.Parallel()
 	model := testkit.NewScriptedModel(
 		testkit.ToolTurn("call_r", "read_file", `{"path":"a.go"}`),
 		testkit.TextTurn("读到了"),
 	)
 	h := newHarness(t, model, testkit.Descriptor("read_file", "tools-fs", domain.AccessRead))
-	h.deps.HasPolicy = func() bool { return false }
 	th, _ := h.store.CreateThread(context.Background(), h.workspace, "ro")
 
 	h.run(t, context.Background(), th.ID, "读")

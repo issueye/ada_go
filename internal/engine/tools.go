@@ -21,7 +21,6 @@ const (
 	HookTurnAfter            = ports.HookTurnAfter
 	HookModelBeforeRequest   = ports.HookModelBeforeRequest
 	HookModelAfterResponse   = ports.HookModelAfterResponse
-	HookToolBeforeCall       = ports.HookToolBeforeCall
 	HookToolAfterCall        = ports.HookToolAfterCall
 	HookCompactionBefore     = ports.HookCompactionBefore
 	HookCompactionAfter      = ports.HookCompactionAfter
@@ -70,7 +69,13 @@ func (r *run) runTools(calls []domain.ToolCall, catalog []domain.Descriptor) too
 		receipted[call.CallID] = true
 	}
 	deny := func(call domain.ToolCall, reason, detail string) {
-		r.recordDenied(call, reason, detail)
+		r.appendToolResult(call, domain.Result{
+			Content: []domain.Part{{Type: domain.PartText, Text: "interrupted: " + detail}},
+			Receipt: domain.Receipt{
+				Status:    domain.ReceiptInterrupted,
+				StartedAt: r.deps.Clock.Now(), FinishedAt: r.deps.Clock.Now(), Reason: reason,
+			},
+		})
 		receipted[call.CallID] = true
 	}
 	defer func() {
@@ -102,38 +107,9 @@ func (r *run) runTools(calls []domain.ToolCall, catalog []domain.Descriptor) too
 			continue
 		}
 
-		// 执行前钩子：deny 是工具结果（denied），不是异常（INV-5）。
-		verdict, err := r.beforeCall(call, desc)
-		if err != nil {
-			// tool.beforeCall 是唯一失败关闭的安全点（06 §6.6）。
-			deny(call, "hook failed", err.Error())
-			continue
-		}
-		if verdict.Aborted {
-			r.emitErrorCode(domain.CodeToolInvalidArgs, "控制面钩子中止了工具调用: "+verdict.Reason)
-			return toolsErrored
-		}
-		if !verdict.Allowed {
-			// deny 是工具结果（INV-5）：记 denied 回执并把结果喂回模型，轮次继续。
-			deny(call, "denied", verdict.Reason)
-			r.hook(HookToolAfterCall, mustJSON(map[string]any{"callId": call.CallID, "tool": call.Tool, "status": "denied"}))
-			continue
-		}
-		args := call.Args
-		if len(verdict.Replacements) > 0 {
-			// replace 仅 builtin 可用；替换后重新校验（06 §6.6）。
-			if replaced, ok := coerceArgs(verdict.Replacements); ok {
-				args = replaced
-			}
-		}
-		if reason, denied := r.policyDeny(desc); denied {
-			deny(call, reason, "没有可用的策略插件")
-			continue
-		}
-
-		// 所有工具（含 system 的 find_tool/exec_tool）都走同一条 Runner。
-		res := r.deps.Runner.Execute(r.ctx, domain.ToolCall{CallID: call.CallID, Tool: call.Tool, Args: args})
-		obsDesc, obsArgs := desc, args
+		// 工具执行：基座不做执行前询问（审批策略已移除），直接走统一 Runner。
+		res := r.deps.Runner.Execute(r.ctx, domain.ToolCall{CallID: call.CallID, Tool: call.Tool, Args: call.Args})
+		obsDesc, obsArgs := desc, call.Args
 		record(call, res)
 		r.hook(HookToolAfterCall, mustJSON(map[string]any{
 			"callId": call.CallID, "tool": call.Tool, "status": string(res.Receipt.Status),
@@ -160,34 +136,6 @@ func (r *run) runTools(calls []domain.ToolCall, catalog []domain.Descriptor) too
 	}
 	r.keepPartialMessage()
 	return toolsContinue
-}
-
-// beforeCall 触发 tool.beforeCall 钩子（策略插件在这里询问用户；基座不含规则）。
-func (r *run) beforeCall(call domain.ToolCall, desc domain.Descriptor) (ports.HookVerdict, error) {
-	snapshot := mustJSON(map[string]any{
-		"callId": call.CallID, "tool": call.Tool, "access": string(desc.Access),
-		"input": json.RawMessage(nonEmptyArgs(call.Args)), "threadId": r.spec.ThreadID,
-	})
-	return r.hook(HookToolBeforeCall, snapshot)
-}
-
-// policyDeny 复刻 toolkit 的失败关闭判定，但只针对「连目录都没有 Executor 参与」的路径：
-// 引擎不判断该不该问，只在完全没有 role=tool-policy 插件时把非只读工具挡下来（02 §5.4）。
-func (r *run) policyDeny(desc domain.Descriptor) (string, bool) {
-	if desc.Access == domain.AccessRead || r.deps.HasPolicy == nil || r.deps.HasPolicy() {
-		return "", false
-	}
-	return "no policy", true
-}
-
-// recordDenied 生成 denied 回执：内容给模型，界面显示 denied 而不是成功（03 §5.6）。
-func (r *run) recordDenied(call domain.ToolCall, reason, detail string) {
-	now := r.deps.Clock.Now()
-	res := domain.Result{
-		Content: []domain.Part{{Type: domain.PartText, Text: "denied by policy: " + detail}},
-		Receipt: domain.Receipt{Status: domain.ReceiptDenied, StartedAt: now, FinishedAt: now, Reason: reason},
-	}
-	r.appendToolResult(call, res)
 }
 
 // recordInterrupted 给「本轮没来得及执行」的调用补回执。
@@ -218,26 +166,12 @@ func (r *run) appendLoopWarning(call domain.ToolCall, desc domain.Descriptor) {
 	}
 }
 
-// nonEmptyArgs 保证钩子载荷里的 input 永远是合法 JSON 对象。
+// nonEmptyArgs 保证工具回执里的 input 永远是合法 JSON 对象。
 func nonEmptyArgs(raw json.RawMessage) json.RawMessage {
 	if len(raw) == 0 {
 		return json.RawMessage("{}")
 	}
 	return raw
-}
-
-// coerceArgs 把钩子替换载荷转成参数原文。
-func coerceArgs(raw json.RawMessage) (json.RawMessage, bool) {
-	var v struct {
-		Args json.RawMessage `json:"args"`
-	}
-	if err := json.Unmarshal(raw, &v); err == nil && len(v.Args) > 0 {
-		return v.Args, true
-	}
-	if json.Valid(raw) {
-		return raw, true
-	}
-	return nil, false
 }
 
 // elapsed 返回本轮已用时（诊断与 budget_check 共用）。

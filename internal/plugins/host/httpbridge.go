@@ -47,13 +47,13 @@ type HTTPBridgeConfig struct {
 
 // Bridge 实现 host.HTTPBridge（出网唯一出口）。
 type Bridge struct {
-	connect  time.Duration
-	idle     time.Duration
-	total    time.Duration
-	maxJSON  int
-	maxSSE   int
-	client   *http.Client
-	debug    *DebugLog
+	connect time.Duration
+	idle    time.Duration
+	total   time.Duration
+	maxJSON int
+	maxSSE  int
+	client  *http.Client
+	debug   *DebugLog
 
 	baseTransport *http.Transport
 	proxyMu       sync.Mutex

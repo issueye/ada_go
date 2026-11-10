@@ -19,17 +19,18 @@ type Invoker interface {
 	Invoke(ctx context.Context, pluginID, tool string, args json.RawMessage) (domain.Result, error)
 }
 
-// Executor 是工具执行包装：校验 → 失败关闭判定 → 超时 → panic 收敛 → 截断 → 回执（02 §5.4）。
+// Executor 是工具执行包装：校验 → 超时 → panic 收敛 → 截断 → 回执（02 §5.4）。
+//
+// 审批策略已整体移除：这里不再有「没有策略插件就拒绝写/执行工具」的失败关闭。
 type Executor struct {
-	catalog   *Catalog
-	invoker   Invoker
-	clock     ports.Clock
-	changes   *ChangeQueue
-	hasPolicy bool
-	redact    func(string) string
-	maxBytes  int
-	maxLines  int
-	ctxMeta   func(ctx context.Context) (threadID, runID string)
+	catalog  *Catalog
+	invoker  Invoker
+	clock    ports.Clock
+	changes  *ChangeQueue
+	redact   func(string) string
+	maxBytes int
+	maxLines int
+	ctxMeta  func(ctx context.Context) (threadID, runID string)
 }
 
 // ExecutorConfig 装配 Executor。
@@ -39,8 +40,6 @@ type ExecutorConfig struct {
 	Clock   ports.Clock
 	// Changes 为空时自动创建（检查点与写串行仍可用）。
 	Changes *ChangeQueue
-	// HasPolicy 报告当前装配里是否存在 role=tool-policy 插件（5.4 的失败关闭依据）。
-	HasPolicy bool
 	// Redact 在写入回执与 details 前脱敏；nil 时原样保留。
 	Redact func(string) string
 	// MaxOutputBytes / MaxOutputLines 为 0 时取默认 50KB / 2000 行。
@@ -80,18 +79,14 @@ func NewExecutor(cfg ExecutorConfig) (*Executor, error) {
 	}
 	return &Executor{
 		catalog: cfg.Catalog, invoker: cfg.Invoker, clock: cfg.Clock, changes: changes,
-		hasPolicy: cfg.HasPolicy, redact: redact, maxBytes: maxBytes, maxLines: maxLines,
+		redact: redact, maxBytes: maxBytes, maxLines: maxLines,
 		ctxMeta: cfg.CtxMeta,
 	}, nil
 }
 
-// SetHasPolicy 让装配层在插件启用/禁用后更新策略门禁（禁用策略插件后写/执行立刻被拒，6.8）。
-func (e *Executor) SetHasPolicy(has bool) { e.hasPolicy = has }
-
 // Execute 跑一次工具调用，永远返回结构化结果（INV-5：拒绝与错误都是结果，不是异常）。
 //
-// 引擎负责 tool.beforeCall 钩子；这里只做「没有策略插件时的失败关闭」，
-// 不含任何审批规则（1.5.2）。
+// 审批策略已移除：这里只做参数校验、预算、截断与回执，不含任何询问/放行规则。
 func (e *Executor) Execute(ctx context.Context, call domain.ToolCall) domain.Result {
 	started := e.clock.Now()
 	d, ok := e.catalog.Lookup(ctx, call.Tool)
@@ -106,12 +101,6 @@ func (e *Executor) Execute(ctx context.Context, call domain.ToolCall) domain.Res
 	}
 	if err := s.Validate(call.Args); err != nil {
 		return e.receipt(call, started, domain.ReceiptError, "tool_invalid_args: "+err.Error(), nil)
-	}
-
-	if !e.hasPolicy && needsPolicy(d.Access) {
-		// 空策略的失败关闭：只读工具仍可用（02 §5.4、5.6）。
-		return e.denied(call, started, "no policy",
-			fmt.Sprintf("没有启用任何 role=tool-policy 插件，%s 类工具 %q 被基座拒绝", d.Access, d.Name))
 	}
 
 	var checkpoint string
@@ -206,13 +195,6 @@ func (e *Executor) receipt(call domain.ToolCall, started time.Time, status domai
 		domain.Result{Content: []domain.Part{{Type: domain.PartText, Text: msg}}, Details: details}, msg)
 }
 
-func (e *Executor) denied(call domain.ToolCall, started time.Time, reason, msg string) domain.Result {
-	res := e.finalize(call, started, e.clock.Now(), domain.ReceiptDenied,
-		domain.Result{Content: []domain.Part{{Type: domain.PartText, Text: reason + ": " + msg}}}, msg)
-	res.Receipt.Reason = reason
-	return res
-}
-
 func (e *Executor) timeoutResult(call domain.ToolCall, msg string) domain.Result {
 	return domain.Result{Content: []domain.Part{{Type: domain.PartText, Text: msg}}}
 }
@@ -269,6 +251,3 @@ func isTimeout(err error) bool {
 	}
 	return strings.Contains(err.Error(), context.DeadlineExceeded.Error())
 }
-
-// needsPolicy 报告该外部效果在没有 role=tool-policy 插件时是否必须失败关闭（02 §5.4）。
-func needsPolicy(a domain.Access) bool { return a != domain.AccessRead }

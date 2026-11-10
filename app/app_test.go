@@ -267,8 +267,9 @@ func TestMissingPluginFailsClosed(t *testing.T) {
 	}
 }
 
-// TestWriteToolsNeedPolicy 钉 coreapp 的门禁：目录里有写/执行工具但没策略插件 → 装配失败。
-func TestWriteToolsNeedPolicy(t *testing.T) {
+// TestWriteToolsNeedNoPolicy：审批策略已整体移除，只有写/执行工具而没有策略插件
+// 不再让装配失败；写工具直接可用。
+func TestWriteToolsNeedNoPolicy(t *testing.T) {
 	p := testProduct(t, "tools-fs")
 	scripts, err := official.Scripts()
 	if err != nil {
@@ -277,12 +278,12 @@ func TestWriteToolsNeedPolicy(t *testing.T) {
 	asm, err := app.Assemble(context.Background(), p, scripts, app.Deps{
 		Context: host.Context{Workspace: t.TempDir(), Log: func(string, string, map[string]any) {}},
 	})
-	if err == nil {
-		_ = asm.Close(context.Background())
-		t.Fatal("有 write 工具但没有 policy 插件时必须失败")
+	if err != nil {
+		t.Fatalf("审批策略移除后装配不应失败: %v", err)
 	}
-	if !strings.Contains(err.Error(), "tool-policy") {
-		t.Fatalf("错误应点名缺少 tool-policy：%v", err)
+	defer func() { _ = asm.Close(context.Background()) }()
+	if _, ok := asm.ToolCatalog().Lookup(context.Background(), "write_file"); !ok {
+		t.Fatal("写工具应在目录里")
 	}
 }
 

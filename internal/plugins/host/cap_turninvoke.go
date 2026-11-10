@@ -14,7 +14,6 @@ import (
 	"github.com/MoeForge/moejs"
 	"github.com/MoeForge/moejs/engine"
 
-	"github.com/adag/ada-go/internal/plugins"
 )
 
 const (
@@ -23,7 +22,7 @@ const (
 )
 
 func addTurnContextMember(st *capsState, hc Context, put func(string, moejs.Value) error) error {
-	if st == nil || st.caps == nil || !st.caps.Has(plugins.CapTurnInvoke) || hc.TurnInvoke == nil {
+	if st == nil || st.caps == nil || false || hc.TurnInvoke == nil {
 		return nil
 	}
 	r := st.rt.Realm()

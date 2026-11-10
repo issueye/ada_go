@@ -73,10 +73,10 @@ func TestDesignCanvasLedgerBlock(t *testing.T) {
 	}
 	out := string(html)
 	for _, want := range []string{
-		"adag-chart",                  // 复用宿主令牌类，而不是插件自己的 CSS
+		"adag-chart", // 复用宿主令牌类，而不是插件自己的 CSS
 		"设计画布台账",
-		"adag-chart__bar--l10",        // 2/2 最大值 → 第 10 档
-		"adag-chart__bar--l5",         // 1/2 → 第 5 档
+		"adag-chart__bar--l10", // 2/2 最大值 → 第 10 档
+		"adag-chart__bar--l5",  // 1/2 → 第 5 档
 		"Element 组件",
 		"http://127.0.0.1:8788",
 	} {

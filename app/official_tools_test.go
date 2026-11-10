@@ -56,9 +56,7 @@ func codingProductIn(t *testing.T, ws string) *app.Assembly {
 	t.Cleanup(func() { bridge.Close() })
 	asm, err := app.Assemble(context.Background(), p, scripts, app.Deps{
 		Context:     host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}, HTTP: bridge},
-		FrontendIDs: frontendIDs, Settings: map[string]map[string]any{
-			"policy-default": {"mode": "full"},
-		},
+		FrontendIDs: frontendIDs, Settings: map[string]map[string]any{},
 	})
 	if err != nil {
 		t.Fatalf("app.Assemble(coding): %v", err)
@@ -74,8 +72,8 @@ func codingProductIn(t *testing.T, ws string) *app.Assembly {
 func TestCodingProductAssembles(t *testing.T) {
 	asm := codingProduct(t)
 
-	if len(asm.Plugins) != 17 {
-		t.Fatalf("后端插件数 = %d，期望 17（provider-admin/env-manager/cron-manager/token-usage/composer-telemetry 的后端也装配；前端插件走 Gateway）: %v",
+	if len(asm.Plugins) != 16 {
+		t.Fatalf("后端插件数 = %d，期望 16（provider-admin/env-manager/cron-manager/token-usage/composer-telemetry 的后端也装配；前端插件走 Gateway）: %v",
 			len(asm.Plugins), pluginIDsOf(asm))
 	}
 	wantFrontend := []string{"tools-plan", "tools-ask", "provider-admin", "token-usage", "ui-charts", "env-manager", "cron-manager", "composer-telemetry"}
@@ -216,7 +214,7 @@ func TestToolsGit(t *testing.T) {
 	git("commit", "-q", "-m", "first commit")
 
 	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
-	asm := assemble(t, testProduct(t, "tools-git", "policy-default"), hc, nil)
+	asm := assemble(t, testProduct(t, "tools-git"), hc, nil)
 
 	if text, res := callTool(t, asm, hc, "git_status", map[string]any{}); !strings.Contains(text, "first") {
 		// --branch 输出含分支头；至少要拿到 exit 0 的状态文本。
@@ -234,7 +232,7 @@ func TestToolsGit(t *testing.T) {
 	// 不是 git 仓库的目录：git 退出码非零，文本带回错误（不抛脚本异常）。
 	plain := tempDir(t)
 	hc2 := host.Context{Workspace: plain, Log: func(string, string, map[string]any) {}}
-	asm2 := assemble(t, testProduct(t, "tools-git", "policy-default"), hc2, nil)
+	asm2 := assemble(t, testProduct(t, "tools-git"), hc2, nil)
 	text, res := callTool(t, asm2, hc2, "git_status", map[string]any{})
 	if res.Details["code"].(float64) == 0 || !strings.Contains(text, "not a git repository") {
 		t.Fatalf("非仓库应回 git 错误文本: %q / %#v", text, res.Details)
@@ -248,7 +246,7 @@ func TestToolsGit(t *testing.T) {
 
 // TestToolsAsk 钉 ask_user 的三形态与两条失败关闭。
 func TestToolsAsk(t *testing.T) {
-	asm := assemble(t, testProduct(t, "tools-ask", "policy-default"),
+	asm := assemble(t, testProduct(t, "tools-ask"),
 		host.Context{Workspace: tempDir(t), Log: func(string, string, map[string]any) {}}, nil)
 
 	run := func(t *testing.T, ui *host.Context, args map[string]any) (string, error) {
@@ -332,7 +330,7 @@ func TestToolsSkillSearch(t *testing.T) {
 			{Name: "deploy-notes", Description: "部署注意事项", Origin: host.SkillOriginWorkspace},
 		}
 	}
-	asm := assemble(t, testProduct(t, "tools-skill", "policy-default"), hc, nil)
+	asm := assemble(t, testProduct(t, "tools-skill"), hc, nil)
 
 	if text, res := callTool(t, asm, hc, "skill_search", map[string]any{"query": "deploy"}); !strings.Contains(text, "deploy-notes") || strings.Contains(text, "clean-code") {
 		t.Fatalf("skill_search(deploy) = %q / %#v", text, res.Details)
@@ -345,7 +343,7 @@ func TestToolsSkillSearch(t *testing.T) {
 	}
 	// 宿主没给技能表：失败关闭。
 	hc2 := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
-	asm2 := assemble(t, testProduct(t, "tools-skill", "policy-default"), hc2, nil)
+	asm2 := assemble(t, testProduct(t, "tools-skill"), hc2, nil)
 	inst := pluginOwning(t, asm2, "skill_search")
 	_, err := inst.CallTool(context.Background(), handlerOf(t, inst, "skill_search"),
 		json.RawMessage(`{"query":"x"}`), hc2)

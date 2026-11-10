@@ -206,7 +206,7 @@ func TestCoreRPCThreadAndTurn(t *testing.T) {
 	if hello["productId"] != "headless" || hello["pid"] == nil {
 		t.Fatalf("hello = %v", hello)
 	}
-	if plugins, _ := hello["plugins"].([]any); len(plugins) != 14 {
+	if plugins, _ := hello["plugins"].([]any); len(plugins) != 13 {
 		t.Fatalf("plugins = %v", hello["plugins"])
 	}
 	if ws, _ := hello["workspace"].(map[string]any); ws["workspaceKey"] == "" {

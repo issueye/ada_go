@@ -60,7 +60,7 @@ func ckptProduct(t *testing.T) string {
 	raw := `{
   "id": "ckpt-test",
   "name": "Checkpoint Fixture Product",
-  "plugins": ["provider-openai-chat", "tools-fs", "tools-shell", "tools-plan", "policy-default", "test-ckpt"],
+  "plugins": ["provider-openai-chat", "tools-fs", "tools-shell", "tools-plan", "test-ckpt"],
   "capabilities": { "skills": false, "images": true, "subagents": false },
   "identity": { "name": "ada-go", "locale": "zh-CN" },
   "policies": { "toolTimeoutMs": 120000, "turnTimeoutMs": 0, "maxTurnTokens": 0, "loopRepeatLimit": 3, "loopAbortLimit": 5, "parallelTools": 1 }
@@ -72,7 +72,7 @@ func ckptProduct(t *testing.T) string {
 	return path
 }
 
-// ckptSession 打开一个带夹具插件的会话；policy-default 用 auto 模式（写工具免询问）。
+// ckptSession 打开一个带夹具插件的会话（审批策略已移除，写工具直接执行）。
 // steps 是逐轮的模型脚本（每一轮一次 ckpt_write 或文本收尾）。
 func ckptSession(t *testing.T, workspace, dataDir string, steps ...[]testkit.ScriptStep) *cli.Session {
 	t.Helper()
@@ -96,7 +96,6 @@ func ckptSession(t *testing.T, workspace, dataDir string, steps ...[]testkit.Scr
 		Product:     ckptProduct(t),
 		Scripts:     append(base, fixture),
 		Assembler:   app.Assembler{},
-		Settings:    map[string]map[string]any{"policy-default": {"mode": "auto"}},
 		ModelClient: model,
 		In:          strings.NewReader(""),
 		Out:         io.Discard,

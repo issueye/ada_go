@@ -21,7 +21,6 @@ import (
 	"github.com/MoeForge/moejs"
 	"github.com/MoeForge/moejs/engine"
 
-	"github.com/adag/ada-go/internal/plugins"
 )
 
 const (
@@ -32,7 +31,7 @@ const (
 )
 
 func addDispatchContextMember(st *capsState, hc Context, put func(string, moejs.Value) error) error {
-	if st == nil || st.caps == nil || !st.caps.Has(plugins.CapDispatchSend) || st.caps.Trust != plugins.TrustBuiltin {
+	if st == nil || st.caps == nil {
 		return nil
 	}
 	if hc.Dispatch == nil {

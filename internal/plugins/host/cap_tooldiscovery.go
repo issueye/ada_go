@@ -18,11 +18,10 @@ import (
 	"github.com/MoeForge/moejs/engine"
 
 	"github.com/adag/ada-go/internal/domain"
-	"github.com/adag/ada-go/internal/plugins"
 )
 
 func addToolDiscoveryContextMembers(st *capsState, hc Context, put func(string, moejs.Value) error) error {
-	if st == nil || st.caps == nil || !st.caps.Has(plugins.CapToolDiscovery) || st.caps.Trust != plugins.TrustBuiltin {
+	if st == nil || st.caps == nil {
 		return nil
 	}
 	if hc.Catalog == nil || hc.InvokeTool == nil {

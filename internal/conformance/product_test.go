@@ -25,7 +25,6 @@ var codingPlugins = []string{
 	"tools-ask",
 	"tools-skill",
 	"tool-discovery",
-	"policy-default",
 	"persona-coding",
 	"provider-admin",
 	"token-usage",
@@ -53,7 +52,7 @@ func TestProductDeclarations(t *testing.T) {
 		mustNoErr(t, "LoadProduct(coding)", err)
 		mustEqual(t, "产品 id", "coding", p.ID)
 		mustEqual(t, "产品名", "ada-go Coding", p.Name)
-		mustCount(t, "coding 的官方插件数", 17, len(p.Plugins))
+		mustCount(t, "coding 的官方插件数", 16, len(p.Plugins))
 		for i, want := range codingPlugins {
 			if p.Plugins[i] != want {
 				t.Errorf("第 %d 项插件: want=%s got=%s", i+1, want, p.Plugins[i])
@@ -94,15 +93,12 @@ func TestProductDeclarations(t *testing.T) {
 		mustCount(t, "空基座 provider 数", 0, rt.ProviderCount)
 		mustCount(t, "空基座页面数", 0, rt.PageCount)
 		mustCount(t, "空基座插槽数", 0, rt.SlotCount)
-		if rt.PolicyPluginActive {
-			t.Errorf("空基座不该有策略插件")
-		}
 		notice := rt.EmptyStateNotice()
 		if len(notice) == 0 {
 			t.Fatalf("空基座必须给出空态提示（10 §11.3「未配置供应商/无工具」）")
 		}
 		joined := strings.Join(notice, "|")
-		for _, want := range []string{"未配置供应商", "无工具", "无策略插件"} {
+		for _, want := range []string{"未配置供应商", "无工具"} {
 			if !strings.Contains(joined, want) {
 				t.Errorf("空态提示缺少 %q: %v", want, notice)
 			}
@@ -134,24 +130,16 @@ func TestProductDeclarations(t *testing.T) {
 		}
 	})
 
-	t.Run("策略门禁：无策略插件即失败关闭", func(t *testing.T) {
+	t.Run("审批策略移除后装配门禁不再要求策略插件", func(t *testing.T) {
 		t.Parallel()
 		p, err := coreapp.LoadProduct(repoPath(t, "products", "coding.agent.json"))
 		mustNoErr(t, "LoadProduct", err)
 
-		bare := &coreapp.Runtime{Product: p, AccessesInUse: []string{"read", "write", "exec"}}
-		err = bare.Check()
-		mustErrContains(t, "缺策略插件", err, "role=tool-policy")
-		mustErrContains(t, "缺策略插件的理由", err, "denied: no policy")
+		// 审批策略已整体移除：目录里有 write/exec 工具时不再失败关闭。
+		withWriteTools := &coreapp.Runtime{Product: p, AccessesInUse: []string{"read", "write", "exec"}}
+		mustNoErr(t, "有写/执行工具时装配门禁", withWriteTools.Check())
 
-		withPolicy := &coreapp.Runtime{Product: p, AccessesInUse: []string{"read", "write"}, PolicyPluginActive: true}
-		mustNoErr(t, "有策略插件", withPolicy.Check())
-
-		readonly := &coreapp.Runtime{Product: p, AccessesInUse: []string{"read"}}
-		mustNoErr(t, "只读工具不需要策略插件", readonly.Check())
-
-		// 替身目录侧的同一门禁：禁用策略插件后 write 工具仍在目录里，
-		// 但基座只能拒绝它（INV-11 + 02 §5.4）。
+		// 替身目录侧：禁用贡献插件后工具必须消失（基座不补位）。
 		cat := testkit.NewStaticCatalog(
 			testkit.Descriptor("read_file", "some-fs", domain.AccessRead),
 			testkit.Descriptor("write_file", "some-fs", domain.AccessWrite),
@@ -164,7 +152,6 @@ func TestProductDeclarations(t *testing.T) {
 			t.Errorf("禁用贡献插件后目录必须清空（基座不补位）")
 		}
 	})
-
 	t.Run("产品声明负面用例", func(t *testing.T) {
 		t.Parallel()
 		cases := []struct{ name, raw, want string }{

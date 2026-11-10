@@ -18,8 +18,8 @@ import (
 )
 
 // TestNodeFSReadAndWriteTrim 钉 12 §6.12.2 的 fs 偏差：只读时写成员「调用即抛」。
-func TestNodeFSReadAndWriteTrim(t *testing.T) {
-	caps := testCaps(t, plugins.TrustThirdParty, plugins.CapFSRead)
+func TestNodeFSReadAndWrite(t *testing.T) {
+	caps := testCaps(t, plugins.TrustThirdParty)
 	if err := os.WriteFile(filepath.Join(caps.WorkspaceRoot, "note.txt"), []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -58,29 +58,15 @@ export default function (agent) {
 	if err != nil {
 		t.Fatalf("write_it: %v", err)
 	}
-	if len(res.Content) != 1 || res.Content[0].Text != codeAccessDenied {
-		t.Fatalf("只读时 writeFileSync 应抛 %s，实际 = %+v", codeAccessDenied, res.Content)
+	// 能力位已移除：写成员不再被裁剪，工作区内的写入直接成功。
+	if len(res.Content) != 1 || res.Content[0].Text != "wrote" {
+		t.Fatalf("写入应成功，实际 = %+v", res.Content)
 	}
-	if _, err := os.Stat(filepath.Join(caps.WorkspaceRoot, "x.txt")); err == nil {
-		t.Fatal("被拒绝的写不应真的落盘")
+	if _, err := os.Stat(filepath.Join(caps.WorkspaceRoot, "x.txt")); err != nil {
+		t.Fatalf("写入没有落盘: %v", err)
 	}
 }
 
-// TestNodeFSWithoutCapabilityFailsAtLink 钉「未声明能力 = 链接期失败」。
-func TestNodeFSWithoutCapabilityFailsAtLink(t *testing.T) {
-	caps := testCaps(t, plugins.TrustThirdParty) // 没有 fs.read/fs.write
-	src := `
-import fs from "node:fs";
-export default function (agent) {}
-`
-	_, err := Load(context.Background(), testScript(t, caps, src), caps, Context{}, Options{})
-	if err == nil {
-		t.Fatal("没有 fs 能力时 import node:fs 必须在装配期失败")
-	}
-	if !contains(err.Error(), codeAccessDenied) && !contains(err.Error(), "fs.read") {
-		t.Fatalf("错误应点名缺失能力（12 §6.14）：%v", err)
-	}
-}
 
 // TestFSGuardReadsUnrestrictedWritesScoped 钉 2026-10-31 决策：
 // agent 的读（ctx.fs.readText/list/stat/exists）不限制目标路径；写路径仍受工作区 Scope 约束。
@@ -219,8 +205,8 @@ export default function (agent) {
 	if err != nil {
 		t.Fatalf("HookChain.Run: %v", err)
 	}
-	if !verdict.Allowed {
-		t.Fatalf("note 动作不应改变允许状态: %+v", verdict)
+	if verdict.Aborted {
+		t.Fatalf("note 动作不应改变裁决: %+v", verdict)
 	}
 	if len(verdict.Notes) != 1 || verdict.Notes[0] != "n:turn.before" {
 		t.Fatalf("notes = %+v，期望 [n:turn.before]", verdict.Notes)

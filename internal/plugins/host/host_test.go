@@ -22,18 +22,12 @@ import (
 	"github.com/adag/ada-go/internal/ports"
 )
 
-// testCaps 造一份最小授予集合：后端能力白名单 + 工作区根。
-func testCaps(t *testing.T, trust plugins.Trust, caps ...plugins.Capability) *CapabilitySet {
+// testCaps 造一份最小上下文：信任级别 + 工作区根（能力位已移除）。
+func testCaps(t *testing.T, trust plugins.Trust, _ ...plugins.Capability) *CapabilitySet {
 	t.Helper()
-	backend := map[plugins.Capability]bool{}
-	for _, c := range caps {
-		backend[c] = true
-	}
 	return &CapabilitySet{
 		PluginID:      "test-plugin",
 		Trust:         trust,
-		Backend:       backend,
-		Frontend:      map[plugins.Capability]bool{},
 		Hooks:         map[string]plugins.HookAction{},
 		Env:           map[string]string{},
 		WorkspaceRoot: tempWorkspace(t),
@@ -49,7 +43,6 @@ func testScript(t *testing.T, caps *CapabilitySet, source string) Script {
 		APIVersion: plugins.APIVersionMajor, Trust: caps.Trust,
 		Backend: &plugins.Backend{
 			Entry:        "index.js",
-			Capabilities: caps.granted(),
 			Hooks:        map[string]plugins.HookAction{},
 		},
 	}
@@ -275,29 +268,6 @@ export default function (agent) {
 	}
 }
 
-// TestModulePolicyGating 钉链接期能力判定（12 §6.12.1(1)）。
-func TestModulePolicyGating(t *testing.T) {
-	ro := testCaps(t, plugins.TrustThirdParty, plugins.CapFSRead)
-	policy := NewModulePolicy(ro)
-	if err := policy.Allow("node:fs"); err != nil {
-		t.Fatalf("有 fs.read 时 node:fs 应放行: %v", err)
-	}
-	if err := policy.Allow("node:child_process"); err == nil {
-		t.Fatal("没有 exec 时 node:child_process 必须在链接期失败")
-	} else if !strings.Contains(err.Error(), codeAccessDenied) {
-		t.Fatalf("错误应带 %s: %v", codeAccessDenied, err)
-	}
-	if err := policy.Allow("node:http"); err == nil || !strings.Contains(err.Error(), codeModuleNotFound) {
-		t.Fatalf("node:http 必须报 %s: %v", codeModuleNotFound, err)
-	}
-	if err := policy.Allow("left-pad"); err != nil {
-		t.Fatalf("非内置名交给宿主模块表，不应被策略拒绝: %v", err)
-	}
-	if err := policy.Allow("native.node"); err == nil || !strings.Contains(err.Error(), codeNativeAddon) {
-		t.Fatalf(".node 原生扩展必须报 %s: %v", codeNativeAddon, err)
-	}
-}
-
 // TestFSGuardRealPath 钉工作区边界：越界一律拒绝（09 §9.2）。
 func TestFSGuardRealPath(t *testing.T) {
 	caps := testCaps(t, plugins.TrustThirdParty, plugins.CapFSRead)
@@ -387,11 +357,11 @@ func TestDecodeToolResult(t *testing.T) {
 }
 
 func TestDecodeHookOutcome(t *testing.T) {
-	out, err := decodeHookOutcome("p", json.RawMessage(`{"action":"deny","reason":"不行"}`))
+	out, err := decodeHookOutcome("p", json.RawMessage(`{"action":"abort","reason":"不行"}`))
 	if err != nil {
 		t.Fatalf("decodeHookOutcome: %v", err)
 	}
-	if out.Action != ports.HookDeny || out.Reason != "不行" {
+	if out.Action != ports.HookAbort || out.Reason != "不行" {
 		t.Fatalf("结果 = %+v", out)
 	}
 	def, err := decodeHookOutcome("p", json.RawMessage(`{}`))

@@ -59,32 +59,3 @@ export default function (agent) {
 	}
 }
 
-func TestGlobalConfigNotInstalledWithoutCapability(t *testing.T) {
-	t.Setenv("ADAGO_HOME", t.TempDir())
-	caps := testCaps(t, plugins.TrustThirdParty)
-	src := `
-export default function (agent) {
-  agent.registerTool({
-    name: "cfg_probe", description: "配置探针", parameters: { type: "object" }, access: "read",
-    execute(args, ctx) {
-      return { content: [{ type: "text", text: String(typeof ctx.config) }] };
-    },
-  });
-}
-`
-	script := testScript(t, caps, src)
-	tools := &recordingTools{}
-	p, err := Load(context.Background(), script, caps, Context{}, Options{Targets: Targets{Tools: tools}})
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	defer func() { _ = p.Close(context.Background()) }()
-	def := p.Contribution().Tools[0]
-	res, err := p.CallTool(context.Background(), def.Handler, json.RawMessage(`{}`), Context{})
-	if err != nil {
-		t.Fatalf("CallTool: %v", err)
-	}
-	if got := strings.TrimSpace(res.Content[0].Text); got != "undefined" {
-		t.Fatalf("未授予时 ctx.config 应为 undefined，得到 %q", got)
-	}
-}

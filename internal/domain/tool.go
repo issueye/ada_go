@@ -6,18 +6,18 @@ import (
 )
 
 // Access 是工具的【外部效果声明】，不是审批开关。
-// 基座不据此自动放行或拒绝；是否询问/阻止由策略插件在 tool.beforeCall 决定
-// （02 §5.4 规则、03 §5.6；取值照 05 §6.3 ToolDef.access）。
+// 基座不据此自动放行或拒绝：审批策略已整体移除，取值只供 UI 徽标与审计展示
+// （取值照 05 §6.3 ToolDef.access）。
 type Access string
 
 const (
-	// AccessRead 只读外部状态；无策略插件时仍可用（02 §5.4）。
+	// AccessRead 只读外部状态。
 	AccessRead Access = "read"
-	// AccessWrite 写外部状态；线程级 KV 不算 write（02 §5.4）；无策略插件时被拒绝。
+	// AccessWrite 写外部状态；线程级 KV 不算 write（02 §5.4）。
 	AccessWrite Access = "write"
-	// AccessExec 执行命令；无策略插件时被拒绝。
+	// AccessExec 执行命令。
 	AccessExec Access = "exec"
-	// AccessNetwork 网络访问；无策略插件时被拒绝。
+	// AccessNetwork 网络访问。
 	AccessNetwork Access = "network"
 )
 
@@ -104,9 +104,9 @@ const (
 	ReceiptOK ReceiptStatus = "ok"
 	// ReceiptError 失败：参数校验失败、工具 panic/错误都转成 error 回执，不终止轮次（02 §5.4）。
 	ReceiptError ReceiptStatus = "error"
-	// ReceiptDenied 被策略拒绝。
+	// ReceiptDenied 被插件自己拒绝（工具实现返回 denied）。
 	// 见 02 §5.4 INV-5：拒绝是工具结果（denied），不是异常，也不终止轮次。
-	// 无 active 策略插件时基座对 write/exec/network 返回 denied: no policy（02 §5.4、03 §5.6）。
+	// 审批策略已移除：基座本身不再产生 denied 回执。
 	ReceiptDenied ReceiptStatus = "denied"
 	// ReceiptTimeout 超出 Timeout 预算（按失败关闭处理，INV-4）。
 	ReceiptTimeout ReceiptStatus = "timeout"

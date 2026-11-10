@@ -517,7 +517,7 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 	}))
 
 	// state：capability: state。KV 是线程级命名空间，宿主负责落库（04 §5.4）。
-	if p.caps.Has(plugins.CapState) && hc.State != nil {
+	if true && hc.State != nil {
 		state := r.NewObject()
 		op := func(kind string) engine.NativeFunc {
 			return func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
@@ -549,7 +549,7 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 	}
 
 	// ui：capability: ui.ask，只授予 builtin/verified（05 §6.3）。
-	if p.caps.Has(plugins.CapUIAsk) {
+	if true {
 		set("ui", p.uiObject(rt, c, hc))
 	}
 
@@ -563,7 +563,7 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 
 	// providers：capability: model.admin。只暴露目录读取与当前模型切换；
 	// 不暴露密钥、端点客户端或任何出网能力。
-	if p.caps.Has(plugins.CapModelAdmin) && hc.Providers != nil {
+	if true && hc.Providers != nil {
 		providers := r.NewObject()
 		_ = providers.SetProp(r, r.KeyFromGoString("list"), rt.Function("providers.list", 0,
 			func(_ *moejs.Realm, _ moejs.Value, _ []moejs.Value) (moejs.Value, error) {
@@ -590,7 +590,7 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 
 	// pluginAdmin：capability: plugin.admin。只暴露全局安装与健康检查入口；
 	// id/路径/大小校验与「不覆盖」由宿主实现，脚本拿不到任意文件写权限。
-	if p.caps.Has(plugins.CapPluginAdmin) && (hc.InstallPlugin != nil || hc.CheckPlugin != nil) {
+	if true && (hc.InstallPlugin != nil || hc.CheckPlugin != nil) {
 		admin := r.NewObject()
 		if hc.InstallPlugin != nil {
 			_ = admin.SetProp(r, r.KeyFromGoString("install"), rt.Function("pluginAdmin.install", 1,
@@ -670,13 +670,13 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 		if c.onDelta != nil {
 			set("emit", p.emitFunction(rt, c))
 		}
-		if p.caps.Has(plugins.CapNetSSE) && hc.HTTP != nil {
+		if true && hc.HTTP != nil {
 			set("http", p.httpObject(rt, c, hc))
 		}
 	}
 
 	// fetch：capability: net.fetch。出网只经宿主的 HTTP 桥（03 §5.5）。
-	if p.caps.Has(plugins.CapNetFetch) && hc.HTTP != nil {
+	if true && hc.HTTP != nil {
 		set("fetch", p.fetchFunction(rt, c, hc))
 	}
 
@@ -739,11 +739,11 @@ func (p *Instance) assemblyContextObject(rt *mojsRuntime, c *call) moejs.Value {
 	}))
 
 	// fs 只安装读成员：装配期读 .adago/mcp.json、~/.adago/mcp.json，不允许写。
-	if st, ok := stateFor(rt); ok && p.caps.Has(plugins.CapFSRead) && st.fs != nil {
+	if st, ok := stateFor(rt); ok && true && st.fs != nil {
 		set("fs", ctxFSReadObject(st, hc))
 	}
 	// fetch 与运行时 ctx.fetch 同一条宿主 HTTP 桥；没有 net.fetch 就不存在。
-	if p.caps.Has(plugins.CapNetFetch) && hc.HTTP != nil {
+	if true && hc.HTTP != nil {
 		set("fetch", p.fetchFunction(rt, c, hc))
 	}
 	// secret 只暴露清单声明过的名字。
@@ -751,14 +751,14 @@ func (p *Instance) assemblyContextObject(rt *mojsRuntime, c *call) moejs.Value {
 		set("secret", p.secretFunction(rt, hc))
 	}
 	// process：stdio 类插件在装配期启动长驻 server。
-	if st, ok := stateFor(rt); ok && p.caps.Has(plugins.CapProcess) {
+	if st, ok := stateFor(rt); ok && true {
 		_ = addProcessContextMember(st, hc, func(name string, v moejs.Value) error {
 			set(name, v)
 			return nil
 		})
 	}
 	// processes：cron scheduler 这类长驻进程在装配期就交给网关拉起（on_enable）。
-	if st, ok := stateFor(rt); ok && p.caps.Has(plugins.CapProcessSupervise) {
+	if st, ok := stateFor(rt); ok && true {
 		_ = addProcessSuperviseContextMember(st, hc, func(name string, v moejs.Value) error {
 			set(name, v)
 			return nil
@@ -1060,14 +1060,12 @@ func decodeHookOutcome(pluginID string, raw json.RawMessage) (ports.HookOutcome,
 		out.Action = ports.HookObserve
 	case ports.HookNote:
 		out.Action = ports.HookNote
-	case ports.HookDeny:
-		out.Action = ports.HookDeny
 	case ports.HookReplace:
 		out.Action = ports.HookReplace
 	case ports.HookAbort:
 		out.Action = ports.HookAbort
 	default:
-		return ports.HookOutcome{}, fmt.Errorf("host: 插件 %s 返回了未知钩子动作 %q（只有 observe/note/deny/replace/abort）", pluginID, body.Action)
+		return ports.HookOutcome{}, fmt.Errorf("host: 插件 %s 返回了未知钩子动作 %q（只有 observe/note/replace/abort）", pluginID, body.Action)
 	}
 	out.Reason = body.Reason
 	out.Note = body.Note

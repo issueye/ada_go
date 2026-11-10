@@ -4,33 +4,48 @@
 当前哪些能力是**有意简化/暂缓**的，动代码前先读这一节，不要把暂缓项当成 bug
 修回来，也不要在相关路径上重新加回限制。
 
-## 暂缓：安全与审批（2026-10-31 决策）
+## 已移除：审批策略与 moejs 安全面（2026-11-10 决策）
 
-以下能力**暂时不做、也不维护**；恢复它们之前，先与本文件和负责人确认。
+以下能力**已经从基座删除**；恢复它们之前先与本文件和负责人确认。
+不要在相关路径上重新加回限制，也不要按旧设计文档（`docs/02`、`docs/03`、`docs/06`
+的审批章节）复活它们——那些章节在下一轮文档收敛中会改写成「已移除」。
 
-### 1. 出网 host 黑白名单（allowlist）已移除
+### 1. 审批策略（policy-default）已整体移除
 
-- 宿主 HTTP 桥（`internal/plugins/host/httpbridge.go`）当前**不限制目标主机**：
-  只要有 `net.fetch` 能力，任意 http(s) 域名都可出网。
-- 曾经的 `--allow-host` 参数、`AllowHosts`/`AllowAnyHost` 桥配置、
-  供应商端点动态放行（`allowProviderHost`）已全部删除；CLI 参数不要再加回来。
-- 保留的边界：协议必须 http(s)、重定向 ≤5 跳、响应 ≤16MB、超时与取消贯穿。
-- **后续计划**：黑白名单以**插件**形式实现（策略插件在 `tool.beforeCall` 之外
-  新增网络策略点，或独立的网络策略插件读取黑白名单配置），不在宿主桥里写死。
-- UI/文档里不要再出现「不在 allowlist 内」类文案；`wttr.in` 等外部 API
-  现在可以直接访问。
+- 插件 `plugins/official/policy-default/` 已删除；`products/*.agent.json` 与
+  `desktop/products/headless.agent.json` 都不再声明它。
+- 钩子点位 `tool.beforeCall` / `tool.afterCall` 已删除（点位从 15 个降为 13 个之外的
+  13→14 口径见 `internal/plugins/contract.go` 的唯一声明），`deny` 动作等级也已删除：
+  可返回的钩子动作只剩 `observe` / `note` / `replace` / `abort`。
+- 基座不再有「没有策略插件就拒绝写/执行工具」的失败关闭：
+  `coreapp.Runtime.Check()` 只校验产品声明，`toolkit.Executor` 不再有 `HasPolicy`，
+  `engine.Deps` 不再有 `HasPolicy`，CLI 不再拦「禁用策略插件」。
+- 工具描述符的 `Access` 仍是效果声明，只供 UI 徽标与审计；它不再是审批开关。
+- 写/执行工具现在直接执行。**不要**重新引入 `role=tool-policy`、`plugins.backend.roles`
+  枚举值、`denied: no policy` 文案或任何「执行前询问」钩子。
 
-### 2. 审批策略（policy-default）维持现状，不演进
+### 2. moejs 相关安全设计已移除
 
-- `policy-default` 仍在装配里：`access=write/exec/network` 的工具调用继续走
-  审批确认；这是现有插件的依赖，**没有移除**。
-- 但审批相关的演进（更多模式、策略 UI、白名单免审批等）暂缓，不做新功能。
+- **能力位（CapabilitySet）**：`internal/plugins/contract.go` 的 `Capability` 常量、
+  `MinTrust` / `TrustAllows`、`InstallSite` 表与 `adag verify capabilities` 门禁已删除。
+  插件不再声明 `backend.capabilities` / `frontend.capabilities`，宿主也不再按能力位
+  决定「装什么、不装什么」。manifest 里这些字段被忽略（保留字段只为旧清单能加载）。
+- **模块白名单与安装矩阵**：`internal/plugins/host/module_policy.go`、
+  `internal/plugins/host/node/matrix.go` 与链接期 `ERR_ACCESS_DENIED` 判定已删除。
+  插件可以 import `node:*` 内置模块，宿主不再做白名单；`internal/conformance/nodecompat`
+  与 `adag verify nodecompat` 相应收敛。
+- **fs / exec / process 桥的边界**：`fsGuard` 的能力位开关、`ExecPolicy` 程序级校验、
+  启动前的信任检查、`plugin.admin`/`model.admin` 等 builtin-only 限制都不再由基座执行；
+  这些桥只保留功能（工作区挂载、无 shell 的 argv 传递、超时与输出截断）。
+- **表现层仍保留的**：`adag.go` 不再有 `trust` 相关的拒绝路径（第三方/verified/builtin
+  仍会出现在清单与页面上，但不再决定能否加载）。
 
-### 3. 插件沙箱的其余边界保持不变
+### 3. 明确仍然生效的边界（不要顺手删）
 
-- 能力位信任矩阵（third-party/verified/builtin）、fs 工作区根（写操作与 `exec` cwd；
-  读成员见下）、exec 仅 builtin/verified、响应大小与超时上限**仍然生效**；
-  暂缓的只有 host 黑白名单与审批演进两块。
+- 事件序号、快照、错误码、RPC 方法集合与 12 个前端插槽。
+- VNode 白名单、CSP/CSRF、HTTP 桥的协议/重定向/响应大小/超时限制。
+- `ctx.fs` 的读成员不限制目标路径（下节），写入与 `exec` 的 cwd 仍限制在工作区根。
+- 进程树终止、审计日志与脱敏。
 
 ### 4. agent 的读不限制路径（2026-10-31 决策）
 
@@ -40,22 +55,28 @@
   因此 agent 的 `read_file` / `list_files` / `search_files` 可以读宿主任意文件；
   写入与 `exec` 的 cwd 仍限制在工作区根。`node:fs` 模块仍按上游挂载点限制
   （agent 工具走 `ctx.fs`，不受影响）。
-- 不要按旧「fs 根」规则给读加回限制；如需收紧，走策略/插件层。
+- 不要按旧「fs 根」规则给读加回限制。
 
 ## 其它速查
 
-- 插件安装：全局 `~/.adago/plugins/<id>/`（`plugin.admin` 能力桥，仅 builtin）。
+- 插件安装：全局 `~/.adago/plugins/<id>/`（`plugin.admin` 桥仍在，但不再是能力位）。
 - 插件启停：全局 `~/.adago/plugins.json` + 工作区 `.adago/plugins.json` 覆盖。
 - 插件平台 API 规范：`plugins/official/plugin-helper/SPEC.md`；
-  插件手册技能：`plugins/official/plugin-helper/skills/plugin-manual/SKILL.md`
-  （创建/检查/启停 + `adag-ui` 动态块用法）。
-- 验证门禁：`go test ./...`、`go vet ./...`、staticcheck、`adag verify`（13 项，
-  含定时任务双写镜像的 cron-sync）。
+  插件手册技能：`plugins/official/plugin-helper/skills/plugin-manual/SKILL.md`。
+- 验证门禁：`go test ./...`、`go vet ./...`、staticcheck、`adag verify`（13 项）。
 
 ## 基座边界与文档（2026-11-09 决策）
 
-- **基座零业务语义、零产品兜底**：系统插件（builtin，随产品发布）实现工具、provider、策略、人格、cron、env、供应商管理、用量展示；禁用后基座不补位。详细边界见 `docs/00-overview.md` §1.5。
-- **cron 是系统插件，不是基础设施**：基座不读 `cron.json`、不解析 cron 表达式、不调度任务、不提供 `/api/cron/fire`；`cronstore` 与相关基座端点已删除；调度由插件用 `agent.every` + `ctx.turn.invoke` 完成。
-- **第三方前端与系统插件同面**：slots/pages/scripts/client 都可声明，由 `frontend.script` 能力、安装确认、CSP 与审计控制风险；不再有「第三方只有 blocks」的特殊裁剪。
-- **内核默认实现 + 可替换 seam**：压缩、存储、模型、工具执行等默认用 Go 实现，同时保留受控接口；替换实现必须在装配期注入并通过契约测试，安全不变量不可替换。见 `docs/06-plugin-runtime.md` §6.10。
-- **文档收敛**：`docs/` 只保留 16 份设计正文（00–15）+ `design.md` 索引；不新增独立计划/评估/交付文档，相关内容并入 10/11 或对应章节。
+- **基座零业务语义、零产品兜底**：系统插件（builtin，随产品发布）实现工具、provider、
+  人格、cron、env、供应商管理、用量展示；禁用后基座不补位。详细边界见
+  `docs/00-overview.md` §1.5。
+- **cron 是系统插件，不是基础设施**：基座不读 `cron.json`、不解析 cron 表达式、
+  不调度任务、不提供 `/api/cron/fire`；调度由插件用 `ctx.processes` 注册单例进程完成。
+- **第三方前端与系统插件同面**：slots/pages/scripts 都可声明，由安装确认、CSP 与审计
+  控制风险。
+- **内核默认实现 + 可替换 seam**：压缩、存储、模型、工具执行等默认用 Go 实现，
+  同时保留受控接口；替换实现必须在装配期注入并通过契约测试。
+- **文档收敛**：`docs/` 只保留 16 份设计正文（00–15）+ `design.md` 索引；
+  不再有审批策略与能力位章节（待下一轮改写）。
+- **internal 目录结构**：`internal/common`（跨端共享的领域/端口/协议/适配器）、
+  `internal/gateway`（网关侧进程与 Web）、`internal/core`（Agent Core 内核与插件宿主）。

@@ -15,7 +15,7 @@ import (
 
 func evt(point ports.HookPoint) ports.HookEvent {
 	return ports.HookEvent{Point: point, ThreadID: "th_1", RunID: "r1",
-		Snapshot: json.RawMessage(`{"tool":"write_file","access":"write"}`)}
+		Snapshot: json.RawMessage(`{"note":"fixture"}`)}
 }
 
 func handler(id string, trust domain.Trust, point ports.HookPoint, max plugins.HookAction,
@@ -60,55 +60,31 @@ func TestHookOrderIsDeterministic(t *testing.T) {
 	}
 }
 
-// TestBeforeCallFailsClosed 验证 06 §6.6：tool.beforeCall 是唯一失败方向为关的点位。
-func TestBeforeCallFailsClosed(t *testing.T) {
+// TestHookFailureIsAlwaysOpen：审批点位移除后不再有失败关闭点位，
+// 任何点位上的超时/异常都只记警告、不改变裁决、不中断主流程（06 §6.6 修订版）。
+func TestHookFailureIsAlwaysOpen(t *testing.T) {
 	t.Parallel()
 	chain := plugins.NewHookChain()
-	if err := chain.Register(handler("policy", domain.TrustBuiltin, ports.HookToolBeforeCall, plugins.ActionDeny,
+	if err := chain.Register(handler("observer", domain.TrustBuiltin, ports.HookUserMessage, plugins.ActionNote,
 		func(context.Context, ports.HookEvent) (ports.HookOutcome, error) {
-			return ports.HookOutcome{}, errors.New("策略插件炸了")
+			return ports.HookOutcome{}, errors.New("处理器炸了")
 		})); err != nil {
 		t.Fatal(err)
 	}
-	v, err := chain.Run(context.Background(), evt(ports.HookToolBeforeCall))
-	if err == nil {
-		t.Fatal("安全点失败必须回传错误")
-	}
-	if v.Allowed {
-		t.Fatal("安全点失败方向必须是拒绝")
-	}
-	if chain.FailureDirection(ports.HookToolBeforeCall) != domain.FailClosed {
-		t.Fatal("tool.beforeCall 必须是 FailClosed")
-	}
-	if chain.FailureDirection(ports.HookTurnAfter) != domain.FailOpen {
-		t.Fatal("非安全点应为 FailOpen")
-	}
-}
-
-// TestObservationPointFailureIsIgnored 验证其它点位失败方向为开。
-func TestObservationPointFailureIsIgnored(t *testing.T) {
-	t.Parallel()
-	chain := plugins.NewHookChain()
-	if err := chain.Register(handler("observer", domain.TrustThirdParty, ports.HookSessionStart, plugins.ActionObserve,
-		func(context.Context, ports.HookEvent) (ports.HookOutcome, error) {
-			return ports.HookOutcome{}, errors.New("观察器超时")
-		})); err != nil {
-		t.Fatal(err)
-	}
-	v, err := chain.Run(context.Background(), evt(ports.HookSessionStart))
+	v, err := chain.Run(context.Background(), evt(ports.HookUserMessage))
 	if err != nil {
-		t.Fatalf("观察点失败不应中断主流程: %v", err)
+		t.Fatalf("处理器失败不应中断主流程: %v", err)
 	}
-	if !v.Allowed {
-		t.Fatal("观察点失败不应改变裁决")
+	if v.Aborted {
+		t.Fatal("处理器失败不得改变裁决")
 	}
-	if len(chain.Warnings()) == 0 {
-		t.Fatal("失败必须留下警告，不能静默")
+	if len(chain.Warnings()) == 0 || !strings.Contains(chain.Warnings()[0], "失败方向为开") {
+		t.Fatalf("失败必须留下警告：%v", chain.Warnings())
 	}
 }
 
-// TestHookTimeoutUsesContractBudget 验证 06 §6.6 的预算与失败方向：
-// 默认 200ms、上限 2s；观察点超时不阻断主流程但必须留警告，安全点超时按拒绝收敛。
+// TestHookTimeoutUsesContractBudget 验证 06 §6.6 的预算：
+// 默认 200ms、上限 2s；超时不阻断主流程但必须留警告。
 func TestHookTimeoutUsesContractBudget(t *testing.T) {
 	t.Parallel()
 	slow := func(ctx context.Context, _ ports.HookEvent) (ports.HookOutcome, error) {
@@ -130,35 +106,16 @@ func TestHookTimeoutUsesContractBudget(t *testing.T) {
 	start := time.Now()
 	v, err := chain.Run(context.Background(), evt(ports.HookUserMessage))
 	if err != nil {
-		t.Fatalf("观察点超时不应中断主流程: %v", err)
+		t.Fatalf("超时不应中断主流程: %v", err)
 	}
-	if !v.Allowed {
-		t.Fatal("观察点超时改变了裁决")
+	if v.Aborted {
+		t.Fatal("超时改变了裁决")
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Fatalf("超时没生效，耗时 %s", elapsed)
 	}
 	if len(chain.Warnings()) == 0 || !strings.Contains(chain.Warnings()[0], "超时") {
 		t.Fatalf("超时必须留下警告：%v", chain.Warnings())
-	}
-
-	// 安全点：同一个慢处理器挂在 tool.beforeCall 上 → 拒绝 + plugin_timeout。
-	safety := plugins.NewHookChain()
-	if err := safety.Register(&plugins.HookHandler{
-		PluginID: "slow", Trust: domain.TrustBuiltin, Point: ports.HookToolBeforeCall,
-		MaxAction: plugins.ActionDeny, Timeout: 20 * time.Millisecond, Fn: slow,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	sv, err := safety.Run(context.Background(), evt(ports.HookToolBeforeCall))
-	if err == nil {
-		t.Fatal("安全点超时必须回传错误")
-	}
-	if sv.Allowed {
-		t.Fatal("安全点超时必须按拒绝收敛")
-	}
-	if !strings.Contains(err.Error(), "plugin_timeout") {
-		t.Fatalf("错误应映射到 plugin_timeout，实得 %v", err)
 	}
 
 	// 超过 2s 的钩子预算不允许登记（06 §6.6 最大 2s）。
@@ -171,12 +128,12 @@ func TestHookTimeoutUsesContractBudget(t *testing.T) {
 	}
 }
 
-// TestTrustGating 验证 replace/abort 仅 builtin，且第三方无法弹窗（06 §6.6、03 §5.6）。
+// TestTrustGating 验证 replace/abort 仅 builtin（06 §6.6、03 §5.6）。
 func TestTrustGating(t *testing.T) {
 	t.Parallel()
 	chain := plugins.NewHookChain()
 
-	if err := chain.Register(handler("3p", domain.TrustThirdParty, ports.HookToolBeforeCall, plugins.ActionAbort,
+	if err := chain.Register(handler("3p", domain.TrustThirdParty, ports.HookTurnBefore, plugins.ActionAbort,
 		func(context.Context, ports.HookEvent) (ports.HookOutcome, error) { return ports.HookOutcome{}, nil })); err == nil {
 		t.Fatal("第三方不得登记 abort 等级的处理器")
 	}
@@ -184,9 +141,9 @@ func TestTrustGating(t *testing.T) {
 		func(context.Context, ports.HookEvent) (ports.HookOutcome, error) { return ports.HookOutcome{}, nil })); err == nil {
 		t.Fatal("第三方不得登记 replace")
 	}
-	if err := chain.Register(handler("3p", domain.TrustThirdParty, ports.HookTurnBefore, plugins.ActionDeny,
-		func(context.Context, ports.HookEvent) (ports.HookOutcome, error) { return ports.HookOutcome{}, nil })); err == nil {
-		t.Fatal("turn.before 不允许 deny，登记必须失败")
+	if err := chain.Register(handler("builtin", domain.TrustBuiltin, ports.HookModelBeforeRequest, plugins.ActionReplace,
+		func(context.Context, ports.HookEvent) (ports.HookOutcome, error) { return ports.HookOutcome{}, nil })); err != nil {
+		t.Fatalf("builtin 应可登记 replace: %v", err)
 	}
 
 	// 运行时越权：登记为 observe 的第三方返回 abort → 只能被忽略并留警告。
@@ -200,7 +157,7 @@ func TestTrustGating(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Aborted || !v.Allowed {
+	if v.Aborted {
 		t.Fatalf("第三方 abort 必须被忽略：%+v", v)
 	}
 	if len(chain.Warnings()) == 0 {
@@ -254,21 +211,13 @@ func TestPanicIsContained(t *testing.T) {
 	if _, err := chain.Run(context.Background(), evt(ports.HookSessionEnd)); err != nil {
 		t.Fatalf("观察点 panic 应被忽略: %v", err)
 	}
-	if err := chain.Register(handler("boom2", domain.TrustBuiltin, ports.HookToolBeforeCall, plugins.ActionDeny,
-		func(context.Context, ports.HookEvent) (ports.HookOutcome, error) { panic("炸了") })); err != nil {
-		t.Fatal(err)
-	}
-	v, err := chain.Run(context.Background(), evt(ports.HookToolBeforeCall))
-	if err == nil || v.Allowed {
-		t.Fatalf("安全点 panic 必须按拒绝收敛: v=%+v err=%v", v, err)
-	}
 }
 
-// TestUnknownPointAndDuplicatesRejected 验证点位集合封闭（15 个，全部有调用方）。
+// TestUnknownPointAndDuplicatesRejected 验证点位集合封闭（14 个，全部有调用方）。
 func TestUnknownPointAndDuplicatesRejected(t *testing.T) {
 	t.Parallel()
-	if len(plugins.HookPoints()) != 15 {
-		t.Fatalf("钩子点位数量 = %d，期望 15", len(plugins.HookPoints()))
+	if len(plugins.HookPoints()) != 14 {
+		t.Fatalf("钩子点位数量 = %d，期望 14", len(plugins.HookPoints()))
 	}
 	chain := plugins.NewHookChain()
 	if err := chain.Register(handler("x", domain.TrustBuiltin, "tool.madeUp", plugins.ActionObserve,
@@ -290,21 +239,17 @@ func TestUnknownPointAndDuplicatesRejected(t *testing.T) {
 	}
 }
 
-// TestReplacePayloadMustBeJSON 验证替换载荷非法时按不允许收敛（引擎会重新校验）。
+// TestReplacePayloadMustBeJSON 验证替换载荷非法时按 error 收敛（引擎会重新校验）。
 func TestReplacePayloadMustBeJSON(t *testing.T) {
 	t.Parallel()
 	chain := plugins.NewHookChain()
-	if err := chain.Register(handler("builtin", domain.TrustBuiltin, ports.HookToolBeforeCall, plugins.ActionReplace,
+	if err := chain.Register(handler("builtin", domain.TrustBuiltin, ports.HookModelBeforeRequest, plugins.ActionReplace,
 		func(context.Context, ports.HookEvent) (ports.HookOutcome, error) {
 			return ports.HookOutcome{PluginID: "builtin", Action: ports.HookReplace, Replacement: json.RawMessage(`{oops`)}, nil
 		})); err != nil {
 		t.Fatal(err)
 	}
-	v, err := chain.Run(context.Background(), evt(ports.HookToolBeforeCall))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if v.Allowed {
-		t.Fatal("非法替换载荷必须被拒绝")
+	if _, err := chain.Run(context.Background(), evt(ports.HookModelBeforeRequest)); err == nil {
+		t.Fatal("非法替换载荷必须报错")
 	}
 }

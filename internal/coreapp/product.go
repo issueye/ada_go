@@ -150,9 +150,7 @@ type Runtime struct {
 	RouteCount    int
 	SlotCount     int
 	PageCount     int
-	// PolicyPluginActive 报告当前装配里是否存在 role=tool-policy 插件。
-	PolicyPluginActive bool
-	// AccessesInUse 列出目录里工具用到的外部效果类别，用于策略门禁。
+	// AccessesInUse 列出目录里工具用到的外部效果类别（供 UI 徽标与审计展示）。
 	AccessesInUse []string
 	// Warnings 是装配期记录的非致命问题。
 	Warnings []string
@@ -174,19 +172,13 @@ func Assemble(p *Product) (*Runtime, error) {
 	return rt, nil
 }
 
-// Check 跑装配期门禁（1.5.5、5.4）：
-// 存在需要外部效果的工具时，必须至少有一个 role=tool-policy 插件，否则失败关闭。
+// Check 跑装配期门禁（1.5.5）。
+//
+// 审批策略已整体移除：装配不再要求存在策略插件，也不再因为「目录里有
+// write/exec/network 工具」而失败关闭。这里只保留空基座的一致性检查。
 func (rt *Runtime) Check() error {
-	needsPolicy := false
-	for _, a := range rt.AccessesInUse {
-		if a != "read" {
-			needsPolicy = true
-			break
-		}
-	}
-	if needsPolicy && !rt.PolicyPluginActive {
-		return fmt.Errorf("coreapp: 目录里有 write/exec/network 工具但缺少 role=tool-policy 插件；" +
-			"基座对这类工具返回 denied: no policy（5.4）")
+	if rt == nil || rt.Product == nil {
+		return fmt.Errorf("coreapp: Runtime.Check 需要产品声明")
 	}
 	return nil
 }
@@ -207,9 +199,6 @@ func (rt *Runtime) EmptyStateNotice() []string {
 	}
 	if rt.ToolCount == 0 {
 		out = append(out, "无工具：当前装配没有贡献任何工具，模型只能直接回答。")
-	}
-	if !rt.PolicyPluginActive {
-		out = append(out, "无策略插件：写、执行与网络类工具即使出现也会被基座拒绝（失败关闭）。")
 	}
 	return out
 }

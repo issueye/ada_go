@@ -87,10 +87,8 @@ func TestPluginHelperAITool(t *testing.T) {
 		Log:           func(string, string, map[string]any) {},
 		InstallPlugin: fakeInstallPlugin(t, home),
 	}
-	p := testProduct(t, "plugin-helper", "policy-default")
-	asm := assemble(t, p, hc, map[string]map[string]any{
-		"policy-default": {"mode": "full"},
-	})
+	p := testProduct(t, "plugin-helper")
+	asm := assemble(t, p, hc, map[string]map[string]any{})
 
 	if _, ok := asm.Tools.Lookup(context.Background(), "create_plugin"); !ok {
 		t.Fatalf("工具目录里没有 create_plugin（现有：%v）", toolNames(asm))
@@ -184,9 +182,7 @@ export default function register(agent) {
 		!strings.Contains(err.Error(), "已存在") {
 		t.Fatalf("重复创建: err = %v, want 含 已存在", err)
 	}
-	rejectAsm := assemble(t, p, hc, map[string]map[string]any{
-		"policy-default": {"mode": "full"},
-	})
+	rejectAsm := assemble(t, p, hc, map[string]map[string]any{})
 	cases := []struct {
 		name string
 		args map[string]any
@@ -200,9 +196,7 @@ export default function register(agent) {
 		target := rejectAsm
 		if i >= 2 {
 			// 第三个拒绝用例换新实例：前两个失败已让实例进入“连续失败”计数。
-			target = assemble(t, p, hc, map[string]map[string]any{
-				"policy-default": {"mode": "full"},
-			})
+			target = assemble(t, p, hc, map[string]map[string]any{})
 		}
 		_, err := tryCreatePlugin(t, target, hc, tc.args)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -223,10 +217,8 @@ func TestPluginHelperToolResultShape(t *testing.T) {
 		Log:           func(string, string, map[string]any) {},
 		InstallPlugin: fakeInstallPlugin(t, tempDir(t)),
 	}
-	p := testProduct(t, "plugin-helper", "policy-default")
-	asm := assemble(t, p, hc, map[string]map[string]any{
-		"policy-default": {"mode": "full"},
-	})
+	p := testProduct(t, "plugin-helper")
+	asm := assemble(t, p, hc, map[string]map[string]any{})
 
 	raw, err := json.Marshal(map[string]any{"id": "shape-check"})
 	if err != nil {
