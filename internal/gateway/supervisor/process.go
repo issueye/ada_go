@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/adag/ada-go/internal/common/version"
 	"github.com/adag/ada-go/internal/gateway/contracts"
-	"github.com/adag/ada-go/internal/version"
 )
 
 // SpawnSpec 是一次 Core 子进程启动所需的完整参数。

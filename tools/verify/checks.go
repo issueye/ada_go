@@ -10,14 +10,14 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/adag/ada-go/internal/coreapp"
-	"github.com/adag/ada-go/internal/coreproto"
-	"github.com/adag/ada-go/internal/diag"
-	"github.com/adag/ada-go/internal/engine"
+	"github.com/adag/ada-go/internal/agent_core/coreapp"
+	"github.com/adag/ada-go/internal/agent_core/coreproto"
+	"github.com/adag/ada-go/internal/agent_core/engine"
+	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/diag"
+	"github.com/adag/ada-go/internal/common/proto"
 	"github.com/adag/ada-go/internal/gateway/frontend"
 	"github.com/adag/ada-go/internal/gateway/web"
-	"github.com/adag/ada-go/internal/plugins"
-	"github.com/adag/ada-go/internal/proto"
 )
 
 // specProto 是 spec/proto.json 的只读视图（校验用，不承担生成职责）。
@@ -221,7 +221,7 @@ func checkGenerated(root string) error {
 		}
 		entry, ok := diag.For(c.Code)
 		if !ok {
-			problems = append(problems, fmt.Sprintf("错误码 %d(%s) 在 internal/diag 没有诊断条目", c.Code, c.Name))
+			problems = append(problems, fmt.Sprintf("错误码 %d(%s) 在 internal/common/diag 没有诊断条目", c.Code, c.Name))
 			continue
 		}
 		if entry.Name != c.Name {

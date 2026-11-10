@@ -31,7 +31,7 @@
 插件随仓库发布在 `plugins/official/browser-use/`，发现即「可用的随包插件」。三种启用方式：
 
 - 产品默认（推荐给长期使用）：把 `browser-use` 加进 `products/coding.agent.json` 的
-  `plugins`。注意 `adag verify products` 与 `internal/conformance` 里冻结了 coding 产品的
+  `plugins`。注意 `adag verify products` 与 `internal/agent_core/conformance` 里冻结了 coding 产品的
   插件数（当前 13），改这里要同步改门禁与文档里的数字。
 - 本工作区单独启用（不改产品声明）：在工作区 `.adago/plugins.json` 里写
 
@@ -163,7 +163,7 @@
 
 ```powershell
 # 装配门禁：官方插件全部能从磁盘加载（含本插件的清单/入口/dist）
-go test ./app ./internal/cli
+go test ./app ./internal/agent_core/cli
 
 # 发现层看到它（随包插件，未启用时状态是 unused）
 go run ./cmd/adag plugin list | Select-String browser-use

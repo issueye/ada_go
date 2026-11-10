@@ -15,7 +15,7 @@
 - 插件 `plugins/official/policy-default/` 已删除；`products/*.agent.json` 与
   `desktop/products/headless.agent.json` 都不再声明它。
 - 钩子点位 `tool.beforeCall` / `tool.afterCall` 已删除（点位从 15 个降为 13 个之外的
-  13→14 口径见 `internal/plugins/contract.go` 的唯一声明），`deny` 动作等级也已删除：
+  13→14 口径见 `internal/agent_core/plugins/contract.go` 的唯一声明），`deny` 动作等级也已删除：
   可返回的钩子动作只剩 `observe` / `note` / `replace` / `abort`。
 - 基座不再有「没有策略插件就拒绝写/执行工具」的失败关闭：
   `coreapp.Runtime.Check()` 只校验产品声明，`toolkit.Executor` 不再有 `HasPolicy`，
@@ -26,13 +26,13 @@
 
 ### 2. moejs 相关安全设计已移除
 
-- **能力位（CapabilitySet）**：`internal/plugins/contract.go` 的 `Capability` 常量、
+- **能力位（CapabilitySet）**：`internal/agent_core/plugins/contract.go` 的 `Capability` 常量、
   `MinTrust` / `TrustAllows`、`InstallSite` 表与 `adag verify capabilities` 门禁已删除。
   插件不再声明 `backend.capabilities` / `frontend.capabilities`，宿主也不再按能力位
   决定「装什么、不装什么」。manifest 里这些字段被忽略（保留字段只为旧清单能加载）。
-- **模块白名单与安装矩阵**：`internal/plugins/host/module_policy.go`、
-  `internal/plugins/host/node/matrix.go` 与链接期 `ERR_ACCESS_DENIED` 判定已删除。
-  插件可以 import `node:*` 内置模块，宿主不再做白名单；`internal/conformance/nodecompat`
+- **模块白名单与安装矩阵**：`internal/agent_core/plugins/host/module_policy.go`、
+  `internal/agent_core/plugins/host/node/matrix.go` 与链接期 `ERR_ACCESS_DENIED` 判定已删除。
+  插件可以 import `node:*` 内置模块，宿主不再做白名单；`internal/agent_core/conformance/nodecompat`
   与 `adag verify nodecompat` 相应收敛。
 - **fs / exec / process 桥的边界**：`fsGuard` 的能力位开关、`ExecPolicy` 程序级校验、
   启动前的信任检查、`plugin.admin`/`model.admin` 等 builtin-only 限制都不再由基座执行；
@@ -79,4 +79,4 @@
 - **文档收敛**：`docs/` 只保留 16 份设计正文（00–15）+ `design.md` 索引；
   不再有审批策略与能力位章节（待下一轮改写）。
 - **internal 目录结构**：`internal/common`（跨端共享的领域/端口/协议/适配器）、
-  `internal/gateway`（网关侧进程与 Web）、`internal/core`（Agent Core 内核与插件宿主）。
+  `internal/gateway`（网关侧进程与 Web）、`internal/agent_core`（Agent Core 内核与插件宿主）。

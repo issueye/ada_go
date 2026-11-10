@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/adag/ada-go/internal/adapters/sqlite"
+	"github.com/adag/ada-go/internal/common/adapters/sqlite"
 )
 
 func cmdAudit(args []string, stdout io.Writer) error {

@@ -122,7 +122,7 @@ plugins/my-plugin/
 定时任务的调度已迁到单例进程：`cron-manager` 装配期用 `ctx.processes` 注册 `scheduler`（global、node、on_enable），由它解析 cron 并经 `ctx.dispatch.send` 同一条调度层投递；`agent.every` 循环已从插件删除。
 `env.admin` 已不存在：env 的变量读写/校验/管理页由 `env-manager` 系统插件经 `global.config` 实现，基座只保留“向子进程注入已配置环境”的通用执行点。`cron.admin` 已删除：cron 的任务模型/调度/历史由 `cron-manager` 经 `global.config` + `agent.every` 通用定时器 + `turn.invoke` 实现；基座不再读 `cron.json`、不调度、不暴露 `/api/cron/fire`。
 
-> 实现状态：`global.config` 已落地（`ctx.config` + `internal/globalconfig`）；`events.read` 已落地（`ctx.events.query` + Emitter 可回放缓冲，`ctx.events.usage` + SQLite 原始用量行）；`token-usage`/`composer-telemetry` 已改为插件内聚合，基座已删除展示用 `usage.get` 投影，只保留 `events.read` 的原始用量行；`turn.invoke` 轮次触发桥与 `agent.every` 通用定时器已落地；cron 已完成迁移。`dispatch.send` 已落地：网关侧 `internal/gateway/dispatch` 同时服务界面发送与 `ctx.dispatch.send`，内部端点只认回环来源 + 控制令牌，且摘掉了宿主环境里的 `ADAG_`/`ADAGO_` 变量（插件子进程拿不到宿主凭据）。路线见 [11 §16](11-structure-roadmap.md)。
+> 实现状态：`global.config` 已落地（`ctx.config` + `internal/common/globalconfig`）；`events.read` 已落地（`ctx.events.query` + Emitter 可回放缓冲，`ctx.events.usage` + SQLite 原始用量行）；`token-usage`/`composer-telemetry` 已改为插件内聚合，基座已删除展示用 `usage.get` 投影，只保留 `events.read` 的原始用量行；`turn.invoke` 轮次触发桥与 `agent.every` 通用定时器已落地；cron 已完成迁移。`dispatch.send` 已落地：网关侧 `internal/gateway/dispatch` 同时服务界面发送与 `ctx.dispatch.send`，内部端点只认回环来源 + 控制令牌，且摘掉了宿主环境里的 `ADAG_`/`ADAGO_` 变量（插件子进程拿不到宿主凭据）。路线见 [11 §16](11-structure-roadmap.md)。
 
 #### 6.2.2 信任级别
 
@@ -361,7 +361,7 @@ interface ToolContext {
 
 #### 6.3.4 工具管理集中化（ToolManager）
 
-工具不是各层各管一段，而是由 **Core 侧的基座内部组件 `ToolManager`**（`internal/toolkit`）统一负责：
+工具不是各层各管一段，而是由 **Core 侧的基座内部组件 `ToolManager`**（`internal/common/toolkit`）统一负责：
 
 | 职责 | 说明 |
 |---|---|

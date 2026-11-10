@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/adag/ada-go/app"
-	"github.com/adag/ada-go/internal/corerpc"
+	"github.com/adag/ada-go/internal/agent_core/corerpc"
 	"github.com/adag/ada-go/internal/gateway"
 )
 

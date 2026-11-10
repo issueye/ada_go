@@ -2,7 +2,7 @@ package main
 
 // CLI 会话面（开发计划 M1-G）：chat / print / threads / events / export / backup。
 //
-// 这里只做参数解析与输出；装配、引擎与存储接线在 internal/cli。
+// 这里只做参数解析与输出；装配、引擎与存储接线在 internal/agent_core/cli。
 
 import (
 	"context"
@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/adag/ada-go/app"
-	"github.com/adag/ada-go/internal/cli"
-	"github.com/adag/ada-go/internal/domain"
+	"github.com/adag/ada-go/internal/agent_core/cli"
+	"github.com/adag/ada-go/internal/common/domain"
 )
 
 // stringList 是可重复的字符串参数（--allow-host a --allow-host b）。

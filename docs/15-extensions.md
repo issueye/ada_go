@@ -404,7 +404,7 @@ Markdown 可能由模型生成，不能等同于插件页面/插槽。动态块�
 | `spec/markdown-block.schema.json` | 新增封套 Schema |
 | `spec/manifest.schema.json` | `frontend.blocks` 数组与字段消费者 |
 | `spec/vnode.schema.json` | 增加 block profile（或独立 `block-vnode.schema.json` 引用公共 `$defs`） |
-| `internal/plugins` manifest | 解析 `frontend.blocks`，加载 schema/template 路径 |
+| `internal/agent_core/plugins` manifest | 解析 `frontend.blocks`，加载 schema/template 路径 |
 | `internal/gateway/frontend` | block 注册表 + Render Runtime 调用 |
 | `internal/gateway/web` | fence 分段、块 VNode 合并、`markdownVNode` 支持 `$C`/`n` |
 | `internal/gateway/web/static/ada-ui.js` | 确认/补齐 `Markdown` 组件对 `$C` 节点的透传 |

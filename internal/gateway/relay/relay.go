@@ -23,9 +23,9 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/adag/ada-go/internal/domain"
+	"github.com/adag/ada-go/internal/common/domain"
+	"github.com/adag/ada-go/internal/common/proto"
 	"github.com/adag/ada-go/internal/gateway/contracts"
-	"github.com/adag/ada-go/internal/proto"
 )
 
 const (

@@ -15,7 +15,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/adag/ada-go/internal/plugins"
+	"github.com/adag/ada-go/internal/agent_core/plugins"
 )
 
 type providersProjection struct {

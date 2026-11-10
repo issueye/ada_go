@@ -21,7 +21,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/adag/ada-go/internal/coreapp"
+	"github.com/adag/ada-go/internal/agent_core/coreapp"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 	"github.com/adag/ada-go/internal/gateway/contracts"
 	"github.com/adag/ada-go/internal/gateway/dispatch"
 	"github.com/adag/ada-go/internal/gateway/frontend"
@@ -31,7 +32,6 @@ import (
 	"github.com/adag/ada-go/internal/gateway/sse"
 	"github.com/adag/ada-go/internal/gateway/supervisor"
 	"github.com/adag/ada-go/internal/gateway/web"
-	"github.com/adag/ada-go/internal/plugins/host"
 )
 
 // Config 是 Gateway 的装配输入。

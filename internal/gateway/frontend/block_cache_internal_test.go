@@ -9,7 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/adag/ada-go/internal/plugins"
+	"github.com/adag/ada-go/internal/agent_core/plugins"
 )
 
 func TestBlockCacheStoreAndKey(t *testing.T) {

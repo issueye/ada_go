@@ -23,8 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/gateway/dispatch"
-	"github.com/adag/ada-go/internal/plugins"
 )
 
 const (

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/adag/ada-go/internal/proto"
+	"github.com/adag/ada-go/internal/common/proto"
 )
 
 // dtoBindings 把 spec/proto.json 的 definitions 绑到手写 DTO（设计 8.2：

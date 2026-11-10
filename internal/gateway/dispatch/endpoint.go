@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/adag/ada-go/internal/domain"
+	"github.com/adag/ada-go/internal/common/domain"
 )
 
 const (

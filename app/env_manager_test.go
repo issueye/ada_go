@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/plugins/host"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 )
 
 type envManagerState struct {

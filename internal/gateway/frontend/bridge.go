@@ -29,10 +29,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 	"github.com/adag/ada-go/internal/gateway/contracts"
 	"github.com/adag/ada-go/internal/gateway/web"
-	"github.com/adag/ada-go/internal/plugins"
-	"github.com/adag/ada-go/internal/plugins/host"
 )
 
 // BackendActionTimeout 是单个只读动作预取的预算（7.5：单个 300ms）。

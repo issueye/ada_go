@@ -8,7 +8,7 @@
 //	go run ./tools/moejspike -case=all
 //
 // 一次性诊断工具，不是生产代码，也不被任何生产包引用（设计 6.10 的基座边界）。
-// 每条结论都必须来自这里或 internal/conformance/nodecompat 的真实运行输出。
+// 每条结论都必须来自这里或 internal/agent_core/conformance/nodecompat 的真实运行输出。
 package main
 
 import (

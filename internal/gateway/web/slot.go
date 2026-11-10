@@ -1,6 +1,6 @@
 // Package web 是 Gateway 的 SSR 宿主。M0 阶段它只携带一件契约：插槽宿主表。
 //
-// 插槽集合是稳定的兼容承诺（设计 7.2）：12 个名字与位置由 internal/plugins 声明，
+// 插槽集合是稳定的兼容承诺（设计 7.2）：12 个名字与位置由 internal/agent_core/plugins 声明，
 // 这里声明「谁消费它们」——每个插槽都必须有一个明确的宿主位置与空贡献回退，
 // adag verify 双向核对，任何一边多出或少掉都算漂移。
 package web
@@ -10,7 +10,7 @@ import (
 	"html/template"
 	"strconv"
 
-	"github.com/adag/ada-go/internal/plugins"
+	"github.com/adag/ada-go/internal/agent_core/plugins"
 )
 
 // SlotHost 描述一个插槽在页面外壳中的宿主位置与回退行为。

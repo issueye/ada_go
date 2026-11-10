@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/adag/ada-go/internal/plugins"
-	"github.com/adag/ada-go/internal/plugins/host"
+	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 )
 
 // ErrNoBlocks 表示插件没有声明任何 frontend.blocks（调用方跳过即可）。

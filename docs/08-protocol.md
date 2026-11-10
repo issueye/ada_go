@@ -16,7 +16,7 @@
 
 ### 8.2 方法表
 
-方法名、方向、入参/出参 JSON Schema 写在 `spec/proto.json`，是唯一手写源；`go generate` 生成 `internal/proto/methods_gen.go`（常量 + dispatch 覆盖表）。DTO 手写在 `dto.go`，由契约测试逐字段对照 Schema。
+方法名、方向、入参/出参 JSON Schema 写在 `spec/proto.json`，是唯一手写源；`go generate` 生成 `internal/common/proto/methods_gen.go`（常量 + dispatch 覆盖表）。DTO 手写在 `dto.go`，由契约测试逐字段对照 Schema。
 
 | 分组 | 方法 | 说明 |
 |---|---|---|
@@ -176,7 +176,7 @@ JSON-RPC 标准错误码用于传输层；业务错误用 4 位应用码：
 | 5003 | `storage_busy` | SQLite 写锁等待超时 |
 | 5004 | `storage_corrupt` | WAL/数据库损坏，需要 `doctor` 或备份恢复 |
 
-诊断码用于日志与页面提示：`ADG-<AREA>-<NNN>`（例如 `ADG-MODEL-002`、`ADG-PLUGIN-004`）。词汇表在 `internal/diag/codes.go` 一处维护，页面只显示码 + 人话 + 下一步，不显示堆栈。
+诊断码用于日志与页面提示：`ADG-<AREA>-<NNN>`（例如 `ADG-MODEL-002`、`ADG-PLUGIN-004`）。词汇表在 `internal/common/diag/codes.go` 一处维护，页面只显示码 + 人话 + 下一步，不显示堆栈。
 
 ### 8.6 产品声明
 

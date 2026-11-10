@@ -1,0 +1,6 @@
+t#1	evt.run.status	th_gold_01J0000000000000000000000A	{"status":"running"}
+t#2	evt.item.updated	th_gold_01J0000000000000000000000A	{"key":"tool:call_01J-G2","status":"started","tool":"write_file"}
+t#3	evt.item.updated	th_gold_01J0000000000000000000000A	{"key":"tool:call_01J-G2","status":"denied"}
+t#4	evt.interaction.resolved	th_gold_01J0000000000000000000000A	{"requestId":"int-1","status":"denied"}
+ws#1	evt.error	th_gold_01J0000000000000000000000A	{"code":2005,"diag":"ADG-THREAD-005","name":"loop_detected"}
+t#5	evt.run.status	th_gold_01J0000000000000000000000A	{"reason":"completed","status":"terminal"}

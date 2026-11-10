@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/plugins"
-	"github.com/adag/ada-go/internal/plugins/host"
+	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 )
 
 func TestNewUnitRequiresClientAsset(t *testing.T) {

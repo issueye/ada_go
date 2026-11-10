@@ -17,7 +17,7 @@
 已落地（后续阶段的前提）：
 
 - P1 Dispatcher 与 P2 内部发送端点：界面与插件共用一条发送路径；
-- P5 ToolManager：注册/可见性/快照/执行路由集中到 `internal/toolkit`；
+- P5 ToolManager：注册/可见性/快照/执行路由集中到 `internal/common/toolkit`；
 - P3 ProcessManager：注册、启动、停止、退避重启、引用计数、限额、日志环、进程树回收。
 
 待解决：
@@ -129,7 +129,7 @@
 - `internal/gateway/web/server.go`
 - `internal/gateway/security/*`
 - `cmd/adag/core.go` / `cmd/adag/gateway.go`
-- `internal/cli/session.go`（读取 control URL/token，交给宿主桥）
+- `internal/agent_core/cli/session.go`（读取 control URL/token，交给宿主桥）
 
 验收：
 
@@ -186,9 +186,9 @@
 ## 7. P4：插件进程桥
 
 > 状态：已实现（2026-11-09）。能力位 `process.supervise`（builtin-only）；宿主桥 `ctx.processes`
-> （`internal/plugins/host/cap_processsupervise.go`）；网关端点 `internal/gateway/processmgr/endpoint.go`
+> （`internal/agent_core/plugins/host/cap_processsupervise.go`）；网关端点 `internal/gateway/processmgr/endpoint.go`
 > （`/internal/processes/register|unregister|ensure|stop|status|list`，回环 + 控制令牌）；Core 侧
-> `internal/cli/plugin_processes.go` 用同一组 `ADAGO_GATEWAY_CONTROL_*` 环境变量。
+> `internal/agent_core/cli/plugin_processes.go` 用同一组 `ADAGO_GATEWAY_CONTROL_*` 环境变量。
 >
 > 落地时的补充决策：
 > - entry 由 Core 宿主解析到 `Script.Root` 内的绝对路径（`..`、绝对路径、空 Root 一律拒绝，
@@ -211,12 +211,12 @@
 
 涉及文件：
 
-- `internal/plugins/contract.go`
-- `internal/plugins/sites.go`
-- `internal/plugins/host/host.go`
-- `internal/plugins/host/cap_processes.go`
-- `internal/plugins/host/cap_processes_test.go`
-- `internal/cli/session.go`
+- `internal/agent_core/plugins/contract.go`
+- `internal/agent_core/plugins/sites.go`
+- `internal/agent_core/plugins/host/host.go`
+- `internal/agent_core/plugins/host/cap_processes.go`
+- `internal/agent_core/plugins/host/cap_processes_test.go`
+- `internal/agent_core/cli/session.go`
 - `spec/manifest.schema.json`
 - `docs/05-plugins.md`
 
@@ -229,12 +229,12 @@
 
 ## 8. P5：基座 ToolManager
 
-> 状态：已实现（2026-11-09）。`internal/toolkit/manager.go`、`internal/domain/toolview.go`；
+> 状态：已实现（2026-11-09）。`internal/common/toolkit/manager.go`、`internal/common/domain/toolview.go`；
 > `Catalog` 保留为纯注册表，`ToolManager` 负责 owner 归属、可见性视图、快照与执行路由。
 
 任务：
 
-- 新建/抽取 `internal/toolkit` 的 `ToolManager`，包住现有 `Catalog` + `toolInvoker`；
+- 新建/抽取 `internal/common/toolkit` 的 `ToolManager`，包住现有 `Catalog` + `toolInvoker`；
 - 统一注册入口：插件装配期 `Register(owner, descriptor)`，禁用/重载 `RemoveOwner(pluginID)`；
 - 统一可见性：
   - `Injected`：模型工具声明；
@@ -249,14 +249,14 @@
 
 涉及文件：
 
-- `internal/toolkit/manager.go`（新）
-- `internal/toolkit/manager_test.go`
-- `internal/toolkit/catalog.go`
+- `internal/common/toolkit/manager.go`（新）
+- `internal/common/toolkit/manager_test.go`
+- `internal/common/toolkit/catalog.go`
 - `app/app.go`（Assembly 持有 Manager）
-- `internal/engine/toolinvoke.go`
-- `internal/engine/toolinvoke_test.go`
-- `internal/plugins/host/cap_tooldiscovery.go`
-- `internal/corerpc/server.go`（tool.list）
+- `internal/agent_core/engine/toolinvoke.go`
+- `internal/agent_core/engine/toolinvoke_test.go`
+- `internal/agent_core/plugins/host/cap_tooldiscovery.go`
+- `internal/agent_core/corerpc/server.go`（tool.list）
 - `docs/05-plugins.md`（若提升为正式设计）
 
 验收：

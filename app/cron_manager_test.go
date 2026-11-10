@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/coreapp"
-	"github.com/adag/ada-go/internal/domain"
-	"github.com/adag/ada-go/internal/plugins/host"
+	"github.com/adag/ada-go/internal/agent_core/coreapp"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	"github.com/adag/ada-go/internal/common/domain"
 )
 
 // cronProduct 是 cron-manager 的最小装配集合：它注册 write/exec 工具，

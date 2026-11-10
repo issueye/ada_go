@@ -14,32 +14,28 @@ ada-go/
   cmd/adag/                main：gateway / core / plugin / doctor / verify
   app/                     组合根：产品声明 + 磁盘 plugins/official/ → coreapp
   internal/
-    domain/                消息、Part、工具描述符/回执、事件、错误、失败方向
-    engine/                RunTurn、终止条件、工具前钩子编排、Compactor seam
-    ports/                 12 个端口接口（内核 seam）
-    adapters/              sqlite、scope、clock、idgen、secret（零 provider 实现）
-    toolkit/               描述符注册表、能力/scope 校验、文件变更队列、检查点（零具体工具）
-    plugins/               manifest、loader、host(moejs)、contrib、hooks、skills
-      host/node/           能力位 → stdlib.Config、env 白名单、Node 错误归一化
-    coreproto/             JSON-RPC 服务端、事件发射、投影
-    coreapp/               通用装配器：接收插件集合 → 目录/引擎（不 import plugins/official/）
-    corecontracts/         Core RPC 与 CLI 共享的轻量类型
-    cli/                   会话运行时（CLI 与 Core 共用；装配入口由 Assembler 注入）
-    corerpc/               JSON-RPC over WebSocket（只依赖 Session 接口）
-    gateway/
-      gateway.go            Gateway 装配、路由与生命周期
+    common/                跨端共享（无业务语义）：domain、ports、proto、diag、version
+      domain/              消息、Part、工具描述符/回执、事件、错误、失败方向
+      ports/               12 个端口接口（内核 seam）
+      proto/               生成的方法常量、DTO、错误码
+    gateway/               唯一对外 HTTP 进程的全部实现
+      gateway.go           Gateway 装配、路由与生命周期
       contracts/ security/ supervisor/ relay/ sse/ dispatch/ processmgr/
       web/                 SSR handlers、模板、静态资源、投影缓存、ui/
       frontend/            esbuild、moejs render、VNode、插槽注册表
-    proto/                 生成的方法常量、DTO、错误码
-    diag/                  诊断码词汇表
-    conformance/           端口契约、不变量、golden、nodecompat、ui 基线
+    agent_core/            Agent Core：唯一引擎、插件宿主、会话运行时
+      engine/              RunTurn、终止条件、Compactor seam
+      plugins/             manifest、loader、host(moejs)、contrib、hooks、skills、provider
+      coreapp/ corecontracts/ coreproto/ corerpc/ cli/
+      conformance/         端口契约、不变量、golden、nodecompat、ui 基线
+    common/adapters/       sqlite、scope、clock、idgen、secret（零 provider 实现）
+    common/toolkit/        描述符注册表、scope 校验、文件变更队列、检查点（零具体工具）
   plugins/
     official/              系统插件包（trust=builtin；构建期预编译 dist/）
       provider-openai-chat/ provider-anthropic-messages/ provider-openai-responses/
       tools-fs/ tools-shell/ tools-git/ tools-plan/ tools-ask/ tools-skill/ tools-subagent/
       tool-discovery/       find_tool/exec_tool（系统插件；宿主桥 tool.discovery）
-      policy-default/ persona-coding/ provider-admin/ token-usage/
+      persona-coding/ provider-admin/ token-usage/
       env-manager/ cron-manager/ composer-telemetry/ plugin-helper/
       mcp-client/ browser-use/ ui-charts/ ui-hello-tsx/
     hello-tsx/ task-plan/ ask-user/   第三方示例（安装时编译）
@@ -203,9 +199,9 @@ go work init . ../moejs
 **当前进度（2026-11-09）**：
 
 - P0 安全前置已完成：来源→信任上限、Ed25519 验签/降级、静态预检（不执行插件代码）、插件目录写保护。
-- P1 通用原语：`global.config`（`ctx.config` + `internal/globalconfig`）与 `events.read`（`ctx.events.query` + Emitter 可回放缓冲，`ctx.events.usage` + SQLite 原始用量行）已落地；`tool-discovery` 系统插件已落地，引擎内联 `find_tool/exec_tool` 已删除；provider 配置存储已迁到 `global.config` 的 `provider-config` 命名空间（legacy `providers.json` 仅首次读取迁移，不再双写），`provider-admin` 已接管供应商 CRUD 与 `/models` 拉取（`ctx.fetch`）；基座 `model.admin` 只剩目录读取与当前模型切换，CRUD/预检桥已删除。`env-manager` 已完成迁移：变量读写/校验走 `ctx.config`（`env` 命名空间），bins 由 `ctx.fs` 投影，基座 `env.admin` 已删除；旧 `env.json` 仅迁移兜底读取。`token-usage`/`composer-telemetry` 已改为插件内聚合：页面动作/route 经 `events.read` 读取原始行，Gateway 不再注入 `data.usage`，`/threads/{id}/state` 只返回 `run`/`context`。下一阶段只剩 cron 迁移。
+- P1 通用原语：`global.config`（`ctx.config` + `internal/common/globalconfig`）与 `events.read`（`ctx.events.query` + Emitter 可回放缓冲，`ctx.events.usage` + SQLite 原始用量行）已落地；`tool-discovery` 系统插件已落地，引擎内联 `find_tool/exec_tool` 已删除；provider 配置存储已迁到 `global.config` 的 `provider-config` 命名空间（legacy `providers.json` 仅首次读取迁移，不再双写），`provider-admin` 已接管供应商 CRUD 与 `/models` 拉取（`ctx.fetch`）；基座 `model.admin` 只剩目录读取与当前模型切换，CRUD/预检桥已删除。`env-manager` 已完成迁移：变量读写/校验走 `ctx.config`（`env` 命名空间），bins 由 `ctx.fs` 投影，基座 `env.admin` 已删除；旧 `env.json` 仅迁移兜底读取。`token-usage`/`composer-telemetry` 已改为插件内聚合：页面动作/route 经 `events.read` 读取原始行，Gateway 不再注入 `data.usage`，`/threads/{id}/state` 只返回 `run`/`context`。下一阶段只剩 cron 迁移。
 - cron 已完成迁移：`cron-manager` 用 `global.config` 存任务、`agent.every` 每 30s 调度、`ctx.turn.invoke` 触发轮次；基座 `cron.admin`/`cronstore`/`cronproc`/`/api/cron/fire` 与 `cron-sync` 门禁已删除。
-- 工具管理已集中化：`internal/toolkit` 的 `ToolManager` 包住目录与插件路由，提供 `Injected`/`Discovery`/`System`/`All` 四种视图与 turn 级快照；可见性规则收敛到 `domain.ToolVisibility`，模型声明、`find_tool` 目录投影与 `exec_tool` 内层校验同源；`exec_tool` 现在拒绝注入式工具（`tool_not_discoverable`），`owner` 由宿主盖章且与目录不一致时拒绝路由。
+- 工具管理已集中化：`internal/common/toolkit` 的 `ToolManager` 包住目录与插件路由，提供 `Injected`/`Discovery`/`System`/`All` 四种视图与 turn 级快照；可见性规则收敛到 `domain.ToolVisibility`，模型声明、`find_tool` 目录投影与 `exec_tool` 内层校验同源；`exec_tool` 现在拒绝注入式工具（`tool_not_discoverable`），`owner` 由宿主盖章且与目录不一致时拒绝路由。
 - 调度层已落地：网关 `internal/gateway/dispatch` 是唯一发送路径（新建会话、发消息、编辑重发与 `/api/workspaces` 都走它），`auto`/`start`/`steer` 三种投递模式共用一份 busy/waiting/finishing 判定；builtin-only 能力 `dispatch.send` 让插件经 `ctx.dispatch.send` 交给同一调度层，网关用回环控制端点 + 每 Core 一次性令牌认证，`/internal/*` 不进用户鉴权链。
 - P3 进程管理已落地：`internal/gateway/processmgr` 是网关名下非 agent-worker 进程（插件注册的长驻进程）的唯一父进程——注册/`on_enable`/`lazy` 启动、`no`/`on_failure`/`always` 指数退避重启、引用计数、每 owner 8 / 全局 32 限额、日志环（200 行、单行 2KB、凭据脱敏）、停止杀整棵进程树；`Gateway.Shutdown` 先停被管进程再关 Core，`Gateway.Processes()` 供插件桥接入。P4 进程桥已落地：builtin-only 能力 `process.supervise`（`ctx.processes.register/ensure/stop/status/unregister/list`）经 `/internal/processes/*`（回环 + 控制令牌）交给同一份 ProcessManager；entry 由 Core 宿主解析到插件目录内并拒绝越界，网关再校验可读性，owner 由能力集盖章；Core 重签令牌时按签发键回收旧代注册。 P6 cron 单进程已落地：`cron-manager` 在装配期注册 `scheduler`（scope=global，runtime=node，on_enable/on_failure），scheduler 自己解析 cron、经 `/internal/dispatch/send` 投递、按 task id 把运行历史合并回 `$ADAGO_HOME/config/cron.json`；每 Core 的 `agent.every` 循环已删除，多工作区不再重复触发。调度进程的凭据由网关按进程签发（只带 `dispatch:send` 范围，sender 盖章为 `plugin:cron-manager`），`ADAGO_HOME`/`ADAG_OFFICIAL_PLUGINS_DIR` 作为路径指针不再被环境剥离。
 ### 16.1 剩余系统插件迁移的先决条件

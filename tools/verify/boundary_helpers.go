@@ -9,9 +9,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/adag/ada-go/internal/coreapp"
-	"github.com/adag/ada-go/internal/plugins"
-	"github.com/adag/ada-go/internal/proto"
+	"github.com/adag/ada-go/internal/agent_core/coreapp"
+	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/proto"
 )
 
 // protoMethods / hookPointNames / slotNames 是给文档数量检查用的实际计数来源。
@@ -32,17 +32,17 @@ func checkDependencyDirection(root string) error {
 		allowSub []string
 		why      string
 	}{
-		{"internal/domain", nil, "domain 不 import 任何其它内部包（设计 13）"},
-		{"internal/ports", []string{"internal/domain"}, "ports 只依赖 domain 与标准库（设计 3.3）"},
+		{"internal/common/domain", nil, "domain 不 import 任何其它内部包（设计 13）"},
+		{"internal/common/ports", []string{"internal/common/domain"}, "ports 只依赖 domain 与标准库（设计 3.3）"},
 		// M1-A 起这些包有真实实现，依赖方向必须继续向下（设计 3.3 的图）。
-		{"internal/toolkit", []string{"internal/domain", "internal/ports"}, "toolkit 实现 ports.ToolCatalog 等端口，不依赖 engine/gateway（设计 3.3）"},
-		{"internal/engine", []string{"internal/domain", "internal/ports"}, "engine 只依赖 ports 与 domain：不知道 moejs、不知道 SQLite、不知道 Gin（设计 3.3）"},
-		{"internal/diag", nil, "diag 是词汇表叶子，不依赖内部层"},
-		{"internal/version", []string{"internal/domain"}, "version 只依赖 domain"},
+		{"internal/common/toolkit", []string{"internal/common/domain", "internal/common/ports"}, "toolkit 实现 ports.ToolCatalog 等端口，不依赖 engine/gateway（设计 3.3）"},
+		{"internal/agent_core/engine", []string{"internal/common/domain", "internal/common/ports"}, "engine 只依赖 ports 与 domain：不知道 moejs、不知道 SQLite、不知道 Gin（设计 3.3）"},
+		{"internal/common/diag", nil, "diag 是词汇表叶子，不依赖内部层"},
+		{"internal/common/version", []string{"internal/common/domain"}, "version 只依赖 domain"},
 		// Gateway 不进入执行内核；允许复用产品声明与前端渲染的共享基座包（设计 3.3）。
 		{"internal/gateway", []string{
-			"internal/coreapp", "internal/domain", "internal/gateway", "internal/plugins",
-			"internal/ports", "internal/proto", "internal/version", "internal/workspacepath",
+			"internal/agent_core/coreapp", "internal/common/domain", "internal/gateway", "internal/agent_core/plugins",
+			"internal/common/ports", "internal/common/proto", "internal/common/version", "internal/common/workspacepath",
 		}, "Gateway 不 import engine/toolkit/adapters/official（设计 3.3）"},
 	}
 	for _, r := range rules {

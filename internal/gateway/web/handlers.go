@@ -23,7 +23,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/adag/ada-go/internal/domain"
+	"github.com/adag/ada-go/internal/common/domain"
 	"github.com/adag/ada-go/internal/gateway/dispatch"
 )
 

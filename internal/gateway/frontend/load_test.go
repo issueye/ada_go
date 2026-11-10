@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 	"github.com/adag/ada-go/internal/gateway/frontend"
-	"github.com/adag/ada-go/internal/plugins/host"
 )
 
 func writeBlockPlugin(t *testing.T, manifest string) string {

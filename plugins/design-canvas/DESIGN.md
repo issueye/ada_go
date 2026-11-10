@@ -266,7 +266,7 @@ _, html, err := b.RenderBlock(req, "design-canvas/canvas-ledger", "b1", 1, data)
 ```
 
 本仓库把这条固化成 `internal/gateway/frontend/design_canvas_block_test.go`，
-另有一条 `internal/plugins/discovery/design_canvas_test.go` 守 manifest 与契约文件。
+另有一条 `internal/agent_core/plugins/discovery/design_canvas_test.go` 守 manifest 与契约文件。
 
 **第四层 降级**：把画布停掉，再调 `design_canvas_sync`。
 期望：**返回文本 + `details.error`，不抛异常**。抛异常会累计到
@@ -287,7 +287,7 @@ _, html, err := b.RenderBlock(req, "design-canvas/canvas-ledger", "b1", 1, data)
 | --- | --- | --- |
 | 静态 | `node --check`（拷成 `.mjs`）＋ 去注释后扫反模式 ＋ `json.tool` | 通过；无 `inputSchema` / 全局 `fetch` / `import` |
 | 装配 | 拷到 `~/.adago/plugins/` 后 `adag plugin list` | `design-canvas 0.1.0 third-party true global c203faca…` |
-| 契约 | `go test ./internal/plugins/discovery -run DesignCanvas` | PASS：清单/能力/入口/块/技能 frontmatter 全部符合 |
+| 契约 | `go test ./internal/agent_core/plugins/discovery -run DesignCanvas` | PASS：清单/能力/入口/块/技能 frontmatter 全部符合 |
 | 块渲染 | `go test ./internal/gateway/frontend -run DesignCanvasLedgerBlock` | PASS：Schema→TSX→VNode→HTML，档位 class 与表格正确；多余字段被拒 |
 | 冒烟 | 用假 `agent`/`ctx` 在 Node 里直跑入口（`node --check` + 断言注册面/台账/降级） | PASS；并发现 `canvasUrl` 误带 `/api/nodes` 路径，已拆成 base（展示）与 endpoint（报错定位） |
 | 降级 | 停掉画布再调工具 | `details.error=unreachable`，文本给出「先启动 adago_design」的建议，插件未被禁用 |

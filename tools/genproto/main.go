@@ -1,4 +1,4 @@
-// Command genproto 从 spec/proto.json 生成 internal/proto/methods_gen.go。
+// Command genproto 从 spec/proto.json 生成 internal/common/proto/methods_gen.go。
 //
 // spec/proto.json 是协议唯一手写源（设计 8.2）；生成的常量与 dispatch 覆盖表不允许手工编辑。
 // CI 用 `go generate ./... && git diff --exit-code` 保证生成物与源同步。
@@ -23,14 +23,14 @@ import (
 // specPath 与 outPath 是相对仓库根的位置。
 const (
 	defaultSpec = "spec/proto.json"
-	defaultOut  = "internal/proto/methods_gen.go"
+	defaultOut  = "internal/common/proto/methods_gen.go"
 	pkgName     = "proto"
 )
 
 func main() {
 	var (
 		specFlag = flag.String("spec", "", "协议源文件（默认自动定位 spec/proto.json）")
-		outFlag  = flag.String("out", "", "生成文件（默认 internal/proto/methods_gen.go）")
+		outFlag  = flag.String("out", "", "生成文件（默认 internal/common/proto/methods_gen.go）")
 		check    = flag.Bool("check", false, "只校验并比较，不写盘；内容有差异时以退出码 1 失败")
 		rootFlag = flag.String("root", "", "仓库根（默认从当前目录向上找 go.mod）")
 	)
@@ -244,8 +244,8 @@ func (d *document) Validate() error {
 	if len(d.ErrorCodes) == 0 {
 		return fmt.Errorf("errorCodes 为空")
 	}
-	if d.Generated.GoPackage != "internal/proto" || d.Generated.ConstFile != "methods_gen.go" {
-		return fmt.Errorf("generated 指向了意外位置：%+v（应为 internal/proto/methods_gen.go）", d.Generated)
+	if d.Generated.GoPackage != "internal/common/proto" || d.Generated.ConstFile != "methods_gen.go" {
+		return fmt.Errorf("generated 指向了意外位置：%+v（应为 internal/common/proto/methods_gen.go）", d.Generated)
 	}
 	if len(d.reservedCodes()) == 0 {
 		return fmt.Errorf("缺少 jsonRpcReserved：传输层保留码必须显式声明，避免与应用码混淆（8.5）")

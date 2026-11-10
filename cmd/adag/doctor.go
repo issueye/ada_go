@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/adag/ada-go/internal/adapters/sqlite"
-	"github.com/adag/ada-go/internal/coreapp"
-	"github.com/adag/ada-go/internal/engine"
-	"github.com/adag/ada-go/internal/plugins"
+	"github.com/adag/ada-go/internal/agent_core/coreapp"
+	"github.com/adag/ada-go/internal/agent_core/engine"
+	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/adapters/sqlite"
 )
 
 // repoRoot 从当前目录向上找 go.mod，定位仓库根。
@@ -123,7 +123,7 @@ func checkDataDir(dir string) error {
 
 // checkFakeProvider 说明 fake 路径的覆盖边界。
 func checkFakeProvider() string {
-	return "fake 模型在 internal/devfake（CLI --fake）；provider 桥由官方 Chat 插件的真实 SSE 测试覆盖"
+	return "fake 模型在 internal/agent_core/devfake（CLI --fake）；provider 桥由官方 Chat 插件的真实 SSE 测试覆盖"
 }
 
 // checkSQLite 用只读连接检查完整性、schema 版本与 WAL 参数（09 §10 doctor 项）。

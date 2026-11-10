@@ -20,10 +20,10 @@ import (
 	"time"
 
 	"github.com/adag/ada-go/app"
-	"github.com/adag/ada-go/internal/domain"
-	"github.com/adag/ada-go/internal/plugins/host"
-	"github.com/adag/ada-go/internal/plugins/provider"
-	"github.com/adag/ada-go/internal/ports"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	"github.com/adag/ada-go/internal/agent_core/plugins/provider"
+	"github.com/adag/ada-go/internal/common/domain"
+	"github.com/adag/ada-go/internal/common/ports"
 	"github.com/adag/ada-go/plugins/official"
 )
 

@@ -15,7 +15,7 @@ import (
 	"time"
 
 	adagapp "github.com/adag/ada-go/app"
-	"github.com/adag/ada-go/internal/plugins/host"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 	"github.com/adag/ada-go/plugins/official"
 )
 

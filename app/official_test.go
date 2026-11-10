@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/adag/ada-go/app"
-	"github.com/adag/ada-go/internal/domain"
-	"github.com/adag/ada-go/internal/plugins/host"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	"github.com/adag/ada-go/internal/common/domain"
 )
 
 // TestToolsFS 钉 tools-fs 的五个工具在真实 fsGuard 下的行为。

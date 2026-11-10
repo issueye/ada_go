@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// render 生成 internal/proto/methods_gen.go 的源码（未经 gofmt）。
+// render 生成 internal/common/proto/methods_gen.go 的源码（未经 gofmt）。
 func render(d *document) ([]byte, error) {
 	var buf bytes.Buffer
 	w := func(format string, args ...any) { fmt.Fprintf(&buf, format, args...) }
@@ -114,7 +114,7 @@ func render(d *document) ([]byte, error) {
 	}
 	w("}\n\n")
 
-	w("// ErrorMeta 是应用错误码的元数据；诊断码绑定在 internal/diag（词汇表唯一位置）。\n")
+	w("// ErrorMeta 是应用错误码的元数据；诊断码绑定在 internal/common/diag（词汇表唯一位置）。\n")
 	w("type ErrorMeta struct {\n\tCode int\n\tName string\n\tTitle string\n\tRetryable bool\n\tTypical []string\n\tDiagnosticArea string\n}\n\n")
 	w("var ErrorCodes = []ErrorMeta{\n")
 	for _, c := range d.ErrorCodes {

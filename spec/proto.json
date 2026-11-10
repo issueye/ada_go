@@ -3,7 +3,7 @@
   "protoVersion": 1,
   "apiVersion": "1.0.0",
   "generated": {
-    "goPackage": "internal/proto",
+    "goPackage": "internal/common/proto",
     "constFile": "methods_gen.go"
   },
   "transport": {

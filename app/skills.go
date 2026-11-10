@@ -16,8 +16,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/adag/ada-go/internal/domain"
-	"github.com/adag/ada-go/internal/plugins/host"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	"github.com/adag/ada-go/internal/common/domain"
 )
 
 // skillsDirRel 是工作区技能目录（相对工作区根）。

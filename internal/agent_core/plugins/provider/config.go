@@ -1,0 +1,223 @@
+package provider
+
+// 供应商配置的持久化（供应商管理页的后端数据面）。
+//
+// 与 provider 插件的关系：
+//   - 插件仍然只负责「协议 → 归一化 Delta」；
+//   - 这里保存的是用户配置的供应商实例（名称、端点、密钥、模型清单）；
+//   - Registry 用 Protocol 找到对应适配器插件，把配置里的 BaseURL/APIKey/模型
+//     注入一次流式请求。
+//
+// API Key 只落在本地数据目录（0600），不返回给浏览器/插件前端；宿主只给
+// 宿主只给管理页后端返回 hasApiKey + 尾号提示。
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+)
+
+// Protocol 是适配器协议标识（不透明字符串，由 provider 插件在 registerProvider 里声明）。
+type Protocol string
+
+// Model 是配置里的一个模型；Disabled 为 true 时不参与 model.list / 模型选择。
+type Model struct {
+	ID               string   `json:"id"`
+	DisplayName      string   `json:"displayName,omitempty"`
+	ContextWindow    int      `json:"contextWindow,omitempty"`
+	MaxOutput        int      `json:"maxOutput,omitempty"`
+	Input            []string `json:"input,omitempty"`
+	SupportsTools    bool     `json:"supportsTools"`
+	SupportsThinking bool     `json:"supportsThinking,omitempty"`
+	// ThinkingLevels 是该模型可选的推理等级（从低到高）；空表示不提供档位。
+	ThinkingLevels []string `json:"thinkingLevels,omitempty"`
+	// ThinkingLevel 是旧的单档配置；加载时会迁移进 ThinkingLevels。
+	ThinkingLevel string `json:"thinkingLevel,omitempty"`
+	Disabled      bool   `json:"disabled,omitempty"`
+}
+
+// Info 转成宿主模型能力（不含 Disabled，调用方过滤）。
+func (m Model) Info() host.ModelInfo {
+	return host.ModelInfo{
+		ID: m.ID, DisplayName: m.DisplayName,
+		ContextWindow: m.ContextWindow, MaxOutput: m.MaxOutput,
+		Input: m.Input, SupportsTools: m.SupportsTools,
+		SupportsThinking: m.SupportsThinking,
+		ThinkingLevels:   append([]string(nil), m.ThinkingLevels...),
+	}
+}
+
+// Config 是一个供应商实例。
+type Config struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Protocol Protocol `json:"protocol"`
+	BaseURL  string   `json:"baseUrl,omitempty"`
+	APIKey   string   `json:"apiKey,omitempty"`
+	// Proxy 是该供应商出网使用的代理（http/https/socks5）；空表示直连。
+	Proxy string `json:"proxy,omitempty"`
+	// Headers 是随每次请求发送的自定义请求头（不覆盖 Host/Content-Length）。
+	Headers  map[string]string `json:"headers,omitempty"`
+	Disabled bool              `json:"disabled,omitempty"`
+	Models   []Model           `json:"models"`
+}
+
+// Clone 深拷贝配置（避免调用方修改 registry 内部状态）。
+func (c Config) Clone() Config {
+	out := c
+	out.Models = append([]Model(nil), c.Models...)
+	for i := range out.Models {
+		out.Models[i].Input = append([]string(nil), c.Models[i].Input...)
+		out.Models[i].ThinkingLevels = append([]string(nil), c.Models[i].ThinkingLevels...)
+	}
+	if c.Headers != nil {
+		out.Headers = make(map[string]string, len(c.Headers))
+		for k, v := range c.Headers {
+			out.Headers[k] = v
+		}
+	}
+	return out
+}
+
+// NormalizeThinkingLevels 归一化推理等级列表：小写、去空、去重，最多 8 档。
+// 档位名允许字母/数字/下划线/连字符，便于自定义 low/high/max 这类 provider 原值。
+func NormalizeThinkingLevels(in []string) ([]string, error) {
+	out := make([]string, 0, len(in))
+	seen := map[string]bool{}
+	for _, raw := range in {
+		level := strings.ToLower(strings.TrimSpace(raw))
+		if level == "" {
+			continue
+		}
+		if len(level) > 32 {
+			return nil, fmt.Errorf("推理等级 %q 过长", raw)
+		}
+		for _, r := range level {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+				continue
+			}
+			return nil, fmt.Errorf("推理等级 %q 只能包含字母、数字、下划线和连字符", raw)
+		}
+		if seen[level] {
+			continue
+		}
+		seen[level] = true
+		out = append(out, level)
+	}
+	if len(out) > 8 {
+		return nil, errors.New("推理等级最多 8 档")
+	}
+	return out, nil
+}
+
+// NormalizeThinkingLevel 归一化旧的单档配置；空串表示默认。
+func NormalizeThinkingLevel(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return "", nil
+	case "off":
+		return "off", nil
+	case "low":
+		return "low", nil
+	case "medium":
+		return "medium", nil
+	case "high":
+		return "high", nil
+	default:
+		return "", fmt.Errorf("思考级别必须是 off/low/medium/high，得到 %q", raw)
+	}
+}
+
+// Store 是 providers.json 的读写器。API 只在 Core 侧使用。
+type Store struct {
+	path string
+	mu   sync.Mutex
+}
+
+// NewStore 创建存储；path 为空时禁用持久化（测试可只调 Registry）。
+func NewStore(path string) *Store { return &Store{path: path} }
+
+// Path 返回配置文件位置。
+func (s *Store) Path() string {
+	if s == nil {
+		return ""
+	}
+	return s.path
+}
+
+type fileData struct {
+	Version   int      `json:"version"`
+	Providers []Config `json:"providers"`
+}
+
+// Load 读取配置。exists=false 表示文件不存在（首次启动，可以播种默认供应商）。
+func (s *Store) Load() ([]Config, bool, error) {
+	if s == nil || strings.TrimSpace(s.path) == "" {
+		return nil, false, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	raw, err := os.ReadFile(s.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("provider: 读取 %s 失败: %w", s.path, err)
+	}
+	var data fileData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return nil, true, fmt.Errorf("provider: 解析 %s 失败: %w", s.path, err)
+	}
+	out := make([]Config, 0, len(data.Providers))
+	for _, c := range data.Providers {
+		out = append(out, c.Clone())
+	}
+	return out, true, nil
+}
+
+// Save 原子写入配置（0600，同目录临时文件 + rename）。
+func (s *Store) Save(configs []Config) error {
+	if s == nil || strings.TrimSpace(s.path) == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data := fileData{Version: 1, Providers: make([]Config, 0, len(configs))}
+	for _, c := range configs {
+		data.Providers = append(data.Providers, c.Clone())
+	}
+	raw, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return fmt.Errorf("provider: 配置无法序列化: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+		return fmt.Errorf("provider: 创建配置目录失败: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".providers-*.json")
+	if err != nil {
+		return fmt.Errorf("provider: 创建临时配置失败: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("provider: 设置配置权限失败: %w", err)
+	}
+	if _, err := tmp.Write(raw); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("provider: 写入配置失败: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("provider: 关闭配置失败: %w", err)
+	}
+	if err := os.Rename(tmpName, s.path); err != nil {
+		return fmt.Errorf("provider: 替换配置失败: %w", err)
+	}
+	return nil
+}

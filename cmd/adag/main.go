@@ -21,15 +21,15 @@ import (
 	"time"
 
 	"github.com/adag/ada-go/app"
-	"github.com/adag/ada-go/internal/adapters/sqlite"
-	"github.com/adag/ada-go/internal/cli"
-	"github.com/adag/ada-go/internal/coreapp"
-	"github.com/adag/ada-go/internal/coreproto"
-	"github.com/adag/ada-go/internal/corerpc"
-	"github.com/adag/ada-go/internal/diag"
-	"github.com/adag/ada-go/internal/plugins/host"
-	"github.com/adag/ada-go/internal/proto"
-	"github.com/adag/ada-go/internal/version"
+	"github.com/adag/ada-go/internal/agent_core/cli"
+	"github.com/adag/ada-go/internal/agent_core/coreapp"
+	"github.com/adag/ada-go/internal/agent_core/coreproto"
+	"github.com/adag/ada-go/internal/agent_core/corerpc"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	"github.com/adag/ada-go/internal/common/adapters/sqlite"
+	"github.com/adag/ada-go/internal/common/diag"
+	"github.com/adag/ada-go/internal/common/proto"
+	"github.com/adag/ada-go/internal/common/version"
 	"github.com/adag/ada-go/tools/verify"
 )
 
@@ -414,7 +414,7 @@ func cmdDoctor(args []string, stdout io.Writer) error {
 
 	fmt.Fprintln(stdout, "")
 	if firstErr != nil {
-		return fmt.Errorf("doctor 发现问题（首个：%w）；诊断码见 internal/diag", firstErr)
+		return fmt.Errorf("doctor 发现问题（首个：%w）；诊断码见 internal/common/diag", firstErr)
 	}
 	fmt.Fprintln(stdout, "doctor: 自检通过（M5 发布口径：Core RPC、Gateway 鉴权/SSR/SSE、插件平台、技能与审计已接通）。")
 	fmt.Fprintln(stdout, "       渲染回归与可访问性基线不在本次自检内（见 docs/09-security-operations.md 已知限制）。")

@@ -20,8 +20,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/adag/ada-go/internal/plugins"
-	"github.com/adag/ada-go/internal/plugins/host"
+	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 )
 
 // Scripts 加载后端官方插件（目录由 pluginsRoot 解析）。

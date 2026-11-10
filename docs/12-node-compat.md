@@ -240,8 +240,8 @@ Node 代码大量依赖 `err.code` 分支，因此错误形状是兼容契约的
 ### 6.14.4 门禁
 
 ```bash
-go test ./internal/conformance/nodecompat -run TestNodeCompat
-go test ./internal/plugins/host/node -run TestCapabilityMatrix
+go test ./internal/agent_core/conformance/nodecompat -run TestNodeCompat
+go test ./internal/agent_core/plugins/host/node -run TestCapabilityMatrix
 adag verify nodecompat          # 模块表、能力位、错误码、文档偏差表
 adag verify boundary            # Node 兼容层不注册工具/不出现插件 id
 ```

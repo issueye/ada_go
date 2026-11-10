@@ -29,8 +29,8 @@
 go vet ./...
 staticcheck ./...
 go test -race ./...
-go test ./internal/conformance -run TestInvariants
-go test ./internal/conformance/nodecompat -run TestNodeCompat
+go test ./internal/agent_core/conformance -run TestInvariants
+go test ./internal/agent_core/conformance/nodecompat -run TestNodeCompat
 go generate ./... && git diff --exit-code   # 生成物必须同步
 adag verify                                 # 协议/接线/能力/插槽/文档
 adag verify nodecompat                      # Node 模块表/能力位/错误码/偏差表

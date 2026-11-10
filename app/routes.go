@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/adag/ada-go/internal/corecontracts"
-	"github.com/adag/ada-go/internal/plugins/host"
+	"github.com/adag/ada-go/internal/agent_core/corecontracts"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 )
 
 // ErrRouteNotFound / ErrRouteMethodNotAllowed 供 Core RPC 映射 404/405。

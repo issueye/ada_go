@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/adag/ada-go/internal/agent_core/plugins/discovery"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 	"github.com/adag/ada-go/internal/gateway/frontend"
-	"github.com/adag/ada-go/internal/plugins/discovery"
-	"github.com/adag/ada-go/internal/plugins/host"
 )
 
 // loadThirdPartyBlockScripts 扫描工作区与全局插件根，加载第三方 frontend.blocks。

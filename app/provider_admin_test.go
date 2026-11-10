@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/adag/ada-go/app"
-	"github.com/adag/ada-go/internal/plugins/host"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 )
 
 // provider-admin 的后端路由确实通过 model.admin 能力取数据、切模型。

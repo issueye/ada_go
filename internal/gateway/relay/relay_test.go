@@ -17,9 +17,9 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/adag/ada-go/internal/common/proto"
 	"github.com/adag/ada-go/internal/gateway/contracts"
 	"github.com/adag/ada-go/internal/gateway/relay"
-	"github.com/adag/ada-go/internal/proto"
 )
 
 type fakeCore struct {

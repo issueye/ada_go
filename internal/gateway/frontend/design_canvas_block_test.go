@@ -14,9 +14,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 	"github.com/adag/ada-go/internal/gateway/frontend"
-	"github.com/adag/ada-go/internal/plugins"
-	"github.com/adag/ada-go/internal/plugins/host"
 )
 
 func TestDesignCanvasLedgerBlock(t *testing.T) {

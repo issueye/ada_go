@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/plugins/host"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 )
 
 const isoCardSource = `import { h, defineComponent } from "ada:render";

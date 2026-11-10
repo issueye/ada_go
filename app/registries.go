@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/adag/ada-go/internal/plugins/host"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 )
 
 // actionRegistry 是 host.ActionRegistry 的实现（方法名 Add*：Go 侧目录是

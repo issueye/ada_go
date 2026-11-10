@@ -2,7 +2,7 @@
 
 > 本文件是随包在 `plugin-helper` 里的平台 API 规范：写一个插件能用什么、
 > 每个入口的确切形状、边界与生命周期。AI 生成插件代码前应按本规范自检；
-> 与代码不一致时以宿主实现为准（`internal/plugins/host`）。
+> 与代码不一致时以宿主实现为准（`internal/agent_core/plugins/host`）。
 
 ## 1. 插件包结构
 

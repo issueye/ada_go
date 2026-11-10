@@ -17,7 +17,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/adag/ada-go/internal/envstore"
+	"github.com/adag/ada-go/internal/common/envstore"
 )
 
 func cmdEnv(args []string, stdout io.Writer) error {

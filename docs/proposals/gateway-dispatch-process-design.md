@@ -367,7 +367,7 @@ type ToolManager interface {
 }
 ```
 
-实现建议放在 `internal/toolkit`，由 `app.Assembly` 持有；`Catalog` 退化为纯注册表，`toolInvoker` 并入 Manager 的路由表。
+实现建议放在 `internal/common/toolkit`，由 `app.Assembly` 持有；`Catalog` 退化为纯注册表，`toolInvoker` 并入 Manager 的路由表。
 
 ### 6.4 可见性
 

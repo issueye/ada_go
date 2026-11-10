@@ -168,8 +168,8 @@ scheduler 不该跟着停。
 
 ### 5.4 网关侧如何装配 hosted 运行时
 
-网关已经允许 import `internal/plugins/host`（`tools/verify/boundary_helpers.go` 的
-gateway allowlist 含 `internal/plugins`，且 `gateway.go:34` 与
+网关已经允许 import `internal/agent_core/plugins/host`（`tools/verify/boundary_helpers.go` 的
+gateway allowlist 含 `internal/agent_core/plugins`，且 `gateway.go:34` 与
 `internal/gateway/frontend/bridge.go:35` 已经在用），所以不需要动依赖方向门禁。
 
 需要新增的装配件：
@@ -248,8 +248,8 @@ B1 的代价只是「给 processmgr 多一个 runtime 分支」。
 
 | 文件 | 作用 |
 |---|---|
-| `internal/plugins/host/daemon.go` | `RunDaemon` / `Daemon`：编译、链接、执行顶层模块并保持 Runtime |
-| `internal/plugins/host/daemon_test.go` | 可用/不可用能力、停止、异常终止、超时 |
+| `internal/agent_core/plugins/host/daemon.go` | `RunDaemon` / `Daemon`：编译、链接、执行顶层模块并保持 Runtime |
+| `internal/agent_core/plugins/host/daemon_test.go` | 可用/不可用能力、停止、异常终止、超时 |
 | `internal/gateway/processmgr/hosted.go` | hosted 的 `Process` 实现（goroutine + cancel → Wait/Kill） |
 | `internal/gateway/processmgr/hosted_test.go` | 启停、重启策略、日志环、归属 |
 | `plugins/official/cron-manager/daemon.ts` + `dist/daemon.js` | 改写后的 scheduler |
@@ -262,7 +262,7 @@ B1 的代价只是「给 processmgr 多一个 runtime 分支」。
 | `internal/gateway/processmgr/manager.go` | `Options.HostedSpawn`；归属提升判定 |
 | `internal/gateway/processmgr/endpoint.go` | 接受 `runtime=hosted`；owner/scope 校验 |
 | `internal/gateway/processmgr/control.go` | hosted **不注入**控制令牌（它直接用 `hc.Dispatch`） |
-| `internal/plugins/host/cap_processsupervise.go` | `runtime` 允许 `hosted`；`gateway-owned` 不在 Runtime 关闭时注销 |
+| `internal/agent_core/plugins/host/cap_processsupervise.go` | `runtime` 允许 `hosted`；`gateway-owned` 不在 Runtime 关闭时注销 |
 | `internal/gateway/gateway.go` | 装配 hosted spawn、config 目录对齐、`hc.Dispatch` 直连 Dispatcher |
 | `plugins/official/cron-manager/index.ts` + `scheduler.ts`（删除） | 注册 `runtime: hosted`；页面读 `tasks`+`runs` 两键 |
 | `plugins/official/cron-manager/plugin.json` | 能力去掉 `process.supervise` 之外的多余项；如走清单声明则加 `backend.daemons` |
@@ -270,11 +270,11 @@ B1 的代价只是「给 processmgr 多一个 runtime 分支」。
 
 ### 7.3 不改
 
-- `internal/plugins/host/nodemods/src/os.js`（`homedir` 保持空）
+- `internal/agent_core/plugins/host/nodemods/src/os.js`（`homedir` 保持空）
 - 全局 `fetch`（保持不存在）
 - `process.env` 白名单语义
 - `internal/gateway/dispatch`（`ctx.dispatch.send` 已就绪）
-- `internal/globalconfig`（flock/限额已就绪）
+- `internal/common/globalconfig`（flock/限额已就绪）
 
 ---
 

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/adag/ada-go/internal/domain"
+	"github.com/adag/ada-go/internal/common/domain"
 )
 
 // 展示层裁剪阈值：Core 已对单字段做 32KB 截断（8.3），这里再收一层，

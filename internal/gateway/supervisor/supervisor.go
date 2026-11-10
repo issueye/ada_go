@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/adag/ada-go/internal/common/workspacepath"
 	"github.com/adag/ada-go/internal/gateway/contracts"
-	"github.com/adag/ada-go/internal/workspacepath"
 )
 
 // ErrShutdown 表示 Supervisor 已关闭，不再接受新的 Acquire。

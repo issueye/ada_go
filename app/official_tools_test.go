@@ -13,9 +13,9 @@ import (
 	"testing"
 
 	"github.com/adag/ada-go/app"
-	"github.com/adag/ada-go/internal/coreapp"
-	"github.com/adag/ada-go/internal/domain"
-	"github.com/adag/ada-go/internal/plugins/host"
+	"github.com/adag/ada-go/internal/agent_core/coreapp"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	"github.com/adag/ada-go/internal/common/domain"
 	"github.com/adag/ada-go/plugins/official"
 )
 

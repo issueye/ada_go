@@ -3,7 +3,7 @@ package official_test
 // 磁盘加载：桌面打包把 plugins/official 放进 Electron resources，运行时就地加载。
 
 import (
-	"github.com/adag/ada-go/internal/plugins/host"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 	"github.com/adag/ada-go/plugins/official"
 	"os"
 	"path/filepath"

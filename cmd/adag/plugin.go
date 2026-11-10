@@ -19,8 +19,8 @@ import (
 	"strings"
 
 	"github.com/adag/ada-go/app"
-	"github.com/adag/ada-go/internal/cli"
-	"github.com/adag/ada-go/internal/plugins/discovery"
+	"github.com/adag/ada-go/internal/agent_core/cli"
+	"github.com/adag/ada-go/internal/agent_core/plugins/discovery"
 )
 
 func cmdPlugin(args []string, stdout io.Writer) error {

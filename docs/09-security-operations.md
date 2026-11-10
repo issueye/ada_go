@@ -95,7 +95,7 @@
 
 ### 10.1 发布与恢复清单
 
-- 版本号真源：`internal/version`；发布产物用 `GOWORK=off` 构建，三平台产物与校验和随 tag。
+- 版本号真源：`internal/common/version`；发布产物用 `GOWORK=off` 构建，三平台产物与校验和随 tag。
 - 备份：`adag backup` 生成一致性副本 + 插件目录 + 配置（不含密钥）；恢复时停 Core、校验、原子替换、删除旧 `-wal`/`-shm`。
 - 升级：先备份，再替换二进制；启动 migration；插件按 `apiVersion` 禁用不兼容项。
 - 发布前门禁：`go test -race ./...`、`go vet`、staticcheck、`adag verify`、`adag doctor --fake`、空基座启动。

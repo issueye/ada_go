@@ -15,13 +15,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/adag/ada-go/internal/coreapp"
-	"github.com/adag/ada-go/internal/corecontracts"
-	"github.com/adag/ada-go/internal/domain"
-	"github.com/adag/ada-go/internal/plugins"
-	"github.com/adag/ada-go/internal/plugins/host"
-	"github.com/adag/ada-go/internal/plugins/provider"
-	"github.com/adag/ada-go/internal/toolkit"
+	"github.com/adag/ada-go/internal/agent_core/coreapp"
+	"github.com/adag/ada-go/internal/agent_core/corecontracts"
+	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	"github.com/adag/ada-go/internal/agent_core/plugins/provider"
+	"github.com/adag/ada-go/internal/common/domain"
+	"github.com/adag/ada-go/internal/common/toolkit"
 	"github.com/adag/ada-go/plugins/official"
 )
 
@@ -192,7 +192,7 @@ func Assemble(ctx context.Context, p *coreapp.Product, scripts []host.Script, de
 
 // Assembler 是组合根对 corecontracts.Assembler 的实现。
 //
-// 它把具体 *Assembly 适配成接口返回，让 internal/cli 不需要 import app；
+// 它把具体 *Assembly 适配成接口返回，让 internal/agent_core/cli 不需要 import app；
 // cmd/adag 负责把 Assembler{} 注入 cli.Config。
 type Assembler struct{}
 

@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/adag/ada-go/app"
-	"github.com/adag/ada-go/internal/domain"
-	"github.com/adag/ada-go/internal/plugins/host"
+	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	"github.com/adag/ada-go/internal/common/domain"
 )
 
 // tryCreatePlugin 在 plugin-helper 实例上直接调用 create_plugin，返回 (输出, 错误)。
