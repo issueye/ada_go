@@ -105,7 +105,7 @@ var table = []Entry{
 	{3002, "tool_invalid_args", Code{AreaTool, 2}, "参数不符合 Schema；按工具描述重新给出参数。"},
 	{3003, "plugin_timeout", Code{AreaPlugin, 1}, "插件调用超时并已重建运行时；重试一次，持续超时请查看插件日志。"},
 	{3004, "plugin_crashed", Code{AreaPlugin, 2}, "插件运行时失败并已隔离；其余功能不受影响，可手动重载该插件。"},
-	{3005, "plugin_denied", Code{AreaPlugin, 3}, "能力或信任级别不允许该调用；检查清单里的 capabilities 与 trust。"},
+	{3005, "plugin_denied", Code{AreaPlugin, 3}, "插件自己拒绝了该调用；查看工具回执里的 reason。能力位与信任级别不再产生该错误。"},
 	{4001, "auth_required", Code{AreaAuth, 1}, "登录已过期；重新打开 /__auth 获取会话。"},
 	{4002, "csrf_invalid", Code{AreaAuth, 2}, "表单 token 不匹配；刷新页面后重新提交。"},
 	{4003, "origin_denied", Code{AreaAuth, 3}, "Origin/Host 校验失败；从配置的地址访问本站。"},

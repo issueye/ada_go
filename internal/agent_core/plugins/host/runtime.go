@@ -28,6 +28,7 @@ import (
 
 	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/common/domain"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/common/ports"
 )
 
@@ -332,24 +333,24 @@ var _ Plugin = (*Instance)(nil)
 // 任何一步失败都不留半个实例：内部先 Close，错误文案点名缺失项（12 §6.14）。
 func Load(ctx context.Context, script Script, caps *CapabilitySet, hc Context, opts Options) (*Instance, error) {
 	if InstallCapabilities == nil {
-		// 能力安装没接线时拒绝加载，而不是「跳过能力安装」装配出一个缺 fs/child_process 的半成品。
-		return nil, fmt.Errorf("host: InstallCapabilities 未赋值（caps.go 未落地），拒绝加载插件 %s", script.pluginID())
+		// 安装挂载点没接线时拒绝加载，而不是装配出一个缺 fs/child_process 的半成品。
+		return nil, fmt.Errorf("host: InstallCapabilities 未赋值（caps.go 未落地），拒绝加载插件 %s", script.PluginID())
 	}
-	if err := script.validate(); err != nil {
+	if err := script.Validate(); err != nil {
 		return nil, err
 	}
 	if caps == nil {
-		return nil, fmt.Errorf("host: 插件 %s 缺少能力授予集合", script.pluginID())
+		return nil, fmt.Errorf("host: 插件 %s 缺少能力授予集合", script.PluginID())
 	}
-	if hc.PluginID != "" && hc.PluginID != script.pluginID() {
-		return nil, fmt.Errorf("host: 宿主上下文的 pluginId %q 与清单 id %q 不一致", hc.PluginID, script.pluginID())
+	if hc.PluginID != "" && hc.PluginID != script.PluginID() {
+		return nil, fmt.Errorf("host: 宿主上下文的 pluginId %q 与清单 id %q 不一致", hc.PluginID, script.PluginID())
 	}
 	budgets := opts.Budgets.withDefaults()
 	if script.Manifest != nil && script.Manifest.Backend != nil && script.Manifest.Backend.InitTimeoutMS > 0 {
 		budgets.Factory = time.Duration(script.Manifest.Backend.InitTimeoutMS) * time.Millisecond
 	}
 	p := &Instance{
-		id: script.pluginID(), script: script, caps: caps, hc: hc, opts: opts, budgets: budgets,
+		id: script.PluginID(), script: script, caps: caps, hc: hc, opts: opts, budgets: budgets,
 		requests:  make(chan *call, budgets.Queue),
 		quit:      make(chan struct{}),
 		ownerDone: make(chan struct{}),
@@ -1234,7 +1235,7 @@ func (p *Instance) teardown(reason error) {
 		p.removeRoots()
 		p.removeRoots = nil
 	}
-	// 能力安装持有上游 node.API（工作区目录句柄与 worker 池）：不关就是每个插件一条泄漏。
+	// 安装状态持有上游 node.API（工作区目录句柄与 worker 池）：不关就是每个插件一条泄漏。
 	if p.rt != nil {
 		_ = CloseCapabilities(p.rt)
 	}
@@ -1414,7 +1415,7 @@ func (p *Instance) ID() string { return p.id }
 func (p *Instance) BaseContext() Context { return p.hc }
 
 // Manifest 返回已校验清单。
-func (p *Instance) Manifest() *plugins.Manifest { return p.script.Manifest }
+func (p *Instance) Manifest() *pluginapi.Manifest { return p.script.Manifest }
 
 // Contribution 返回装配期结算的贡献集合（只读，勿改）。
 func (p *Instance) Contribution() *Contribution {

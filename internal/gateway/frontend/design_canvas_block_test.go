@@ -14,8 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
-	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/gateway/frontend"
 )
 
@@ -35,11 +34,11 @@ func TestDesignCanvasLedgerBlock(t *testing.T) {
 		t.Fatalf("读 schema: %v", err)
 	}
 
-	scripts := []host.Script{{
-		Manifest: &plugins.Manifest{
+	scripts := []pluginapi.Script{{
+		Manifest: &pluginapi.Manifest{
 			ID: "design-canvas", Name: "设计画布台账", Version: "0.1.0", APIVersion: 1,
-			Trust: plugins.TrustThirdParty,
-			Frontend: &plugins.Frontend{Blocks: []plugins.BlockContribution{{
+			Trust: pluginapi.TrustThirdParty,
+			Frontend: &pluginapi.Frontend{Blocks: []pluginapi.BlockContribution{{
 				Name:     "canvas-ledger",
 				Schema:   "schemas/canvas-ledger.json",
 				Template: "canvas-ledger.tsx",

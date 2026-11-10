@@ -17,18 +17,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/common/domain"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/common/ports"
 )
 
 // testCaps 造一份最小上下文：信任级别 + 工作区根（能力位已移除）。
-func testCaps(t *testing.T, trust plugins.Trust, _ ...plugins.Capability) *CapabilitySet {
+func testCaps(t *testing.T, trust pluginapi.Trust, _ ...pluginapi.Capability) *CapabilitySet {
 	t.Helper()
 	return &CapabilitySet{
 		PluginID:      "test-plugin",
 		Trust:         trust,
-		Hooks:         map[string]plugins.HookAction{},
+		Hooks:         map[string]pluginapi.HookAction{},
 		Env:           map[string]string{},
 		WorkspaceRoot: tempWorkspace(t),
 		Mount:         DefaultMount,
@@ -38,12 +38,12 @@ func testCaps(t *testing.T, trust plugins.Trust, _ ...plugins.Capability) *Capab
 // testScript 造一个最小插件：清单 + 入口源码。
 func testScript(t *testing.T, caps *CapabilitySet, source string) Script {
 	t.Helper()
-	m := &plugins.Manifest{
+	m := &pluginapi.Manifest{
 		ID: "test-plugin", Name: "测试插件", Version: "0.1.0",
-		APIVersion: plugins.APIVersionMajor, Trust: caps.Trust,
-		Backend: &plugins.Backend{
+		APIVersion: pluginapi.APIVersionMajor, Trust: caps.Trust,
+		Backend: &pluginapi.Backend{
 			Entry: "index.js",
-			Hooks: map[string]plugins.HookAction{},
+			Hooks: map[string]pluginapi.HookAction{},
 		},
 	}
 	return Script{Manifest: m, EntryName: entryName(m.ID), Source: source}
@@ -51,7 +51,7 @@ func testScript(t *testing.T, caps *CapabilitySet, source string) Script {
 
 // TestLoadRegisterAndCallTool 是主链测试：入口工厂注册工具 → 装配提交 → 调用 → 结算。
 func TestLoadRegisterAndCallTool(t *testing.T) {
-	caps := testCaps(t, plugins.TrustThirdParty)
+	caps := testCaps(t, pluginapi.TrustThirdParty)
 	src := `
 export default function (agent) {
   agent.registerTool({
@@ -106,7 +106,7 @@ export default function (agent) {
 // registerTool 的 discovery 位从脚本 JSON 一路带到引擎描述符（05 §6.3）：
 // 缺省 false（注入式），true 时不注入模型清单、只经 find_tool/exec_tool 使用。
 func TestRegisterToolDiscoveryFlag(t *testing.T) {
-	caps := testCaps(t, plugins.TrustThirdParty)
+	caps := testCaps(t, pluginapi.TrustThirdParty)
 	src := `
 export default function (agent) {
   agent.registerTool({
@@ -154,7 +154,7 @@ export default function (agent) {
 // 一次超时/取消后 dirty Runtime 会在下一次调用前重建并重跑入口工厂；
 // 工厂必须能看到新的 staging，否则会误报「agent API 已冻结」。
 func TestRebuildRunsFactoryWithStaging(t *testing.T) {
-	caps := testCaps(t, plugins.TrustThirdParty)
+	caps := testCaps(t, pluginapi.TrustThirdParty)
 	src := `
 export default function (agent) {
   agent.registerTool({
@@ -189,7 +189,7 @@ export default function (agent) {
 
 // TestFactoryAssemblyContext 钉入口工厂的第二个只读参数（MCP 装配期发现的前提）。
 func TestFactoryAssemblyContext(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapFSRead, plugins.CapNetFetch)
+	caps := testCaps(t, pluginapi.TrustBuiltin, pluginapi.CapFSRead, pluginapi.CapNetFetch)
 	caps.Secrets = []string{"mcp_token"}
 	bridge, err := NewHTTPBridge(HTTPBridgeConfig{})
 	if err != nil {
@@ -241,7 +241,7 @@ export default function (agent, ctx) {
 
 // TestSecondRegistrationIsIgnoredAfterFreeze 钉「运行期再注册只记警告」（06 §6.5）。
 func TestSecondRegistrationIsIgnoredAfterFreeze(t *testing.T) {
-	caps := testCaps(t, plugins.TrustThirdParty)
+	caps := testCaps(t, pluginapi.TrustThirdParty)
 	src := `
 export default function (agent) {
   agent.registerTool({ name: "first", description: "1", parameters: { type: "object" }, access: "read",
@@ -270,7 +270,7 @@ export default function (agent) {
 
 // TestFSGuardRealPath 钉工作区边界：越界一律拒绝（09 §9.2）。
 func TestFSGuardRealPath(t *testing.T) {
-	caps := testCaps(t, plugins.TrustThirdParty, plugins.CapFSRead)
+	caps := testCaps(t, pluginapi.TrustThirdParty, pluginapi.CapFSRead)
 	st := &capsState{caps: caps, limits: DefaultLimits()}
 	guard, err := newFSGuard(st)
 	if err != nil {
@@ -310,7 +310,7 @@ func TestFSGuardRealPath(t *testing.T) {
 
 // TestFSGuardReadLimit 钉 16MB 上限（E-6：上游没有单次读写上限）。
 func TestFSGuardReadLimit(t *testing.T) {
-	caps := testCaps(t, plugins.TrustThirdParty, plugins.CapFSRead)
+	caps := testCaps(t, pluginapi.TrustThirdParty, pluginapi.CapFSRead)
 	st := &capsState{caps: caps, limits: Limits{MaxFileBytes: 16, MaxDirEntries: 4, MaxPathBytes: 4096,
 		MaxFetchBytes: 1 << 20, MaxExecOutputBytes: 1 << 20, MaxExecTimeout: time.Second, MaxTimers: 8}}
 	guard, err := newFSGuard(st)
@@ -378,7 +378,7 @@ func TestTimerLimit(t *testing.T) {
 	SetLimits(Limits{MaxTimers: 4})
 	defer SetLimits(DefaultLimits())
 
-	caps := testCaps(t, plugins.TrustThirdParty)
+	caps := testCaps(t, pluginapi.TrustThirdParty)
 	src := `
 export default function (agent) {
   agent.registerTool({ name: "spin", description: "建定时器", parameters: { type: "object" }, access: "read",
@@ -473,7 +473,7 @@ func tempWorkspace(t *testing.T) string {
 // 「已经成功的调用」误判成「Promise 未结算」，于是每次成功都累加失败计数，
 // 三次之后插件被自动禁用。这里连打 5 次成功调用，失败计数必须保持 0。
 func TestSuccessfulCallsDoNotCountAsFailures(t *testing.T) {
-	caps := testCaps(t, plugins.TrustThirdParty)
+	caps := testCaps(t, pluginapi.TrustThirdParty)
 	src := `
 export default function (agent) {
   agent.registerTool({ name: "ok", description: "ok", parameters: { type: "object" }, access: "read",
@@ -509,7 +509,7 @@ export default function (agent) {
 // 冷却期内拒绝并提示自动恢复；冷却到点下一次调用半开放行——重建重跑工厂后本次
 // 调用成功即完全恢复（计数、冷却清零），不需要任何人工重载。
 func TestBreakerAutoRecoversAfterCooldown(t *testing.T) {
-	caps := testCaps(t, plugins.TrustThirdParty)
+	caps := testCaps(t, pluginapi.TrustThirdParty)
 	src := `
 export default function (agent) {
   agent.registerTool({ name: "flaky", description: "flaky", parameters: { type: "object" }, access: "read",
@@ -572,7 +572,7 @@ export default function (agent) {
 // TestBreakerBacksOffWhenProbeKeepsFailing 钉指数退避：插件一直坏时，每次
 // 「冷却到点 → 半开探测 → 试探失败」把冷却翻倍（30s → 60s → 120s，上限 10min）。
 func TestBreakerBacksOffWhenProbeKeepsFailing(t *testing.T) {
-	caps := testCaps(t, plugins.TrustThirdParty)
+	caps := testCaps(t, pluginapi.TrustThirdParty)
 	src := `
 export default function (agent) {
   agent.registerTool({ name: "broken", description: "broken", parameters: { type: "object" }, access: "read",
@@ -631,7 +631,7 @@ func (r *recordingRoutes) AddRoute(reg RouteRegistration) error {
 
 // route 支持 (method, path, handler) 与对象形式。
 func TestRouteRegistersAndCalls(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin)
+	caps := testCaps(t, pluginapi.TrustBuiltin)
 	src := "export default function (agent) {\n" +
 		"  agent.route({ method: 'POST', path: '/echo', handler: function (req) { return { echo: req.body }; } });\n" +
 		"  agent.route('GET', '/ping', function () { return { ok: true }; });\n" +
@@ -668,7 +668,7 @@ func TestRouteRegistersAndCalls(t *testing.T) {
 
 // SSE 路由：登记 sse:true，处理器用 ctx.sse.send 推帧，宿主按帧回调。
 func TestSSERouteStreams(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin)
+	caps := testCaps(t, pluginapi.TrustBuiltin)
 	src := "export default function (agent) {\n" +
 		"  agent.route({ method: 'GET', path: '/events', sse: true, handler: function (req, ctx) {\n" +
 		"    ctx.sse.send({ n: 1 });\n" +
@@ -720,7 +720,7 @@ func TestSSERouteStreams(t *testing.T) {
 
 // model.admin：ctx.providers 只在声明能力后安装，list/select 都走宿主回调。
 func TestModelAdminRoutes(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapModelAdmin)
+	caps := testCaps(t, pluginapi.TrustBuiltin, pluginapi.CapModelAdmin)
 	src := "export default function (agent) {\n" +
 		"  agent.route('GET', '/state', function (req, ctx) { return ctx.providers.list(); });\n" +
 		"  agent.route('POST', '/select', function (req, ctx) {\n" +

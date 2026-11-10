@@ -10,14 +10,14 @@ import (
 	"strings"
 
 	"github.com/adag/ada-go/internal/agent_core/coreapp"
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/common/proto"
 )
 
 // protoMethods / hookPointNames / slotNames 是给文档数量检查用的实际计数来源。
 func protoMethods() []string   { return proto.AllMethodNames() }
-func hookPointNames() []string { return plugins.HookPointNames() }
-func slotNames() []string      { return plugins.SlotNames() }
+func hookPointNames() []string { return pluginapi.HookPointNames() }
+func slotNames() []string      { return pluginapi.SlotNames() }
 
 // modulePrefix 是本仓库的导入前缀。
 const modulePrefix = "github.com/adag/ada-go/"
@@ -39,11 +39,12 @@ func checkDependencyDirection(root string) error {
 		{"internal/agent_core/engine", []string{"internal/common/domain", "internal/common/ports"}, "engine 只依赖 ports 与 domain：不知道 moejs、不知道 SQLite、不知道 Gin（设计 3.3）"},
 		{"internal/common/diag", nil, "diag 是词汇表叶子，不依赖内部层"},
 		{"internal/common/version", []string{"internal/common/domain"}, "version 只依赖 domain"},
-		// Gateway 不进入执行内核；允许复用产品声明与前端渲染的共享基座包（设计 3.3）。
+		// Gateway 不进入执行内核：它可以复用产品声明（coreapp）与共享契约（common/pluginapi），
+		// 但不再依赖插件宿主或其清单包（2026-11-10：契约类型下沉到 common/pluginapi）。
 		{"internal/gateway", []string{
-			"internal/agent_core/coreapp", "internal/common/domain", "internal/gateway", "internal/agent_core/plugins",
+			"internal/agent_core/coreapp", "internal/common/domain", "internal/gateway", "internal/common/pluginapi",
 			"internal/common/ports", "internal/common/proto", "internal/common/version", "internal/common/workspacepath",
-		}, "Gateway 不 import engine/toolkit/adapters/official（设计 3.3）"},
+		}, "Gateway 不 import engine/toolkit/adapters/official/插件宿主（设计 3.3）"},
 	}
 	for _, r := range rules {
 		imports, err := packageImports(root, r.pkg)
@@ -74,7 +75,7 @@ func checkDependencyDirection(root string) error {
 		}
 	}
 	// 组级方向：common 不得反向依赖 agent_core / gateway；agent_core 不得依赖 gateway。
-	// 组内包级规则允许的东西（例如 globalconfig 曾 import plugins.ValidID）会在这里被拦下。
+	// 组内包级规则允许的东西（例如 globalconfig 曾 import pluginapi.ValidID）会在这里被拦下。
 	if err := checkGroupDirection(root); err != nil {
 		return err
 	}

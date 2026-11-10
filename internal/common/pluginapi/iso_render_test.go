@@ -1,4 +1,4 @@
-package host
+package pluginapi
 
 // P0 同构渲染探针：证明 ada-render.js 可以在 moejs 里、没有 DOM 的情况下，
 // 用同一份组件定义输出 VNode JSON，并且事件处理函数不会进入线格式。
@@ -21,7 +21,7 @@ import (
 )
 
 func TestIsoRenderToJSONWithoutDOM(t *testing.T) {
-	enginePath := filepath.Join("..", "..", "..", "gateway", "web", "static", "ada-render.js")
+	enginePath := filepath.Join("..", "..", "gateway", "web", "static", "ada-render.js")
 	engine, err := os.ReadFile(enginePath)
 	if err != nil {
 		t.Fatalf("读取渲染引擎失败: %v", err)

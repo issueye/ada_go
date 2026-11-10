@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // copyTree 把插件目录复制到临时根下的 <id>/，避免测试直接依赖仓库路径的写权限。
@@ -75,7 +75,7 @@ func TestDesignCanvasSamplePlugin(t *testing.T) {
 	if m.APIVersion != 1 {
 		t.Errorf("apiVersion = %d", m.APIVersion)
 	}
-	if m.Trust != plugins.TrustThirdParty {
+	if m.Trust != pluginapi.TrustThirdParty {
 		t.Errorf("trust = %q，示例插件必须是 third-party", m.Trust)
 	}
 	if p.Source != SourceGlobal || p.Fingerprint == "" {
@@ -86,11 +86,11 @@ func TestDesignCanvasSamplePlugin(t *testing.T) {
 	if m.Backend == nil || m.Backend.Entry == "" {
 		t.Fatal("缺少 backend.entry")
 	}
-	got := map[plugins.Capability]bool{}
+	got := map[pluginapi.Capability]bool{}
 	for _, c := range m.Backend.Capabilities {
 		got[c] = true
 	}
-	for _, want := range []plugins.Capability{plugins.Capability("net.fetch"), plugins.Capability("state")} {
+	for _, want := range []pluginapi.Capability{pluginapi.Capability("net.fetch"), pluginapi.Capability("state")} {
 		if !got[want] {
 			t.Errorf("缺少能力 %q", want)
 		}

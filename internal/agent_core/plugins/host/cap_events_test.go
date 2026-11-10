@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 func TestEventsContextMember(t *testing.T) {
-	caps := testCaps(t, plugins.TrustThirdParty, plugins.CapEventsRead)
+	caps := testCaps(t, pluginapi.TrustThirdParty, pluginapi.CapEventsRead)
 	src := `
 export default function (agent) {
   agent.registerTool({
@@ -57,7 +57,7 @@ export default function (agent) {
 }
 
 func TestEventsContextMemberRejectsOtherThread(t *testing.T) {
-	caps := testCaps(t, plugins.TrustThirdParty, plugins.CapEventsRead)
+	caps := testCaps(t, pluginapi.TrustThirdParty, pluginapi.CapEventsRead)
 	src := `
 export default function (agent) {
   agent.registerTool({
@@ -95,7 +95,7 @@ export default function (agent) {
 }
 
 func TestEventsUsageContextMember(t *testing.T) {
-	caps := testCaps(t, plugins.TrustThirdParty, plugins.CapEventsRead)
+	caps := testCaps(t, pluginapi.TrustThirdParty, pluginapi.CapEventsRead)
 	src := `
 export default function (agent) {
   agent.registerTool({
@@ -149,7 +149,7 @@ export default function (agent) {
 }
 
 func TestEventsNotInstalledWithoutCapability(t *testing.T) {
-	caps := testCaps(t, plugins.TrustThirdParty)
+	caps := testCaps(t, pluginapi.TrustThirdParty)
 	src := `
 export default function (agent) {
   agent.registerTool({

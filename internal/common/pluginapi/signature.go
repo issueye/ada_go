@@ -1,4 +1,4 @@
-package plugins
+package pluginapi
 
 // Ed25519 清单签名（09 §9.1、6.9、11 §16 P0）。
 //
@@ -37,10 +37,10 @@ const signatureDomain = "ada-plugin-v1\n"
 // 不应再改目录内容，否则验签会失败。
 func SignManifest(m *Manifest, dir string, priv ed25519.PrivateKey) (string, error) {
 	if m == nil {
-		return "", errors.New("plugins: 清单为空")
+		return "", errors.New("pluginapi: 清单为空")
 	}
 	if len(priv) != ed25519.PrivateKeySize {
-		return "", errors.New("plugins: 私钥长度非法")
+		return "", errors.New("pluginapi: 私钥长度非法")
 	}
 	payload, err := signaturePayload(m, dir)
 	if err != nil {
@@ -52,18 +52,18 @@ func SignManifest(m *Manifest, dir string, priv ed25519.PrivateKey) (string, err
 // VerifyManifestSignature 用已配置的公钥验签；没有公钥、签名非法或目录被改动都返回错误。
 func VerifyManifestSignature(m *Manifest, dir string) error {
 	if m == nil {
-		return errors.New("plugins: 清单为空")
+		return errors.New("pluginapi: 清单为空")
 	}
 	keys, err := configuredPublicKeys()
 	if err != nil {
 		return err
 	}
 	if len(keys) == 0 {
-		return errors.New("plugins: 没有配置插件公钥（ADAGO_PLUGIN_PUBKEYS 或 plugin-keys.json）")
+		return errors.New("pluginapi: 没有配置插件公钥（ADAGO_PLUGIN_PUBKEYS 或 plugin-keys.json）")
 	}
 	sig, err := base64.StdEncoding.DecodeString(strings.TrimSpace(m.Sig))
 	if err != nil || len(sig) != ed25519.SignatureSize {
-		return fmt.Errorf("plugins: %s 的 sig 不是合法 Ed25519 base64 签名", m.ID)
+		return fmt.Errorf("pluginapi: %s 的 sig 不是合法 Ed25519 base64 签名", m.ID)
 	}
 	payload, err := signaturePayload(m, dir)
 	if err != nil {
@@ -74,7 +74,7 @@ func VerifyManifestSignature(m *Manifest, dir string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("plugins: %s 的签名与目录内容不匹配", m.ID)
+	return fmt.Errorf("pluginapi: %s 的签名与目录内容不匹配", m.ID)
 }
 
 // signaturePayload 拼出被签名的字节：domain + 规范化清单 + 目录摘要。
@@ -101,7 +101,7 @@ func canonicalManifest(m *Manifest) ([]byte, error) {
 	copy.Sig = ""
 	raw, err := json.Marshal(copy)
 	if err != nil {
-		return nil, fmt.Errorf("plugins: 清单无法序列化: %w", err)
+		return nil, fmt.Errorf("pluginapi: 清单无法序列化: %w", err)
 	}
 	return raw, nil
 }
@@ -143,7 +143,7 @@ func directoryDigest(dir string) (string, error) {
 		return nil
 	})
 	if err != nil {
-		return "", fmt.Errorf("plugins: 读取插件目录失败: %w", err)
+		return "", fmt.Errorf("pluginapi: 读取插件目录失败: %w", err)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].rel < items[j].rel })
 	h := sha256.New()
@@ -168,7 +168,7 @@ func configuredPublicKeys() ([]ed25519.PublicKey, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("plugins: 读取公钥配置失败: %w", err)
+		return nil, fmt.Errorf("pluginapi: 读取公钥配置失败: %w", err)
 	}
 	var body struct {
 		Keys []string `json:"keys"`
@@ -178,7 +178,7 @@ func configuredPublicKeys() ([]ed25519.PublicKey, error) {
 	}
 	var list []string
 	if err := json.Unmarshal(raw, &list); err != nil {
-		return nil, fmt.Errorf("plugins: plugin-keys.json 形状非法（需要 {\"keys\":[...]} 或 [...]）")
+		return nil, fmt.Errorf("pluginapi: plugin-keys.json 形状非法（需要 {\"keys\":[...]} 或 [...]）")
 	}
 	return parsePublicKeys(list)
 }
@@ -189,7 +189,7 @@ func publicKeysPath() (string, error) {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
-		return "", errors.New("plugins: 无法定位用户主目录")
+		return "", errors.New("pluginapi: 无法定位用户主目录")
 	}
 	return filepath.Join(home, ".adago", "plugin-keys.json"), nil
 }
@@ -204,7 +204,7 @@ func parsePublicKeys(raw []string) ([]ed25519.PublicKey, error) {
 		}
 		b, err := base64.StdEncoding.DecodeString(s)
 		if err != nil || len(b) != ed25519.PublicKeySize {
-			return nil, fmt.Errorf("plugins: 公钥 %q 不是合法 Ed25519 base64 公钥", s)
+			return nil, fmt.Errorf("pluginapi: 公钥 %q 不是合法 Ed25519 base64 公钥", s)
 		}
 		out = append(out, ed25519.PublicKey(b))
 	}

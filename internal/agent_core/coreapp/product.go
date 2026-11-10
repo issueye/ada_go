@@ -44,7 +44,7 @@ type Identity struct {
 	Locale string `json:"locale"`
 }
 
-// Policies 是引擎与工具的运行参数；刻意不含审批规则，审批属于策略插件自己的设置（8.6）。
+// Policies 是引擎与工具的运行参数；刻意不含审批规则（审批策略已整体移除，8.6）。
 type Policies struct {
 	ToolTimeoutMS   int `json:"toolTimeoutMs"`
 	TurnTimeoutMS   int `json:"turnTimeoutMs"`
@@ -158,7 +158,7 @@ type Runtime struct {
 
 // Assemble 把产品声明与插件贡献结算成运行期目录（6.5 的两阶段在 M3 落地）。
 //
-// M0 只保证：空声明 → 空目录，且失败关闭判定正确（没有策略插件时写/执行/网络不可用）。
+// M0 只保证：空声明 → 空目录；审批策略已移除，写/执行/网络工具不再有失败关闭判定。
 func Assemble(p *Product) (*Runtime, error) {
 	if p == nil {
 		return nil, fmt.Errorf("coreapp: Assemble 需要非空产品声明")

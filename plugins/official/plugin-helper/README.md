@@ -1,7 +1,7 @@
 # 插件助手
 
 只保留**对话创建**：在会话里说「创建一个 XXX 插件」。AI 编写入口源码后调用本插件的
-`create_plugin` 工具（`access: write`，会经过审批策略确认）落盘。前端管理页已移除，
+`create_plugin` 工具（`access: write`）落盘。前端管理页已移除，
 管理能力仍由 `create_plugin` / `check_plugin` / `remove_plugin` 工具和对应 route 提供。
 
 插件安装到全局目录 `~/.adago/plugins/<id>/`（生产统一路径，跨工作区共享）。
@@ -24,8 +24,7 @@
 
 ## 移除插件（remove_plugin）
 
-对话里说「移除/卸载 XXX 插件」时，AI 调用 `remove_plugin`（`access: write`，
-过审批）：删除发现优先级最高的插件目录（工作区旧目录优先于全局根），并清理
+对话里说「移除/卸载 XXX 插件」时，AI 调用 `remove_plugin`（`access: write`）：删除发现优先级最高的插件目录（工作区旧目录优先于全局根），并清理
 两份启停状态里的条目；随包插件不能移除。移除后需在插件页点「重载」生效。
 
 ## 健康检查（check_plugin）

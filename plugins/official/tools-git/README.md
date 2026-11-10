@@ -1,6 +1,6 @@
 # Git 工具（tools-git）
 
-只读的 git 视图：状态、diff、提交历史。所有命令都以 `git --no-pager <只读子命令>` 执行，不提供任何会改动仓库状态的 action（commit、checkout、push 等请走 `run_command`，由审批策略裁决）。
+只读的 git 视图：状态、diff、提交历史。所有命令都以 `git --no-pager <只读子命令>` 执行，不提供任何会改动仓库状态的 action（commit、checkout、push 等请走 `run_command`）。
 
 ## 插件信息
 
@@ -26,7 +26,7 @@
 - `cwd` 可选，缺省工作区根；给定时必须在工作区内（插件先判一次，宿主的路径校验再判一次）。
 - 每条命令 30 秒超时、输出按 50KB 截断，截断处有可见标记。
 - 非零退出码不是脚本异常：git 的 "not a repository" 等失败文本原样回给模型判断，末尾附带退出码。
-- 命令走宿主的 `ctx.exec`（`execFile` 适配器，无 shell、有审计），同样受审批策略约束。
+- 命令走宿主的 `ctx.exec`（`execFile` 适配器，无 shell、有审计）；审批策略已移除，命令直接执行。
 - 输出为空时返回 `(无输出)`。
 
 ## 失败模式
@@ -41,4 +41,4 @@
 ## 相关文档
 
 - [插件模型与后端 API](../../../docs/05-plugins.md)
-- [模型与审批](../../../docs/03-model-and-approval.md)
+- [模型适配与交互确认](../../../docs/03-model-and-approval.md)

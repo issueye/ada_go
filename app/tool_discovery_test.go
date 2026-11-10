@@ -1,7 +1,7 @@
 package app_test
 
 // tool-discovery 系统插件的行为验收：真实装配 coding 产品 + 一个 discovery=true
-// 的测试工具，经 find_tool 发现、exec_tool 由宿主桥执行（审批链在 engine.InvokeTool）。
+// 的测试工具，经 find_tool 发现、exec_tool 由宿主桥执行（执行链在 engine.InvokeTool）。
 
 import (
 	"context"
@@ -15,9 +15,9 @@ import (
 	"github.com/adag/ada-go/internal/agent_core/conformance/testkit"
 	"github.com/adag/ada-go/internal/agent_core/coreapp"
 	"github.com/adag/ada-go/internal/agent_core/engine"
-	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 	"github.com/adag/ada-go/internal/common/domain"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/plugins/official"
 )
 
@@ -39,13 +39,13 @@ func TestToolDiscoveryPluginFindAndExec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	custom := host.Script{
-		Manifest: &plugins.Manifest{
-			ID: "lazy-probe", Name: "Lazy Probe", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
-			Trust: plugins.TrustThirdParty,
-			Backend: &plugins.Backend{
+	custom := pluginapi.Script{
+		Manifest: &pluginapi.Manifest{
+			ID: "lazy-probe", Name: "Lazy Probe", Version: "0.1.0", APIVersion: pluginapi.APIVersionMajor,
+			Trust: pluginapi.TrustThirdParty,
+			Backend: &pluginapi.Backend{
 				Entry:        "index.js",
-				Capabilities: []plugins.Capability{},
+				Capabilities: []pluginapi.Capability{},
 			},
 		},
 		EntryName: "plugin://lazy-probe/index.js",
@@ -97,7 +97,7 @@ func TestToolDiscoveryPluginFindAndExec(t *testing.T) {
 			}, engine.TurnSpec{ThreadID: meta.ThreadID, RunID: meta.RunID}, call)
 		},
 	}
-	asm, err = app.AssembleWithExtras(context.Background(), p, base, []host.Script{custom}, nil, nil, app.Deps{
+	asm, err = app.AssembleWithExtras(context.Background(), p, base, []pluginapi.Script{custom}, nil, nil, app.Deps{
 		Context: hc, FrontendIDs: frontendIDs,
 	})
 	if err != nil {

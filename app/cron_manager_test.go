@@ -18,7 +18,7 @@ import (
 )
 
 // cronProduct 是 cron-manager 的最小装配集合：它注册 write/exec 工具，
-// 所以必须同时装配审批策略插件（否则装配期直接拒绝，见 5.4 失败关闭）。
+// 审批策略已移除，装配不再要求额外的策略插件（见 5.4）。
 func cronProduct(t *testing.T) *coreapp.Product {
 	t.Helper()
 	return testProduct(t, "cron-manager")

@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/gateway/dispatch"
 )
 
@@ -303,7 +303,7 @@ func (e *Endpoint) dispatchOp(_ context.Context, ident dispatch.Identity, op str
 		return ProcessResponse{Ref: processRefOf(ref), Status: &st}, &st, nil
 	case OpList:
 		pluginID := strings.TrimSpace(req.PluginID)
-		if !plugins.ValidID(pluginID) {
+		if !pluginapi.ValidID(pluginID) {
 			return ProcessResponse{}, nil, newError(CodeInvalidSpec, "list 需要合法的 pluginId")
 		}
 		out := make([]Status, 0, 8)
@@ -427,7 +427,7 @@ func specOf(ident dispatch.Identity, req ProcessRequest) (ProcessSpec, error) {
 // ownerOf 取请求里的插件 id（由 Core 宿主盖章）并校验形状。
 func ownerOf(req ProcessRequest) (string, error) {
 	pluginID := strings.TrimSpace(req.PluginID)
-	if !plugins.ValidID(pluginID) {
+	if !pluginapi.ValidID(pluginID) {
 		return "", newError(CodeInvalidSpec, "pluginId %q 非法（由 Core 宿主盖章）", pluginID)
 	}
 	return pluginID, nil

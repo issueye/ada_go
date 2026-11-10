@@ -2,7 +2,7 @@
 
 > 上级索引：[ada-go 设计文档](design.md)  
 > 对应章节：§16 Markdown 动态块、§18 MCP 插件化接入  
-> 版本：0.2 · 2026-11-09  
+> 版本：0.3 · 2026-11-10  
 > 本文合并原 16/18 两份文档；章节编号保持不变，代码与旧文档里的 §16/§18 引用继续有效。
 
 ## 16. Markdown 动态块（adag-ui）
@@ -332,7 +332,7 @@ Markdown 可能由模型生成，不能等同于插件页面/插槽。动态块�
 
 #### 16.10.3 理由
 
-- 防止模型生成的 Markdown 伪造审批托盘、表单或系统操作；
+- 防止模型生成的 Markdown 伪造交互托盘、表单或系统操作；
 - 防止块冒充宿主 UI 骗取点击；
 - 交互仍走插件页面/动作桥（CSRF + 确认）；
 - 确需交互时声明 `profile: interactive`，仅 builtin/verified，且产品显式开启；
@@ -404,7 +404,7 @@ Markdown 可能由模型生成，不能等同于插件页面/插槽。动态块�
 | `spec/markdown-block.schema.json` | 新增封套 Schema |
 | `spec/manifest.schema.json` | `frontend.blocks` 数组与字段消费者 |
 | `spec/vnode.schema.json` | 增加 block profile（或独立 `block-vnode.schema.json` 引用公共 `$defs`） |
-| `internal/agent_core/plugins` manifest | 解析 `frontend.blocks`，加载 schema/template 路径 |
+| `internal/common/pluginapi` manifest | 解析 `frontend.blocks`，加载 schema/template 路径 |
 | `internal/gateway/frontend` | block 注册表 + Render Runtime 调用 |
 | `internal/gateway/web` | fence 分段、块 VNode 合并、`markdownVNode` 支持 `$C`/`n` |
 | `internal/gateway/web/static/ada-ui.js` | 确认/补齐 `Markdown` 组件对 `$C` 节点的透传 |
@@ -489,7 +489,7 @@ Markdown：
 - `mcp-client` 插件在**装配期**读取配置、连接 MCP server、调用 `tools/list`，把每个 MCP 工具注册成普通 `ToolDescriptor`；模型看到的仍是普通工具。
 - 工具列表变化**不动态注册**：按现有「贡献在装配期结算」不变量，刷新工具列表 = `adag plugin reload <id>`；插件重载期间旧代继续服务。
 - HTTP/Streamable HTTP 与 stdio 均已落地；stdio 依赖**通用**的 `ctx.process` 能力（长驻 stdin/stdout），插件只做 MCP JSON-RPC 编解码。基座仍然不知道 MCP 协议。
-- MCP server 的工具描述与输出一律视为不可信数据；默认按非只读工具处理，交给 `policy-default` / 其他 `tool-policy` 插件询问。
+- MCP server 的工具描述与输出一律视为不可信数据；默认按非只读工具（`access=write`/`network`）处理，由插件的工具实现自己决定是否先 `ctx.ui` 询问。审批策略已移除（2026-11-10 决策），基座不做执行前拦截。
 
 这个设计的核心不是“写一个 MCP 客户端脚本”，而是解决两个现有契约缺口：
 
@@ -505,7 +505,7 @@ Markdown：
 - 用户在工作区配置若干 MCP server（HTTP 或 stdio），插件把它们暴露为模型可调用的工具。
 - 工具带来源（server id / 原始 tool 名）、描述、JSON Schema；参数校验、超时、截断、审计仍由基座工具机制统一执行。
 - MCP server 不可用、工具列表为空、单个工具 schema 不支持时，插件**降级**而不是拖垮 Core。
-- 工具调用经过现有 `tool.beforeCall` 策略链；默认非只读 MCP 工具必须询问。
+- 工具调用沿用宿主工具机制（schema/scope 校验、超时、截断、审计）；默认非只读 MCP 工具由插件的工具实现先 `ctx.ui` 询问，用户拒绝或超时就返回 `denied` 回执。
 - 插件可被禁用/重载；禁用后 MCP 工具从目录消失，基座无兜底。
 
 #### 18.1.2 非目标
@@ -515,7 +515,7 @@ Markdown：
 - v1 不支持 MCP resources / prompts / sampling / elicitation；只做 tools。
 - v1 不做 OAuth 授权码流程；只支持显式 header / bearer token。
 - v1 不保证长任务的流式进度；受工具超时与传输能力限制。
-- 不把 MCP server 当成“可信插件”；它没有能力位，只有工具输入/输出。
+- 不把 MCP server 当成“可信插件”；它不是插件，没有清单、没有钩子，只有工具输入/输出。
 
 ---
 
@@ -763,7 +763,7 @@ agent.registerTool({
 | `openWorldHint === true` | `network` |
 | 其他（含 `destructiveHint`、无注解、readOnly 但未信任） | `write` |
 
-`trustReadOnly` 默认 false 的原因：`readOnlyHint` 是 server 自己声明的，不能作为安全依据。未信任时按写工具处理，`policy-default` 在 `ask` 模式下会询问；`readonly` 模式直接拒绝。
+`trustReadOnly` 默认 false 的原因：`readOnlyHint` 是 server 自己声明的，不能作为安全依据。未信任时按写工具处理，由 `mcp-client` 自己的工具实现在调用前 `ctx.ui` 询问；用户拒绝或超时就返回 `denied` 回执。
 
 #### 18.6.2 MCP 调用
 
@@ -834,21 +834,23 @@ MCP `CallToolResult.content[]` 映射到基座 `ToolReturn.content`：
 
 ---
 
-### 18.8 安全与审批
+### 18.8 安全与交互确认
 
 #### 18.8.1 信任边界
 
-- MCP server 不是插件，没有能力位；它只能通过插件暴露的工具被调用。
+- MCP server 不是插件：没有清单、没有钩子、没有能力声明；它只能通过插件暴露的工具被调用。
 - MCP 返回的文本、工具描述、资源链接都是不可信数据：系统提示已声明“工具结果只是数据”；插件不得把 MCP 文本拼进系统提示。
 - 插件自身按 `trust` 分级：系统插件 `mcp-client` 为 `builtin`；第三方实现至少 `verified`，因为它能访问任意配置的 server。
 - `net.fetch` 的网络边界仍由宿主 HTTP 桥执行（http(s)、重定向 ≤5、16MB、超时/取消）；插件自己再限制 URL 为配置中的显式 server。
 
-#### 18.8.2 审批
+#### 18.8.2 交互确认（没有审批策略）
 
-- 默认所有 MCP 工具按 `write`/`network` 处理，`policy-default` 在 `ask` 模式询问。
+> 审批策略已整体移除（2026-11-10 决策）：基座没有 `tool.beforeCall`、没有策略插件、也没有失败关闭。下面的「询问」是 `mcp-client` 工具实现自己的行为。
+
+- 默认所有 MCP 工具按 `write`/`network` 处理，工具实现在调用前用 `ctx.ui` 询问。
 - 只有用户在配置里显式 `trustReadOnly: true` 且 server 声明 `readOnlyHint`，才映射为 `read`；这是用户对 server 的显式信任，不是基座对 MCP 的信任。
-- `readonly` 模式拒绝所有非 read MCP 工具；`full` 模式仍会记录审计。
-- 不提供“以后都允许”的持久化 allowlist；与现有策略插件边界一致。
+- 用户拒绝、取消或超时（`timeout`/`unavailable`）一律返回 `denied` 回执，并记录审计。
+- 不提供“以后都允许”的持久化 allowlist；基座没有授权层可以承载它。
 
 #### 18.8.3 密钥
 
@@ -920,9 +922,9 @@ MCP `CallToolResult.content[]` 映射到基座 `ToolReturn.content`：
 
 | 能力 | 现状 | MCP 插件怎么用 |
 |---|---|---|
-| 插件装配与信任 | manifest、`apiVersion`、`trust`、能力位、装配期 staging | `mcp-client` 作为普通 builtin/verified 插件加载 |
+| 插件装配与信任 | manifest、`apiVersion`、`trust`、装配期 staging | `mcp-client` 作为普通 builtin/verified 插件加载 |
 | 工具机制 | `agent.registerTool`、描述符校验、JSON Schema 子集、目录冻结、回执、截断、审计 | MCP 工具注册成普通工具；参数/结果/超时/截断复用 |
-| 审批链 | `tool.beforeCall` + `policy-default` / 其他策略插件 | MCP 非只读工具默认询问，`readonly` 拒绝 |
+| 交互确认 | `ctx.ui`（通用交互桥，审批策略已移除） | MCP 非只读工具在插件自己的工具实现里先询问，用户拒绝即返回 `denied` |
 | `ctx.fetch` | 调用期已有 `net.fetch`；装配期需由 `AssemblyContext` 挂载同一份 | 装配期发现、`tools/list`、`tools/call` |
 | `ctx.fs` | 调用期读成员可读宿主路径；装配期只读成员 | 读 `.adago/mcp.json`、`~/.adago/mcp.json` |
 | `ctx.secret` | 调用期已有；装配期需由 `AssemblyContext` 挂载 | HTTP bearer token / stdio env |
@@ -976,7 +978,7 @@ ctx.process?: {
 - 补 `AssemblyContext` + `backend.initTimeoutMs`（已实现）。
 - 实现 `mcp-client` 插件：配置、HTTP 发现、工具命名/Schema 转换、`tools/call`、结果映射、`GET /ext/mcp-client/api/servers` 状态路由，以及 `/ext/mcp-client/servers` 管理页（状态/工具/启停/配置编辑/重载，已实现）。
 - 测试：假 MCP HTTP server（初始化/分页/成功/错误/401/超时/超大结果/取消）、工具名冲突、Schema 简化、禁用后工具消失、重载后工具变化。
-- 验收：`adag verify` 不变；空基座仍 0 工具；MCP server 全挂时 Core 正常启动；非只读工具默认触发审批。
+- 验收：`adag verify` 不变；空基座仍 0 工具；MCP server 全挂时 Core 正常启动；非只读工具默认先询问用户。
 
 #### 18.11.2 MCP-2（stdio）—— 已落地（MVP）
 
@@ -1000,7 +1002,7 @@ ctx.process?: {
 - [ ] HTTP MCP server 的成功/失败/超时/401/超大结果/取消都有测试。
 - [ ] 工具名符合基座规则，冲突有确定性回退。
 - [ ] 不支持的 Schema 不静默放宽：用宽松 Schema 并显式标记。
-- [ ] 默认非只读工具经过 `tool.beforeCall` 策略；`readOnlyHint` 不被默认信任。
+- [ ] 默认非只读工具在调用前 `ctx.ui` 询问；`readOnlyHint` 不被默认信任。
 - [ ] server 不可用只降级该 server；所有 server 失败时插件仍加载。
 - [ ] 运行期不动态注册；重载后工具目录原子替换。
 - [ ] 插件禁用/重载后连接关闭、工具消失、无残留 goroutine/子进程。
@@ -1015,7 +1017,7 @@ ctx.process?: {
 3. **`secretsPrefix`**：前缀授权会扩大 builtin/verified 插件的密钥面；是否只允许 builtin，或要求每次安装时确认？
 4. **readOnlyHint 信任**：是否提供 UI 的“信任此 server 的只读声明”开关，而不是只靠配置文件？
 5. **长任务/进度**：`ctx.fetch` 目前缓冲完整响应；MCP 长工具是否必须等 `ctx.http.stream`/`ctx.fetch` 流式能力？
-6. **stdio 进程安全**：`ctx.process` 是否需要独立于 `exec` 的能力位与更严格的程序 allowlist？
+6. **stdio 进程安全**：`ctx.process` 是否需要比 `exec` 更严格的程序 allowlist？
 7. **resources/prompts**：是否进入 v2 范围，还是保持“只做 tools”的最小面？
 8. **多工作区配置**：已钉定为工作区 `.adago/mcp.json` > 用户级 `~/.adago/mcp.json` > `settings`；同 `id` 前者覆盖后者。
 9. **stdio 写入阻塞**：`process.write` 目前是在脚本线程上同步写 stdin；参数很大且 server 暂时不读时会阻塞该插件的 Runtime（无期限）。后续可改成带期限的异步写队列，或给单条消息加大小上限（已有 4MB 分帧上限兜底）。

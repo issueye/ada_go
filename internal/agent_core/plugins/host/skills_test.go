@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 func TestParseSkillOK(t *testing.T) {
@@ -59,7 +59,7 @@ func TestParseSkillRejects(t *testing.T) {
 func TestScriptSkillsScan(t *testing.T) {
 	root := t.TempDir()
 	script := Script{
-		Manifest: &plugins.Manifest{ID: "demo"},
+		Manifest: &pluginapi.Manifest{ID: "demo"},
 		Root:     root,
 		StaticAssets: map[string][]byte{
 			"skills/beta/SKILL.md":      []byte("---\nname: beta\ndescription: 第二个\n---\nB 正文"),
@@ -94,7 +94,7 @@ func TestScriptSkillsScan(t *testing.T) {
 }
 
 func TestScriptSkillsEmpty(t *testing.T) {
-	skills, warns := ScriptSkills(Script{Manifest: &plugins.Manifest{ID: "demo"}})
+	skills, warns := ScriptSkills(Script{Manifest: &pluginapi.Manifest{ID: "demo"}})
 	if len(skills) != 0 || len(warns) != 0 {
 		t.Fatalf("没有技能时应返回空: %+v %v", skills, warns)
 	}

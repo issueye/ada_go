@@ -51,5 +51,5 @@ OpenAI Responses API 的流式协议适配器。与 Chat Completions 的关键�
 
 ## 相关文档
 
-- [模型与审批](../../../docs/03-model-and-approval.md)
+- [模型适配与交互确认](../../../docs/03-model-and-approval.md)
 - [插件模型与后端 API](../../../docs/05-plugins.md)

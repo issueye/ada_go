@@ -18,8 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
-	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/gateway/contracts"
 	"github.com/adag/ada-go/internal/gateway/frontend"
 	"github.com/adag/ada-go/internal/gateway/web"
@@ -193,11 +192,11 @@ func TestBridgeMarkdownBlocksDisabled(t *testing.T) {
 
 // TestBridgeRenderBlockComponent 验证 block TSX 产出的 $C 组件节点能通过校验与 HTML 渲染。
 func TestBridgeRenderBlockComponent(t *testing.T) {
-	scripts := []host.Script{{
-		Manifest: &plugins.Manifest{
+	scripts := []pluginapi.Script{{
+		Manifest: &pluginapi.Manifest{
 			ID: "demo-block", Name: "Demo Block", Version: "0.1.0", APIVersion: 1,
-			Trust: plugins.TrustBuiltin,
-			Frontend: &plugins.Frontend{Blocks: []plugins.BlockContribution{{
+			Trust: pluginapi.TrustBuiltin,
+			Frontend: &pluginapi.Frontend{Blocks: []pluginapi.BlockContribution{{
 				Name: "icon", Schema: "schemas/icon.json", Template: "blocks/icon.tsx", Profile: "display",
 			}}},
 		},
@@ -225,11 +224,11 @@ export default function Block() { return <Icon name="i-list" />; }`,
 
 // TestBridgeBlockAudit 钉三种失败审计，且审计不携带 data/渲染器错误原文。
 func TestBridgeBlockAudit(t *testing.T) {
-	scripts := []host.Script{{
-		Manifest: &plugins.Manifest{
+	scripts := []pluginapi.Script{{
+		Manifest: &pluginapi.Manifest{
 			ID: "audit-block", Name: "Audit", Version: "0.1.0", APIVersion: 1,
-			Trust: plugins.TrustBuiltin,
-			Frontend: &plugins.Frontend{Blocks: []plugins.BlockContribution{
+			Trust: pluginapi.TrustBuiltin,
+			Frontend: &pluginapi.Frontend{Blocks: []pluginapi.BlockContribution{
 				{Name: "bad-data", Schema: "schemas/required.json", Template: "blocks/ok.tsx"},
 				{Name: "bad-render", Schema: "schemas/any.json", Template: "blocks/throw.tsx"},
 				{Name: "bad-vnode", Schema: "schemas/any.json", Template: "blocks/form.tsx"},
@@ -292,11 +291,11 @@ func TestBridgeBlockAudit(t *testing.T) {
 
 // TestBridgeBlockPropsNoCSRF 钉住块 props 不带 CSRF token，且 nil request 不 panic。
 func TestBridgeBlockPropsNoCSRF(t *testing.T) {
-	scripts := []host.Script{{
-		Manifest: &plugins.Manifest{
+	scripts := []pluginapi.Script{{
+		Manifest: &pluginapi.Manifest{
 			ID: "csrf-block", Name: "CSRF", Version: "0.1.0", APIVersion: 1,
-			Trust: plugins.TrustBuiltin,
-			Frontend: &plugins.Frontend{Blocks: []plugins.BlockContribution{
+			Trust: pluginapi.TrustBuiltin,
+			Frontend: &pluginapi.Frontend{Blocks: []pluginapi.BlockContribution{
 				{Name: "echo", Schema: "schemas/any.json", Template: "blocks/echo.tsx"},
 			}},
 		},
@@ -330,11 +329,11 @@ func TestBridgeBlockPropsNoCSRF(t *testing.T) {
 // TestBridgeBlockRenderTimeout 钉单块渲染超时：死循环 block 必须被中断，
 // 按 render_failed/render_error 记审计，而不是拖住请求。
 func TestBridgeBlockRenderTimeout(t *testing.T) {
-	scripts := []host.Script{{
-		Manifest: &plugins.Manifest{
+	scripts := []pluginapi.Script{{
+		Manifest: &pluginapi.Manifest{
 			ID: "slow-block", Name: "Slow", Version: "0.1.0", APIVersion: 1,
-			Trust: plugins.TrustBuiltin,
-			Frontend: &plugins.Frontend{Blocks: []plugins.BlockContribution{
+			Trust: pluginapi.TrustBuiltin,
+			Frontend: &pluginapi.Frontend{Blocks: []pluginapi.BlockContribution{
 				{Name: "loop", Schema: "schemas/any.json", Template: "blocks/loop.tsx"},
 			}},
 		},
@@ -510,7 +509,7 @@ func TestBridgeSlotFailureIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("official.FrontendScripts: %v", err)
 	}
-	broken := host.Script{Manifest: mustManifest(t, `{
+	broken := pluginapi.Script{Manifest: mustManifest(t, `{
 		"id": "test-broken",
 		"name": "坏插件",
 		"version": "0.1.0",
@@ -543,9 +542,9 @@ func TestBridgeSlotFailureIsolation(t *testing.T) {
 	}
 }
 
-func mustManifest(t *testing.T, raw string) *plugins.Manifest {
+func mustManifest(t *testing.T, raw string) *pluginapi.Manifest {
 	t.Helper()
-	m, err := plugins.LoadManifest([]byte(raw))
+	m, err := pluginapi.LoadManifest([]byte(raw))
 	if err != nil {
 		t.Fatalf("清单非法: %v", err)
 	}
@@ -612,7 +611,7 @@ func bridgeWithOnly(t *testing.T, core *fakeCore, id, csrf string) *frontend.Bri
 	if err != nil {
 		t.Fatalf("official.FrontendScripts: %v", err)
 	}
-	var picked []host.Script
+	var picked []pluginapi.Script
 	for _, s := range scripts {
 		if s.Manifest != nil && s.Manifest.ID == id {
 			picked = append(picked, s)
@@ -789,11 +788,11 @@ func TestBridgeTokenUsageDashboardProjection(t *testing.T) {
 // TestBridgeRenderBlockEmpty 钉住「模板返回 null ＝ 合法空块」：
 // 不报错、不记审计、HTML 为空；二次调用命中缓存后语义不变。
 func TestBridgeRenderBlockEmpty(t *testing.T) {
-	scripts := []host.Script{{
-		Manifest: &plugins.Manifest{
+	scripts := []pluginapi.Script{{
+		Manifest: &pluginapi.Manifest{
 			ID: "empty-block", Name: "Empty", Version: "0.1.0", APIVersion: 1,
-			Trust: plugins.TrustBuiltin,
-			Frontend: &plugins.Frontend{Blocks: []plugins.BlockContribution{
+			Trust: pluginapi.TrustBuiltin,
+			Frontend: &pluginapi.Frontend{Blocks: []pluginapi.BlockContribution{
 				{Name: "none", Schema: "schemas/any.json", Template: "blocks/none.tsx"},
 				{Name: "blank-object", Schema: "schemas/any.json", Template: "blocks/blank.tsx"},
 			}},
@@ -837,11 +836,11 @@ func TestBridgeRenderBlockEmpty(t *testing.T) {
 // TestBridgeRenderBlockVersion 钉住封套 version 契约：插件声明 version=2 时，
 // 封套 version 2 才渲染（props.block.version 同源），1 一律降级并记审计。
 func TestBridgeRenderBlockVersion(t *testing.T) {
-	scripts := []host.Script{{
-		Manifest: &plugins.Manifest{
+	scripts := []pluginapi.Script{{
+		Manifest: &pluginapi.Manifest{
 			ID: "versioned-block", Name: "Versioned", Version: "0.1.0", APIVersion: 1,
-			Trust: plugins.TrustBuiltin,
-			Frontend: &plugins.Frontend{Blocks: []plugins.BlockContribution{
+			Trust: pluginapi.TrustBuiltin,
+			Frontend: &pluginapi.Frontend{Blocks: []pluginapi.BlockContribution{
 				{Name: "card", Schema: "schemas/any.json", Template: "blocks/echo.tsx", Version: 2},
 			}},
 		},

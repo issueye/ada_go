@@ -34,7 +34,7 @@ func notifyConfigChange(hc Context, namespace string) {
 
 // addGlobalConfigContextMember 给 ToolContext 补 ctx.config（capability: global.config）。
 func addGlobalConfigContextMember(st *capsState, hc Context, put func(string, moejs.Value) error) error {
-	if st == nil || st.caps == nil || false {
+	if st == nil || st.caps == nil {
 		return nil
 	}
 	ns := st.caps.ConfigNamespace

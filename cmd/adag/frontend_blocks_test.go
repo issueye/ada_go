@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 func writePluginDir(t *testing.T, root, id string) string {
@@ -56,7 +56,7 @@ func TestLoadBlockScriptsFromRootsPriorityAndShadowing(t *testing.T) {
 	writePluginDir(t, global, "chart-plugin") // 工作区优先，全局这份被忽略
 	writePluginDir(t, global, "global-only")
 
-	official := []host.Script{{Manifest: &plugins.Manifest{ID: "github-trending"}}}
+	official := []host.Script{{Manifest: &pluginapi.Manifest{ID: "github-trending"}}}
 	got := loadBlockScriptsFromRoots([]string{ws, global}, official)
 
 	ids := map[string]bool{}

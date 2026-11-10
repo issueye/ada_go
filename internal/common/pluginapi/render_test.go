@@ -1,4 +1,4 @@
-package host
+package pluginapi
 
 // M4 渲染宿主测试：TSX → VNode JSON 的管线行为（7.3）。
 //

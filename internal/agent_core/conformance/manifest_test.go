@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // manifestCase 是一个清单夹具用例。
@@ -16,7 +16,7 @@ type manifestCase struct {
 
 // TestManifestFixtures 把 docs/13-appendix.md 附录 A.1（task-plan 前端清单）与
 // A.2（tools-plan 后端清单）落成 testdata/plugins/*/plugin.json，
-// 用真实加载器 plugins.LoadManifest 跑正反两面（05 §6.2、06 §6.4/§6.6/§6.9、12 §6.14）。
+// 用真实加载器 pluginapi.LoadManifest 跑正反两面（05 §6.2、06 §6.4/§6.6/§6.9、12 §6.14）。
 //
 // 负面用例的硬要求来自 12 §6.14：装配期失败必须「报错直接指向缺失能力」，
 // 所以每个用例都断言错误信息里出现那个缺失的名字本身，而不是笼统的「清单无效」。
@@ -44,10 +44,10 @@ func TestManifestFixtures(t *testing.T) {
 		slot := m.Frontend.Slots[0]
 		mustEqual(t, "插槽名", "chat.corner", slot.Slot)
 		mustEqual(t, "模板", "slot.tsx", slot.Template)
-		if !plugins.IsSlotName(slot.Slot) {
+		if !pluginapi.IsSlotName(slot.Slot) {
 			t.Errorf("chat.corner 不在 12 个插槽白名单里")
 		}
-		if !hasString(plugins.FrontendCapabilityNames(), "backend.read") {
+		if !hasString(pluginapi.FrontendCapabilityNames(), "backend.read") {
 			t.Errorf("backend.read 不在前端能力白名单里")
 		}
 		a, ok := m.Frontend.Actions["plan"]
@@ -101,7 +101,7 @@ func TestManifestFixtures(t *testing.T) {
 		for _, entry := range 合法 {
 			raw := []byte(`{"id":"gap-probe","name":"P","version":"0.1.0","apiVersion":1,` +
 				`"trust":"builtin","backend":{"entry":` + jsonStr(entry) + `,"capabilities":["state"]}}`)
-			m, err := plugins.LoadManifest(raw)
+			m, err := pluginapi.LoadManifest(raw)
 			mustNoErr(t, "entry="+entry, err)
 			if m != nil && m.Backend != nil && m.Backend.Entry != entry {
 				t.Errorf("entry 漂移: %q != %q", m.Backend.Entry, entry)
@@ -109,15 +109,15 @@ func TestManifestFixtures(t *testing.T) {
 		}
 		省略入口 := []byte(`{"id":"gap-probe","name":"P","version":"0.1.0","apiVersion":1,` +
 			`"trust":"builtin","backend":{"capabilities":["state"]}}`)
-		m, err := plugins.LoadManifest(省略入口)
+		m, err := pluginapi.LoadManifest(省略入口)
 		mustNoErr(t, "省略 entry 走默认值", err)
-		mustEqual(t, "默认入口", plugins.DefaultBackendEntry, m.Backend.Entry)
+		mustEqual(t, "默认入口", pluginapi.DefaultBackendEntry, m.Backend.Entry)
 
 		越界 := []string{"/etc/passwd", "..\\evil.ts", "../evil.ts", "C:/temp/index.ts", "./index.ts", "a//b.ts"}
 		for _, entry := range 越界 {
 			raw := []byte(`{"id":"gap-probe","name":"P","version":"0.1.0","apiVersion":1,` +
 				`"trust":"builtin","backend":{"entry":` + jsonStr(entry) + `,"capabilities":["state"]}}`)
-			_, err := plugins.LoadManifest(raw)
+			_, err := pluginapi.LoadManifest(raw)
 			if err == nil {
 				t.Fatalf("entry=%q 必须被拒绝", entry)
 			}
@@ -133,7 +133,7 @@ func TestManifestFixtures(t *testing.T) {
 		if builtin.APIVersion != third.APIVersion {
 			t.Errorf("apiVersion 应当一致: %d vs %d", builtin.APIVersion, third.APIVersion)
 		}
-		mustEqual(t, "宿主 API 主版本", "1", jsonInt(t, plugins.APIVersionMajor))
+		mustEqual(t, "宿主 API 主版本", "1", jsonInt(t, pluginapi.APIVersionMajor))
 	})
 
 	// --- 负面：每个都必须「报错直接指向缺失能力」 ---
@@ -152,7 +152,7 @@ func TestManifestFixtures(t *testing.T) {
 		t.Run("负面_"+c.dir, func(t *testing.T) {
 			t.Parallel()
 			raw := readFixture(t, "plugins", c.dir, "plugin.json")
-			m, err := plugins.LoadManifest(raw)
+			m, err := pluginapi.LoadManifest(raw)
 			if err == nil {
 				t.Fatalf("%s 必须被拒绝（%s），实得合法清单 %+v", c.dir, c.why, m)
 			}
@@ -185,20 +185,20 @@ func TestManifestFixtures(t *testing.T) {
 	t.Run("能力白名单与消费点对齐", func(t *testing.T) {
 		t.Parallel()
 		// 清单校验依赖的两张表必须自洽：能力位都有安装消费者，点位与插槽数量固定。
-		mustNoErr(t, "CheckCapabilitySites", plugins.CheckCapabilitySites())
-		mustCount(t, "插槽数量", 12, len(plugins.Slots()))
-		mustCount(t, "钩子点位数量", 14, len(plugins.HookPoints()))
-		mustCount(t, "后端能力位数量", 17, len(plugins.BackendCapabilities()))
-		mustCount(t, "前端能力位数量", 2, len(plugins.FrontendCapabilities()))
-		mustCount(t, "角色集合", 0, len(plugins.Roles()))
+		mustNoErr(t, "CheckCapabilitySites", pluginapi.CheckCapabilitySites())
+		mustCount(t, "插槽数量", 12, len(pluginapi.Slots()))
+		mustCount(t, "钩子点位数量", 14, len(pluginapi.HookPoints()))
+		mustCount(t, "后端能力位数量", 17, len(pluginapi.BackendCapabilities()))
+		mustCount(t, "前端能力位数量", 2, len(pluginapi.FrontendCapabilities()))
+		mustCount(t, "角色集合", 0, len(pluginapi.Roles()))
 	})
 }
 
-// loadFixture 直接走 plugins.LoadManifest：夹具必须原样加载，不做任何绕行。
-func loadFixture(t *testing.T, dir string) *plugins.Manifest {
+// loadFixture 直接走 pluginapi.LoadManifest：夹具必须原样加载，不做任何绕行。
+func loadFixture(t *testing.T, dir string) *pluginapi.Manifest {
 	t.Helper()
 	raw := readFixture(t, "plugins", dir, "plugin.json")
-	m, err := plugins.LoadManifest(raw)
+	m, err := pluginapi.LoadManifest(raw)
 	mustNoErr(t, "LoadManifest("+dir+")", err)
 	if m == nil {
 		t.Fatalf("LoadManifest(%s) 返回 nil", dir)
@@ -206,7 +206,7 @@ func loadFixture(t *testing.T, dir string) *plugins.Manifest {
 	return m
 }
 
-func capNames(in []plugins.Capability) []string {
+func capNames(in []pluginapi.Capability) []string {
 	out := make([]string, 0, len(in))
 	for _, c := range in {
 		out = append(out, string(c))
@@ -224,7 +224,7 @@ func hasString(xs []string, want string) bool {
 }
 
 func hasInstallSite(cap string) bool {
-	_, ok := plugins.InstallSiteFor(plugins.Capability(cap))
+	_, ok := pluginapi.InstallSiteFor(pluginapi.Capability(cap))
 	return ok
 }
 

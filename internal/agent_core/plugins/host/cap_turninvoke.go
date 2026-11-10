@@ -21,7 +21,7 @@ const (
 )
 
 func addTurnContextMember(st *capsState, hc Context, put func(string, moejs.Value) error) error {
-	if st == nil || st.caps == nil || false || hc.TurnInvoke == nil {
+	if st == nil || st.caps == nil || hc.TurnInvoke == nil {
 		return nil
 	}
 	r := st.rt.Realm()

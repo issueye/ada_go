@@ -2,7 +2,7 @@
 
 > 上级索引：[ada-go 设计文档](design.md)  
 > 对应章节：§6.10 定位与分层、§6.11 引擎能力契约、§6.12 Node 兼容原生库、§6.13 安全与资源边界、§6.14 兼容性验证  
-> 版本：0.2 · 2026-11-09
+> 版本：0.3 · 2026-11-10
 
 ## 6.10 定位：API 形状兼容，不是 Node 运行时
 
@@ -13,15 +13,15 @@
 | 层 | 提供方 | 内容 | 权限 |
 |---|---|---|---|
 | L1 引擎 | moejs | 语言、ESM/CJS、Promise/job、二进制、错误、内存与中断 | 无 IO；未安装的东西不存在 |
-| L2 原生库 | moejs `stdlib` + ada-go 宿主配置 | 以 `node:*` 名字暴露的 Go 实现：`fs`、`path`、`crypto`、`child_process` 等 | 每个模块、每个能力位单独安装；边界由 Root/ReadOnly、Allow、Env 等宿主配置决定 |
+| L2 原生库 | moejs `stdlib` + ada-go 宿主配置 | 以 `node:*` 名字暴露的 Go 实现：`fs`、`path`、`crypto`、`child_process` 等 | 整套模块对系统插件与第三方一致；边界由 Root、Allow、Env 等宿主配置与成员实现决定（模块白名单已删除） |
 | L3 宿主能力 | ada-go Core | `agent:host`、`ctx.fs`、`ctx.fetch`、`ctx.exec`、`ctx.process`、`ctx.state`、`ctx.secret`、`ctx.ui` | 插件 API 的出口；Scope、审计、超时、密钥在这里执行 |
 
-`ctx.fs`/`ctx.fetch`/`ctx.exec` 是 ada-go 的显式宿主 API；`node:*` 是给现有 Node 代码与依赖的兼容形状。两者都由宿主安装，走同一套 Scope、能力位与审计策略，不是两套权限；新增模块不能绕开宿主配置直接访问系统。
+`ctx.fs`/`ctx.fetch`/`ctx.exec` 是 ada-go 的显式宿主 API；`node:*` 是给现有 Node 代码与依赖的兼容形状。两者都由宿主安装，走同一套 Scope 与审计，不是两套权限；新增模块不能绕开宿主配置直接访问系统。
 
 **兼容承诺**：
 
 - 目标是 **Node 20/22 LTS 的可观察行为**，不是内部实现。文档列出的子集之外，不保证兼容。
-- 不支持的 API 必须**显式失败**（`ERR_ACCESS_DENIED`、`ERR_MODULE_NOT_FOUND` 或模块不存在），不允许静默降级或返回近似值。
+- 不支持的 API 必须**显式失败**（`ERR_MODULE_NOT_FOUND`、`ERR_NATIVE_ADDON_UNSUPPORTED` 或模块不存在），不允许静默降级或返回近似值。
 - 同一份兼容性语料在 Node 20 与 moejs 下各跑一遍；差异要么修复，要么写进本文的“偏差”列。
 - locale、时区、随机源、时钟由宿主固定；同一输入在同一配置下结果可复现。需要 Node 已知怪癖时由宿主显式开启 `WithNodeQuirks()`。
 
@@ -40,7 +40,7 @@
 
 ## 6.11 引擎能力契约
 
-以下能力是 ada-go 对 moejs 的硬性要求。“验收”列同时是兼容性测试的入口。交付形态优先在上游实现：ada-go 不维护私有 fork，也不在宿主里复制一套 Node 模块；宿主只做能力位到 `stdlib.Config` 的映射、错误归一化与审计包装。
+以下能力是 ada-go 对 moejs 的硬性要求。“验收”列同时是兼容性测试的入口。交付形态优先在上游实现：ada-go 不维护私有 fork，也不在宿主里复制一套 Node 模块；宿主只做模块到 `stdlib.Config` 的映射、错误归一化与审计包装。
 
 | 能力 | 硬性要求 | 验收 |
 |---|---|---|
@@ -53,27 +53,27 @@
 | 二进制与编码 | `ArrayBuffer`、TypedArray、`DataView`、`Buffer`（Uint8Array 子类）、`TextEncoder`/`TextDecoder`（UTF-8、`fatal`、`ignoreBOM`）、`atob`/`btoa`、`structuredClone` 与 transfer；插件 Runtime 不提供 `SharedArrayBuffer`/`Atomics` | 编解码、克隆、transfer、越界 |
 | 错误 | `Error.cause`、`AggregateError`、`DOMException`；跨宿主边界保留 `name`/`message`/`code`/`stack`；栈帧映射到 `plugin://<id>/...` 与 esbuild source map；不泄露宿主绝对路径与密钥 | 错误形状、栈映射、脱敏 |
 | 资源边界 | 内存上限计入脚本持有的对象、字符串、TypedArray 与 Buffer；栈大小与调用深度独立上限；context 中断在解释器内轮询且脚本不可 `catch`；正则回溯可中断；Runtime 可关闭且不留 goroutine | 内存、死循环、深递归、灾难性回溯 |
-| 模块策略 | 能按模块名安装/拒绝；未知模块在链接期失败；同一模块的 `fs` 与 `node:fs` 是同一实例；第三方 Runtime 关闭代码生成 | 模块白名单、别名同一性、链接期错误 |
+| 模块表 | 宿主决定装哪些模块；未支持的模块在链接期失败；同一模块的 `fs` 与 `node:fs` 是同一实例；第三方 Runtime 关闭代码生成 | 别名同一性、链接期错误 |
 | 可观测 | 结构化 `console`；未捕获异常与未处理 rejection 有宿主钩子；可读取当前脚本名与行号；关闭原因可区分超时、内存、取消、内部错误 | 日志字段、关闭原因 |
 
 实现上依赖这些接口（已存在或按 E-x 补齐）：`SetModule`/`SetModuleValues`/`SetModuleLoader`/`SetAsyncModuleLoader` 控制模块表；`rt.Go`/`StartAsyncWork`/`Post`/`Done`/`Unref`/`AbortOn` 管异步；`CallContext`/`Await`/`RunJobsContext` 执行与排空；`WithMemoryLimit`/`WithStackSize`/`WithMaxCallDepth` 设边界；`WithoutCodeGeneration` 关代码生成；`SetTimeZone`/`WithLocale`/`WithNodeQuirks` 固定可复现行为；`Serialize`/`Deserialize` 跨 Runtime 克隆；`OnUnhandledRejection`/`OnClose` 接生命周期。
 
 ### 6.11.1 现状与待补
 
-moejs 已经提供 ESM/CJS 互操作、顶层 `await`、`AsyncWork`、`AbortController`、`Buffer`、`structuredClone`、`TextEncoder`、source map、内存/栈/深度上限、context 中断、模块加载器与按能力拆分的 `stdlib`。ada-go 还需要以下接口或行为，按优先级排列：
+moejs 已经提供 ESM/CJS 互操作、顶层 `await`、`AsyncWork`、`AbortController`、`Buffer`、`structuredClone`、`TextEncoder`、source map、内存/栈/深度上限、context 中断、模块加载器与 `stdlib`。ada-go 还需要以下接口或行为，按优先级排列：
 
 | 编号 | 待补能力 | 用途 |
 |---|---|---|
-| E-1 | 模块白名单/拒绝列表（细于当前 `NoWebAPIs` 的整组开关） | 只装纯计算模块，排除 `vm`、`worker_threads`、`async_hooks`；避免“为了 `util` 顺带装上 `vm`” |
+| E-1 | ~~模块白名单/拒绝列表~~ | **已放弃**（2026-11-10 决策）：宿主不再按清单裁剪模块，`node:*` 一律可 import |
 | E-2 | 定时器 `unref`/`ref`、每 Runtime 数量上限、全局 `setImmediate` | 插件可等待但不必阻止 Runtime 结束；防止定时器耗尽 |
 | E-3 | `node:module` 的 `createRequire`（仅解析已安装的 `node:*`） | 兼容 CJS 依赖里的 `require("node:path")`；禁止磁盘解析 |
-| E-4 | `fs` 的 Node 错误码与字段（`code`、`errno`、`syscall`、`path`）；只读时静态裁剪写成员 | 插件按 `err.code === "ENOENT"` 分支；能力缺失在调用前就暴露 |
+| E-4 | `fs` 的 Node 错误码与字段（`code`、`errno`、`syscall`、`path`）；写成员的越界判定 | 插件按 `err.code === "ENOENT"` 分支；越界在调用时暴露（不再按能力静态裁剪） |
 | E-5 | `child_process` 的 shell 开关与按函数安装（只装 `execFile`/`execFileSync`） | ada-go 不允许 shell；`spawn`/`fork` 不进入 v1 |
 | E-6 | 每次调用的文件大小、目录条目数上限（或宿主可注入的包装） | 在引擎层再兜一层 16MB/10k，而不只靠插件自觉 |
 | E-7 | 宿主侧 Buffer/字符串的计入或独立配额 | 内存上限之外，Go 侧副本不能无界增长 |
 | E-8 | `timers/promises` 的 `signal` 取消与 `setInterval` 清理保证 | 长等待可被轮次取消 |
 
-这些是 **moejs 的演进项**，不是当前已实现清单；E-1/E-4/E-5 是 M1 阻断项。未补齐前，ada-go 只能用更窄的安装（例如不装 `fs`/`child_process`）或宿主包装规避，不能宣称 6.12 的矩阵已经满足。本地联合修复与双跑使用 [11 §13.1](11-structure-roadmap.md#131-go-workspace) 的 Go workspace；发布验证必须切回 `GOWORK=off`，以版本化依赖复验。
+这些是 **moejs 的演进项**，不是当前已实现清单；E-4/E-5 是 M1 阻断项（E-1 已放弃）。未补齐前，ada-go 用宿主包装规避（`fs` 成员包装、自建 `child_process`），不能让插件靠「装得更宽」绕过边界。本地联合修复与双跑使用 [11 §13.1](11-structure-roadmap.md#131-go-workspace) 的 Go workspace；发布验证必须切回 `GOWORK=off`，以版本化依赖复验。
 
 ---
 
@@ -83,10 +83,10 @@ moejs 已经提供 ESM/CJS 互操作、顶层 `await`、`AsyncWork`、`AbortCont
 
 ### 6.12.1 安装
 
-宿主按清单能力构造 `stdlib.Config`；没声明的模块根本不安装。目标形态：
+宿主给每个 Runtime 装上同一套模块，**不再按清单能力位裁剪**（2026-11-10 决策：模块白名单与安装矩阵已删除，链接期不再因缺能力报 `ERR_ACCESS_DENIED`）。目标形态：
 
 ```go
-// 目标形态；模块白名单与 Run.Shell 是 6.11 的待补项。
+// 目标形态；Run.Shell 仍是 6.11 的待补项（E-5），模块白名单项已放弃。
 cfg := stdlib.Config{
     Stdout: logWriter, Stderr: logWriter,
     Loop:   loop, // 无 Loop 则没有计时器，promise 立即结算
@@ -97,10 +97,10 @@ cfg := stdlib.Config{
         Version: "20.0.0",
         Exit:    nil, // process.exit 抛异常，不能结束 Core
     },
-    FS:          nodeFS(caps, workspace), // 无 fs.read/fs.write 时为 nil
+    FS:          nodeFS(workspace), // 始终安装；写成员固定工作区根
     OS:          &stdlib.OSInfo{Tmpdir: "/tmp"},
-    Fetch:       nodeFetch(caps),         // 无 net.fetch 时为 nil
-    Run:         nodeRun(caps),           // 无 exec 或非 builtin/verified 时为 nil
+    Fetch:       nodeFetch(),       // 始终安装；出网仍只经宿主 HTTP 桥
+    Run:         nodeRun(),         // 始终安装；只有 execFile、无 shell
     NoWebAPIs:   false,
     WindowsPaths: false, // 虚拟 FS 统一 POSIX 视图，宿主路径不进入脚本
 }
@@ -108,8 +108,8 @@ cfg := stdlib.Config{
 
 安装后还要做三件事：
 
-1. **链接期检查**：静态 `import "node:fs"` 在没有 `fs.read`/`fs.write` 时直接让插件装配失败，错误码 `ERR_ACCESS_DENIED`；不要等到第一次调用才报错。
-2. **成员裁剪**：模块存在但部分成员无权限时，被裁剪的成员**调用即抛** `ERR_ACCESS_DENIED`（成员仍在、调用失败，见 D-7 的上游偏差），避免 `typeof fs.writeFile === "undefined"` 这种可被误判为“版本差异”的静默行为。
+1. **静态检查只剩 `.node`**：原生扩展在装配前就拒绝（`ERR_NATIVE_ADDON_UNSUPPORTED`）；`node:*` 模块不再按白名单在链接期否决。
+2. **功能边界仍在成员内**：`node:fs` 的写成员固定工作区根（越界调用即失败），`node:child_process` 只有 `execFile`/`execFileSync`、不存在 `spawn`/`fork`/shell，`process.exit` 抛异常而不是结束 Core。
 3. **审计**：所有受控调用记录模块、方法、作用域内路径/主机/命令、字节数与结果；参数中的密钥与 token 脱敏。
 
 ### 6.12.2 模块矩阵
@@ -139,16 +139,16 @@ cfg := stdlib.Config{
 | `timers`、`timers/promises` | `setTimeout`/`setImmediate`/`setInterval`；promise 形式支持 `signal` | `setImmediate` 以 0ms 定时器实现，顺序与 Node 的 check 阶段不完全相同；定时器不打满 CPU，长等待应让出 |
 | 上限 | 每 Runtime 256 个未完成定时器 | 超出抛 `ERR_TIMER_LIMIT`；Runtime 关闭时全部取消 |
 
-#### 按能力安装（受限 IO）
+#### 受限 IO（始终安装，边界在成员里）
 
-| 模块 | 能力位 | 兼容范围 | 偏差与边界 |
-|---|---|---|---|
-| `fs`、`fs/promises` | `fs.read` / `fs.write` | `readFile`/`writeFile`/`appendFile`/`readdir`/`stat`/`lstat`/`mkdir`/`rm`/`rename`/`copyFile`/`realpath`/`readlink`/`existsSync`；同步与 promise 两种形状；`createReadStream`/`createWriteStream`（Web Streams） | 根固定为工作区，脚本视图 `/`；symlink 越界拒绝；单次读写 16MB、目录 10k 条；不提供回调形式；v1 不开放 `watch`、文件描述符、`chmod`/`chown`/`utimes`。例外：`ctx.fs` 的读成员（`readText`/`list`/`stat`/`exists`）不限制路径；`ctx.fs.writeText` 可写工作区与已安装插件目录（`~/.adago/plugins/<id>/`），node:fs 写成员仍固定工作区 |
-| `process` | 始终（只读子集） | `argv`、`env`（白名单）、`cwd`、`platform`、`arch`、`version`/`versions`、`pid`、`hrtime`、`nextTick`、`stdout`/`stderr` | `cwd` 是虚拟根 `/`；`env` 只含 `backend.env`；`exit` 抛异常；没有 `kill`、`binding`、`dlopen`、`setuid`、`umask` |
-| `os` | 始终（受限） | `platform`、`arch`、`EOL`、`cpus`、`tmpdir` | `hostname`/`homedir` 为空；没有 `networkInterfaces`、`userInfo`、`loadavg` |
-| `child_process` | `exec`，仅 builtin/verified | `execFile`/`execFileSync`；参数数组、`cwd`、`env`、`timeout`、`maxBuffer` | 不安装 `spawn`/`fork`；`exec`/`execSync` 因走 shell 而被拒绝（`Run.Shell=false`）；`cwd` 使用虚拟根并由宿主映射到工作区，越界拒绝；捕获上限 4MB，超时 120s，杀整棵进程树；进入模型回执仍按 50KB/2000 行截断 |
-| `module` | 始终（受限，待补 E-3） | `createRequire` 只解析已安装的 `node:*`；`builtinModules` 列已安装模块；`isBuiltin` | 不做磁盘解析、不读 `package.json`、没有 `require.cache`/`require.main` |
-| `node:test` | 否 | 不安装 | 插件测试在构建期用 Node 跑，不在 Runtime 内跑；`assert` 仍可用 |
+| 模块 | 兼容范围 | 偏差与边界 |
+|---|---|---|
+| `fs`、`fs/promises` | `readFile`/`writeFile`/`appendFile`/`readdir`/`stat`/`lstat`/`mkdir`/`rm`/`rename`/`copyFile`/`realpath`/`readlink`/`existsSync`；同步与 promise 两种形状；`createReadStream`/`createWriteStream`（Web Streams） | 根固定为工作区，脚本视图 `/`；symlink 越界拒绝；单次读写 16MB、目录 10k 条；不提供回调形式；v1 不开放 `watch`、文件描述符、`chmod`/`chown`/`utimes`。例外：`ctx.fs` 的读成员（`readText`/`list`/`stat`/`exists`）不限制路径；`ctx.fs.writeText` 可写工作区与已安装插件目录（`~/.adago/plugins/<id>/`），node:fs 写成员仍固定工作区 |
+| `process` | `argv`、`env`（白名单）、`cwd`、`platform`、`arch`、`version`/`versions`、`pid`、`hrtime`、`nextTick`、`stdout`/`stderr` | `cwd` 是虚拟根 `/`；`env` 只含 `backend.env`；`exit` 抛异常；没有 `kill`、`binding`、`dlopen`、`setuid`、`umask` |
+| `os` | `platform`、`arch`、`EOL`、`cpus`、`tmpdir` | `hostname`/`homedir` 为空；没有 `networkInterfaces`、`userInfo`、`loadavg` |
+| `child_process` | `execFile`/`execFileSync`；参数数组、`cwd`、`env`、`timeout`、`maxBuffer` | 不安装 `spawn`/`fork`；`exec`/`execSync` 因走 shell 而被拒绝（`Run.Shell=false`）；`cwd` 使用虚拟根并由宿主映射到工作区，越界拒绝；捕获上限 4MB，超时 120s，杀整棵进程树；进入模型回执仍按 50KB/2000 行截断 |
+| `module` | `createRequire` 只解析已安装的 `node:*`；`builtinModules` 列已安装模块；`isBuiltin` | 不做磁盘解析、不读 `package.json`、没有 `require.cache`/`require.main` |
+| `node:test` | 不安装 | 插件测试在构建期用 Node 跑，不在 Runtime 内跑；`assert` 仍可用 |
 
 #### 不安装
 
@@ -186,7 +186,7 @@ Node 代码大量依赖 `err.code` 分支，因此错误形状是兼容契约的
 | `ETIMEDOUT` | 命令或宿主调用超时 | `syscall` |
 | `ABORT_ERR` | `AbortSignal` 取消 | `name = "AbortError"` |
 | `ERR_INVALID_ARG_TYPE` / `ERR_OUT_OF_RANGE` | 参数类型或范围错误 | `name = "TypeError"` / `"RangeError"` |
-| `ERR_ACCESS_DENIED` | 能力缺失、作用域越界、成员被裁剪 | `capability` |
+| `ERR_ACCESS_DENIED` | 作用域越界、成员明确拒绝 | `capability`（历史字段，能力位已不再是安装开关） |
 | `ERR_MODULE_NOT_FOUND` | 模块不存在或未安装 | `specifier` |
 | `ERR_NATIVE_ADDON_UNSUPPORTED` | 尝试加载 `.node` | `path` |
 | `ERR_FS_FILE_TOO_LARGE` | 超过单次读写上限 | `size`、`limit` |
@@ -199,16 +199,16 @@ Node 代码大量依赖 `err.code` 分支，因此错误形状是兼容契约的
 
 ## 6.13 安全与资源边界
 
-- **无环境权限**：L2 模块不向脚本暴露原生句柄；文件、网络、命令都在宿主构造的边界内（Root/ReadOnly、Fetch.Allow、Run.Allow、Env），并统一审计。插件不能通过 Node 模块拿到第二条访问路径。
+- **无环境权限**：L2 模块不向脚本暴露原生句柄；文件、网络、命令都在宿主构造的边界内（Root、Allow、Env），并统一审计。插件不能通过 Node 模块拿到第二条访问路径。
 - **文件**：写操作与 `exec` 的 cwd 固定在工作区；`..` 与 symlink 按真实落点检查；`node:fs` 写成员固定工作区，`ctx.fs.writeText` 额外可写已安装插件目录（`~/.adago/plugins/<id>/`）。`ctx.fs` 的读成员（`readText`/`list`/`stat`/`exists`）**不限制目标路径**：agent 的 `read_file`/`list_files`/`search_files` 可读宿主任意文件，包括插件目录、配置目录与 `secrets.toml` 所在目录（2026-10-31 决策）。密钥值仍只经 `secret` broker 按名提供，不进提示词/日志/进程环境；密钥文件的可读性由操作系统权限与部署方式承担。单次读写 16MB、目录 10k 条、路径 4096 字节；超限报错而不是截断。
 - **环境变量**：`backend.env` 是白名单，只把列出的名字注入 `process.env`；值在装配期冻结。`ADAG_*` 与密钥名是保留名，清单声明也会被拒绝。密钥不走环境变量，走 `ctx.secret(name)`；`process.env` 中永远不出现密钥。另有**环境变量模块**（`~/.adago/env.json` + `<workspace>/.adago/env.json`）：它只注入插件启动的子进程（`ctx.exec`/后台/`ctx.process.start`），同名覆盖宿主环境，不进入 `process.env`；变量名不允许 `ADAG_` 前缀。**服务程序目录**（工作区 `<workspace>/.adago/bin`、用户级 `~/.adago/bin`）会前置到同一份子进程 PATH（工作区优先、去重）。
-- **网络**：默认没有任何网络模块。`ctx.fetch` 受 `net.fetch` 约束（协议必须 http(s)、重定向 ≤5 跳、响应体 ≤16MB、超时与取消贯穿；当前不限制目标主机，host 策略留待网络策略插件）；provider 的 `ctx.http.sse` 受 `net.sse` 约束，只有 builtin/verified 可用。没有 `listen`、没有原始 socket。
-- **命令**：`child_process` 只有 `execFile`，仅 `exec` 能力且仅 builtin/verified；`Run.Allow` 再按程序名与参数检查；`cwd` 使用虚拟根并由宿主映射到工作区，越界拒绝；环境变量由白名单与「环境变量模块」的用户变量叠加（后者同名覆盖）；120s 超时；4MB 输出；取消时杀整棵进程树。`exec`/`execSync` 因走 shell 而禁用。宿主另提供 `ctx.execBackground`/`ctx.checkTask`/`ctx.waitTask`/`ctx.killTask`：后台任务同样无 shell、受程序策略与 cwd scope 约束，每 Runtime 最多 8 个、生命周期上限 30 分钟，`waitTask` 单次等待上限 60s，插件 Runtime 关闭时统一终止。
-- **长驻进程**：`ctx.process` 是独立的 `process` 能力（仅 builtin/verified），只用于 stdio 类长期协议；无 shell、程序策略、cwd scope、env 白名单、输出上限、审计与进程树终止；每 Runtime 最多 8 个、单进程生命周期 30 分钟，关闭/重载时统一终止。它不是 `exec` 的别名。
+- **网络**：没有任何网络模块（`http`/`net`/`dns` 不装）。`ctx.fetch` 是唯一出网入口（协议必须 http(s)、重定向 ≤5 跳、响应体 ≤16MB、超时与取消贯穿；当前不限制目标主机，host 策略留待网络策略插件）；provider 的 `ctx.http.sse` 走同一个宿主桥。没有 `listen`、没有原始 socket。
+- **命令**：`child_process` 只有 `execFile`；`Run.Allow` 按程序名与参数检查；`cwd` 使用虚拟根并由宿主映射到工作区，越界拒绝；环境变量由白名单与「环境变量模块」的用户变量叠加（后者同名覆盖）；120s 超时；4MB 输出；取消时杀整棵进程树。`exec`/`execSync` 因走 shell 而禁用。宿主另提供 `ctx.execBackground`/`ctx.checkTask`/`ctx.waitTask`/`ctx.killTask`：后台任务同样无 shell、受程序策略与 cwd scope 约束，每 Runtime 最多 8 个、生命周期上限 30 分钟，`waitTask` 单次等待上限 60s，插件 Runtime 关闭时统一终止。
+- **长驻进程**：`ctx.process` 是与 `exec` 分开的一条桥，只用于 stdio 类长期协议；无 shell、程序策略、cwd scope、env 白名单、输出上限、审计与进程树终止；每 Runtime 最多 8 个、单进程生命周期 30 分钟，关闭/重载时统一终止。它不是 `exec` 的别名。
 - **随机与时间**：`crypto` 的随机源由宿主注入；时间、locale、时区由宿主固定，避免插件用时间侧信道或不可复现行为。
 - **内存**：插件 Runtime 64MB（脚本堆）。宿主为一次调用分配的 Go 侧缓冲另计，单次不超过 16MB；所有 Buffer 在调用结束释放。Runtime 超内存即重建，插件标记 `degraded`。
 - **CPU**：脚本调用 5s、工具 120s、钩子 200ms（最大 2s）、provider 15s/90s/30min；宿主长调用暂停脚本计时；取消不可被 `catch`。
-- **模块策略失败方向**：没有能力就不安装；安装了但成员无权限就抛 `ERR_ACCESS_DENIED`；未知模块在链接期失败。任何情况下都不回退到“全量 Node”。
+- **失败方向**：宿主表里没有的 `node:*` 模块在链接期失败（`ERR_MODULE_NOT_FOUND`）；`.node` 原生扩展拒绝（`ERR_NATIVE_ADDON_UNSUPPORTED`）；成员越界调用即抛错。任何情况下都不回退到“全量 Node”，也不存在「声明了能力就多装一点」的路径。
 - **前端**：Gateway 的 Render Runtime 不安装 `stdlib`，没有 `process`、`Buffer`、`fs`、`fetch`；TSX 只做纯渲染（见 [7](07-ssr-frontend.md)）。
 
 ---
@@ -223,11 +223,11 @@ Node 代码大量依赖 `err.code` 分支，因此错误形状是兼容契约的
 
 | 层 | 用例 |
 |---|---|
-| 模块解析 | `node:fs` 与 `fs` 同一实例；`require`/`import` 看到同一导出；循环依赖；动态 `import()`；未安装模块链接期失败；缺失依赖安装期失败；`plugin://` 路径 |
+| 模块解析 | `node:fs` 与 `fs` 同一实例；`require`/`import` 看到同一导出；循环依赖；动态 `import()`；未支持模块链接期失败；缺失依赖安装期失败；`plugin://` 路径 |
 | 语言与异步 | 顶层 `await`；microtask/timer 顺序；未处理 rejection；`AsyncWork` 关闭竞态；宿主 panic 转 rejection；跨 goroutine 无 JS 值 |
 | 定时器 | `setTimeout`/`setInterval`/`setImmediate`；清除；`unref`；256 上限；Runtime 关闭取消；`timers/promises` 的 `signal` |
 | 二进制 | Buffer 与 Uint8Array 互转；`TextDecoder` 分片；`atob`/`btoa`；`structuredClone` 循环引用与 transfer；超大分配报错 |
-| `fs` | 读写/追加/列目录/stat；只读时写成员拒绝；`..` 与 symlink 越界；16MB 上限；10k 条目；`ENOENT`/`EACCES`/`EISDIR`；Web Stream 分块读写 |
+| `fs` | 读写/追加/列目录/stat；写成员越界被拒；`..` 与 symlink 越界；16MB 上限；10k 条目；`ENOENT`/`EACCES`/`EISDIR`；Web Stream 分块读写 |
 | `process`/`os` | `env` 只含白名单；`cwd` 为 `/`；`exit` 抛异常；`hrtime`；`hostname`/`homedir` 为空 |
 | `child_process` | `execFile` 成功/失败/超时/输出超限；shell 被拒绝；`cwd` 越界；取消杀进程树；环境变量白名单 |
 | `crypto`/`zlib` | 已知向量；HMAC/PBKDF2/HKDF；`timingSafeEqual`；gzip/deflate 往返；解压炸弹上限 |
@@ -241,10 +241,11 @@ Node 代码大量依赖 `err.code` 分支，因此错误形状是兼容契约的
 
 ```bash
 go test ./internal/agent_core/conformance/nodecompat -run TestNodeCompat
-go test ./internal/agent_core/plugins/host/node -run TestCapabilityMatrix
-adag verify nodecompat          # 模块表、能力位、错误码、文档偏差表
+go test ./internal/agent_core/plugins/host/nodemods
 adag verify boundary            # Node 兼容层不注册工具/不出现插件 id
 ```
+
+模块表与能力位对应的 `adag verify nodecompat` 门禁已删除（2026-11-10 决策）；语料与偏差表仍以 `go test` 为准。
 
 性能基线：模块导入 p95 < 10ms（单插件、已编译产物）；受控宿主调用 p95 < 2ms（不含实际 IO）；`fs` 4KB 读 p95 < 5ms（SSD）；Node 兼容层常驻内存 < 2MB/插件（不含 Buffer）。
 

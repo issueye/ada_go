@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/gateway/frontend"
 )
 
@@ -73,7 +73,7 @@ func TestLoadBlockScriptStripsNonBlockFrontend(t *testing.T) {
 		t.Fatal("缺少 block 模板")
 	}
 
-	bridge, err := frontend.NewBridge(frontend.BridgeOptions{Scripts: []host.Script{script}, MarkdownBlocks: true})
+	bridge, err := frontend.NewBridge(frontend.BridgeOptions{Scripts: []pluginapi.Script{script}, MarkdownBlocks: true})
 	if err != nil {
 		t.Fatalf("NewBridge: %v", err)
 	}

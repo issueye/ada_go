@@ -2,7 +2,7 @@
 
 > 上级索引：[ada-go 设计文档](design.md)  
 > 对应章节：§5.3 RunTurn 状态机与不变量、§5.4 工具系统  
-> 版本：0.2 · 2026-11-09
+> 版本：0.3 · 2026-11-10
 
 ## 5.3 RunTurn 状态机与不变量
 
@@ -29,7 +29,7 @@ finishing ──► finished（恰好一个 TurnFinished）
    d. `ModelClient.Stream`，边收边发增量；空闲超时 90s，总超时按配置；
    e. 组装 assistant 消息（文本、思考、工具调用）；
    f. 无工具调用 → 跳出；
-   g. 有工具调用 → 顺序预检（schema、scope、`tool.beforeCall` 钩子/策略）→ 执行 → 结构化回执 → 追加工具结果 → 继续。
+   g. 有工具调用 → 顺序预检（schema、scope）→ 执行 → 结构化回执 → 追加工具结果 → 继续。
 7. `turn.after` 钩子；发用量事件；若水位接近上限，后台预压缩，供下一轮使用。
 8. 恰好发一次 `TurnFinished`（`completed | cancelled | error | interrupted | budget_exceeded`），释放锁。
 
@@ -55,7 +55,7 @@ finishing ──► finished（恰好一个 TurnFinished）
 | INV-2 | 每个端口都有生产实现与测试替身，不允许 nil 端口 | 装配测试 |
 | INV-3 | 工具描述符注册表是唯一真源，目录由它派生 | verify-wiring |
 | INV-4 | 交互失败方向默认关闭；超时记为 `timeout`，断线/无 UI 记为 `unavailable`，策略插件必须都当作拒绝 | 交互失败方向测试 |
-| INV-5 | 拒绝是工具结果（`denied`），不是异常，也不终止轮次 | 拒绝流回放 |
+| INV-5 | 拒绝是工具结果（`denied`），不是异常，也不终止轮次；基座不再产生 `denied`，它只来自工具实现 | 拒绝流回放 |
 | INV-6 | 事件 `seq` 单调；`ToolCallStarted` 必先于同 `call_id` 的 `ToolCallFinished` | 事件序列 golden |
 | INV-7 | 任何线程在任一时刻最多一个运行中轮次 | 并发测试 |
 | INV-8 | 取消穿透到模型、工具、插件脚本、命令进程树；执行中的工具能观察到 | 取消贯穿测试 |
@@ -71,7 +71,7 @@ type Descriptor struct {
     Name           string
     Description    string
     Parameters     json.RawMessage // JSON Schema
-    Access         Access          // 外部效果：read | write | exec | network；线程级 KV 不算 write；基座不据此审批
+    Access         Access          // 外部效果：read | write | exec | network；线程级 KV 不算 write；基座不据此判定
     Timeout        time.Duration
     ParallelSafe   bool
     Repeatable     bool            // 轮询类工具不计入循环检测
@@ -99,8 +99,8 @@ type Receipt struct {
 
 规则：
 
-- 描述符的 `Access` 只是效果声明，供 UI 徽标、审计与策略插件使用；基座不按它自动放行或拒绝。是否询问/阻止由 `tool.beforeCall` 策略插件决定。
-- 没有 active 的 `tool-policy` 插件时，基座对 `write`/`exec`/`network` 工具返回 `denied: no policy`（只读工具仍可用）；这是“空策略”的失败关闭，不是审批规则。
+- 描述符的 `Access` 只是效果声明，供 UI 徽标与审计使用；基座不按它自动放行或拒绝，也不存在执行前的插件判决（审批策略已移除）。要加前置约束，只能写进工具实现自己。
+- 工具可以自己返回 `denied` 回执（例如 `ctx.ui` 拿不到用户确认）；那是工具的业务决定，轮次继续。
 - 参数先按 JSON Schema 校验，再交给工具；校验失败直接生成 `error` 回执，让模型自己修。
 - 工具 panic 被捕获为 `error` 回执；工具返回的 `error` 也转成回执，不终止轮次。
 - 默认顺序执行；只有整批工具都 `ParallelSafe` 且产品策略允许时才并发，结果按源序回填。
@@ -117,16 +117,16 @@ type Receipt struct {
 | 能力包 | 工具 | 说明 |
 |---|---|---|
 | `tools-fs` | `read_file`、`write_file`、`edit_file`、`list_files`、`search_files` | 读可访问宿主任意路径；写仍受 Scope；编辑要求唯一匹配 |
-| `tools-shell` | `run_command`、`run_background`、`check_task`、`wait_task`、`kill_task` | 超时/取消杀进程树；后台任务有 id，轮次结束后继续跑；`wait_task` 阻塞到任务结束或等待上限（60s），`check_task` 只看即时快照；两者都标记 `repeatable`；`run_command`/`run_background` 由 `policy-default` 询问，`check_task`/`wait_task`/`kill_task` 只读控制 |
-| `tools-git` | `git_status`、`git_diff`、`git_log` | 三个只读视图，不提供 commit/checkout/push 等写 action；写操作走 `run_command` 并由策略插件裁决 |
+| `tools-shell` | `run_command`、`run_background`、`check_task`、`wait_task`、`kill_task` | 超时/取消杀进程树；后台任务有 id，轮次结束后继续跑；`wait_task` 阻塞到任务结束或等待上限（60s），`check_task` 只看即时快照；两者都标记 `repeatable` |
+| `tools-git` | `git_status`、`git_diff`、`git_log` | 三个只读视图，不提供 commit/checkout/push 等写 action；写操作走 `run_command` |
 | `tools-plan` | `update_plan`、`read_plan`、`reflect_plan` | 维护线程级任务计划；`reflect_plan` 基于当前计划做反思，引导遵循规划路径、避免走偏或越做越多；同一插件的前端段把它渲染成 Todo 卡片 |
 | `tools-ask` | `ask_user` | 向用户提问；前端段在交互托盘里渲染提问卡片 |
 | `tools-skill` | `skill_search` | 按关键词检索技能；正文由模型按提示里的 path 用 `read_file` 读取 |
-| `tool-discovery` | `find_tool`、`exec_tool` | 目录只读投影 + 按名执行；复用审批、超时与循环检测 |
+| `tool-discovery` | `find_tool`、`exec_tool` | 目录只读投影 + 按名执行；内层执行沿用同一套超时与循环检测 |
 | `tools-subagent` | `invoke_subagent` | v1.5；委派子智能体 |
 
-这些是 TS 实现的系统插件（`trust=builtin`），构建期预编译成 `dist/`，桌面打包随 Electron `resources` 发布；运行时与第三方插件走同一个 moejs 宿主、同一份描述符注册表与同一套装配。信任级别只决定可用能力与钩子等级，不改变注册方式。禁用 `tools-fs` 后 `read_file` 必须从模型工具表中消失，基座不能偷偷补一个同名实现。`find_tool`/`exec_tool` 同理：它们由 `tool-discovery` 系统插件提供，基座只保留目录只读投影与内层执行的宿主桥（`catalog.read`/`tool.invoke`），审批、超时与循环检测仍走同一条链路。
+这些是 TS 实现的系统插件（`trust=builtin`），构建期预编译成 `dist/`，桌面打包随 Electron `resources` 发布；运行时与第三方插件走同一个 moejs 宿主、同一份描述符注册表与同一套装配。信任级别只决定控制面钩子权限，不改变注册方式，也不再决定装什么。禁用 `tools-fs` 后 `read_file` 必须从模型工具表中消失，基座不能偷偷补一个同名实现。`find_tool`/`exec_tool` 同理：它们由 `tool-discovery` 系统插件提供，基座只保留目录只读投影与内层执行的宿主桥（`catalog.read`/`tool.invoke`），超时与循环检测仍走同一条链路。
 
 ---
 
-**相邻文档**：[← 架构、Gateway 与 Core 分层](01-architecture.md) · [索引](design.md) · [模型适配、审批与取消 →](03-model-and-approval.md)
+**相邻文档**：[← 架构、Gateway 与 Core 分层](01-architecture.md) · [索引](design.md) · [模型适配、审批（已移除）与取消 →](03-model-and-approval.md)

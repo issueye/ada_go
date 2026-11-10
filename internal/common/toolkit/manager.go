@@ -5,7 +5,7 @@ package toolkit
 // 上层（装配、宿主桥、引擎、Core RPC）不再各自拼一套。
 //
 // 它【不做】的事同样是契约：
-//   - 不跑 tool.beforeCall / 策略 / 失败关闭——审批链只有 engine 一份；
+//   - 不做执行前判定——审批策略已整体移除，执行只走 engine 的统一 Runner；
 //   - 不实现具体工具——执行仍交给插件的 Runner（本包只认 Invoker 接口）；
 //   - 不做运行期加载——冻结后注册只记警告，要生效就重载插件（06 §6.5）。
 //
@@ -180,7 +180,7 @@ func (m *ToolManager) Version() uint64 {
 //
 // 归属以【目录】为准而不是以调用方传参为准：pluginID 与描述符不一致时拒绝，
 // 这样即使某条上层路径传错了归属，也不会把调用投给另一个插件。
-// 审批链不在这里——engine 已经在调用前跑完 beforeCall 与策略判定。
+// 执行前判定不在这里——engine 已跑完 schema/scope 校验（没有审批钩子）。
 func (m *ToolManager) Invoke(ctx context.Context, pluginID, tool string, args json.RawMessage) (domain.Result, error) {
 	d, ok := m.catalog.Lookup(ctx, tool)
 	if !ok {

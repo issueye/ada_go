@@ -13,8 +13,8 @@ import (
 
 	"github.com/adag/ada-go/internal/agent_core/coreapp"
 	"github.com/adag/ada-go/internal/agent_core/engine"
-	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/common/adapters/sqlite"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // repoRoot 从当前目录向上找 go.mod，定位仓库根。
@@ -88,11 +88,11 @@ func checkProductsBoot(root string) error {
 		}
 	}
 	// 钩子与插槽注册表的自洽性也在这里报出：doctor 是排障入口，不该只报文件问题。
-	if err := plugins.CheckCapabilitySites(); err != nil {
+	if err := pluginapi.CheckCapabilitySites(); err != nil {
 		problems = append(problems, err.Error())
 	}
-	if len(engine.HookSites()) != len(plugins.HookPoints()) {
-		problems = append(problems, fmt.Sprintf("钩子点位 %d 个但调用方 %d 个", len(plugins.HookPoints()), len(engine.HookSites())))
+	if len(engine.HookSites()) != len(pluginapi.HookPoints()) {
+		problems = append(problems, fmt.Sprintf("钩子点位 %d 个但调用方 %d 个", len(pluginapi.HookPoints()), len(engine.HookSites())))
 	}
 	if len(problems) > 0 {
 		return fmt.Errorf("%s", strings.Join(problems, "; "))

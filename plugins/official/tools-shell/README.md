@@ -44,8 +44,8 @@
 - `cwd` 由宿主映射到工作区；越界拒绝。
 - 环境变量只注入清单白名单（本插件未声明 `env`，因此只使用宿主默认白名单）。
 - 输出按行数（2000）与字节数（50KB）双重截断，截断处有可见标记。
-- 非零退出码**不抛错**，原样返回给模型判断；启动失败、超时或被策略拒绝才抛异常。
-- 每条命令都有审计记录；`run_command`/`run_background` 的执行权限仍受审批策略（如 `policy-default`）约束，`check_task`/`wait_task`/`kill_task` 是只读控制。
+- 非零退出码**不抛错**，原样返回给模型判断；只有启动失败、超时或越界才抛异常。
+- 每条命令都有审计记录；`run_command`/`run_background` 现在直接执行（审批策略已移除），`check_task`/`wait_task`/`kill_task` 是只读控制。
 - 后台任务在插件 Runtime 关闭、超时或 `kill_task` 时杀整棵进程树；`check_task`/`wait_task` 单路输出最多返回尾部 64KB。
 - `wait_task` 是宿主侧条件等待（任务结束信号或定时器），不在插件里 sleep 轮询；单次等待上限 60s，取消调用会立即返回。等长任务时应优先用它，避免模型反复发起 `check_task`。
 
@@ -62,4 +62,4 @@
 
 - [插件模型与后端 API](../../../docs/05-plugins.md)
 - [Node 兼容与宿主边界](../../../docs/12-node-compat.md)
-- [模型与审批](../../../docs/03-model-and-approval.md)
+- [模型适配与交互确认](../../../docs/03-model-and-approval.md)

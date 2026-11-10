@@ -13,8 +13,8 @@ import (
 	"github.com/adag/ada-go/internal/agent_core/coreapp"
 	"github.com/adag/ada-go/internal/agent_core/coreproto"
 	"github.com/adag/ada-go/internal/agent_core/engine"
-	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/common/diag"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/common/proto"
 	"github.com/adag/ada-go/internal/gateway/frontend"
 	"github.com/adag/ada-go/internal/gateway/web"
@@ -323,7 +323,7 @@ func checkDispatch(root string) error {
 
 // checkHooks 检查 14 个点位与引擎调用方双向覆盖。
 func checkHooks(root string) error {
-	points := plugins.HookPoints()
+	points := pluginapi.HookPoints()
 	sites := engine.HookSites()
 	names := make([]string, len(points))
 	for i, p := range points {
@@ -346,7 +346,7 @@ func checkHooks(root string) error {
 		if p.Pair == "" {
 			continue
 		}
-		other, ok := plugins.LookupHookPoint(p.Pair)
+		other, ok := pluginapi.LookupHookPoint(p.Pair)
 		if !ok {
 			return fmt.Errorf("点位 %s 声明的成对点位 %q 不存在", p.Name, p.Pair)
 		}
@@ -357,7 +357,7 @@ func checkHooks(root string) error {
 	// 审批点位移除后不再有失败关闭点位：任何点位允许动作都不得包含拒绝类动作。
 	for _, p := range points {
 		for _, a := range p.Allowed {
-			if (a == plugins.ActionReplace || a == plugins.ActionAbort) && len(p.BuiltinOnlyActions) == 0 {
+			if (a == pluginapi.ActionReplace || a == pluginapi.ActionAbort) && len(p.BuiltinOnlyActions) == 0 {
 				return fmt.Errorf("点位 %s 允许 %s 却没有标成 builtin 专属", p.Name, a)
 			}
 		}
@@ -370,7 +370,7 @@ func checkSlots(root string) error {
 	if err := web.CheckSlotCoverage(); err != nil {
 		return err
 	}
-	if n := len(plugins.Slots()); n != 12 {
+	if n := len(pluginapi.Slots()); n != 12 {
 		return fmt.Errorf("插槽数量是 %d，设计 7.2 声明 12（其中 thread.tray 是 ada-go 新增的第 12 个）", n)
 	}
 	for _, h := range web.SlotHosts() {
@@ -392,7 +392,7 @@ func checkManifestFields(root string) error {
 		return err
 	}
 	schemaPaths := info.paths()
-	shape := structPaths(reflect.TypeOf(plugins.Manifest{}))
+	shape := structPaths(reflect.TypeOf(pluginapi.Manifest{}))
 	// map 字段（backend.hooks、frontend.actions）吸收两侧的子路径：
 	// Schema 可能逐点枚举，Go 侧用 map，两边都只在该路径本身比对。
 	schemaPaths = absorbSchemaMapChildren(info, schemaPaths, shape.Maps)
@@ -403,10 +403,10 @@ func checkManifestFields(root string) error {
 	}
 	// 钩子点位在 Schema 里逐点声明（backend.hooks.<point>），未声明的点位调用时拒绝，
 	// 所以点位集合必须与注册表完全一致；插槽与角色、信任级别是枚举。
-	if err := checkChildNames(info, "backend.hooks", plugins.HookPointNames(), "钩子点位"); err != nil {
+	if err := checkChildNames(info, "backend.hooks", pluginapi.HookPointNames(), "钩子点位"); err != nil {
 		return err
 	}
-	if err := checkEnumMatches(info, "frontend.slots.slot", plugins.SlotNames(), "插槽名"); err != nil {
+	if err := checkEnumMatches(info, "frontend.slots.slot", pluginapi.SlotNames(), "插槽名"); err != nil {
 		return err
 	}
 	if err := checkEnumMatches(info, "backend.roles", roleNames(), "插件角色"); err != nil {
@@ -446,7 +446,7 @@ func childNames(info *schemaInfo, prefix string) []string {
 
 // roleNames 返回合法角色名集合（审批策略移除后为空；角色字段保留只为清单兼容）。
 func roleNames() []string {
-	roles := plugins.Roles()
+	roles := pluginapi.Roles()
 	out := make([]string, len(roles))
 	for i, r := range roles {
 		out[i] = string(r)

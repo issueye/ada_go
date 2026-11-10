@@ -2,7 +2,7 @@ package frontend
 
 // M4 的 VNode → HTML 渲染器（设计 7.3）：
 //
-//	插件 TSX → host.Renderer 产出 VNode JSON → 本文件校验并渲染成 HTML。
+//	插件 TSX → pluginapi.Renderer 产出 VNode JSON → 本文件校验并渲染成 HTML。
 //
 // 安全不变量：
 //   - 标签/组件/属性白名单与 spec/vnode.schema.json 一致（校验复用 vnode.go 的

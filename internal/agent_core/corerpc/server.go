@@ -30,6 +30,7 @@ import (
 	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 	"github.com/adag/ada-go/internal/common/diag"
 	"github.com/adag/ada-go/internal/common/domain"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/common/ports"
 	"github.com/adag/ada-go/internal/common/proto"
 	"github.com/adag/ada-go/internal/common/version"
@@ -1686,7 +1687,7 @@ func modelInfo(m host.ModelInfo) proto.ModelInfo {
 
 func pluginSummary(inst interface {
 	ID() string
-	Manifest() *plugins.Manifest
+	Manifest() *pluginapi.Manifest
 	Summary() plugins.Summary
 }) proto.PluginSummary {
 	sum := inst.Summary()

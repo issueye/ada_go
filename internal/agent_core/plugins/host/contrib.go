@@ -11,12 +11,13 @@ import (
 
 	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/common/domain"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/common/ports"
 )
 
 // 本文件钉住「插件能贡献什么」与「宿主对外提供什么操作」两套类型。
 //
-// runtime.go（生命周期与预算）、caps.go（能力安装）、agentapi.go（agent 对象与结算）
+// runtime.go（生命周期与预算）、caps.go（成员与模块安装）、agentapi.go（agent 对象与结算）
 // 都实现这里的接口，因此先把形状固定下来，避免三个方向各写一套。
 
 var (
@@ -38,7 +39,7 @@ type ToolDef struct {
 	// Discovery 选择注册形态（缺省 false = 注入式）：
 	//   - 注入式：工具声明随模型请求下发，模型直接调用；
 	//   - 发现式（true）：不注入模型清单，模型经基座 find_tool 拿到名称/说明/
-	//     参数 Schema 后用 exec_tool 执行；审批、超时、循环检测沿用本描述符。
+	//     参数 Schema 后用 exec_tool 执行；超时、循环检测沿用本描述符。
 	// 适合低频/大 Schema 工具，省上下文；终止轮次的工具不能声明 discovery。
 	Discovery bool `json:"discovery,omitempty"`
 	// Handler 是脚本侧函数在宿主内的句柄；由 agentapi 填充，不来自 JSON。
@@ -140,7 +141,7 @@ type HandlerRef struct {
 type Contribution struct {
 	PluginID   string
 	Version    string
-	Trust      plugins.Trust
+	Trust      pluginapi.Trust
 	Tools      []ToolDef
 	Providers  []ProviderDef
 	Prompts    []PromptDef
@@ -155,11 +156,11 @@ type Contribution struct {
 
 // FrontendContribution 是清单 frontend 段的结算结果（模板路径已校验过）。
 type FrontendContribution struct {
-	Slots     []plugins.SlotContribution `json:"slots,omitempty"`
-	Pages     []plugins.PageContribution `json:"pages,omitempty"`
-	Nav       []plugins.NavContribution  `json:"nav,omitempty"`
-	Dashboard []plugins.DashboardContribution
-	Actions   map[string]plugins.ActionBinding
+	Slots     []pluginapi.SlotContribution `json:"slots,omitempty"`
+	Pages     []pluginapi.PageContribution `json:"pages,omitempty"`
+	Nav       []pluginapi.NavContribution  `json:"nav,omitempty"`
+	Dashboard []pluginapi.DashboardContribution
+	Actions   map[string]pluginapi.ActionBinding
 	Styles    []string
 	Scripts   []string
 	Assets    string
@@ -175,7 +176,7 @@ func (c *Contribution) Validate(caps *CapabilitySet) error {
 	if strings.TrimSpace(c.PluginID) == "" {
 		return fmt.Errorf("host: 贡献缺少插件 id")
 	}
-	if !plugins.ValidID(c.PluginID) {
+	if !pluginapi.ValidID(c.PluginID) {
 		return fmt.Errorf("host: 插件 id %q 非法", c.PluginID)
 	}
 	seenTool := map[string]bool{}
@@ -218,18 +219,18 @@ func (c *Contribution) Validate(caps *CapabilitySet) error {
 		seenAction[a.Name] = true
 	}
 	for _, s := range c.Frontend.Slots {
-		if !plugins.IsSlotName(s.Slot) {
+		if !pluginapi.IsSlotName(s.Slot) {
 			return fmt.Errorf("host: %s 声明了未知插槽 %q", c.PluginID, s.Slot)
 		}
 	}
 	for _, h := range c.Hooks {
-		point, ok := plugins.LookupHookPoint(h.Point)
+		point, ok := pluginapi.LookupHookPoint(h.Point)
 		if !ok {
 			return fmt.Errorf("host: %s 登记了未知钩子点位 %q", c.PluginID, h.Point)
 		}
-		level := plugins.HookAction(h.Action)
+		level := pluginapi.HookAction(h.Action)
 		if level == "" {
-			level = plugins.ActionObserve
+			level = pluginapi.ActionObserve
 		}
 		declared, ok := caps.Hooks[h.Point]
 		if !ok {
@@ -238,11 +239,11 @@ func (c *Contribution) Validate(caps *CapabilitySet) error {
 		if level.Rank() > declared.Rank() {
 			return fmt.Errorf("host: %s 在 %s 上用了 %s，清单只声明到 %s", c.PluginID, h.Point, level, declared)
 		}
-		if !point.AllowsAction(level, c.Trust == plugins.TrustBuiltin) {
+		if !point.AllowsAction(level, c.Trust == pluginapi.TrustBuiltin) {
 			return fmt.Errorf("host: %s（trust=%s）不能在 %s 上使用 %s", c.PluginID, c.Trust, h.Point, level)
 		}
 	}
-	if len(c.Providers) > 0 && c.Trust != plugins.TrustBuiltin && c.Trust != plugins.TrustVerified {
+	if len(c.Providers) > 0 && c.Trust != pluginapi.TrustBuiltin && c.Trust != pluginapi.TrustVerified {
 		return fmt.Errorf("host: %s 是 %s，不能注册 provider（05 §6.3）", c.PluginID, c.Trust)
 	}
 	for _, p := range c.Providers {
@@ -306,7 +307,7 @@ type Plugin interface {
 	// ID 是插件 id（等于目录名）。
 	ID() string
 	// Manifest 是已校验的清单。
-	Manifest() *plugins.Manifest
+	Manifest() *pluginapi.Manifest
 	// Contribution 是装配期结算的贡献集合（只读）。
 	Contribution() *Contribution
 	// CallTool 执行一次工具调用：args 与返回值都只走 JSON；预算取描述符 timeoutMs。

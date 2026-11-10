@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/adag/ada-go/app"
-	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/plugins/official"
 )
 
@@ -38,14 +38,14 @@ export default function (agent) {
   });
 }
 `
-	m := &plugins.Manifest{
+	m := &pluginapi.Manifest{
 		ID: "env-fixture", Name: "环境变量夹具", Version: "0.1.0",
-		APIVersion: plugins.APIVersionMajor, Trust: plugins.TrustVerified,
-		Backend: &plugins.Backend{Entry: "index.js", Capabilities: []plugins.Capability{plugins.CapExec}},
+		APIVersion: pluginapi.APIVersionMajor, Trust: pluginapi.TrustVerified,
+		Backend: &pluginapi.Backend{Entry: "index.js", Capabilities: []pluginapi.Capability{pluginapi.CapExec}},
 	}
-	script := host.Script{
+	script := pluginapi.Script{
 		Manifest:  m,
-		EntryName: host.EntryScheme + "://env-fixture/index.js",
+		EntryName: pluginapi.EntryScheme + "://env-fixture/index.js",
 		Source:    src,
 	}
 	ws := tempDir(t)

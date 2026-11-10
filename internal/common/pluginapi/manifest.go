@@ -1,4 +1,4 @@
-package plugins
+package pluginapi
 
 import (
 	"encoding/json"
@@ -129,7 +129,7 @@ const reservedEnvPrefix = "ADAG_"
 func LoadManifest(raw []byte) (*Manifest, error) {
 	var m Manifest
 	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, fmt.Errorf("plugins: 解析清单失败: %w", err)
+		return nil, fmt.Errorf("pluginapi: 解析清单失败: %w", err)
 	}
 	if err := m.Validate(""); err != nil {
 		return nil, err
@@ -140,39 +140,39 @@ func LoadManifest(raw []byte) (*Manifest, error) {
 // Validate 做装配期校验。dirName 非空时额外要求 id 等于目录名（6.2）。
 func (m *Manifest) Validate(dirName string) error {
 	if m == nil {
-		return fmt.Errorf("plugins: 清单为空")
+		return fmt.Errorf("pluginapi: 清单为空")
 	}
 	if !ValidID(m.ID) {
-		return fmt.Errorf("plugins: 插件 id %q 不满足 ^[a-z][a-z0-9-]{1,63}$", m.ID)
+		return fmt.Errorf("pluginapi: 插件 id %q 不满足 ^[a-z][a-z0-9-]{1,63}$", m.ID)
 	}
 	if dirName != "" && m.ID != dirName {
-		return fmt.Errorf("plugins: 插件 id %q 必须等于目录名 %q", m.ID, dirName)
+		return fmt.Errorf("pluginapi: 插件 id %q 必须等于目录名 %q", m.ID, dirName)
 	}
 	if strings.TrimSpace(m.Name) == "" {
-		return fmt.Errorf("plugins: %s 缺少 name", m.ID)
+		return fmt.Errorf("pluginapi: %s 缺少 name", m.ID)
 	}
 	if !isSemver(m.Version) {
-		return fmt.Errorf("plugins: %s 的 version %q 不是 semver", m.ID, m.Version)
+		return fmt.Errorf("pluginapi: %s 的 version %q 不是 semver", m.ID, m.Version)
 	}
 	if m.APIVersion == 0 {
-		return fmt.Errorf("plugins: %s 缺少 apiVersion", m.ID)
+		return fmt.Errorf("pluginapi: %s 缺少 apiVersion", m.ID)
 	}
 	if m.APIVersion != APIVersionMajor {
 		// 主版本不匹配直接拒绝加载；次版本兼容由宿主忽略未知字段（6.2）。
-		return fmt.Errorf("plugins: %s 声明 apiVersion=%d，宿主只支持主版本 %d", m.ID, m.APIVersion, APIVersionMajor)
+		return fmt.Errorf("pluginapi: %s 声明 apiVersion=%d，宿主只支持主版本 %d", m.ID, m.APIVersion, APIVersionMajor)
 	}
 	if !m.Trust.Valid() {
 		if m.Trust == "" {
 			m.Trust = TrustThirdParty // 默认第三方、受限（6.2）
 		} else {
-			return fmt.Errorf("plugins: %s 的 trust %q 未知", m.ID, m.Trust)
+			return fmt.Errorf("pluginapi: %s 的 trust %q 未知", m.ID, m.Trust)
 		}
 	}
 	if m.Trust == TrustVerified && strings.TrimSpace(m.Sig) == "" {
-		return fmt.Errorf("plugins: %s 声明 trust=verified 但没有 sig", m.ID)
+		return fmt.Errorf("pluginapi: %s 声明 trust=verified 但没有 sig", m.ID)
 	}
 	if m.Backend == nil && m.Frontend == nil {
-		return fmt.Errorf("plugins: %s 既没有 backend 也没有 frontend，没有可加载内容", m.ID)
+		return fmt.Errorf("pluginapi: %s 既没有 backend 也没有 frontend，没有可加载内容", m.ID)
 	}
 	if err := m.validateBackend(); err != nil {
 		return err
@@ -190,35 +190,35 @@ func (m *Manifest) validateBackend() error {
 	}
 	if b.Pool > 1 {
 		// 6.4：v1 固定每插件 1 个 Runtime；pool 保留给后续版本，声明即装配失败。
-		return fmt.Errorf("plugins: %s 请求 backend.pool=%d，v1 固定每插件 1 个 Runtime", m.ID, b.Pool)
+		return fmt.Errorf("pluginapi: %s 请求 backend.pool=%d，v1 固定每插件 1 个 Runtime", m.ID, b.Pool)
 	}
 	if b.InitTimeoutMS < 0 || b.InitTimeoutMS > 60000 {
-		return fmt.Errorf("plugins: %s 的 backend.initTimeoutMs 必须在 0..60000 毫秒内", m.ID)
+		return fmt.Errorf("pluginapi: %s 的 backend.initTimeoutMs 必须在 0..60000 毫秒内", m.ID)
 	}
 	if b.InitTimeoutMS > 5000 && m.Trust == TrustThirdParty {
-		return fmt.Errorf("plugins: %s 的 backend.initTimeoutMs=%d 超过 5000，仅 builtin/verified 可声明", m.ID, b.InitTimeoutMS)
+		return fmt.Errorf("pluginapi: %s 的 backend.initTimeoutMs=%d 超过 5000，仅 builtin/verified 可声明", m.ID, b.InitTimeoutMS)
 	}
 	if !validEntryPath(b.Entry) {
-		return fmt.Errorf("plugins: %s 的 backend.entry %q 必须是插件目录内的相对路径（禁止绝对路径、反斜杠、盘符与 . / .. 段）", m.ID, b.Entry)
+		return fmt.Errorf("pluginapi: %s 的 backend.entry %q 必须是插件目录内的相对路径（禁止绝对路径、反斜杠、盘符与 . / .. 段）", m.ID, b.Entry)
 	}
 	if b.ConfigNamespace != "" {
 		if !ValidID(b.ConfigNamespace) {
-			return fmt.Errorf("plugins: %s 的 backend.configNamespace %q 不满足 ^[a-z][a-z0-9-]{1,63}$", m.ID, b.ConfigNamespace)
+			return fmt.Errorf("pluginapi: %s 的 backend.configNamespace %q 不满足 ^[a-z][a-z0-9-]{1,63}$", m.ID, b.ConfigNamespace)
 		}
 		if !hasCap(b.Capabilities, CapGlobalConfig) {
-			return fmt.Errorf("plugins: %s 声明了 configNamespace 但没有 global.config 能力", m.ID)
+			return fmt.Errorf("pluginapi: %s 声明了 configNamespace 但没有 global.config 能力", m.ID)
 		}
 	}
 	if err := ValidateCapabilityList(b.Capabilities, m.Trust, true); err != nil {
-		return fmt.Errorf("plugins: %s: %w", m.ID, err)
+		return fmt.Errorf("pluginapi: %s: %w", m.ID, err)
 	}
 	for _, name := range b.Env {
 		if strings.HasPrefix(name, reservedEnvPrefix) {
-			return fmt.Errorf("plugins: %s 的 backend.env 不能声明保留前缀 %q", m.ID, reservedEnvPrefix)
+			return fmt.Errorf("pluginapi: %s 的 backend.env 不能声明保留前缀 %q", m.ID, reservedEnvPrefix)
 		}
 		for _, s := range b.Secrets {
 			if s == name {
-				return fmt.Errorf("plugins: %s 把 %q 同时写进 env 与 secrets；密钥只能经 secret() 取得（6.13）", m.ID, name)
+				return fmt.Errorf("pluginapi: %s 把 %q 同时写进 env 与 secrets；密钥只能经 secret() 取得（6.13）", m.ID, name)
 			}
 		}
 	}
@@ -231,11 +231,11 @@ func (m *Manifest) validateBackend() error {
 			}
 		}
 		if !known {
-			return fmt.Errorf("plugins: %s 声明未知角色 %q", m.ID, r)
+			return fmt.Errorf("pluginapi: %s 声明未知角色 %q", m.ID, r)
 		}
 	}
 	if err := ValidateHookDeclaration(b.Hooks, m.Trust); err != nil {
-		return fmt.Errorf("plugins: %s: %w", m.ID, err)
+		return fmt.Errorf("pluginapi: %s: %w", m.ID, err)
 	}
 	return nil
 }
@@ -246,84 +246,84 @@ func (m *Manifest) validateFrontend() error {
 		return nil
 	}
 	if err := ValidateCapabilityList(f.Capabilities, m.Trust, false); err != nil {
-		return fmt.Errorf("plugins: %s: %w", m.ID, err)
+		return fmt.Errorf("pluginapi: %s: %w", m.ID, err)
 	}
 	if len(f.Scripts) > 0 && !hasCap(f.Capabilities, CapFrontendScript) {
-		return fmt.Errorf("plugins: %s 声明了 scripts 但没有 frontend.script 能力（7.5）", m.ID)
+		return fmt.Errorf("pluginapi: %s 声明了 scripts 但没有 frontend.script 能力（7.5）", m.ID)
 	}
 	if m.Trust != TrustBuiltin && m.Trust != TrustVerified && len(f.Scripts) > 0 {
-		return fmt.Errorf("plugins: %s 是 %s，不加载插件 JS（7.5、6.9）", m.ID, m.Trust)
+		return fmt.Errorf("pluginapi: %s 是 %s，不加载插件 JS（7.5、6.9）", m.ID, m.Trust)
 	}
 	client := strings.TrimSpace(f.Client)
 	if client != "" {
 		if !validEntryPath(client) || !strings.HasSuffix(client, ".js") {
-			return fmt.Errorf("plugins: %s 的 frontend.client %q 必须是 assets 内的 .js 相对路径", m.ID, client)
+			return fmt.Errorf("pluginapi: %s 的 frontend.client %q 必须是 assets 内的 .js 相对路径", m.ID, client)
 		}
 		if !hasCap(f.Capabilities, CapFrontendScript) {
-			return fmt.Errorf("plugins: %s 声明了 frontend.client 但没有 frontend.script 能力（7.5）", m.ID)
+			return fmt.Errorf("pluginapi: %s 声明了 frontend.client 但没有 frontend.script 能力（7.5）", m.ID)
 		}
 		if m.Trust != TrustBuiltin && m.Trust != TrustVerified {
-			return fmt.Errorf("plugins: %s 是 %s，不允许前端 client bundle（7.5、6.9）", m.ID, m.Trust)
+			return fmt.Errorf("pluginapi: %s 是 %s，不允许前端 client bundle（7.5、6.9）", m.ID, m.Trust)
 		}
 	}
 	seenSlot := make(map[string]bool, len(f.Slots))
 	for _, s := range f.Slots {
 		if !IsSlotName(s.Slot) {
-			return fmt.Errorf("plugins: %s 声明未知插槽 %q", m.ID, s.Slot)
+			return fmt.Errorf("pluginapi: %s 声明未知插槽 %q", m.ID, s.Slot)
 		}
 		if strings.TrimSpace(s.Template) == "" {
-			return fmt.Errorf("plugins: %s 在插槽 %s 上没有 template", m.ID, s.Slot)
+			return fmt.Errorf("pluginapi: %s 在插槽 %s 上没有 template", m.ID, s.Slot)
 		}
 		if s.Hydrate && client == "" {
-			return fmt.Errorf("plugins: %s 的插槽 %s 声明了 hydrate 但没有 frontend.client", m.ID, s.Slot)
+			return fmt.Errorf("pluginapi: %s 的插槽 %s 声明了 hydrate 但没有 frontend.client", m.ID, s.Slot)
 		}
 		if s.ClientOnly && !s.Hydrate {
-			return fmt.Errorf("plugins: %s 的插槽 %s 声明了 clientOnly 但没有 hydrate（纯客户端挂载必须先声明 hydrate）", m.ID, s.Slot)
+			return fmt.Errorf("pluginapi: %s 的插槽 %s 声明了 clientOnly 但没有 hydrate（纯客户端挂载必须先声明 hydrate）", m.ID, s.Slot)
 		}
 		key := s.Slot + "\x00" + s.Template
 		if seenSlot[key] {
-			return fmt.Errorf("plugins: %s 在插槽 %s 上重复贡献 %q", m.ID, s.Slot, s.Template)
+			return fmt.Errorf("pluginapi: %s 在插槽 %s 上重复贡献 %q", m.ID, s.Slot, s.Template)
 		}
 		seenSlot[key] = true
 	}
 	sort.SliceStable(f.Slots, func(i, j int) bool { return f.Slots[i].Order < f.Slots[j].Order })
 	for binding, a := range f.Actions {
 		if !ValidID(binding) && !isSnakeID(binding) {
-			return fmt.Errorf("plugins: %s 的动作 binding %q 命名非法", m.ID, binding)
+			return fmt.Errorf("pluginapi: %s 的动作 binding %q 命名非法", m.ID, binding)
 		}
 		if strings.TrimSpace(a.Action) == "" {
-			return fmt.Errorf("plugins: %s 的动作 binding %q 没有 action 名", m.ID, binding)
+			return fmt.Errorf("pluginapi: %s 的动作 binding %q 没有 action 名", m.ID, binding)
 		}
 		if strings.TrimSpace(a.Backend) == "" {
-			return fmt.Errorf("plugins: %s 的动作 binding %q 没有 backend 目标插件", m.ID, binding)
+			return fmt.Errorf("pluginapi: %s 的动作 binding %q 没有 backend 目标插件", m.ID, binding)
 		}
 		if !a.Read && a.Confirm == "" {
 			// 写动作必须用户点击并给出确认文案（6.3、7.6）。
-			return fmt.Errorf("plugins: %s 的写动作 %q 缺少 confirm 文案", m.ID, binding)
+			return fmt.Errorf("pluginapi: %s 的写动作 %q 缺少 confirm 文案", m.ID, binding)
 		}
 		if a.Read && !hasCap(f.Capabilities, CapBackendRead) {
-			return fmt.Errorf("plugins: %s 预取只读动作 %q 但没有 backend.read 能力", m.ID, binding)
+			return fmt.Errorf("pluginapi: %s 预取只读动作 %q 但没有 backend.read 能力", m.ID, binding)
 		}
 	}
 	if len(f.Actions) > MaxBackendActions {
-		return fmt.Errorf("plugins: %s 声明了 %d 个动作，超过上限 %d（7.5）", m.ID, len(f.Actions), MaxBackendActions)
+		return fmt.Errorf("pluginapi: %s 声明了 %d 个动作，超过上限 %d（7.5）", m.ID, len(f.Actions), MaxBackendActions)
 	}
 	for _, p := range f.Pages {
 		if strings.TrimSpace(p.Slug) == "" || strings.TrimSpace(p.Template) == "" {
-			return fmt.Errorf("plugins: %s 的页面贡献缺少 slug 或 template", m.ID)
+			return fmt.Errorf("pluginapi: %s 的页面贡献缺少 slug 或 template", m.ID)
 		}
 		if p.Hydrate && client == "" {
-			return fmt.Errorf("plugins: %s 的页面 %s 声明了 hydrate 但没有 frontend.client", m.ID, p.Slug)
+			return fmt.Errorf("pluginapi: %s 的页面 %s 声明了 hydrate 但没有 frontend.client", m.ID, p.Slug)
 		}
 	}
 	seenBlock := make(map[string]bool, len(f.Blocks))
 	for i := range f.Blocks {
 		b := &f.Blocks[i]
 		if !ValidID(b.Name) {
-			return fmt.Errorf("plugins: %s 的 block 名 %q 不满足 ^[a-z][a-z0-9-]{1,63}$", m.ID, b.Name)
+			return fmt.Errorf("pluginapi: %s 的 block 名 %q 不满足 ^[a-z][a-z0-9-]{1,63}$", m.ID, b.Name)
 		}
 		if seenBlock[b.Name] {
-			return fmt.Errorf("plugins: %s 重复声明 block %q", m.ID, b.Name)
+			return fmt.Errorf("pluginapi: %s 重复声明 block %q", m.ID, b.Name)
 		}
 		seenBlock[b.Name] = true
 		// 路径在加载期归一：官方/第三方加载器按 TrimSpace 后的键存模板与 Schema，
@@ -331,16 +331,16 @@ func (m *Manifest) validateFrontend() error {
 		b.Schema = strings.TrimSpace(b.Schema)
 		b.Template = strings.TrimSpace(b.Template)
 		if !validEntryPath(b.Schema) || !strings.HasSuffix(b.Schema, ".json") {
-			return fmt.Errorf("plugins: %s 的 block %s schema %q 必须是插件目录内的 .json 相对路径", m.ID, b.Name, b.Schema)
+			return fmt.Errorf("pluginapi: %s 的 block %s schema %q 必须是插件目录内的 .json 相对路径", m.ID, b.Name, b.Schema)
 		}
 		if !validEntryPath(b.Template) || !strings.HasSuffix(b.Template, ".tsx") {
-			return fmt.Errorf("plugins: %s 的 block %s template %q 必须是插件目录内的 .tsx 相对路径", m.ID, b.Name, b.Template)
+			return fmt.Errorf("pluginapi: %s 的 block %s template %q 必须是插件目录内的 .tsx 相对路径", m.ID, b.Name, b.Template)
 		}
 		if b.Version == 0 {
 			b.Version = 1
 		}
 		if b.Version < 1 {
-			return fmt.Errorf("plugins: %s 的 block %s version 必须是正整数", m.ID, b.Name)
+			return fmt.Errorf("pluginapi: %s 的 block %s version 必须是正整数", m.ID, b.Name)
 		}
 		switch b.Profile {
 		case "":
@@ -348,10 +348,10 @@ func (m *Manifest) validateFrontend() error {
 		case "display":
 		case "interactive":
 			if m.Trust != TrustBuiltin && m.Trust != TrustVerified {
-				return fmt.Errorf("plugins: %s 的 block %s 声明 interactive，但信任级别是 %s", m.ID, b.Name, m.Trust)
+				return fmt.Errorf("pluginapi: %s 的 block %s 声明 interactive，但信任级别是 %s", m.ID, b.Name, m.Trust)
 			}
 		default:
-			return fmt.Errorf("plugins: %s 的 block %s 声明未知 profile %q", m.ID, b.Name, b.Profile)
+			return fmt.Errorf("pluginapi: %s 的 block %s 声明未知 profile %q", m.ID, b.Name, b.Profile)
 		}
 	}
 	return nil

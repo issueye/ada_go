@@ -22,8 +22,7 @@ import (
 	"github.com/adag/ada-go/internal/agent_core/cli"
 	"github.com/adag/ada-go/internal/agent_core/conformance/testkit"
 	"github.com/adag/ada-go/internal/agent_core/corerpc"
-	"github.com/adag/ada-go/internal/agent_core/plugins"
-	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/common/ports"
 )
 
@@ -1018,10 +1017,10 @@ func TestCoreRPCPluginHTTPStream(t *testing.T) {
 	if err := os.WriteFile(productPath, []byte(product), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	m := &plugins.Manifest{
+	m := &pluginapi.Manifest{
 		ID: "sse-fixture", Name: "SSE 夹具", Version: "0.1.0",
-		APIVersion: plugins.APIVersionMajor, Trust: plugins.TrustBuiltin,
-		Backend: &plugins.Backend{Entry: "index.js"},
+		APIVersion: pluginapi.APIVersionMajor, Trust: pluginapi.TrustBuiltin,
+		Backend: &pluginapi.Backend{Entry: "index.js"},
 	}
 	src := "export default function (agent) {\n" +
 		"  agent.route({ method: 'GET', path: '/events', sse: true, handler: function (req, ctx) {\n" +
@@ -1029,10 +1028,10 @@ func TestCoreRPCPluginHTTPStream(t *testing.T) {
 		"    ctx.sse.send({ n: 2 }, 'update');\n" +
 		"  } });\n" +
 		"}"
-	script := host.Script{Manifest: m, EntryName: host.EntryScheme + "://sse-fixture/index.js", Source: src}
+	script := pluginapi.Script{Manifest: m, EntryName: pluginapi.EntryScheme + "://sse-fixture/index.js", Source: src}
 	sess, err := cli.Open(ctx, cli.Config{
 		Workspace: t.TempDir(), DataDir: t.TempDir(), Product: productPath,
-		Scripts: []host.Script{script}, Assembler: app.Assembler{}, Fake: true, In: strings.NewReader(""),
+		Scripts: []pluginapi.Script{script}, Assembler: app.Assembler{}, Fake: true, In: strings.NewReader(""),
 	})
 	if err != nil {
 		t.Fatalf("cli.Open: %v", err)

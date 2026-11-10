@@ -4,8 +4,8 @@ package host
 //
 //   - 入口固定为 plugin://<id>/index.js 形状的名字；其余模块只在 Script.Bundle 内联表里找；
 //   - 不访问磁盘、不解析 node_modules、不做 TypeScript 编译（05 §6.1、06 §6.10）；
-//   - 未安装的模块在「链接期」失败，而不是运行期拿到 undefined（06 §6.5、12 §6.14.2）；
-//     失败文案点名缺失的能力位，让报错直接指向缺失能力；
+//   - 宿主表里没有的模块在「链接期」失败，而不是运行期拿到 undefined（06 §6.5、12 §6.14.2）；
+//     失败文案点名说明符与原因（`.node` 原生扩展 / npm 包）；
 //   - import.meta 指向虚拟路径（plugin://<id>/…），宿主绝对路径不进脚本（12 §6.12.1）。
 
 import (
@@ -18,7 +18,7 @@ import (
 
 	"github.com/MoeForge/moejs"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // AgentAPIModule 是类型声明用的虚拟模块名（05 §6.3：后端插件从 agent:api 导入类型）。
@@ -27,7 +27,7 @@ const AgentAPIModule = "agent:api"
 
 // moduleProvider 把一个模块名解析成宿主提供的模块（node:path、node:fs 之类）。
 //
-// 能力安装（caps.go）与模块表必须共用一份白名单：Runtime 构造期就要拿到 Importer，
+// 模块安装（caps.go）与模块表必须有同一份注册表：Runtime 构造期就要拿到 Importer，
 // 而 InstallCapabilities 拿的是已经构造好的 Runtime —— 因此模块实现在这里以
 // 注册表的形式提供，由 caps.go 在 init 里登记（见 RegisterModuleProvider）。
 type moduleProvider func(caps *CapabilitySet) (*moejs.Module, error)
@@ -56,87 +56,19 @@ func lookupModuleProvider(name string) (moduleProvider, bool) {
 
 // InstallContextMembers 是「把能力成员挂到每次调用的 ctx 对象上」的挂载点（可选）。
 //
-// 05 §6.3 的 ToolContext 里 fs/exec/fetch 这些成员按能力安装，形状由宿主决定；
+// 05 §6.3 的 ToolContext 里 fs/exec/fetch 这些成员由宿主统一注入，形状由宿主决定；
 // agentapi.go 负责安装 ctx 的身份字段与 log/state/secret/ui/http（这些只依赖 host.go
-// 里已经定义的桥），能力安装方通过本变量补上自己的成员。未赋值不视为错误。
+// 里已经定义的桥），成员安装方通过本变量补上自己的成员。未赋值不视为错误。
 var InstallContextMembers func(rt *mojsRuntime, put func(name string, v moejs.Value) error, kind callKind, caps *CapabilitySet, hc Context) error
 
-// pluginID 是脚本对应的插件 id（清单优先，其次从入口名推）。
-func (s Script) pluginID() string {
-	if s.Manifest != nil && s.Manifest.ID != "" {
-		return s.Manifest.ID
-	}
-	if rest, ok := strings.CutPrefix(s.EntryName, EntryScheme+"://"); ok {
-		id, _, _ := strings.Cut(rest, "/")
-		return id
-	}
-	return ""
-}
+// pluginapi.EntryScheme / entryName / validate 等形状检查已下沉到 internal/common/pluginapi：
+// Gateway 的前端渲染桥只需要「清单 + 源码 + 静态资源」，不该依赖插件宿主。
+// 这里保留一个薄封装，避免调用方到处写 pluginapi.EntryName。
 
-// EntryScheme 是虚拟模块的名字空间（06 §6.4）。
-const EntryScheme = "plugin"
+func entryName(id string) string { return pluginapi.EntryName(id) }
 
-// entryName 拼出规范入口名 plugin://<id>/index.js。
-func entryName(id string) string { return EntryScheme + "://" + id + "/index.js" }
-
-// validate 检查待加载脚本的形状：空基座不崩，缺件要点名（06 §6.5）。
-func (s Script) validate() error {
-	if s.Manifest == nil {
-		return fmt.Errorf("host: 插件脚本缺少清单")
-	}
-	id := s.Manifest.ID
-	if !plugins.ValidID(id) {
-		return fmt.Errorf("host: 插件 id %q 非法（^[a-z][a-z0-9-]{1,63}$，06 §6.2）", id)
-	}
-	if s.Manifest.APIVersion != plugins.APIVersionMajor {
-		return fmt.Errorf("host: 插件 %s 的 apiVersion %d 与宿主主版本 %d 不匹配（06 §6.2）",
-			id, s.Manifest.APIVersion, plugins.APIVersionMajor)
-	}
-	if !s.Manifest.Trust.Valid() {
-		return fmt.Errorf("host: 插件 %s 的 trust %q 未知（06 §6.9）", id, s.Manifest.Trust)
-	}
-	if strings.TrimSpace(s.Source) == "" {
-		return fmt.Errorf("host: 插件 %s 没有入口源码（backend.entry 为空或在 Bundle 里缺失，06 §6.2）", id)
-	}
-	if s.EntryName == "" {
-		s.EntryName = entryName(id)
-	}
-	if err := s.checkEntryName(id); err != nil {
-		return err
-	}
-	for name := range s.Bundle {
-		if err := checkVirtualName(id, name); err != nil {
-			return fmt.Errorf("host: 插件 %s 的随包模块 %q 非法: %w", id, name, err)
-		}
-	}
-	return nil
-}
-
-func (s Script) checkEntryName(id string) error {
-	if err := checkVirtualName(id, s.EntryName); err != nil {
-		return fmt.Errorf("host: 插件 %s 的入口名 %q 非法: %w", id, s.EntryName, err)
-	}
-	return nil
-}
-
-// checkVirtualName 限定模块名必须落在 plugin://<id>/ 之下（不接受绝对宿主路径）。
-func checkVirtualName(id, name string) error {
-	if name == AgentAPIModule {
-		return nil
-	}
-	rest, ok := strings.CutPrefix(name, EntryScheme+"://")
-	if !ok {
-		return fmt.Errorf("必须是 %s://<id>/… 形状的虚拟名", EntryScheme)
-	}
-	owner, _, _ := strings.Cut(rest, "/")
-	if owner != id {
-		return fmt.Errorf("模块名属于插件 %q，与当前插件 %q 不符", owner, id)
-	}
-	if strings.Contains(name, "..") {
-		return errors.New("模块名不允许包含 ..")
-	}
-	return nil
-}
+// checkVirtualName 是 pluginapi.CheckVirtualName 的薄封装。
+func checkVirtualName(id, name string) error { return pluginapi.CheckVirtualName(id, name) }
 
 // moduleLoader 是一个运行时的虚拟模块表（每 Runtime 一份缓存，12 §6.11 模块系统）。
 type moduleLoader struct {
@@ -158,8 +90,8 @@ func (l *moduleLoader) resolver() moejs.Resolver {
 	return moejs.Resolver(l.resolve)
 }
 
-// ValidateScript 做**不执行插件代码**的静态检查：清单形状、入口语法、模块链接
-// 与能力白名单。安装/体检的预检用它替代「运行入口工厂 + 完整装配」，
+// ValidateScript 做**不执行插件代码**的静态检查：清单形状、入口语法与模块链接。
+// 安装/体检的预检用它替代「运行入口工厂 + 完整装配」，
 // 避免一个只读工具/安装动作触发任意插件代码（09 §10.2、11 §16 P0）。
 //
 // 它不注册工具、不执行 handler、不触发网络/子进程；真正的贡献校验留给显式重载。
@@ -170,7 +102,7 @@ func ValidateScript(s Script, caps *CapabilitySet) error {
 	if caps == nil {
 		return fmt.Errorf("host: 插件 %s 缺少能力集合", s.Manifest.ID)
 	}
-	if err := s.validate(); err != nil {
+	if err := s.Validate(); err != nil {
 		return err
 	}
 	if err := validateStaticNodeImports(s, caps); err != nil {
@@ -192,7 +124,7 @@ func validateStaticNodeImports(s Script, _ *CapabilitySet) error {
 	}
 	for _, src := range sources {
 		if m := nativeAddonRe.FindStringSubmatch(src); m != nil {
-			return fmt.Errorf("host: 插件 %s 静态检查导入 %s 被拒绝: 原生扩展不支持（12 §6.10）", s.pluginID(), m[1])
+			return fmt.Errorf("host: 插件 %s 静态检查导入 %s 被拒绝: 原生扩展不支持（12 §6.10）", s.PluginID(), m[1])
 		}
 	}
 	return nil
@@ -205,15 +137,15 @@ func (l *moduleLoader) linkEntry() (*moejs.Module, error) {
 	}
 	name := l.script.EntryName
 	if name == "" {
-		name = entryName(l.script.pluginID())
+		name = entryName(l.script.PluginID())
 	}
 	m, err := moejs.Compile(name, l.script.Source)
 	if err != nil {
-		return nil, fmt.Errorf("host: 插件 %s 的入口编译失败: %w", l.script.pluginID(), err)
+		return nil, fmt.Errorf("host: 插件 %s 的入口编译失败: %w", l.script.PluginID(), err)
 	}
 	linked, lerr := moejs.Link(m, l.resolver())
 	if lerr != nil {
-		return nil, fmt.Errorf("host: 插件 %s 的入口链接失败: %w", l.script.pluginID(), describeLinkError(lerr))
+		return nil, fmt.Errorf("host: 插件 %s 的入口链接失败: %w", l.script.PluginID(), describeLinkError(lerr))
 	}
 	l.entry = linked
 	l.cache[name] = linked
@@ -249,7 +181,7 @@ func (l *moduleLoader) bundleSource(referrer moejs.Referrer, spec string) (strin
 		return src, true
 	}
 	// 也接受「写 plugin://<id>/x.js、表里键是 ./x.js」这类归一化差异。
-	if rel, ok := strings.CutPrefix(name, EntryScheme+"://"+l.script.pluginID()+"/"); ok {
+	if rel, ok := strings.CutPrefix(name, pluginapi.EntryScheme+"://"+l.script.PluginID()+"/"); ok {
 		if src, ok := l.script.Bundle[rel]; ok {
 			return src, true
 		}
@@ -259,7 +191,7 @@ func (l *moduleLoader) bundleSource(referrer moejs.Referrer, spec string) (strin
 
 // resolveName 把 specifier 变成规范的虚拟模块名。
 func (l *moduleLoader) resolveName(referrer moejs.Referrer, spec string) string {
-	id := l.script.pluginID()
+	id := l.script.PluginID()
 	base := entryName(id)
 	if referrer != nil {
 		if n := referrer.Name(); n != "" {
@@ -270,7 +202,7 @@ func (l *moduleLoader) resolveName(referrer moejs.Referrer, spec string) string 
 		dir := path.Dir(base)
 		return path.Join(dir, spec)
 	}
-	if strings.HasPrefix(spec, EntryScheme+"://") {
+	if strings.HasPrefix(spec, pluginapi.EntryScheme+"://") {
 		return path.Clean(spec)
 	}
 	return spec
@@ -282,7 +214,7 @@ func (l *moduleLoader) compileOnce(name, src string) (*moejs.Module, error) {
 	}
 	m, err := moejs.Compile(name, src)
 	if err != nil {
-		return nil, fmt.Errorf("host: 插件 %s 的模块 %s 编译失败: %w", l.script.pluginID(), name, err)
+		return nil, fmt.Errorf("host: 插件 %s 的模块 %s 编译失败: %w", l.script.PluginID(), name, err)
 	}
 	l.cache[name] = m
 	return m, nil
@@ -294,7 +226,7 @@ func (l *moduleLoader) hostModule(spec string) (*moejs.Module, error) {
 	if fn, ok := lookupModuleProvider(trimmed); ok {
 		m, err := fn(l.caps)
 		if err != nil {
-			return nil, fmt.Errorf("host: 插件 %s 导入 %s 失败: %w", l.script.pluginID(), spec, err)
+			return nil, fmt.Errorf("host: 插件 %s 导入 %s 失败: %w", l.script.PluginID(), spec, err)
 		}
 		if m == nil {
 			return nil, l.missingModuleError(spec)
@@ -307,7 +239,7 @@ func (l *moduleLoader) hostModule(spec string) (*moejs.Module, error) {
 // missingModuleError 解释「宿主表里没有这个模块」：不再按安装矩阵分层，
 // 只剩「原生扩展 / npm 包」两种事实。
 func (l *moduleLoader) missingModuleError(spec string) error {
-	id := l.script.pluginID()
+	id := l.script.PluginID()
 	if strings.HasSuffix(spec, ".node") {
 		return fmt.Errorf("host: 插件 %s 导入 %s 被拒绝：原生扩展不支持（12 §6.10）", id, spec)
 	}
@@ -337,7 +269,7 @@ func (l *moduleLoader) meta(r *moejs.Realm, m *moejs.Module, meta *moejs.Object)
 		name = m.Name()
 	}
 	if name == "" {
-		name = entryName(l.script.pluginID())
+		name = entryName(l.script.PluginID())
 	}
 	set := func(key, val string) error {
 		return meta.SetProp(r, r.KeyFromGoString(key), moejs.String(val))
@@ -351,7 +283,7 @@ func (l *moduleLoader) meta(r *moejs.Realm, m *moejs.Module, meta *moejs.Object)
 	if err := set("dirname", path.Dir(name)); err != nil {
 		return err
 	}
-	return set("path", strings.TrimPrefix(name, EntryScheme+"://"))
+	return set("path", strings.TrimPrefix(name, pluginapi.EntryScheme+"://"))
 }
 
 // runInit 执行装配期：建运行时 → 加载入口 → 安装能力 → 跑入口工厂 → 结算贡献。
@@ -409,7 +341,7 @@ func (p *Instance) loadEntry() error {
 	return nil
 }
 
-// installCapabilities 调用能力安装挂载点（由 caps.go 赋值）。
+// installCapabilities 调用成员与模块安装挂载点（由 caps.go 赋值）。
 func (p *Instance) installCapabilities() error {
 	fn := InstallCapabilities
 	if fn == nil {

@@ -74,5 +74,5 @@ func VisibleTools(list []Descriptor, v ToolVisibility) []Descriptor {
 //
 // 这是「只有 find_tool 列出的工具才能这样执行」的机器化表达（05 §6.3）：
 // 发现式工具可以，注入式工具不行——后者模型本来就直呼其名，再开一条 exec_tool
-// 旁路只会让审批与循环检测多一套入口。
+// 旁路只会让循环检测多一套入口。
 func (d Descriptor) Discoverable() bool { return d.Discovery }

@@ -2,7 +2,7 @@
 
 > 上级索引：[ada-go 设计文档](design.md)  
 > 对应章节：§5.7 会话、分支与压缩（含 SQLite 并发）、§5.8 子智能体  
-> 版本：0.2 · 2026-11-09
+> 版本：0.3 · 2026-11-10
 
 ## 5.7 会话、分支与压缩
 
@@ -120,4 +120,4 @@ CREATE TABLE audit (
 
 ---
 
-**相邻文档**：[← 模型适配、审批与取消](03-model-and-approval.md) · [索引](design.md) · [插件模型与后端 API →](05-plugins.md)
+**相邻文档**：[← 模型适配、审批（已移除）与取消](03-model-and-approval.md) · [索引](design.md) · [插件模型与后端 API →](05-plugins.md)

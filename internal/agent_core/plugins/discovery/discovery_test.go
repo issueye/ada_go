@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 const sampleManifest = `{
@@ -394,20 +394,20 @@ func TestLoadDirCapsTrustBySource(t *testing.T) {
 		name      string
 		manifest  string
 		source    string
-		wantTrust plugins.Trust
+		wantTrust pluginapi.Trust
 		wantSkip  bool
 	}{
 		{
 			name:      "workspace builtin 降级",
 			manifest:  `{"id":"hello-echo","name":"Hello","version":"0.1.0","apiVersion":1,"trust":"builtin","backend":{"entry":"index.ts","capabilities":[]}}`,
 			source:    SourceWorkspace,
-			wantTrust: plugins.TrustThirdParty,
+			wantTrust: pluginapi.TrustThirdParty,
 		},
 		{
 			name:      "global verified 未验签降级",
 			manifest:  `{"id":"hello-echo","name":"Hello","version":"0.1.0","apiVersion":1,"trust":"verified","sig":"fake-signature","backend":{"entry":"index.ts","capabilities":[]}}`,
 			source:    SourceGlobal,
-			wantTrust: plugins.TrustThirdParty,
+			wantTrust: pluginapi.TrustThirdParty,
 		},
 		{
 			name:     "builtin 声明 exec 降级后失败关闭",
@@ -418,8 +418,8 @@ func TestLoadDirCapsTrustBySource(t *testing.T) {
 		{
 			name:      "official 来源保留 builtin",
 			manifest:  `{"id":"hello-echo","name":"Hello","version":"0.1.0","apiVersion":1,"trust":"builtin","backend":{"entry":"index.ts","capabilities":["exec"]}}`,
-			source:    string(plugins.OriginOfficial),
-			wantTrust: plugins.TrustBuiltin,
+			source:    string(pluginapi.OriginOfficial),
+			wantTrust: pluginapi.TrustBuiltin,
 		},
 	}
 	for _, tc := range cases {
@@ -457,15 +457,15 @@ func TestVerifiedPluginRequiresValidSignature(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeVerified := func(t *testing.T, root, id string) (string, *plugins.Manifest) {
+	writeVerified := func(t *testing.T, root, id string) (string, *pluginapi.Manifest) {
 		t.Helper()
 		dir := writePlugin(t, root, id)
-		m := &plugins.Manifest{
-			ID: id, Name: "Verified", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
-			Trust:   plugins.TrustVerified,
-			Backend: &plugins.Backend{Entry: "index.ts"},
+		m := &pluginapi.Manifest{
+			ID: id, Name: "Verified", Version: "0.1.0", APIVersion: pluginapi.APIVersionMajor,
+			Trust:   pluginapi.TrustVerified,
+			Backend: &pluginapi.Backend{Entry: "index.ts"},
 		}
-		sig, err := plugins.SignManifest(m, dir, priv)
+		sig, err := pluginapi.SignManifest(m, dir, priv)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -488,7 +488,7 @@ func TestVerifiedPluginRequiresValidSignature(t *testing.T) {
 		if err != nil || len(warnings) != 0 || len(loaded) != 1 {
 			t.Fatalf("loaded=%d warnings=%+v err=%v", len(loaded), warnings, err)
 		}
-		if got := loaded[0].Script.Manifest.Trust; got != plugins.TrustVerified {
+		if got := loaded[0].Script.Manifest.Trust; got != pluginapi.TrustVerified {
 			t.Fatalf("有效签名应保留 verified，得到 %s", got)
 		}
 	})
@@ -504,7 +504,7 @@ func TestVerifiedPluginRequiresValidSignature(t *testing.T) {
 		if err != nil || len(loaded) != 1 {
 			t.Fatalf("loaded=%d err=%v", len(loaded), err)
 		}
-		if got := loaded[0].Script.Manifest.Trust; got != plugins.TrustThirdParty {
+		if got := loaded[0].Script.Manifest.Trust; got != pluginapi.TrustThirdParty {
 			t.Fatalf("篡改目录应降级 third-party，得到 %s", got)
 		}
 	})
@@ -521,7 +521,7 @@ func TestVerifiedPluginRequiresValidSignature(t *testing.T) {
 		if err != nil || len(loaded) != 1 {
 			t.Fatalf("loaded=%d err=%v", len(loaded), err)
 		}
-		if got := loaded[0].Script.Manifest.Trust; got != plugins.TrustThirdParty {
+		if got := loaded[0].Script.Manifest.Trust; got != pluginapi.TrustThirdParty {
 			t.Fatalf("错误公钥应降级 third-party，得到 %s", got)
 		}
 	})
@@ -534,7 +534,7 @@ func TestVerifiedPluginRequiresValidSignature(t *testing.T) {
 		if err != nil || len(loaded) != 1 {
 			t.Fatalf("loaded=%d err=%v", len(loaded), err)
 		}
-		if got := loaded[0].Script.Manifest.Trust; got != plugins.TrustThirdParty {
+		if got := loaded[0].Script.Manifest.Trust; got != pluginapi.TrustThirdParty {
 			t.Fatalf("没有公钥应降级 third-party，得到 %s", got)
 		}
 	})

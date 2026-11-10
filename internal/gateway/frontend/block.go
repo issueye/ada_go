@@ -2,7 +2,7 @@ package frontend
 
 // Markdown 动态块的 VNode profile：比插件页面/插槽更窄。
 //
-// 动态块的内容由 Markdown（可能来自模型）驱动，不允许伪造审批托盘、表单或
+// 动态块的内容由 Markdown（可能来自模型）驱动，不允许伪造交互托盘、表单或
 // 宿主控制组件；交互仍走插件页面/动作桥。
 
 import "fmt"

@@ -11,25 +11,24 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
-	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 func islandBridge(t *testing.T, hydrate bool, src string) *Bridge {
 	t.Helper()
-	m := &plugins.Manifest{
-		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
-		Trust: plugins.TrustBuiltin,
-		Frontend: &plugins.Frontend{
-			Capabilities: []plugins.Capability{plugins.CapFrontendScript},
+	m := &pluginapi.Manifest{
+		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: pluginapi.APIVersionMajor,
+		Trust: pluginapi.TrustBuiltin,
+		Frontend: &pluginapi.Frontend{
+			Capabilities: []pluginapi.Capability{pluginapi.CapFrontendScript},
 			Client:       "client.js",
-			Slots: []plugins.SlotContribution{{
+			Slots: []pluginapi.SlotContribution{{
 				Slot: "sidebar.top", Template: "slot.tsx", Hydrate: hydrate,
 			}},
 		},
 	}
 	b, err := NewBridge(BridgeOptions{
-		Scripts: []host.Script{{
+		Scripts: []pluginapi.Script{{
 			Manifest:     m,
 			Bundle:       map[string]string{"slot.tsx": src},
 			StaticAssets: map[string][]byte{"client.js": []byte("export default {}")},
@@ -106,19 +105,19 @@ export default defineComponent({
 }
 
 func TestDisableIslandsKeepsSSRWithoutMarkers(t *testing.T) {
-	m := &plugins.Manifest{
-		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
-		Trust: plugins.TrustBuiltin,
-		Frontend: &plugins.Frontend{
-			Capabilities: []plugins.Capability{plugins.CapFrontendScript},
+	m := &pluginapi.Manifest{
+		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: pluginapi.APIVersionMajor,
+		Trust: pluginapi.TrustBuiltin,
+		Frontend: &pluginapi.Frontend{
+			Capabilities: []pluginapi.Capability{pluginapi.CapFrontendScript},
 			Client:       "client.js",
-			Slots: []plugins.SlotContribution{{
+			Slots: []pluginapi.SlotContribution{{
 				Slot: "sidebar.top", Template: "slot.tsx", Hydrate: true,
 			}},
 		},
 	}
 	b, err := NewBridge(BridgeOptions{
-		Scripts: []host.Script{{
+		Scripts: []pluginapi.Script{{
 			Manifest: m,
 			Bundle: map[string]string{"slot.tsx": `import { h, defineComponent } from "ada:render";
 export default defineComponent({ render(h) { return <div class="island">hello</div>; } });
@@ -147,19 +146,19 @@ export default defineComponent({ render(h) { return <div class="island">hello</d
 }
 
 func TestHydratePageInjectsIslandMarkers(t *testing.T) {
-	m := &plugins.Manifest{
-		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
-		Trust: plugins.TrustBuiltin,
-		Frontend: &plugins.Frontend{
-			Capabilities: []plugins.Capability{plugins.CapFrontendScript},
+	m := &pluginapi.Manifest{
+		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: pluginapi.APIVersionMajor,
+		Trust: pluginapi.TrustBuiltin,
+		Frontend: &pluginapi.Frontend{
+			Capabilities: []pluginapi.Capability{pluginapi.CapFrontendScript},
 			Client:       "client.js",
-			Pages: []plugins.PageContribution{{
+			Pages: []pluginapi.PageContribution{{
 				Slug: "providers", Template: "page.tsx", Title: "供应商", Hydrate: true,
 			}},
 		},
 	}
 	b, err := NewBridge(BridgeOptions{
-		Scripts: []host.Script{{
+		Scripts: []pluginapi.Script{{
 			Manifest: m,
 			Bundle: map[string]string{"page.tsx": `import { h, defineComponent } from "ada:render";
 export default defineComponent({
@@ -188,19 +187,19 @@ export default defineComponent({
 }
 
 func TestHasIslandsForChatSlot(t *testing.T) {
-	m := &plugins.Manifest{
-		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
-		Trust: plugins.TrustBuiltin,
-		Frontend: &plugins.Frontend{
-			Capabilities: []plugins.Capability{plugins.CapFrontendScript},
+	m := &pluginapi.Manifest{
+		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: pluginapi.APIVersionMajor,
+		Trust: pluginapi.TrustBuiltin,
+		Frontend: &pluginapi.Frontend{
+			Capabilities: []pluginapi.Capability{pluginapi.CapFrontendScript},
 			Client:       "client.js",
-			Slots: []plugins.SlotContribution{{
+			Slots: []pluginapi.SlotContribution{{
 				Slot: "chat.corner", Template: "slot.tsx", Hydrate: true,
 			}},
 		},
 	}
 	b, err := NewBridge(BridgeOptions{
-		Scripts: []host.Script{{
+		Scripts: []pluginapi.Script{{
 			Manifest: m,
 			Bundle: map[string]string{"slot.tsx": `import { h, defineComponent } from "ada:render";
 export default defineComponent({ render(h) { return <div class="corner">x</div>; } });
@@ -223,13 +222,13 @@ export default defineComponent({ render(h) { return <div class="corner">x</div>;
 // P2-3：多个 hydrate 贡献共享同一插槽时，标记必须落在各自根元素上，
 // 不能额外包一层容器（否则插槽的 flex/`> *` 布局会被破坏）。
 func TestHydrateSlotKeepsRootsUnwrapped(t *testing.T) {
-	m := &plugins.Manifest{
-		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
-		Trust: plugins.TrustBuiltin,
-		Frontend: &plugins.Frontend{
-			Capabilities: []plugins.Capability{plugins.CapFrontendScript},
+	m := &pluginapi.Manifest{
+		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: pluginapi.APIVersionMajor,
+		Trust: pluginapi.TrustBuiltin,
+		Frontend: &pluginapi.Frontend{
+			Capabilities: []pluginapi.Capability{pluginapi.CapFrontendScript},
 			Client:       "client.js",
-			Slots: []plugins.SlotContribution{
+			Slots: []pluginapi.SlotContribution{
 				{Slot: "sidebar.top", Template: "one.tsx", Hydrate: true, Order: 1},
 				{Slot: "sidebar.top", Template: "two.tsx", Hydrate: true, Order: 2},
 			},
@@ -239,7 +238,7 @@ func TestHydrateSlotKeepsRootsUnwrapped(t *testing.T) {
 export default defineComponent({ render(h) { return <div class="%s">%s</div>; } });
 `
 	b, err := NewBridge(BridgeOptions{
-		Scripts: []host.Script{{
+		Scripts: []pluginapi.Script{{
 			Manifest: m,
 			Bundle: map[string]string{
 				"one.tsx": fmt.Sprintf(src, "one", "1"),
@@ -274,19 +273,19 @@ export default defineComponent({ render(h) { return <div class="%s">%s</div>; } 
 // clientOnly 贡献：服务端**不执行模板**，只输出带标记的空壳。这里故意让模板
 // 在渲染时抛错——如果桥还在跑模板，测试就会失败；输出里也不能有模板内容。
 func TestClientOnlySlotRendersEmptyShell(t *testing.T) {
-	m := &plugins.Manifest{
-		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
-		Trust: plugins.TrustBuiltin,
-		Frontend: &plugins.Frontend{
-			Capabilities: []plugins.Capability{plugins.CapFrontendScript},
+	m := &pluginapi.Manifest{
+		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: pluginapi.APIVersionMajor,
+		Trust: pluginapi.TrustBuiltin,
+		Frontend: &pluginapi.Frontend{
+			Capabilities: []pluginapi.Capability{pluginapi.CapFrontendScript},
 			Client:       "client.js",
-			Slots: []plugins.SlotContribution{{
+			Slots: []pluginapi.SlotContribution{{
 				Slot: "composer.footer", Template: "slot.tsx", Hydrate: true, ClientOnly: true,
 			}},
 		},
 	}
 	b, err := NewBridge(BridgeOptions{
-		Scripts: []host.Script{{
+		Scripts: []pluginapi.Script{{
 			Manifest: m,
 			Bundle: map[string]string{"slot.tsx": `import { h, defineComponent } from "ada:render";
 export default defineComponent({
@@ -337,19 +336,19 @@ export default defineComponent({
 
 // clientOnly 贡献同样让页面加载客户端引擎（否则空壳永远没人接管）。
 func TestClientOnlySlotReportsHasIslands(t *testing.T) {
-	m := &plugins.Manifest{
-		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
-		Trust: plugins.TrustBuiltin,
-		Frontend: &plugins.Frontend{
-			Capabilities: []plugins.Capability{plugins.CapFrontendScript},
+	m := &pluginapi.Manifest{
+		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: pluginapi.APIVersionMajor,
+		Trust: pluginapi.TrustBuiltin,
+		Frontend: &pluginapi.Frontend{
+			Capabilities: []pluginapi.Capability{pluginapi.CapFrontendScript},
 			Client:       "client.js",
-			Slots: []plugins.SlotContribution{{
+			Slots: []pluginapi.SlotContribution{{
 				Slot: "composer.footer", Template: "slot.tsx", Hydrate: true, ClientOnly: true,
 			}},
 		},
 	}
 	b, err := NewBridge(BridgeOptions{
-		Scripts: []host.Script{{
+		Scripts: []pluginapi.Script{{
 			Manifest: m,
 			Bundle: map[string]string{"slot.tsx": `export default function () { return null; }
 `},
@@ -370,17 +369,17 @@ func TestClientOnlySlotReportsHasIslands(t *testing.T) {
 
 // clientOnly 没有 client bundle 是装配/渲染错误（没有 SSR 可回退，空壳没意义）。
 func TestClientOnlySlotWithoutClientIsError(t *testing.T) {
-	m := &plugins.Manifest{
-		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
-		Trust: plugins.TrustBuiltin,
-		Frontend: &plugins.Frontend{
-			Slots: []plugins.SlotContribution{{
+	m := &pluginapi.Manifest{
+		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: pluginapi.APIVersionMajor,
+		Trust: pluginapi.TrustBuiltin,
+		Frontend: &pluginapi.Frontend{
+			Slots: []pluginapi.SlotContribution{{
 				Slot: "composer.footer", Template: "slot.tsx", ClientOnly: true,
 			}},
 		},
 	}
 	b, err := NewBridge(BridgeOptions{
-		Scripts: []host.Script{{
+		Scripts: []pluginapi.Script{{
 			Manifest: m,
 			Bundle: map[string]string{"slot.tsx": `export default function () { return null; }
 `},

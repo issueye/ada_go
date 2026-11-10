@@ -3,7 +3,7 @@ package frontend
 // 全局/工作区安装的第三方插件只贡献 Markdown 动态块（frontend.blocks）：
 // 页面/插槽/样式/脚本仍然只装配随包官方插件（SPEC §8 边界）。
 //
-// 这里从插件目录读取 plugin.json、block 模板与数据 Schema，产出 host.Script。
+// 这里从插件目录读取 plugin.json、block 模板与数据 Schema，产出 pluginapi.Script。
 // 清单其余前端贡献被剥掉，避免第三方插件借 blocks 之外的面进入宿主 UI。
 
 import (
@@ -14,8 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
-	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // ErrNoBlocks 表示插件没有声明任何 frontend.blocks（调用方跳过即可）。
@@ -25,20 +24,20 @@ var ErrNoBlocks = errors.New("frontend: 插件没有 frontend.blocks")
 //
 // 只接受 display/未知 profile 的声明（interactive 在运行期同样 fail-closed）；
 // Schema 在加载期编译，非法即拒绝整个脚本，让调用方跳过该插件而不是拖垮 Gateway。
-func LoadBlockScript(dir string) (host.Script, error) {
+func LoadBlockScript(dir string) (pluginapi.Script, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, "plugin.json"))
 	if err != nil {
-		return host.Script{}, fmt.Errorf("frontend: 读取 %s/plugin.json 失败: %w", dir, err)
+		return pluginapi.Script{}, fmt.Errorf("frontend: 读取 %s/plugin.json 失败: %w", dir, err)
 	}
-	m, err := plugins.LoadManifest(raw)
+	m, err := pluginapi.LoadManifest(raw)
 	if err != nil {
-		return host.Script{}, fmt.Errorf("frontend: 插件 %s 的清单非法: %w", dir, err)
+		return pluginapi.Script{}, fmt.Errorf("frontend: 插件 %s 的清单非法: %w", dir, err)
 	}
 	if err := m.Validate(filepath.Base(dir)); err != nil {
-		return host.Script{}, err
+		return pluginapi.Script{}, err
 	}
 	if m.Frontend == nil || len(m.Frontend.Blocks) == 0 {
-		return host.Script{}, ErrNoBlocks
+		return pluginapi.Script{}, ErrNoBlocks
 	}
 
 	bundle := map[string]string{}
@@ -47,20 +46,20 @@ func LoadBlockScript(dir string) (host.Script, error) {
 		template := strings.TrimSpace(b.Template)
 		src, rerr := os.ReadFile(filepath.Join(dir, filepath.FromSlash(template)))
 		if rerr != nil {
-			return host.Script{}, fmt.Errorf("frontend: 读取 block %s 的模板 %s 失败: %w", b.Name, b.Template, rerr)
+			return pluginapi.Script{}, fmt.Errorf("frontend: 读取 block %s 的模板 %s 失败: %w", b.Name, b.Template, rerr)
 		}
 		if strings.TrimSpace(string(src)) == "" {
-			return host.Script{}, fmt.Errorf("frontend: block %s 的模板 %s 为空", b.Name, b.Template)
+			return pluginapi.Script{}, fmt.Errorf("frontend: block %s 的模板 %s 为空", b.Name, b.Template)
 		}
 		bundle[template] = string(src)
 
 		schemaPath := strings.TrimSpace(b.Schema)
 		schema, serr := os.ReadFile(filepath.Join(dir, filepath.FromSlash(schemaPath)))
 		if serr != nil {
-			return host.Script{}, fmt.Errorf("frontend: 读取 block %s 的 Schema %s 失败: %w", b.Name, b.Schema, serr)
+			return pluginapi.Script{}, fmt.Errorf("frontend: 读取 block %s 的 Schema %s 失败: %w", b.Name, b.Schema, serr)
 		}
 		if _, cerr := CompileDataSchema(schema); cerr != nil {
-			return host.Script{}, fmt.Errorf("frontend: block %s 的 Schema 非法: %w", b.Name, cerr)
+			return pluginapi.Script{}, fmt.Errorf("frontend: block %s 的 Schema 非法: %w", b.Name, cerr)
 		}
 		schemas[schemaPath] = schema
 	}
@@ -72,7 +71,7 @@ func LoadBlockScript(dir string) (host.Script, error) {
 	fe.Actions, fe.Styles, fe.Scripts, fe.Assets = nil, nil, nil, ""
 	clone.Frontend = &fe
 
-	return host.Script{
+	return pluginapi.Script{
 		Manifest: &clone,
 		Bundle:   bundle,
 		Schemas:  schemas,

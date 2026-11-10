@@ -17,6 +17,7 @@ import (
 
 	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/common/domain"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // 登记项类别（槽位键的前缀；重建时逐字比对）。
@@ -44,7 +45,7 @@ func newStaging(p *Instance) *Staging {
 		PluginID: p.id,
 		Version:  p.scriptVersion(),
 		Trust:    p.caps.Trust,
-		Frontend: FrontendContribution{Actions: map[string]plugins.ActionBinding{}},
+		Frontend: FrontendContribution{Actions: map[string]pluginapi.ActionBinding{}},
 	}
 	// 技能发现（6.7）：装配期扫描插件包内 skills/<name>/SKILL.md，只结算
 	// name/description 元数据（正文不进基座，模型按路径用 read_file 读取）。
@@ -258,7 +259,7 @@ func (t Targets) commit(c *Contribution, caps *CapabilitySet, hooks func(HookDef
 			d := tl.Descriptor(c.PluginID)
 			// 只有基座保留的发现桥入口才打 System 位（find_tool/exec_tool）：
 			// 它只用于「谁能注册这两个保留名」的校验，不是「该插件所有工具都算系统工具」。
-			if caps != nil && true &&
+			if caps != nil &&
 				(d.Name == domain.ToolFindName || d.Name == domain.ToolExecName) {
 				d.System = true
 			}
@@ -390,16 +391,16 @@ func (p *Instance) scriptVersion() string {
 
 // frontendContribution 从清单 frontend 段结算前端贡献（模板路径已在清单校验里查过）。
 func (p *Instance) frontendContribution() FrontendContribution {
-	f := FrontendContribution{Actions: map[string]plugins.ActionBinding{}}
+	f := FrontendContribution{Actions: map[string]pluginapi.ActionBinding{}}
 	m := p.script.Manifest
 	if m == nil || m.Frontend == nil {
 		return f
 	}
 	in := m.Frontend
-	f.Slots = append([]plugins.SlotContribution(nil), in.Slots...)
-	f.Pages = append([]plugins.PageContribution(nil), in.Pages...)
-	f.Nav = append([]plugins.NavContribution(nil), in.Nav...)
-	f.Dashboard = append([]plugins.DashboardContribution(nil), in.Dashboard...)
+	f.Slots = append([]pluginapi.SlotContribution(nil), in.Slots...)
+	f.Pages = append([]pluginapi.PageContribution(nil), in.Pages...)
+	f.Nav = append([]pluginapi.NavContribution(nil), in.Nav...)
+	f.Dashboard = append([]pluginapi.DashboardContribution(nil), in.Dashboard...)
 	f.Styles = append([]string(nil), in.Styles...)
 	f.Scripts = append([]string(nil), in.Scripts...)
 	f.Assets = in.Assets

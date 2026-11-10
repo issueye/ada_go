@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/common/domain"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 func TestToolDiscoveryContextMembers(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapToolDiscovery)
+	caps := testCaps(t, pluginapi.TrustBuiltin, pluginapi.CapToolDiscovery)
 	src := `
 export default function (agent) {
   agent.registerTool({

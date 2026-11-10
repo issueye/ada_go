@@ -1,7 +1,7 @@
 package host
 
 // 本文件钉三个「宿主自建模块」的落地行为：
-//   - node:fs 按能力安装、只读时写成员调用即抛 ERR_ACCESS_DENIED；
+//   - node:fs 始终安装、写成员越界调用即抛错；
 //   - node:child_process 只有 execFile/execFileSync，且真的执行（E-5）；
 //   - 全局 process 是宿主给的受限形状（argv/env/cwd/platform）。
 
@@ -14,12 +14,13 @@ import (
 	"testing"
 
 	"github.com/adag/ada-go/internal/agent_core/plugins"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/common/ports"
 )
 
 // TestNodeFSReadAndWriteTrim 钉 12 §6.12.2 的 fs 偏差：只读时写成员「调用即抛」。
 func TestNodeFSReadAndWrite(t *testing.T) {
-	caps := testCaps(t, plugins.TrustThirdParty)
+	caps := testCaps(t, pluginapi.TrustThirdParty)
 	if err := os.WriteFile(filepath.Join(caps.WorkspaceRoot, "note.txt"), []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +76,7 @@ func TestFSGuardReadsUnrestrictedWritesScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	trusted := testCaps(t, plugins.TrustBuiltin, plugins.CapFSRead, plugins.CapFSWrite)
+	trusted := testCaps(t, pluginapi.TrustBuiltin, pluginapi.CapFSRead, pluginapi.CapFSWrite)
 	g, err := newFSGuard(&capsState{caps: trusted})
 	if err != nil {
 		t.Fatalf("newFSGuard: %v", err)
@@ -89,7 +90,7 @@ func TestFSGuardReadsUnrestrictedWritesScoped(t *testing.T) {
 	}
 
 	// 读不再按信任级别限制：第三方同样可以读宿主绝对路径。
-	third := testCaps(t, plugins.TrustThirdParty, plugins.CapFSRead)
+	third := testCaps(t, pluginapi.TrustThirdParty, pluginapi.CapFSRead)
 	g2, err := newFSGuard(&capsState{caps: third})
 	if err != nil {
 		t.Fatalf("newFSGuard(third): %v", err)
@@ -101,7 +102,7 @@ func TestFSGuardReadsUnrestrictedWritesScoped(t *testing.T) {
 
 // TestChildProcessExecFileSync 钉 E-5：execFile 真的执行、且没有 spawn/exec。
 func TestChildProcessExecFileSync(t *testing.T) {
-	caps := testCaps(t, plugins.TrustVerified, plugins.CapExec)
+	caps := testCaps(t, pluginapi.TrustVerified, pluginapi.CapExec)
 	cmd, argv := "cmd.exe", []string{"/c", "echo", "spike-out"}
 	if runtime.GOOS != "windows" {
 		cmd, argv = "/bin/echo", []string{"spike-out"}
@@ -142,7 +143,7 @@ export default function (agent) {
 
 // TestProcessGlobal 钉全局 process 的受限形状（12 §6.12.2 process 行）。
 func TestProcessGlobal(t *testing.T) {
-	caps := testCaps(t, plugins.TrustThirdParty)
+	caps := testCaps(t, pluginapi.TrustThirdParty)
 	caps.Env = map[string]string{"FOO": "bar"}
 	src := `
 export default function (agent) {
@@ -184,15 +185,15 @@ func indexOf(s, sub string) int {
 
 // TestHookRegistrationAndCall 钉钩子这条独立通道：on(point, fn) → 钩子链 → 动作结算。
 func TestHookRegistrationAndCall(t *testing.T) {
-	caps := testCaps(t, plugins.TrustThirdParty)
-	caps.Hooks["turn.before"] = plugins.ActionNote
+	caps := testCaps(t, pluginapi.TrustThirdParty)
+	caps.Hooks["turn.before"] = pluginapi.ActionNote
 	src := `
 export default function (agent) {
   agent.on("turn.before", (evt, ctx) => ({ action: "note", note: "n:" + evt.point }));
 }
 `
 	script := testScript(t, caps, src)
-	script.Manifest.Backend.Hooks = map[string]plugins.HookAction{"turn.before": plugins.ActionNote}
+	script.Manifest.Backend.Hooks = map[string]pluginapi.HookAction{"turn.before": pluginapi.ActionNote}
 	chain := plugins.NewHookChain()
 	p, err := Load(context.Background(), script, caps, Context{}, Options{Targets: Targets{Hooks: chain}})
 	if err != nil {

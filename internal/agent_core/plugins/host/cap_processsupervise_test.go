@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // fakeSupervisor 记录桥调用，返回固定状态。
@@ -90,7 +90,7 @@ func testScriptWithRoot(t *testing.T, caps *CapabilitySet, source, root string) 
 
 // 桥未注入（CLI 直连）时 ctx.processes 不存在。
 func TestProcessesAbsentWithoutBridge(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapProcessSupervise)
+	caps := testCaps(t, pluginapi.TrustBuiltin, pluginapi.CapProcessSupervise)
 	src := `
 export default function (agent) {
   agent.registerTool({
@@ -116,7 +116,7 @@ export default function (agent) {
 
 // 注册成功：entry 被解析成插件目录内的绝对路径，owner 由能力集盖章。
 func TestProcessesRegisterResolvesEntry(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapProcessSupervise)
+	caps := testCaps(t, pluginapi.TrustBuiltin, pluginapi.CapProcessSupervise)
 	root := t.TempDir()
 	scriptPath := filepath.Join(root, "dist", "scheduler.js")
 	if err := os.MkdirAll(filepath.Dir(scriptPath), 0o700); err != nil {
@@ -179,7 +179,7 @@ export default function (agent) {
 
 // 越界 entry 在宿主侧就被拒绝（不依赖网关再拦一次）。
 func TestProcessesRejectsEscapingEntry(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapProcessSupervise)
+	caps := testCaps(t, pluginapi.TrustBuiltin, pluginapi.CapProcessSupervise)
 	root := t.TempDir()
 	src := `
 export default function (agent) {
@@ -230,7 +230,7 @@ export default function (agent) {
 
 // 桥返回错误时，脚本拿到的是固定错误码而不是静默成功。
 func TestProcessesSurfacesBridgeError(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapProcessSupervise)
+	caps := testCaps(t, pluginapi.TrustBuiltin, pluginapi.CapProcessSupervise)
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "scheduler.js"), []byte("//"), 0o600); err != nil {
 		t.Fatal(err)
@@ -270,7 +270,7 @@ export default function (agent) {
 
 // list 返回本插件的进程快照。
 func TestProcessesList(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapProcessSupervise)
+	caps := testCaps(t, pluginapi.TrustBuiltin, pluginapi.CapProcessSupervise)
 	src := `
 export default function (agent) {
   agent.registerTool({
@@ -304,7 +304,7 @@ export default function (agent) {
 // 关闭 Runtime 时按「本插件注册过哪些进程」逐个注销：插件禁用/重载后调度进程不能
 // 继续跑（06 §6.4「关闭 Runtime 要取消它启动的所有异步工作」）。
 func TestProcessesReleasedOnClose(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapProcessSupervise)
+	caps := testCaps(t, pluginapi.TrustBuiltin, pluginapi.CapProcessSupervise)
 	root := t.TempDir()
 	entryPath := filepath.Join(root, "dist", "scheduler.js")
 	if err := os.MkdirAll(filepath.Dir(entryPath), 0o700); err != nil {
@@ -351,7 +351,7 @@ export default function (agent) {
 
 // 显式 unregister 之后关闭 Runtime 不再重复注销（引用计数不能被减两次）。
 func TestProcessesExplicitUnregisterIsNotRepeated(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapProcessSupervise)
+	caps := testCaps(t, pluginapi.TrustBuiltin, pluginapi.CapProcessSupervise)
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "scheduler.js"), []byte("//"), 0o600); err != nil {
 		t.Fatal(err)

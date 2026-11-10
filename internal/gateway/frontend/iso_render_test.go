@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 const isoCardSource = `import { h, defineComponent } from "ada:render";
@@ -36,9 +36,9 @@ func TestIsoComponentsRenderThroughGo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取 ada-ui-iso.js: %v", err)
 	}
-	r := host.NewRenderer(
-		host.WithRenderEngineSource(string(engine)),
-		host.WithIsoComponentsSource(string(iso)),
+	r := pluginapi.NewRenderer(
+		pluginapi.WithRenderEngineSource(string(engine)),
+		pluginapi.WithIsoComponentsSource(string(iso)),
 	)
 	vnode, err := r.RenderIsland(isoCardSource, nil)
 	if err != nil {
@@ -116,9 +116,9 @@ func TestIsoTableRenderThroughGo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取 ada-ui-iso.js: %v", err)
 	}
-	r := host.NewRenderer(
-		host.WithRenderEngineSource(string(engine)),
-		host.WithIsoComponentsSource(string(iso)),
+	r := pluginapi.NewRenderer(
+		pluginapi.WithRenderEngineSource(string(engine)),
+		pluginapi.WithIsoComponentsSource(string(iso)),
 	)
 	vnode, err := r.RenderIsland(isoTableSource, nil)
 	if err != nil {
@@ -170,9 +170,9 @@ func TestIsoSelectRenderThroughGo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取 ada-ui-iso.js: %v", err)
 	}
-	r := host.NewRenderer(
-		host.WithRenderEngineSource(string(engine)),
-		host.WithIsoComponentsSource(string(iso)),
+	r := pluginapi.NewRenderer(
+		pluginapi.WithRenderEngineSource(string(engine)),
+		pluginapi.WithIsoComponentsSource(string(iso)),
 	)
 	vnode, err := r.RenderIsland(isoSelectSource, nil)
 	if err != nil {
@@ -224,9 +224,9 @@ func TestIsoTabsRenderThroughGo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取 ada-ui-iso.js: %v", err)
 	}
-	r := host.NewRenderer(
-		host.WithRenderEngineSource(string(engine)),
-		host.WithIsoComponentsSource(string(iso)),
+	r := pluginapi.NewRenderer(
+		pluginapi.WithRenderEngineSource(string(engine)),
+		pluginapi.WithIsoComponentsSource(string(iso)),
 	)
 	vnode, err := r.RenderIsland(isoTabsSource, nil)
 	if err != nil {
@@ -282,9 +282,9 @@ func TestIsoModalRenderThroughGo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取 ada-ui-iso.js: %v", err)
 	}
-	r := host.NewRenderer(
-		host.WithRenderEngineSource(string(engine)),
-		host.WithIsoComponentsSource(string(iso)),
+	r := pluginapi.NewRenderer(
+		pluginapi.WithRenderEngineSource(string(engine)),
+		pluginapi.WithIsoComponentsSource(string(iso)),
 	)
 	vnode, err := r.RenderIsland(isoModalSource, nil)
 	if err != nil {
@@ -318,9 +318,9 @@ func TestIsoIconTodoNoticeRenderThroughGo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取 ada-ui-iso.js: %v", err)
 	}
-	r := host.NewRenderer(
-		host.WithRenderEngineSource(string(engine)),
-		host.WithIsoComponentsSource(string(iso)),
+	r := pluginapi.NewRenderer(
+		pluginapi.WithRenderEngineSource(string(engine)),
+		pluginapi.WithIsoComponentsSource(string(iso)),
 	)
 	vnode, err := r.RenderIsland(isoIconsSource, nil)
 	if err != nil {

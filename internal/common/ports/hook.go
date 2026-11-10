@@ -11,7 +11,7 @@ import (
 // 成对点位必须成对出现（turn.before/after、model.beforeRequest/afterResponse、
 // compaction.before/after）。
 //
-// 审批点位（tool.beforeCall/tool.afterCall）随审批策略整体移除：基座不再有
+// 审批点位（tool.beforeCall）随审批策略整体移除：基座不再有
 // 「执行前询问/拒绝」这一层。
 type HookPoint string
 

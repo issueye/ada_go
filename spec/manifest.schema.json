@@ -74,8 +74,8 @@
             "enum": ["fs.read", "fs.write", "net.fetch", "net.sse", "exec", "process", "state", "global.config", "events.read", "ui.ask", "subagent.invoke", "model.admin", "plugin.admin", "tool.discovery", "turn.invoke", "dispatch.send", "process.supervise"]
           },
           "uniqueItems": true,
-          "description": "可安装能力的白名单（§6.2）。没声明的能力不安装：node:fs 需 fs.read/fs.write、node:child_process 需 exec、ctx.fetch 需 net.fetch、ctx.http.sse 需 net.sse、ctx.process 需 process、ctx.state 需 state、ctx.config 需 global.config、ctx.events 需 events.read、ctx.ui 需 ui.ask、ctx.turn 需 turn.invoke、ctx.dispatch 需 dispatch.send、ctx.processes 需 process.supervise；未安装的模块链接期报 ERR_ACCESS_DENIED，不是运行期空值（§6.12）。信任规则（违反即装配失败，见根 allOf 的 x-trust-rule）：ui.ask/net.sse/exec/process/global.config 仅 builtin|verified；subagent.invoke/model.admin/plugin.admin/tool.discovery/turn.invoke/dispatch.send/process.supervise 仅 builtin。",
-          "x-consumer": "coreapp/stdlib: 装配期构造 stdlib.Config，按能力位安装 node:* 模块与 ctx 成员；engine: 受控调用审计与能力门禁"
+          "description": "能力词汇（§6.2）。2026-11-10 决策后它只做清单声明校验：名字必须在本枚举内、不能重复、不能被低于最低信任的信任级别声明；它不再决定宿主「装什么」——ctx.* 桥与 node:* 模块一律装上，链接期也不再因缺能力报 ERR_ACCESS_DENIED（§6.12）。信任规则（违反即装配失败，见根 allOf 的 x-trust-rule）：ui.ask/net.sse/exec/process/global.config 仅 builtin|verified；subagent.invoke/model.admin/plugin.admin/tool.discovery/turn.invoke/dispatch.send/process.supervise 仅 builtin。",
+          "x-consumer": "coreapp/plugins: 装配期校验名字与最低信任级别（ValidateCapabilityList）；不再据此裁剪模块或 ctx 成员"
         },
         "env": {
           "type": "array",
@@ -202,7 +202,7 @@
           "type": "array",
           "items": { "enum": ["backend.read", "frontend.script"] },
           "uniqueItems": true,
-          "description": "前端能力位（§6.2：前端 capabilities 控制预取、脚本、静态资源等）。backend.read：允许 SSR 渲染时预取只读动作结果注入 props.data.backend；frontend.script：允许加载 scripts 静态 JS，仅 builtin/verified（third-party 声明即装配失败，x-trust-rule T3；§6.9/§7.5）。",
+          "description": "前端能力声明（§6.2）：只做清单校验，不再按信任级别裁剪贡献面。backend.read：声明后 SSR 渲染时预取只读动作结果注入 props.data.backend；frontend.script：声明后允许加载 scripts 静态 JS，仍受 CSP script-src self 约束（third-party 声明即装配失败，x-trust-rule T3；§6.9/§7.5）。",
           "x-consumer": "gateway/render: 决定是否预取只读动作；gateway/web: 决定是否加载 scripts（受信任级别与 CSP script-src 'self' 双重约束）"
         },
         "client": {
@@ -466,7 +466,7 @@
     },
     "settings": {
       "type": "object",
-      "description": "插件自己设置项的 JSON Schema（draft 2020-12 子集，形态为普通对象）。基座不解释业务字段：配置按 [plugins.settings.<id>] 原样存储（附录 B：「插件设置由插件自己声明与校验；基座只按名存储」），设置项声明 schema 供基座渲染通用表单；设置不得改变 scope 根、密钥访问或能力授予（§1.5 边界）。",
+      "description": "插件自己设置项的 JSON Schema（draft 2020-12 子集，形态为普通对象）。基座不解释业务字段：配置按 [plugins.settings.<id>] 原样存储（附录 B：「插件设置由插件自己声明与校验；基座只按名存储」），设置项声明 schema 供基座渲染通用表单；设置不得改变 scope 根或密钥访问（§1.5 边界；审批策略已移除，没有授权面可改）。",
       "x-consumer": "gateway/web: 按本 schema 渲染通用设置表单；coreapp: 按名存储与透传给插件；adag verify: 核对设置项不触碰宿主权限面"
     }
   },
@@ -537,7 +537,7 @@
             "x-consumer": "coreapp: 信任规则 T3 条件（收敛 backend.capabilities 可声明集合）",
             "properties": {
               "capabilities": {
-                "x-consumer": "stdlib: 信任规则 T3（third-party 的 fs.read/fs.write/net.fetch/state 之外能力不予安装，声明即装配失败）",
+                "x-consumer": "coreapp/plugins: 信任规则 T3（third-party 声明 fs.read/fs.write/net.fetch/state/events.read 之外的能力即装配失败）",
                 "items": { "enum": ["fs.read", "fs.write", "net.fetch", "state", "events.read"] }
               }
             }

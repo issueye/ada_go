@@ -1,4 +1,4 @@
-package host
+package pluginapi
 
 // 同构渲染的性能基线（docs/20 P3-4）。不设 CI 阈值，先记录每次
 // 引擎加载 + 编译缓存命中 + renderToJSON 的墙钟与分配，供后续优化对比。
@@ -26,13 +26,13 @@ export default defineComponent({
 
 func benchRenderer(b *testing.B, iso bool) *Renderer {
 	b.Helper()
-	engine, err := os.ReadFile(filepath.Join("..", "..", "..", "gateway", "web", "static", "ada-render.js"))
+	engine, err := os.ReadFile(filepath.Join("..", "..", "gateway", "web", "static", "ada-render.js"))
 	if err != nil {
 		b.Fatalf("读取 ada-render.js: %v", err)
 	}
 	opts := []RendererOption{WithRenderEngineSource(string(engine))}
 	if iso {
-		ui, rerr := os.ReadFile(filepath.Join("..", "..", "..", "gateway", "web", "static", "ada-ui-iso.js"))
+		ui, rerr := os.ReadFile(filepath.Join("..", "..", "gateway", "web", "static", "ada-ui-iso.js"))
 		if rerr != nil {
 			b.Fatalf("读取 ada-ui-iso.js: %v", rerr)
 		}

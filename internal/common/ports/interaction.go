@@ -10,7 +10,7 @@ import (
 
 // InteractionRequest 是一次通用用户交互（confirm/select/input，05 §6.3 UIContext、
 // 03 §5.6；id/类型/标题/正文/选项/截止时间即 08 §8.2 evt.interaction.requested 的载荷，
-// 存储形状是 04 §5.7 interactions 表）。它不含审批语义——审批规则属于官方默认策略插件。
+// 存储形状是 04 §5.7 interactions 表）。它不含审批语义——审批策略已整体移除。
 type InteractionRequest struct {
 	// ID 由 IDGen.NewInteractionID 生成。
 	ID       string `json:"id"`

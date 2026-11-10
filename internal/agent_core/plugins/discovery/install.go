@@ -18,7 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // 安装上限（任务 M3 契约；docs 06 §6.9 的 50MB 解压上限）。
@@ -92,7 +92,7 @@ func InstallZip(zipPath, workspaceDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("discovery: 解压后缺少 plugin.json: %w", err)
 	}
-	m, err := plugins.LoadManifest(raw)
+	m, err := pluginapi.LoadManifest(raw)
 	if err != nil {
 		return "", fmt.Errorf("discovery: 插件清单非法: %w", err)
 	}

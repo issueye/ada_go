@@ -1,6 +1,6 @@
 // Package web 是 Gateway 的 SSR 宿主。M0 阶段它只携带一件契约：插槽宿主表。
 //
-// 插槽集合是稳定的兼容承诺（设计 7.2）：12 个名字与位置由 internal/agent_core/plugins 声明，
+// 插槽集合是稳定的兼容承诺（设计 7.2）：12 个名字与位置由 internal/common/pluginapi 声明，
 // 这里声明「谁消费它们」——每个插槽都必须有一个明确的宿主位置与空贡献回退，
 // adag verify 双向核对，任何一边多出或少掉都算漂移。
 package web
@@ -10,12 +10,12 @@ import (
 	"html/template"
 	"strconv"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // SlotHost 描述一个插槽在页面外壳中的宿主位置与回退行为。
 type SlotHost struct {
-	// Slot 是契约名，必须与 plugins.Slots() 逐字一致。
+	// Slot 是契约名，必须与 pluginapi.Slots() 逐字一致。
 	Slot string
 	// Template 是承载它的模板片段名（M2 落地 web/templates/）。
 	Template string
@@ -82,7 +82,7 @@ func HostFor(slot string) (SlotHost, bool) {
 // CheckSlotCoverage 双向核对契约注册表与宿主表：名字集合必须完全一致，
 // 且基座所有权标记不能互相矛盾（这是 adag verify 的一项检查）。
 func CheckSlotCoverage() error {
-	contract := plugins.Slots()
+	contract := pluginapi.Slots()
 	if len(contract) != len(slotHosts) {
 		return fmt.Errorf("web: 插槽数量不一致：契约 %d 个，宿主 %d 个", len(contract), len(slotHosts))
 	}
@@ -96,7 +96,7 @@ func CheckSlotCoverage() error {
 		}
 	}
 	for _, h := range slotHosts {
-		if !plugins.IsSlotName(h.Slot) {
+		if !pluginapi.IsSlotName(h.Slot) {
 			return fmt.Errorf("web: 宿主声明了未知插槽 %q", h.Slot)
 		}
 	}

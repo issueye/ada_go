@@ -2,7 +2,7 @@
 
 > 上级索引：[ada-go 设计文档](design.md)  
 > 对应章节：§7 SSR 前端  
-> 版本：0.2 · 2026-11-09
+> 版本：0.3 · 2026-11-10
 
 ## 7. SSR 前端
 
@@ -27,7 +27,7 @@
 
 ```
 ┌──────────────┬──────────────────────────────────────────────────────┐
-│ Sidebar 264  │ Topbar 54：会话标题 / 模式与审批档位 / 运行中 / 刷新 / 停止 │
+│ Sidebar 264  │ Topbar 54：会话标题 / 模式与模型 / 运行中 / 刷新 / 停止 │
 │              ├──────────────────────────────────────────────────────┤
 │ 品牌          │ Transcript（SSE 增量推送，阅读宽度 840–880）          │
 │ 新会话        │  用户消息 / 助手 Markdown / 思考与工具折叠            │
@@ -35,7 +35,7 @@
 │ 工作区树      │                                                      │
 │ 会话列表      │                                                      │
 │ 插件导航      ├──────────────────────────────────────────────────────┤
-│ 侧栏底部插槽  │ 交互托盘（审批 / 提问 / 排队，贴在 Composer 上方）    │
+│ 侧栏底部插槽  │ 交互托盘（确认 / 提问 / 排队，贴在 Composer 上方）      │
 │              │ Composer：输入卡 + 工具行（左/右插槽）                │
 │              │ ComposerAux：状态 / 遥测 / 快捷操作 / composer.footer │
 └──────────────┴──────────────────────────────────────────────────────┘
@@ -74,7 +74,7 @@
 
 宿主组件（Go 实现，既能在 `html/template` 里用，也能被 VNode 渲染器按名字调用；名字、DOM 与 class 以 a_da 组件库为准，全部是通用组件，不含业务语义）：
 
-`Button`、`IconButton`、`SendButton`、`Chip`、`TextField`、`Select`、`Tabs`、`Modal`、`ConfirmDialog`、`Disclosure`、`Panel`、`UserMessage`、`AssistantMessage`、`Notice`、`EmptyState`、`Composer`、`ComposerAux`、`ModelPicker`、`ModelTable`、`QueueTray`、`Form`、`ToolCall`、`TodoList`（TSX 名 `Todo`）、`Icon`、`Slot`；另有 `InteractionTray` 把审批/提问/排队归一化为同一托盘，`Markdown` 负责已清洗正文的最终排版。逐项映射见 [7.7.3](#773-组件与-dom)。
+`Button`、`IconButton`、`SendButton`、`Chip`、`TextField`、`Select`、`Tabs`、`Modal`、`ConfirmDialog`、`Disclosure`、`Panel`、`UserMessage`、`AssistantMessage`、`Notice`、`EmptyState`、`Composer`、`ComposerAux`、`ModelPicker`、`ModelTable`、`QueueTray`、`Form`、`ToolCall`、`TodoList`（TSX 名 `Todo`）、`Icon`、`Slot`；另有 `InteractionTray` 把确认/提问/排队归一化为同一托盘，`Markdown` 负责已清洗正文的最终排版。逐项映射见 [7.7.3](#773-组件与-dom)。
 
 TSX 侧通过虚拟模块引用：
 
@@ -177,11 +177,11 @@ data: {"threadId":"th_...","seq":128,"baseSeq":120,"ops":[
 
 Render Runtime **不安装 Node 兼容层**：没有 `process`、`Buffer`、`fs`、`fetch`、`crypto` 模块，也不加载后端 stdlib。TSX 只做纯计算与 VNode 组装；需要的数据一律通过 `props`（含只读动作预取）进入，副作用走动作桥。
 
-**只读数据投影**（`backend.read` 能力位，与只读动作预取同一个门禁）：
+**只读数据投影**（需在清单声明 `backend.read`，与只读动作预取同一个声明门禁）：
 
 - `data.providers`：供应商/模型目录与当前模型（不含 API Key）；这是通用配置视图，供应商 CRUD 归 `provider-admin` 系统插件。
 - `data.usage`：已移除。token/成本不再由基座注入；需要展示的插件声明 `backend.read` 动作，经 `events.read` 读取每轮原始行后自行聚合。
-- `data.interactions`：当前线程待答交互（审批/选择/输入）；这是内核交互投影，不属于业务语义。
+- `data.interactions`：当前线程待答交互（确认/选择/输入）；这是内核交互投影，不属于业务语义。
 - `app.csrf`：写表单的双提交 token（与基座模板里的隐藏字段同源）。
 
 写操作仍走基座通用路由（如 `POST /model/select` 切换当前模型）或插件动作；投影只读，不改 Core 状态。当前渲染运行时的组件实现面是 `Icon` / `TodoList` / `Select`，其它组件名虽在白名单里，执行会返回「尚未实现」——系统插件优先用原生标签 + `ada-*` class；下拉一律用 `Select` 组件（SSR 成 `<ada-select>`），不要写原生 `<select>`。
@@ -219,7 +219,7 @@ type SlotProps = {
   → 写动作 303 回页面；读动作返回 JSON
 ```
 
-- 动作不是工具：不进模型上下文，不受 `tool.beforeCall` 策略约束，但必须在界面上由用户点击确认，且受插件能力与 scope 约束；`exec` 能力仍受信任级别约束（仅 builtin/verified）。
+- 动作不是工具：不进模型上下文，也不经过任何执行前钩子（审批策略已移除），但必须在界面上由用户点击确认，且受 scope 约束。
 - 所有插件 HTTP 响应都带 `Cache-Control: no-store`（静态资源除外），避免跨用户缓存。
 
 #### 7.6.1 插件动态 HTTP API（route）
@@ -244,7 +244,7 @@ agent.route({ method: "POST", path: "/items", handler(req, ctx) { return { ok: t
 - 只允许 GET/POST，只接受 JSON 请求体与 JSON 返回值；`body` 只对 POST 透传，单次响应上限 64KB（宿主强制）。
 - 线程上下文：`adaAPI` 在 `/threads/{id}` 页面自动带 `?threadId=`（可用 `options.threadId` 覆盖，传 `null` 关闭）；Gateway 也接受从 Referer 的会话页路径推断。route 的 `ctx.state` 按该线程命名空间读写，没有线程上下文时是工作区级操作。
 - 路由按插件隔离；同一方法+路径重复登记在加载期报错；`/*` 是前缀匹配，`Path` 保留剩余段由插件自行解析（G-14，见 [11 §15.3](11-structure-roadmap.md)）。
-- 接口不是工具、不进模型上下文；能力位与 scope 仍由插件清单决定，`exec` 等能力不因此放开。
+- 接口不是工具、不进模型上下文；它只提供数据面，拿不到 `ctx.exec`/`ctx.fetch` 之外的新权限，scope 仍由宿主执行。
 - 浏览器侧统一用 `window.adaAPI(pluginId, path, { method, body })`（`api.js`，自动带 CSRF），不要手写 `/ext/...` URL。需要确认再执行的操作（删除等）用 `window.adaConfirm(message, onConfirm)`（复用共享 ConfirmDialog），不要用 `window.confirm`/`alert`/`prompt`。
 
 #### 7.6.2 SSE 路由
@@ -328,7 +328,7 @@ Go 组件库按 a_da 的组件清单实现，名字与输出对齐：
 | a_da 组件 | ada-go Go 组件 | 说明 |
 |---|---|---|
 | `Button` / `IconButton` / `SendButton` | 同名 | 变体、尺寸、`kind` 与焦点态一致；图标按钮强制 `aria-label` |
-| `Chip` | `Chip` | 模式、审批档位、模型；tone 与 caret 行为一致 |
+| `Chip` | `Chip` | 模式、模型；tone 与 caret 行为一致 |
 | `TextField` / `Select` | 同名 | `Select` 仍是组件化下拉，不是原生 `<select>`；插件页通过 `ssr:components` 的 `Select` 使用同一套 `<ada-select>`（触发器 + listbox + 隐藏 input） |
 | `Tabs` / `TabItem` | `Tabs` | 导航条归组件库，面板归页面；无 JS 时是真实链接 `?tab=` |
 | `Modal` / `ConfirmDialog` | 同名 | 必须用 `<ada-modal>`；不用原生 `<dialog>`、`window.confirm` |
@@ -343,7 +343,7 @@ Go 组件库按 a_da 的组件清单实现，名字与输出对齐：
 | `QueueTray` | `QueueTray` | 排队消息：提升、删除、清空 |
 | `Slot` | `Slot` | 插槽容器；贡献为空时回退 |
 | `TodoList`（TSX 名 `Todo`） | `TodoList`（TSX 名 `Todo`） | 计划步骤清单，复用 `.ada-todo__list*` 样式 |
-| —（a_da 分三个托盘） | `InteractionTray` | ada-go 唯一的基座新增壳组件：把审批/提问/排队归一化为同一托盘；审批与排队 in-flow，提问浮动，视觉与 a_da 一致 |
+| —（a_da 分三个托盘） | `InteractionTray` | ada-go 唯一的基座新增壳组件：把确认/提问/排队归一化为同一托盘；确认与排队 in-flow，提问浮动，视觉与 a_da 一致 |
 
 规则：
 
@@ -359,7 +359,7 @@ Go 组件库按 a_da 的组件清单实现，名字与输出对齐：
 沿用 a_da 的八条设计原则：操作面唯一、状态必须真实、阅读优先、布局稳定、渐进披露、可恢复、暗色等价、失败安全。
 
 - **状态颜色**：运行中用 warn（顶栏徽标）或品牌色（左侧呼吸条）；等待批准用 warn；待答复用 brand；失败/停止用 danger。完成态不加绿标；颜色不是唯一信号，同时有文字或图标。
-- **布局稳定**：审批/排队托盘位于 transcript 与 Composer 之间，出现时不覆盖输入框；提问卡浮在托盘区顶部，不占布局；浮层出现/消失不顶动对话流。
+- **布局稳定**：确认/排队托盘位于 transcript 与 Composer 之间，出现时不覆盖输入框；提问卡浮在托盘区顶部，不占布局；浮层出现/消失不顶动对话流。
 - **Composer**：Enter 发送、Shift+Enter 换行、IME 组合输入中不发送；空内容禁用发送；运行中允许继续输入，提交后按 `turn.steer` 排队并在当前步骤后送达（内容为空时不发）；图片 PNG/JPEG/WebP/GIF，单张 ≤8MB、最多 4 张。
 - **编辑并重发**：空闲会话里，用户消息气泡下方提供“编辑并重发”折叠入口（原生 `<details>`）；轮次未结束（运行中/等待答复）时不渲染，需先中止或作答。提交后 head 移到该消息的父节点（首条则清空 head），其后的当前分支被舍弃，旧分支只留在存储里；编辑框只改文字，原消息的图片自动沿用。
 - **工具卡**：执行中的耗时是活的（服务端 `startedAt` + 客户端每秒续走）；长输出只有一层折叠（10 行预览 + “展开全部”），展开后 420px 内滚；JSON 走等宽原文，其余按 Markdown。
@@ -406,7 +406,7 @@ Todo 卡片是插件的前端段，不是基座组件：`plugins/official/tools-
 - 宽度 1600 / 1280 / 1024 / 860 / 760 / 500 下无横向溢出；≤760px 侧栏为抽屉，汉堡唤出、遮罩/Esc 关闭。
 - Light/Dark 两套主题逐组件验收；正文 ≥4.5:1、大字/图标 ≥3:1；token 名与值与 a_da 基线逐项一致。
 - CSS 中不出现硬编码十六进制色、奇数尺寸、`dark:` 变体；模板不写内联 `style` 布局。
-- golden HTML 覆盖：对话流、工具卡、审批/提问/排队托盘、任务卡、空状态、错误页；`<details>`、真实链接与表单在禁用 JS 时仍可读可操作。
+- golden HTML 覆盖：对话流、工具卡、确认/提问/排队托盘、任务卡、空状态、错误页；`<details>`、真实链接与表单在禁用 JS 时仍可读可操作。
 - `prefers-reduced-motion`、键盘 Tab 顺序、焦点回归、`aria-live` 完成播报各有自动化或人工验收项。
 - 视觉回归以 a_da 的 `preview-p0.png` 等截图为对照基线；ada-go 不维护第二套截图口径。
 
@@ -434,8 +434,8 @@ Todo 卡片是插件的前端段，不是基座组件：`plugins/official/tools-
 
 两点边界：
 
-- `sender` 由宿主盖章（界面固定 `user:web`，插件由能力集填 `pluginId`），只用于审计、
-  限流与幂等命名空间，**不能作为授权绕过**；工具审批与能力位仍走原链路。
+- `sender` 由宿主盖章（界面固定 `user:web`，插件按清单 id 填 `pluginId`），只用于审计、
+  限流与幂等命名空间，**不能作为授权绕过**；工具执行仍走原链路（schema/scope/超时）。
 - 幂等键由调用方给：表单每次提交生成一个（双击只生效一次），定时任务用「任务 + 时刻」
   推导（同一分钟不重复触发）。调度层不会用「文本 + 线程」去猜，否则连发两条相同消息
   会被当成重试吞掉第二条。

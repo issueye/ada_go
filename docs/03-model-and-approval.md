@@ -1,8 +1,8 @@
-# 模型适配、审批与取消
+# 模型适配、审批（已移除）与取消
 
 > 上级索引：[ada-go 设计文档](design.md)  
-> 对应章节：§5.5 模型适配层、§5.6 审批（策略插件）与取消  
-> 版本：0.2 · 2026-11-09
+> 对应章节：§5.5 模型适配层、§5.6 审批（已移除）与取消  
+> 版本：0.3 · 2026-11-10
 
 ## 5.5 模型适配层
 
@@ -88,7 +88,7 @@ interface ProviderContext {
 }
 ```
 
-`http.sse` 是受信能力 `net.sse`，只授予 builtin/verified；TLS、代理、重定向、连接/空闲/总时长、取消与响应大小都由宿主执行，插件只做“SSE 事件 → 归一化增量”的协议映射。provider 的 `stream` 是长任务，不受 5s 脚本调用超时约束，受建连 15s、空闲 90s、总时长 30 分钟与轮次取消约束。provider 清单声明 `backend.capabilities: ["net.sse"]` 与 `secrets`，模型名、`base_url` 与参数由产品配置传入，插件不读全局配置。`ProviderDef` 的 `protocol` / `defaultBaseUrl` / `secretName` / `displayName` / `authHeader` / `authPrefix` / `apiVersionHeader` / `apiVersion` 用于系统 provider 插件声明播种默认供应商、密钥提示与代发 `/models` 的元数据；基座不写死具体供应商的端点、密钥名或鉴权头。`ModelClient` 是内核 seam：默认实现由 provider 插件桥接，替换实现必须在装配期注入并通过流式契约测试。
+`http.sse` 在历次设计里记为受信能力 `net.sse`；能力位已不再决定「装什么」（2026-11-10 决策），只剩清单层的声明校验：声明 `net.sse` 要求 builtin/verified，第三方声明即装配失败。TLS、代理、重定向、连接/空闲/总时长、取消与响应大小都由宿主执行，插件只做“SSE 事件 → 归一化增量”的协议映射。provider 的 `stream` 是长任务，不受 5s 脚本调用超时约束，受建连 15s、空闲 90s、总时长 30 分钟与轮次取消约束。provider 清单声明 `backend.capabilities: ["net.sse"]` 与 `secrets`，模型名、`base_url` 与参数由产品配置传入，插件不读全局配置。`ProviderDef` 的 `protocol` / `defaultBaseUrl` / `secretName` / `displayName` / `authHeader` / `authPrefix` / `apiVersionHeader` / `apiVersion` 用于系统 provider 插件声明播种默认供应商、密钥提示与代发 `/models` 的元数据；基座不写死具体供应商的端点、密钥名或鉴权头。`ModelClient` 是内核 seam：默认实现由 provider 插件桥接，替换实现必须在装配期注入并通过流式契约测试。
 
 Node 兼容层**不安装** `node:http`/`node:https`/`node:net`/`node:tls`/`node:dns`。provider 只能用 `ctx.http.sse`/`ctx.http.json`，不能用全局 `fetch` 或自建连接；这样代理、证书、重定向、DNS 与超时都只有一个执行点。完整模块矩阵见 [6.12](12-node-compat.md#612-node-兼容原生库)。
 
@@ -99,58 +99,44 @@ Node 兼容层**不安装** `node:http`/`node:https`/`node:net`/`node:tls`/`node
 - 终止信号必须显式：`[DONE]`、`message_stop`、`response.completed`。**EOF 不等于完成**；没有终止信号的 EOF 是错误。
 - 超时分层：建连 15s、空闲 90s（可通过 `ADAG_STREAM_IDLE` 调整）、总时长 30 分钟；取消贯穿到 HTTP 请求。
 - 重试：由基座的 `ModelClient` 包装层负责，provider 只实现单次流；只对 429/5xx/网络错误且在**首个增量之前**重试，指数退避 + 抖动，最多 3 次，尊重 `Retry-After`。已经开始输出后不自动重试，避免重复内容。
-- 图片输入：模型能力位 + 产品能力位双门；任一说 false 就拒绝，而不是悄悄丢图。
+- 图片输入：模型能力位 + 产品能力位双门；任一说 false 就拒绝，而不是悄悄丢图。（这里的「能力位」是模型与产品声明的**功能开关**，与已移除的插件安装能力位不是一回事。）
 - 用量：每次请求记录 input/output/cache token；有价的模型显示估算成本，没有价就只显示 token。
 
-## 5.6 审批（策略插件）与取消
+## 5.6 审批（已移除）与取消
 
-审批参考 pi：**内核不内置审批策略**，只提供 `tool.beforeCall` 钩子与通用 `ctx.ui`；由策略插件决定何时询问、如何裁决。工具描述符只有 `Access` 效果声明，没有 `approval` 字段。
+> 状态：**审批策略已整体移除**（2026-11-10 决策，口径见 `AGENTS.md`）。本节保留通用交互桥与取消，不再描述任何审批规则。
+
+**基座不内置审批，也不再失败关闭**：`tool.beforeCall` 钩子点位与 `policy-default` 插件都已删除，工具描述符只有 `Access` 效果声明（供 UI 徽标与审计），没有 `approval` 字段。写/执行工具**直接执行**，没有「没有策略插件就拒绝」的判定。
 
 **执行前链路**：
 
 ```
-schema/scope 校验 → tool.beforeCall 钩子链（按 priority）
-  → 策略插件可调用 ctx.ui.confirm/select/input
-  → 用户响应 / 超时 / 无 UI
-  → 钩子返回 allow 或 deny
-  → 执行 或 生成 denied 回执
+schema/scope 校验 → 执行 → 结构化回执 → tool.afterCall 钩子（只观察）
 ```
 
-- 任何插件都可以在 `tool.beforeCall` 返回 `deny`；`replace`（替换参数后重新校验）与 `abort` 仅 builtin。
-- `ctx.ui` 是能力 `ui.ask`，只授予 builtin/verified 插件；第三方不能弹窗，避免钓鱼。
-- 钩子等待用户响应时占用该线程的调用队列，但不阻塞其他线程；同一线程最多一个待处理交互。
-- 超时解析为 `timeout`；SSE 断线、无 UI 解析为 `unavailable`。两者都必须被策略插件当作拒绝，基座不会替它放行。
-- 一次交互恰好解析一次，状态为 `accepted | denied | cancelled | timeout | unavailable`；待处理交互持久化，Gateway/Core 重启后可恢复。
+- 钩子动作只剩 `observe` / `note` / `replace` / `abort`；`deny` 等级已删除，不存在「执行前拒绝」的钩子路径。
+- `ctx.ui`（能力 `ui.ask`，仅 builtin/verified）仍存在：它是**通用交互原语**（confirm/select/input/form/notify），供 `tools-ask` 这类插件在工具内主动提问，不是审批开关。
+- 工具可以自己返回 `denied` 回执（`ReceiptDenied`）：那是工具实现的业务决定，基座不做判定，轮次继续。
+
+**通用交互桥（仍然生效）**：
+
+- 交互请求经 `ctx.ui` → 宿主 → Gateway `InteractionTray`，持久化到 `interactions` 表；等待用户响应时占用该线程的调用队列，但不阻塞其他线程；同一线程最多一个待处理交互。
+- 超时解析为 `timeout`；SSE 断线、无 UI 解析为 `unavailable`。基座不替调用方解释这两种结果的业务含义，调用方必须自己按拒绝方向处理。
+- 一次交互恰好解析一次，状态为 `accepted | denied | cancelled | timeout | unavailable`；Gateway/Core 重启后可恢复。
 - `interaction.respond` 必须同时匹配 `threadId` 与 `requestId`，且只接受 `pending`、未过期的请求；重复响应幂等返回首次结果，过期/伪造返回错误且不改变状态。
-
-**系统插件 `policy-default`（TS，builtin，`role=tool-policy`）**：
-
-| 模式 | 读 | 写 | 执行/网络 |
-|---|---|---|---|
-| `readonly` | 允许 | 拒绝 | 拒绝 |
-| `ask`（默认） | 允许 | 询问 | 询问 |
-| `auto` | 允许 | 允许（scope 内） | 询问 |
-| `full` | 允许 | 允许（scope 内） | 允许（仍记录审计） |
-
-- 它订阅 `tool.beforeCall`，根据 `Access`、工具名、参数与线程/工作区 scope 决定是否 `ctx.ui.confirm`；询问时显示完整命令、cwd、原始参数（转义后）与风险说明。策略插件是系统插件，可替换为更严格/更宽松的实现；基座只保留失败关闭门禁。
-- 模式是策略插件自己的设置，不是基座配置；换一个策略插件就换一套规则，引擎不感知。
-- 非交互模式（CLI/print）没有 UI：`policy-default` 对写/执行/网络直接拒绝。
-- 拒绝理由作为工具结果回给模型（`denied: ...`），界面卡片显示 `denied`，不显示成成功。
-
-**没有策略插件时**：基座对 `write`/`exec`/`network` 工具返回 `denied: no policy`；只读工具不受影响。产品门禁 `adag verify` 要求启用这类工具时必须至少有一个 `role=tool-policy` 插件；运行期禁用策略插件后，写/执行工具立即变成拒绝，而不是裸奔。
 
 **与 pi 的对应关系**：
 
 | pi | ada-go | 说明 |
 |---|---|---|
-| `pi.on("tool_call")` | `agent.on("tool.beforeCall")` | 同为执行前钩子；ada-go 的 `replace` 仅 builtin，`deny` 对所有插件开放 |
+| `pi.on("tool_call")` | 无对应点位（`tool.beforeCall` 已删除） | ada-go 执行前没有可阻塞的钩子；需要前置约束请在工具实现里做 |
 | `ctx.ui.confirm/select/input` | `ctx.ui.*` | 同一组通用交互原语，不含审批语义 |
-| `ctx.hasUI` | `ctx.ui.available` | 无 UI 时由策略插件决定失败方向 |
-| `{ block: true, reason }` | `{ action: "deny", reason }` | 拒绝变成 `denied` 工具回执，轮次继续 |
-| 扩展自己实现 permission gate | `policy-default` / 其他 `tool-policy` 插件 | 基座没有规则；换插件即换策略 |
+| `ctx.hasUI` | `ctx.ui.available` | 无 UI 时由调用方决定方向 |
+| `{ block: true, reason }` | `ReceiptDenied`（工具自己返回） | 拒绝由工具实现决定，不是基座钩子 |
+| 扩展自己实现 permission gate | 系统插件自己的工具实现 | 基座没有规则，也没有策略插件角色 |
 | TUI 选择器（进程内） | Gateway `InteractionTray` + `interactions` 表 | 跨进程，因此交互必须持久化、可恢复、可幂等响应 |
 
-差别只在进程边界：pi 的扩展与 TUI 同进程，可以直接阻塞；ada-go 的钩子在 Core、界面在 Gateway，所以 `ctx.ui` 必须经过通用交互桥，并把待处理请求写入 `interactions` 表，才能做到断线/重启后恢复。基座增加的只有这条桥，不是审批规则。
+差别只在进程边界：pi 的扩展与 TUI 同进程，可以直接阻塞；ada-go 的交互在 Core、界面在 Gateway，所以 `ctx.ui` 必须经过通用交互桥，并把待处理请求写入 `interactions` 表，才能做到断线/重启后恢复。
 
 **取消**：
 

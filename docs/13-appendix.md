@@ -2,7 +2,7 @@
 
 > 上级索引：[ada-go 设计文档](design.md)  
 > 对应章节：附录 A 插件示例、附录 B 配置示例、附录 C 与参考实现的差异、附录 D 术语  
-> 版本：0.2 · 2026-11-09
+> 版本：0.3 · 2026-11-10
 
 ## 附录 A：插件示例
 
@@ -178,16 +178,15 @@ memory_limit_mb = 64
 call_timeout = "5s"
 hook_timeout = "200ms"
 
-# Node 兼容层的默认边界；能力位仍由各插件清单决定
+# Node 兼容层的默认边界；模块表已不再按清单能力位裁剪
 [plugins.node]
 env_allow = ["PATH", "HOME", "TMPDIR"]  # process.env 白名单；密钥不在此列
 timer_max = 256                          # 每 Runtime 未完成定时器
 io_max_mb = 16                           # 单次 fs 读写 / fetch 响应体
 exec_max_kb = 4096                       # child_process 捕获上限
 
-# 插件设置由插件自己声明与校验；基座只按名存储
-[plugins.settings.policy-default]
-mode = "ask"               # readonly | ask | auto | full
+# 插件设置由插件自己声明与校验；基座只按名存储（审批策略插件已删除，这里只是通用形状）
+[plugins.settings.example-plugin]
 interaction_timeout = "300s"
 
 [gateway]
@@ -213,12 +212,12 @@ plugin_route_kb = 64
 | 插件内存 | 无上限 | 每 Runtime 64MB + 超时重建 |
 | 协议 | 多处手写、83 方法 | JSON 单源 + 生成常量、34 方法 |
 | 会话 | 文件 | SQLite append-only DAG |
-| 审批 | 当前实现移除 | 基座只提供交互桥；策略插件（`tool.beforeCall` + `ctx.ui`）+ UI 托盘，无策略则失败关闭 |
+| 审批 | 当前实现移除 | **已移除**（2026-11-10 决策）：没有审批策略插件、没有执行前钩子、也没有失败关闭；保留通用交互桥 `ctx.ui` 与 UI 托盘 |
 | UI 与设计系统 | Black Swan token、`ada-*` 组件、DOM 与交互 | **直接复用同一套** token/CSS/DOM/插槽与交互；只把 Askama/Rust 换成 `html/template`/Go，不另造视觉语言 |
 | 前端耦合 | OOB DOM id 较深 | 事件带 target/seq，断序快照 |
 | 进程模型 | 网关 + 节点 | 网关 + Core，单二进制两角色 |
 | 插件贡献 | 装配期结算 | 同左，双代原子重载 |
-| Node 库 | 无（Boa，无 Node 兼容层） | Node API 形状子集：Go 原生库、按能力安装；无原生扩展/libuv/运行时 npm |
+| Node 库 | 无（Boa，无 Node 兼容层） | Node API 形状子集：Go 原生库、整套模块；无原生扩展/libuv/运行时 npm |
 | 工具实现 | 内置 Rust + TS | 基座零工具；系统与第三方都是 TS 插件，同一 moejs 引擎与注册契约 |
 | 可观测 | 日志/诊断点 | 日志 + 审计 + 指标 + `adag doctor` |
 
@@ -231,13 +230,13 @@ plugin_route_kb = 64
 - **贡献**：插件在装配期登记的工具、提示词、动作、路由、钩子、插槽、页面。
 - **快照/补丁**：Core 事件的两种形态；快照用于首次加载与断序，补丁用于增量。
 - **回执**：工具执行的结构化结果，分 `content`（模型）与 `details`（界面）。
-- **能力位**：插件清单声明、宿主安装的最小权限集合。
+- **能力位**：插件清单里的能力词汇（名字、最低信任级别）；**不再决定宿主装什么**（2026-11-10 决策）。
 - **装配期**：插件加载并提交贡献的阶段；运行期不可再改变目录。
 - **交互请求（Interaction）**：插件经 `ctx.ui` 发起、基座路由到 Gateway 托盘的 confirm/select/input；有 `pending/accepted/denied/cancelled/timeout/unavailable` 六种状态。
-- **策略插件**：声明 `role=tool-policy`、订阅 `tool.beforeCall` 并自行决定放行规则的插件；基座不内置审批规则。
-- **失败方向**：拿不到判定依据时安全判定往哪边倒；默认关闭。
+- **策略插件**：曾经的角色（声明 `role=tool-policy`、订阅 `tool.beforeCall`）；**该角色与点位都已删除**（2026-11-10 决策），基座与插件都没有审批规则。
+- **失败方向**：拿不到用户答复时由调用方决定往哪边倒（`timeout`/`unavailable`）；基座不再替插件做「默认拒绝」。
 - **Node 兼容层**：以 `node:*` 名字暴露给插件的 API 子集；不是 Node 运行时，无原生扩展、libuv 与运行时 npm 解析。
-- **原生库**：用 Go 实现、按 Node 模块名暴露的内置模块；所有 IO 经宿主回调与能力位，不直接触达系统。
+- **原生库**：用 Go 实现、按 Node 模块名暴露的内置模块；所有 IO 经宿主回调，不直接触达系统。
 - **设计令牌（`--ph-*`）**：a_da 的 Black Swan 颜色与语义变量，定义在 `design/tokens.css`；ada-go 原样复用，组件只引用变量、不写死色值。
 - **`ada-*` 组件库**：a_da 的服务端渲染组件 DOM/class 约定；ada-go 用 Go 组件输出同一结构，插件插槽与页面共享同一套样式。
 

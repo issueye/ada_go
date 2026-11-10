@@ -9,12 +9,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 func TestBlockCacheStoreAndKey(t *testing.T) {
 	b := &Bridge{blockCache: map[string]blockCacheEntry{}}
-	entry := blockEntry{u: &unit{manifest: &plugins.Manifest{ID: "demo", Version: "0.1.0"}}}
+	entry := blockEntry{u: &unit{manifest: &pluginapi.Manifest{ID: "demo", Version: "0.1.0"}}}
 	r := httptest.NewRequest("GET", "/threads/th_1", nil)
 	data := json.RawMessage(`{"a":1}`)
 	key := b.blockCacheKey(entry, r, "demo/card", "b1", data)
@@ -37,7 +37,7 @@ func TestBlockCacheStoreAndKey(t *testing.T) {
 	}
 
 	// 键区分 renderer / block id / 插件版本 / 路由 / data。
-	bumped := blockEntry{u: &unit{manifest: &plugins.Manifest{ID: "demo", Version: "0.2.0"}}}
+	bumped := blockEntry{u: &unit{manifest: &pluginapi.Manifest{ID: "demo", Version: "0.2.0"}}}
 	for name, got := range map[string]string{
 		"renderer": b.blockCacheKey(entry, r, "demo/other", "b1", data),
 		"block":    b.blockCacheKey(entry, r, "demo/card", "b2", data),

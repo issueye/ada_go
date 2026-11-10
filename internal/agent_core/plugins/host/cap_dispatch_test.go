@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 func TestDispatchContextMember(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapDispatchSend)
+	caps := testCaps(t, pluginapi.TrustBuiltin, pluginapi.CapDispatchSend)
 	src := `
 export default function (agent) {
   agent.registerTool({
@@ -74,7 +74,7 @@ export default function (agent) {
 
 // 未注入控制面（CLI 直连、无网关）时 ctx.dispatch 不存在，而不是给个假实现。
 func TestDispatchAbsentWithoutBridge(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapDispatchSend)
+	caps := testCaps(t, pluginapi.TrustBuiltin, pluginapi.CapDispatchSend)
 	src := `
 export default function (agent) {
   agent.registerTool({
@@ -100,7 +100,7 @@ export default function (agent) {
 
 // 非 builtin 拿不到桥（能力位的信任约束仍生效）。
 func TestDispatchRequiresBuiltin(t *testing.T) {
-	caps := testCaps(t, plugins.TrustVerified, plugins.CapDispatchSend)
+	caps := testCaps(t, pluginapi.TrustVerified, pluginapi.CapDispatchSend)
 	src := `
 export default function (agent) {
   agent.registerTool({
@@ -128,7 +128,7 @@ export default function (agent) {
 
 // 参数校验在宿主侧完成：空 text / 非法 mode / 超长都抛固定错误码。
 func TestDispatchValidatesArgs(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapDispatchSend)
+	caps := testCaps(t, pluginapi.TrustBuiltin, pluginapi.CapDispatchSend)
 	src := `
 export default function (agent) {
   agent.registerTool({
@@ -179,7 +179,7 @@ export default function (agent) {
 
 // 桥返回的业务失败要上浮（cron 用它记 thread_busy），而不是被吞成成功。
 func TestDispatchSurfacesBridgeError(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapDispatchSend)
+	caps := testCaps(t, pluginapi.TrustBuiltin, pluginapi.CapDispatchSend)
 	src := `
 export default function (agent) {
   agent.registerTool({

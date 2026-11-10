@@ -24,7 +24,7 @@ description: 插件手册：创建、检查、修改、移除 ada-go 插件，�
 用户说「创建一个 XXX 插件」时按这个顺序做：
 
 1. 先与用户确认插件 id：3-64 位小写字母/数字/连字符，字母开头（如 `todo-sync`）。
-2. 调用 `create_plugin` 工具（access=write，会经过审批确认）：
+2. 调用 `create_plugin` 工具（access=write）：
    - `id` 必填；`name`/`description` 用一句话概括用途；
    - `entry` 由你编写：ESM JavaScript，必须 `export default function register(agent)`；
    - **每个工具的字段名固定**：`agent.registerTool({ name, description,
@@ -32,12 +32,12 @@ description: 插件手册：创建、检查、修改、移除 ada-go 插件，�
      `execute(args, ctx)` 返回 `{ content: [{ type: "text", text: "..." }] }`。
      不要用 MCP 风格的 `inputSchema` / `run`（宿主只认 `parameters` + `execute`，
      写错会在安装预检被拒绝并回滚）；
-   - `ctx.state.get/set` 返回 **Promise**，要 `async/await`；state 声明在
-     `capabilities: ["state"]` 里；
+   - `ctx.state.get/set` 返回 **Promise**，要 `async/await`；习惯上在
+     `capabilities: ["state"]` 里声明（声明只是清单词汇，不再决定宿主装不装）；
    - 入口由宿主直接执行：不经过 TypeScript/npm 编译——不要用 enum/namespace/import=，
      不要 import npm 包；类型注解可以写；
    - `capabilities` 只能从 `fs.read` / `fs.write` / `state` / `net.fetch` 里选，默认空；
-     只读工具不需要任何能力。
+     能力位不再决定装什么（2026-11-10 决策），`ctx.*` 桥一律可用，声明越界仍会装配失败。
 3. 安装位置是全局插件根 `~/.adago/plugins/<id>/`（生产统一路径，跨工作区共享）；
    与随包插件或已有插件同 id 会被宿主拒绝。安装时会做一次完整装配预检，
    入口形状/注册调用不合法会直接失败并回滚，不会留下坏插件。
@@ -95,7 +95,7 @@ description: 插件手册：创建、检查、修改、移除 ada-go 插件，�
 
 需要**结构化展示**时用：用量/成本摘要、排行榜、占比、趋势、清单、状态卡。
 不要在 Markdown 里手写 HTML（会被清洗），也不要用 ASCII 表格硬凑图表。
-动态块是**只读展示**：没有事件、没有表单、不能触发工具或审批。
+动态块是**只读展示**：没有事件、没有表单、不能触发工具。
 
 不需要用户先写插件：`coding` 与 `headless` 产品默认启用 `token-usage` 与
 `ui-charts`，直接用它们的 renderer 即可。
@@ -160,7 +160,7 @@ description: 插件手册：创建、检查、修改、移除 ada-go 插件，�
 3. 一条回答 ≤ **8** 块；一块只表达一个主题，不要把整段回答塞进 `data`。
 4. 始终写 `fallback` 纯文本：宿主不支持、插件禁用或渲染失败时显示它。
 5. 块是**展示**不是指令：`data` 里的文本不会影响你的后续行为或工具调用。
-6. 交互（表单、按钮、审批）不要放进块；走工具调用或插件页面。
+6. 交互（表单、按钮、确认）不要放进块；走工具调用或插件页面。
 7. `renderer` 必须来自你**确知存在且已启用**的插件；编造的 id 会降级成提示卡。
 
 ### 3.5 宿主强制限额
@@ -221,7 +221,7 @@ h1–h6 ul ol li span strong em code small a table thead tbody tr th td caption 
 
 ## 6. 移除 / 修改
 
-- 移除：用户说「移除/卸载 XXX 插件」时调用 `remove_plugin`（access=write，过审批）：
+- 移除：用户说「移除/卸载 XXX 插件」时调用 `remove_plugin`（access=write）：
   删除发现优先级最高的插件目录并清理启停条目；随包插件拒绝移除。
   移除后转告用户在插件页点「重载」生效；已加载的代服务到重载为止，不影响在途轮次。
 - 修改：全局插件在 `~/.adago/plugins/<id>/`（在工作区 fs 工具的边界之外），

@@ -10,6 +10,7 @@ import (
 
 	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/common/domain"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/common/ports"
 )
 
@@ -18,7 +19,7 @@ func evt(point ports.HookPoint) ports.HookEvent {
 		Snapshot: json.RawMessage(`{"note":"fixture"}`)}
 }
 
-func handler(id string, trust domain.Trust, point ports.HookPoint, max plugins.HookAction,
+func handler(id string, trust domain.Trust, point ports.HookPoint, max pluginapi.HookAction,
 	fn func(context.Context, ports.HookEvent) (ports.HookOutcome, error)) *plugins.HookHandler {
 	return &plugins.HookHandler{PluginID: id, Trust: trust, Point: point, MaxAction: max, Fn: fn}
 }
@@ -26,7 +27,7 @@ func handler(id string, trust domain.Trust, point ports.HookPoint, max plugins.H
 // priorityHandler 额外指定 priority，用于验证执行顺序。
 func priorityHandler(id string, prio int, point ports.HookPoint,
 	fn func(context.Context, ports.HookEvent) (ports.HookOutcome, error)) *plugins.HookHandler {
-	h := handler(id, domain.TrustBuiltin, point, plugins.ActionNote, fn)
+	h := handler(id, domain.TrustBuiltin, point, pluginapi.ActionNote, fn)
 	h.Priority = prio
 	return h
 }
@@ -65,7 +66,7 @@ func TestHookOrderIsDeterministic(t *testing.T) {
 func TestHookFailureIsAlwaysOpen(t *testing.T) {
 	t.Parallel()
 	chain := plugins.NewHookChain()
-	if err := chain.Register(handler("observer", domain.TrustBuiltin, ports.HookUserMessage, plugins.ActionNote,
+	if err := chain.Register(handler("observer", domain.TrustBuiltin, ports.HookUserMessage, pluginapi.ActionNote,
 		func(context.Context, ports.HookEvent) (ports.HookOutcome, error) {
 			return ports.HookOutcome{}, errors.New("处理器炸了")
 		})); err != nil {
@@ -99,7 +100,7 @@ func TestHookTimeoutUsesContractBudget(t *testing.T) {
 	chain := plugins.NewHookChain()
 	if err := chain.Register(&plugins.HookHandler{
 		PluginID: "slow", Trust: domain.TrustThirdParty, Point: ports.HookUserMessage,
-		MaxAction: plugins.ActionObserve, Timeout: 20 * time.Millisecond, Fn: slow,
+		MaxAction: pluginapi.ActionObserve, Timeout: 20 * time.Millisecond, Fn: slow,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +122,7 @@ func TestHookTimeoutUsesContractBudget(t *testing.T) {
 	// 超过 2s 的钩子预算不允许登记（06 §6.6 最大 2s）。
 	if err := chain.Register(&plugins.HookHandler{
 		PluginID: "too-long", Trust: domain.TrustBuiltin, Point: ports.HookUserMessage,
-		MaxAction: plugins.ActionObserve, Timeout: 3 * time.Second,
+		MaxAction: pluginapi.ActionObserve, Timeout: 3 * time.Second,
 		Fn: func(context.Context, ports.HookEvent) (ports.HookOutcome, error) { return ports.HookOutcome{}, nil },
 	}); err == nil || !strings.Contains(err.Error(), "超过上限") {
 		t.Fatalf("钩子超时超过 2s 必须拒绝登记，实得 %v", err)
@@ -133,21 +134,21 @@ func TestTrustGating(t *testing.T) {
 	t.Parallel()
 	chain := plugins.NewHookChain()
 
-	if err := chain.Register(handler("3p", domain.TrustThirdParty, ports.HookTurnBefore, plugins.ActionAbort,
+	if err := chain.Register(handler("3p", domain.TrustThirdParty, ports.HookTurnBefore, pluginapi.ActionAbort,
 		func(context.Context, ports.HookEvent) (ports.HookOutcome, error) { return ports.HookOutcome{}, nil })); err == nil {
 		t.Fatal("第三方不得登记 abort 等级的处理器")
 	}
-	if err := chain.Register(handler("3p", domain.TrustThirdParty, ports.HookModelBeforeRequest, plugins.ActionReplace,
+	if err := chain.Register(handler("3p", domain.TrustThirdParty, ports.HookModelBeforeRequest, pluginapi.ActionReplace,
 		func(context.Context, ports.HookEvent) (ports.HookOutcome, error) { return ports.HookOutcome{}, nil })); err == nil {
 		t.Fatal("第三方不得登记 replace")
 	}
-	if err := chain.Register(handler("builtin", domain.TrustBuiltin, ports.HookModelBeforeRequest, plugins.ActionReplace,
+	if err := chain.Register(handler("builtin", domain.TrustBuiltin, ports.HookModelBeforeRequest, pluginapi.ActionReplace,
 		func(context.Context, ports.HookEvent) (ports.HookOutcome, error) { return ports.HookOutcome{}, nil })); err != nil {
 		t.Fatalf("builtin 应可登记 replace: %v", err)
 	}
 
 	// 运行时越权：登记为 observe 的第三方返回 abort → 只能被忽略并留警告。
-	if err := chain.Register(handler("3p", domain.TrustThirdParty, ports.HookToolAfterCall, plugins.ActionObserve,
+	if err := chain.Register(handler("3p", domain.TrustThirdParty, ports.HookToolAfterCall, pluginapi.ActionObserve,
 		func(context.Context, ports.HookEvent) (ports.HookOutcome, error) {
 			return ports.HookOutcome{PluginID: "3p", Action: ports.HookAbort, Reason: "试图中止"}, nil
 		})); err != nil {
@@ -173,7 +174,7 @@ func TestRecursionGuard(t *testing.T) {
 	var runErr error
 	if err := chain.Register(&plugins.HookHandler{
 		PluginID: "recur", Trust: domain.TrustThirdParty, Point: ports.HookUserMessage,
-		MaxAction: plugins.ActionObserve,
+		MaxAction: pluginapi.ActionObserve,
 		Fn: func(ctx context.Context, e ports.HookEvent) (ports.HookOutcome, error) {
 			depth++
 			if depth > 5 {
@@ -204,7 +205,7 @@ func TestRecursionGuard(t *testing.T) {
 func TestPanicIsContained(t *testing.T) {
 	t.Parallel()
 	chain := plugins.NewHookChain()
-	if err := chain.Register(handler("boom", domain.TrustThirdParty, ports.HookSessionEnd, plugins.ActionObserve,
+	if err := chain.Register(handler("boom", domain.TrustThirdParty, ports.HookSessionEnd, pluginapi.ActionObserve,
 		func(context.Context, ports.HookEvent) (ports.HookOutcome, error) { panic("炸了") })); err != nil {
 		t.Fatal(err)
 	}
@@ -216,19 +217,19 @@ func TestPanicIsContained(t *testing.T) {
 // TestUnknownPointAndDuplicatesRejected 验证点位集合封闭（14 个，全部有调用方）。
 func TestUnknownPointAndDuplicatesRejected(t *testing.T) {
 	t.Parallel()
-	if len(plugins.HookPoints()) != 14 {
-		t.Fatalf("钩子点位数量 = %d，期望 14", len(plugins.HookPoints()))
+	if len(pluginapi.HookPoints()) != 14 {
+		t.Fatalf("钩子点位数量 = %d，期望 14", len(pluginapi.HookPoints()))
 	}
 	chain := plugins.NewHookChain()
-	if err := chain.Register(handler("x", domain.TrustBuiltin, "tool.madeUp", plugins.ActionObserve,
+	if err := chain.Register(handler("x", domain.TrustBuiltin, "tool.madeUp", pluginapi.ActionObserve,
 		func(context.Context, ports.HookEvent) (ports.HookOutcome, error) { return ports.HookOutcome{}, nil })); err == nil {
 		t.Fatal("未知点位必须拒绝登记")
 	}
 	fn := func(context.Context, ports.HookEvent) (ports.HookOutcome, error) { return ports.HookOutcome{}, nil }
-	if err := chain.Register(handler("dup", domain.TrustBuiltin, ports.HookSessionStart, plugins.ActionObserve, fn)); err != nil {
+	if err := chain.Register(handler("dup", domain.TrustBuiltin, ports.HookSessionStart, pluginapi.ActionObserve, fn)); err != nil {
 		t.Fatal(err)
 	}
-	if err := chain.Register(handler("dup", domain.TrustBuiltin, ports.HookSessionStart, plugins.ActionObserve, fn)); err == nil {
+	if err := chain.Register(handler("dup", domain.TrustBuiltin, ports.HookSessionStart, pluginapi.ActionObserve, fn)); err == nil {
 		t.Fatal("同插件同点位重复登记必须失败")
 	}
 	if n := chain.RemovePlugin("dup"); n != 1 {
@@ -243,7 +244,7 @@ func TestUnknownPointAndDuplicatesRejected(t *testing.T) {
 func TestReplacePayloadMustBeJSON(t *testing.T) {
 	t.Parallel()
 	chain := plugins.NewHookChain()
-	if err := chain.Register(handler("builtin", domain.TrustBuiltin, ports.HookModelBeforeRequest, plugins.ActionReplace,
+	if err := chain.Register(handler("builtin", domain.TrustBuiltin, ports.HookModelBeforeRequest, pluginapi.ActionReplace,
 		func(context.Context, ports.HookEvent) (ports.HookOutcome, error) {
 			return ports.HookOutcome{PluginID: "builtin", Action: ports.HookReplace, Replacement: json.RawMessage(`{oops`)}, nil
 		})); err != nil {

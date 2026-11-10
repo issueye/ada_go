@@ -8,30 +8,30 @@ import (
 	"testing"
 
 	"github.com/adag/ada-go/app"
-	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // routeFixtureScript 是一个只登记 HTTP 路由的后端插件夹具。
-func routeFixtureScript() host.Script {
+func routeFixtureScript() pluginapi.Script {
 	src := "export default function (agent) {\n" +
 		"  agent.route({ method: 'POST', path: '/echo', handler: function (req) {\n" +
 		"    return { method: req.method, path: req.path, query: req.query, body: req.body };\n" +
 		"  } });\n" +
 		"  agent.route('GET', '/items/*', function (req) { return { prefix: req.path }; });\n" +
 		"}"
-	m := &plugins.Manifest{
+	m := &pluginapi.Manifest{
 		ID: "route-fixture", Name: "路由夹具", Version: "0.1.0",
-		APIVersion: plugins.APIVersionMajor, Trust: plugins.TrustBuiltin,
-		Backend: &plugins.Backend{Entry: "index.js"},
+		APIVersion: pluginapi.APIVersionMajor, Trust: pluginapi.TrustBuiltin,
+		Backend: &pluginapi.Backend{Entry: "index.js"},
 	}
-	return host.Script{Manifest: m, EntryName: host.EntryScheme + "://route-fixture/index.js", Source: src}
+	return pluginapi.Script{Manifest: m, EntryName: pluginapi.EntryScheme + "://route-fixture/index.js", Source: src}
 }
 
 func assembleRouteFixture(t *testing.T) *app.Assembly {
 	t.Helper()
 	p := testProduct(t, "route-fixture")
-	asm, err := app.Assemble(context.Background(), p, []host.Script{routeFixtureScript()},
+	asm, err := app.Assemble(context.Background(), p, []pluginapi.Script{routeFixtureScript()},
 		app.Deps{Context: host.Context{Workspace: t.TempDir()}})
 	if err != nil {
 		t.Fatalf("app.Assemble: %v", err)
@@ -91,13 +91,13 @@ func TestPluginRouteCarriesThreadIntoState(t *testing.T) {
 	src := "export default function (agent) {\n" +
 		"  agent.route('GET', '/state', function (req, ctx) { return ctx.state.get('k'); });\n" +
 		"}"
-	m := &plugins.Manifest{
+	m := &pluginapi.Manifest{
 		ID: "route-state", Name: "状态路由夹具", Version: "0.1.0",
-		APIVersion: plugins.APIVersionMajor, Trust: plugins.TrustBuiltin,
-		Backend: &plugins.Backend{Entry: "index.js", Capabilities: []plugins.Capability{plugins.CapState}},
+		APIVersion: pluginapi.APIVersionMajor, Trust: pluginapi.TrustBuiltin,
+		Backend: &pluginapi.Backend{Entry: "index.js", Capabilities: []pluginapi.Capability{pluginapi.CapState}},
 	}
-	script := host.Script{Manifest: m, EntryName: host.EntryScheme + "://route-state/index.js", Source: src}
-	asm, err := app.Assemble(ctx, testProduct(t, "route-state"), []host.Script{script}, app.Deps{Context: hc})
+	script := pluginapi.Script{Manifest: m, EntryName: pluginapi.EntryScheme + "://route-state/index.js", Source: src}
+	asm, err := app.Assemble(ctx, testProduct(t, "route-state"), []pluginapi.Script{script}, app.Deps{Context: hc})
 	if err != nil {
 		t.Fatalf("app.Assemble: %v", err)
 	}
@@ -126,13 +126,13 @@ func TestPluginHTTPAPIStream(t *testing.T) {
 		"  } });\n" +
 		"  agent.route('GET', '/plain', function () { return { ok: true }; });\n" +
 		"}"
-	m := &plugins.Manifest{
+	m := &pluginapi.Manifest{
 		ID: "route-sse", Name: "SSE 路由夹具", Version: "0.1.0",
-		APIVersion: plugins.APIVersionMajor, Trust: plugins.TrustBuiltin,
-		Backend: &plugins.Backend{Entry: "index.js"},
+		APIVersion: pluginapi.APIVersionMajor, Trust: pluginapi.TrustBuiltin,
+		Backend: &pluginapi.Backend{Entry: "index.js"},
 	}
-	script := host.Script{Manifest: m, EntryName: host.EntryScheme + "://route-sse/index.js", Source: src}
-	asm, err := app.Assemble(ctx, testProduct(t, "route-sse"), []host.Script{script}, app.Deps{Context: host.Context{Workspace: t.TempDir()}})
+	script := pluginapi.Script{Manifest: m, EntryName: pluginapi.EntryScheme + "://route-sse/index.js", Source: src}
+	asm, err := app.Assemble(ctx, testProduct(t, "route-sse"), []pluginapi.Script{script}, app.Deps{Context: host.Context{Workspace: t.TempDir()}})
 	if err != nil {
 		t.Fatalf("app.Assemble: %v", err)
 	}

@@ -16,9 +16,9 @@ import (
 	"github.com/adag/ada-go/app"
 	"github.com/adag/ada-go/internal/agent_core/cli"
 	"github.com/adag/ada-go/internal/agent_core/conformance/testkit"
-	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 	"github.com/adag/ada-go/internal/common/adapters/sqlite"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/plugins/official"
 )
 
@@ -80,7 +80,7 @@ func ckptSession(t *testing.T, workspace, dataDir string, steps ...[]testkit.Scr
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := plugins.LoadManifest([]byte(ckptFixtureManifest))
+	manifest, err := pluginapi.LoadManifest([]byte(ckptFixtureManifest))
 	if err != nil {
 		t.Fatal(err)
 	}

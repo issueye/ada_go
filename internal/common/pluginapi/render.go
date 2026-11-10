@@ -1,6 +1,6 @@
-package host
+package pluginapi
 
-// 本文件是 M4 的 TSX → VNode 渲染宿主（设计 7.3、7.5、9.5）：
+// 本文件是 M4 的 TSX → VNode 渲染器（设计 7.3、7.5、9.5）：
 //
 //	esbuild transform（--jsx=transform --jsx-factory=jsx --jsx-fragment=Fragment）
 //	→ moejs 一次性 Runtime（预置全局 jsx / Fragment 与虚拟模块 ssr:components）
@@ -14,7 +14,8 @@ package host
 //   - 每次渲染一个新 Runtime：失败即丢弃，不跨请求复用脚本值（6.4 的 JSON 边界）；
 //   - 超时用 Runtime.Interrupt 投递（脚本不可 catch，INV-8），失败必须返回错误。
 //
-// 本文件只新增渲染能力，不改变 host.go / load.go / runtime.go 的既有语义。
+// 渲染器与插件宿主解耦：它只依赖 moejs + esbuild + spec/vnode 形状，不依赖 Runtime/桥；
+// 因此放在 common，Gateway 可以直接用它而不必 import internal/agent_core/plugins/host。
 
 import (
 	"crypto/sha256"
@@ -32,7 +33,15 @@ import (
 
 // 渲染预算（7.3：插槽 100ms、页面 300ms；数值与 internal/gateway/frontend 的
 // SlotTimeoutMS/PageTimeoutMS 一致，由装配方显式传入覆盖，这里的默认只兜底）。
+//
+// 渲染 Runtime 与插件 Runtime 共用同一份内存与装配预算（7.5、09 §9.5）：这些常量
+// 不能从插件宿主传进来（那会让 common 反向依赖 agent_core），因此在这里声明同值常量。
 const (
+	// MemoryLimit 是渲染 Runtime 的脚本堆上限（64MB，与插件 Runtime 同一份上限）。
+	MemoryLimit = 64 << 20
+	// DefaultCallTimeout 是建 Runtime / 编译链的装配预算（5s）。
+	DefaultCallTimeout = 5 * time.Second
+
 	DefaultRenderSlotTimeout = 100 * time.Millisecond
 	DefaultRenderPageTimeout = 300 * time.Millisecond
 	// maxRenderVNodeBytes 是模板返回值（VNode JSON）的上限（7.3 x-limits maxOutputBytes）。
@@ -244,14 +253,14 @@ func (r *Renderer) RenderIsland(src string, props json.RawMessage) (json.RawMess
 // 客户端挂载前用 hydrateStores 恢复。
 func (r *Renderer) RenderIslandWithStores(src string, props json.RawMessage) (json.RawMessage, json.RawMessage, error) {
 	if len(r.engineSrc) == 0 {
-		return nil, nil, errors.New("host: 未配置 ada-render 引擎源，同构渲染不可用")
+		return nil, nil, errors.New("pluginapi: 未配置 ada-render 引擎源，同构渲染不可用")
 	}
 	return r.renderIsland(src, props, r.islandTime)
 }
 
 func (r *Renderer) renderIsland(src string, props json.RawMessage, budget time.Duration) (json.RawMessage, json.RawMessage, error) {
 	if len(src) == 0 {
-		return nil, nil, errors.New("host: 同构渲染模板源码为空")
+		return nil, nil, errors.New("pluginapi: 同构渲染模板源码为空")
 	}
 	js, err := r.compileIsland(src)
 	if err != nil {
@@ -275,7 +284,7 @@ func (r *Renderer) renderIsland(src string, props json.RawMessage, budget time.D
 	}
 	fn, ok := rt.Export("default")
 	if !ok || !engine.IsCallable(fn) {
-		return nil, nil, errors.New("host: 同构模板缺少 `export default` 组件定义")
+		return nil, nil, errors.New("pluginapi: 同构模板缺少 `export default` 组件定义")
 	}
 
 	started := time.Now()
@@ -286,29 +295,29 @@ func (r *Renderer) renderIsland(src string, props json.RawMessage, budget time.D
 	if len(props) > 0 {
 		v, perr := rt.ParseJSON(props)
 		if perr != nil {
-			return nil, nil, fmt.Errorf("host: 同构 props 不是合法 JSON: %w", perr)
+			return nil, nil, fmt.Errorf("pluginapi: 同构 props 不是合法 JSON: %w", perr)
 		}
 		arg = v
 	}
 	res, err := rt.CallFunction(fn, moejs.Undefined(), arg)
 	if err != nil {
 		if isRenderTimeout(err) {
-			return nil, nil, fmt.Errorf("host: 同构渲染超出预算 %v（实际墙钟 %v）", budget, time.Since(started))
+			return nil, nil, fmt.Errorf("pluginapi: 同构渲染超出预算 %v（实际墙钟 %v）", budget, time.Since(started))
 		}
 		return nil, nil, r.renderError("同构模板执行", err)
 	}
 	if res.IsObject() {
 		r0 := rt.Realm()
 		if then, terr := r0.GetMethod(res, r0.KeyFromGoString("then")); terr == nil && engine.IsCallable(then) {
-			return nil, nil, errors.New("host: 同构渲染返回了 Promise（渲染必须同步）")
+			return nil, nil, errors.New("pluginapi: 同构渲染返回了 Promise（渲染必须同步）")
 		}
 	}
 	raw, err := rt.AppendJSON(nil, res)
 	if err != nil {
-		return nil, nil, fmt.Errorf("host: 同构渲染结果不可 JSON 序列化: %w", err)
+		return nil, nil, fmt.Errorf("pluginapi: 同构渲染结果不可 JSON 序列化: %w", err)
 	}
 	if len(raw) > maxRenderVNodeBytes {
-		return nil, nil, fmt.Errorf("host: 同构渲染结果 %d 字节，超过 VNode 输出上限 %d", len(raw), maxRenderVNodeBytes)
+		return nil, nil, fmt.Errorf("pluginapi: 同构渲染结果 %d 字节，超过 VNode 输出上限 %d", len(raw), maxRenderVNodeBytes)
 	}
 
 	stores := json.RawMessage("{}")
@@ -319,7 +328,7 @@ func (r *Renderer) renderIsland(src string, props json.RawMessage, budget time.D
 		}
 		storeRaw, serr := rt.AppendJSON(nil, storeRes)
 		if serr != nil {
-			return nil, nil, fmt.Errorf("host: store 快照不可 JSON 序列化: %w", serr)
+			return nil, nil, fmt.Errorf("pluginapi: store 快照不可 JSON 序列化: %w", serr)
 		}
 		stores = json.RawMessage(storeRaw)
 	}
@@ -330,11 +339,11 @@ func (r *Renderer) renderIsland(src string, props json.RawMessage, budget time.D
 func (r *Renderer) linkIsland(pluginJS string) (*moejs.Module, error) {
 	engine, err := moejs.Compile("ada:render", r.engineModuleSource())
 	if err != nil {
-		return nil, fmt.Errorf("host: ada-render 模块编译失败: %w", err)
+		return nil, fmt.Errorf("pluginapi: ada-render 模块编译失败: %w", err)
 	}
 	plugin, err := moejs.Compile("adag:entry", pluginJS)
 	if err != nil {
-		return nil, fmt.Errorf("host: 同构插件模块编译失败: %w", err)
+		return nil, fmt.Errorf("pluginapi: 同构插件模块编译失败: %w", err)
 	}
 	const wrapper = `import def from "adag:entry";
 import { renderToJSON, collectStoreSnapshots } from "ada:render";
@@ -343,7 +352,7 @@ export function __adaStores() { return collectStoreSnapshots(); }
 `
 	entry, err := moejs.Compile("adag:island", wrapper)
 	if err != nil {
-		return nil, fmt.Errorf("host: 同构入口编译失败: %w", err)
+		return nil, fmt.Errorf("pluginapi: 同构入口编译失败: %w", err)
 	}
 	modules := map[string]*moejs.Module{
 		"ada:render": engine,
@@ -352,7 +361,7 @@ export function __adaStores() { return collectStoreSnapshots(); }
 	if len(r.isoSrc) > 0 {
 		iso, ierr := moejs.Compile("ada:ui", r.isoModuleSource())
 		if ierr != nil {
-			return nil, fmt.Errorf("host: ada-ui-iso 模块编译失败: %w", ierr)
+			return nil, fmt.Errorf("pluginapi: ada-ui-iso 模块编译失败: %w", ierr)
 		}
 		modules["ada:ui"] = iso
 	}
@@ -360,11 +369,11 @@ export function __adaStores() { return collectStoreSnapshots(); }
 		if m, ok := modules[spec]; ok {
 			return m, nil
 		}
-		return nil, fmt.Errorf("host: 同构模板 import %q 不可用：只允许 ada:render 与 ada:ui（原生标签可自由使用）", spec)
+		return nil, fmt.Errorf("pluginapi: 同构模板 import %q 不可用：只允许 ada:render 与 ada:ui（原生标签可自由使用）", spec)
 	})
 	linked, lerr := moejs.Link(entry, resolver)
 	if lerr != nil {
-		return nil, fmt.Errorf("host: 同构模块链接失败: %w", lerr)
+		return nil, fmt.Errorf("pluginapi: 同构模块链接失败: %w", lerr)
 	}
 	return linked, nil
 }
@@ -444,12 +453,12 @@ func (r *Renderer) compileIsland(src string) (string, error) {
 	if len(result.Errors) > 0 {
 		e := result.Errors[0]
 		if e.Location != nil {
-			return "", fmt.Errorf("host: 同构 TSX 编译失败: %s（%s:%d）", e.Text, e.Location.File, e.Location.Line)
+			return "", fmt.Errorf("pluginapi: 同构 TSX 编译失败: %s（%s:%d）", e.Text, e.Location.File, e.Location.Line)
 		}
-		return "", fmt.Errorf("host: 同构 TSX 编译失败: %s", e.Text)
+		return "", fmt.Errorf("pluginapi: 同构 TSX 编译失败: %s", e.Text)
 	}
 	if len(result.Code) == 0 {
-		return "", errors.New("host: 同构 TSX 编译没有产物")
+		return "", errors.New("pluginapi: 同构 TSX 编译没有产物")
 	}
 	js := string(result.Code)
 	r.mu.Lock()
@@ -468,7 +477,7 @@ func (r *Renderer) compileIsland(src string) (string, error) {
 // 固定成本算进插件预算。两者都用 Runtime.Interrupt 投递，脚本不可 catch（INV-8）。
 func (r *Renderer) render(src string, props json.RawMessage, budget time.Duration) (json.RawMessage, error) {
 	if len(src) == 0 {
-		return nil, errors.New("host: 渲染模板源码为空")
+		return nil, errors.New("pluginapi: 渲染模板源码为空")
 	}
 	js, err := r.compile(src)
 	if err != nil {
@@ -495,7 +504,7 @@ func (r *Renderer) render(src string, props json.RawMessage, budget time.Duratio
 	}
 	fn, ok := rt.Export("default")
 	if !ok || !engine.IsCallable(fn) {
-		return nil, errors.New("host: 渲染模板缺少 `export default function (props) {}`（7.3）")
+		return nil, errors.New("pluginapi: 渲染模板缺少 `export default function (props) {}`（7.3）")
 	}
 
 	// 调用段：这次模板函数的执行按插槽/页面预算计。
@@ -507,14 +516,14 @@ func (r *Renderer) render(src string, props json.RawMessage, budget time.Duratio
 	if len(props) > 0 {
 		v, perr := rt.ParseJSON(props)
 		if perr != nil {
-			return nil, fmt.Errorf("host: 渲染 props 不是合法 JSON: %w", perr)
+			return nil, fmt.Errorf("pluginapi: 渲染 props 不是合法 JSON: %w", perr)
 		}
 		arg = v
 	}
 	res, err := rt.CallFunction(fn, moejs.Undefined(), arg)
 	if err != nil {
 		if isRenderTimeout(err) {
-			return nil, fmt.Errorf("host: 渲染模板执行超出预算 %v（实际墙钟 %v，7.3 超时上限）", budget, time.Since(started))
+			return nil, fmt.Errorf("pluginapi: 渲染模板执行超出预算 %v（实际墙钟 %v，7.3 超时上限）", budget, time.Since(started))
 		}
 		return nil, r.renderError("模板执行", err)
 	}
@@ -522,21 +531,21 @@ func (r *Renderer) render(src string, props json.RawMessage, budget time.Duratio
 	if res.IsObject() {
 		r0 := rt.Realm()
 		if then, terr := r0.GetMethod(res, r0.KeyFromGoString("then")); terr == nil && engine.IsCallable(then) {
-			return nil, errors.New("host: 渲染模板返回了 Promise（渲染必须同步，7.3）")
+			return nil, errors.New("pluginapi: 渲染模板返回了 Promise（渲染必须同步，7.3）")
 		}
 	}
 	raw, err := rt.AppendJSON(nil, res)
 	if err != nil {
-		return nil, fmt.Errorf("host: 渲染结果不可 JSON 序列化: %w", err)
+		return nil, fmt.Errorf("pluginapi: 渲染结果不可 JSON 序列化: %w", err)
 	}
 	if len(raw) > maxRenderVNodeBytes {
-		return nil, fmt.Errorf("host: 渲染结果 %d 字节，超过 VNode 输出上限 %d（7.3）", len(raw), maxRenderVNodeBytes)
+		return nil, fmt.Errorf("pluginapi: 渲染结果 %d 字节，超过 VNode 输出上限 %d（7.3）", len(raw), maxRenderVNodeBytes)
 	}
 	return json.RawMessage(raw), nil
 }
 
 // errRenderTimeout 是渲染看门狗投递给 Runtime.Interrupt 的哨兵（脚本不可 catch）。
-var errRenderTimeout = errors.New("host: 渲染超出预算")
+var errRenderTimeout = errors.New("pluginapi: 渲染超出预算")
 
 // isRenderTimeout 报告 err 是否为看门狗投递的中断（脚本不可 catch，INV-8）。
 func isRenderTimeout(err error) bool {
@@ -552,35 +561,35 @@ func isRenderTimeout(err error) bool {
 // renderError 把 Runtime 的失败分类成人话：中断（超时）单独点名。
 func (r *Renderer) renderError(stage string, err error) error {
 	if isRenderTimeout(err) {
-		return fmt.Errorf("host: 渲染%s超出预算（7.3 超时上限）", stage)
+		return fmt.Errorf("pluginapi: 渲染%s超出预算（7.3 超时上限）", stage)
 	}
 	var exc *moejs.Exception
 	if errors.As(err, &exc) {
-		return fmt.Errorf("host: 渲染%s抛出 %s: %s", stage, exc.Name(), exc.Message())
+		return fmt.Errorf("pluginapi: 渲染%s抛出 %s: %s", stage, exc.Name(), exc.Message())
 	}
-	return fmt.Errorf("host: 渲染%s失败: %w", stage, err)
+	return fmt.Errorf("pluginapi: 渲染%s失败: %w", stage, err)
 }
 
 // link 编译并链接入口（含 ssr:components 依赖）。相对/未知 import 在这里失败。
 func (r *Renderer) link(entrySrc string) (*moejs.Module, error) {
 	entry, err := moejs.Compile("adag:render-entry", entrySrc)
 	if err != nil {
-		return nil, fmt.Errorf("host: 渲染模块编译失败: %w", err)
+		return nil, fmt.Errorf("pluginapi: 渲染模块编译失败: %w", err)
 	}
 	comp, err := moejs.Compile(renderComponentsModule, r.compMod)
 	if err != nil {
-		return nil, fmt.Errorf("host: 渲染组件桥编译失败: %w", err)
+		return nil, fmt.Errorf("pluginapi: 渲染组件桥编译失败: %w", err)
 	}
 	modules := map[string]*moejs.Module{renderComponentsModule: comp}
 	resolver := moejs.Resolver(func(_ moejs.Referrer, spec string) (*moejs.Module, error) {
 		if m, ok := modules[spec]; ok {
 			return m, nil
 		}
-		return nil, fmt.Errorf("host: 渲染模板 import %q 不可用：渲染模板是单文件 ESM，宿主组件只能来自 %s（7.3、6.10）", spec, renderComponentsModule)
+		return nil, fmt.Errorf("pluginapi: 渲染模板 import %q 不可用：渲染模板是单文件 ESM，宿主组件只能来自 %s（7.3、6.10）", spec, renderComponentsModule)
 	})
 	linked, lerr := moejs.Link(entry, resolver)
 	if lerr != nil {
-		return nil, fmt.Errorf("host: 渲染模块链接失败: %w", lerr)
+		return nil, fmt.Errorf("pluginapi: 渲染模块链接失败: %w", lerr)
 	}
 	return linked, nil
 }
@@ -610,12 +619,12 @@ func (r *Renderer) compile(src string) (string, error) {
 	if len(result.Errors) > 0 {
 		e := result.Errors[0]
 		if e.Location != nil {
-			return "", fmt.Errorf("host: TSX 编译失败: %s（%s:%d）", e.Text, e.Location.File, e.Location.Line)
+			return "", fmt.Errorf("pluginapi: TSX 编译失败: %s（%s:%d）", e.Text, e.Location.File, e.Location.Line)
 		}
-		return "", fmt.Errorf("host: TSX 编译失败: %s", e.Text)
+		return "", fmt.Errorf("pluginapi: TSX 编译失败: %s", e.Text)
 	}
 	if len(result.Code) == 0 {
-		return "", errors.New("host: TSX 编译没有产物")
+		return "", errors.New("pluginapi: TSX 编译没有产物")
 	}
 	js := string(result.Code)
 

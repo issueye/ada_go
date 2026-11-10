@@ -89,7 +89,7 @@
 | `browser_call` | write | 长尾工具透传：`cookies` / `files` / `frames` / `downloads` / `dialogs` |
 
 `browser_call` 故意只开放这五个工具：`eval` 与 `script` 必须走 `browser_eval` /
-`browser_script`，否则可以用 `write` 级的透传绕过 `exec` 级的审批。
+`browser_script`，否则可以用 `write` 级的透传绕过 `exec` 级的约束。
 
 页面 dialog 是同步调用，不能事后逐条点；先用
 `browser_call {tool:"dialogs", args:{action:"accept", text:"yes"}}` 设策略，再触发会弹框的动作。
@@ -144,11 +144,12 @@
 这时不要把结果当成完整内容，改用更小的 `filter`/`scope`/`limit` 或分批读取。
 注意它和工具自己的 `max_chars` 截断是两回事：后者会在正文里写“已按 max_chars 截断”。
 
-## 审批与边界
+## 交互确认与边界
 
-- `read` 工具（状态、快照、正文、截图、抓包、控制台）不受审批策略影响。
-- `write` / `exec` 工具按 `policy-default` 的当前模式走：`ask` 每次确认、`auto` 自动放行写、
-  `readonly` 全部拒绝。`parallelTools=1`，同一线程内浏览器动作是串行的。
+> 审批策略已整体移除（2026-11-10 决策）：基座没有执行前钩子，也没有策略插件。下面的确认是工具实现自己的选择。
+
+- `read` 工具（状态、快照、正文、截图、抓包、控制台）不询问。
+- `write` / `exec` 工具由插件自己的工具实现决定是否先 `ctx.ui.confirm`；`parallelTools=1`，同一线程内浏览器动作是串行的。
 - 浏览器租约 120s 空闲自动释放；用户点 `Take over` 后写操作返回 `control_locked`，
   读操作照常。任务结束或交接时调用 `browser_control {action:"release"}`。
 - 单次工具预算 120s（产品 `policies.toolTimeoutMs`）：`browser_script` 默认 60s、

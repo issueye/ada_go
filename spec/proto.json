@@ -230,7 +230,7 @@
         "threadId": { "type": "string" },
         "runId": { "type": "string" },
         "callId": { "type": "string", "description": "由工具调用发起时关联的 callId；省略表示非工具发起" },
-        "pluginId": { "type": "string", "description": "发起交互的插件（如 policy-default、tools-ask）" },
+        "pluginId": { "type": "string", "description": "发起交互的插件（如 tools-ask）" },
         "kind": { "type": "string", "enum": ["confirm", "select", "input"] },
         "title": { "type": "string" },
         "body": { "type": "string" },
@@ -442,7 +442,7 @@
     },
     "ProductPolicy": {
       "type": "object",
-      "description": "运行参数（8.6 policies）：引擎并发、单工具超时、可选墙钟/token 上限、循环检测阈值；不含审批规则（审批属 policy-* 插件自己的设置）。作为 workspace.updatePolicy 入参时缺省字段保持当前值。",
+      "description": "运行参数（8.6 policies）：引擎并发、单工具超时、可选墙钟/token 上限、循环检测阈值；不含审批规则（审批策略已整体移除）。作为 workspace.updatePolicy 入参时缺省字段保持当前值。",
       "additionalProperties": false,
       "properties": {
         "toolTimeoutMs": { "type": "integer", "minimum": 0, "default": 120000, "description": "单工具默认超时" },
@@ -628,7 +628,7 @@
     {
       "name": "workspace.updatePolicy",
       "group": "workspace",
-      "summary": "更新运行参数：资源上限、循环检测、当前模型等（审批策略由插件自己管理）",
+      "summary": "更新运行参数：资源上限、循环检测、当前模型等（不含审批规则）",
       "direction": "gateway->core",
       "since": "1.0",
       "idempotent": true,

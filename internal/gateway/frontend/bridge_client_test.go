@@ -7,22 +7,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
-	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 func TestNewUnitRequiresClientAsset(t *testing.T) {
-	m := &plugins.Manifest{
-		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
-		Trust: plugins.TrustBuiltin,
-		Frontend: &plugins.Frontend{
+	m := &pluginapi.Manifest{
+		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: pluginapi.APIVersionMajor,
+		Trust: pluginapi.TrustBuiltin,
+		Frontend: &pluginapi.Frontend{
 			Client: "client.js",
-			Slots: []plugins.SlotContribution{{
+			Slots: []pluginapi.SlotContribution{{
 				Slot: "chat.corner", Template: "slot.tsx",
 			}},
 		},
 	}
-	script := host.Script{
+	script := pluginapi.Script{
 		Manifest:     m,
 		Bundle:       map[string]string{"slot.tsx": "export default function () { return null; }"},
 		StaticAssets: map[string][]byte{},

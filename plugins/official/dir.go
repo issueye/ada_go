@@ -20,8 +20,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // Scripts 加载后端官方插件（目录由 pluginsRoot 解析）。
@@ -142,7 +142,7 @@ func loadAllFromDir(root string, frontend bool) ([]host.Script, error) {
 		if err != nil {
 			return nil, fmt.Errorf("official: 读取 %s/plugin.json 失败: %w", id, err)
 		}
-		m, err := plugins.LoadManifest(raw)
+		m, err := pluginapi.LoadManifest(raw)
 		if err != nil {
 			return nil, fmt.Errorf("official: 官方插件 %s 的清单非法: %w", id, err)
 		}
@@ -173,7 +173,7 @@ func loadAllFromDir(root string, frontend bool) ([]host.Script, error) {
 	return out, nil
 }
 
-func loadBackendDir(dir string, m *plugins.Manifest) (host.Script, error) {
+func loadBackendDir(dir string, m *pluginapi.Manifest) (host.Script, error) {
 	src, err := os.ReadFile(filepath.Join(dir, "dist", "index.js"))
 	if err != nil {
 		return host.Script{}, fmt.Errorf("official: 缺少 %s/dist/index.js（先运行 node plugins/official/build.mjs）: %w", dir, err)
@@ -187,7 +187,7 @@ func loadBackendDir(dir string, m *plugins.Manifest) (host.Script, error) {
 	}
 	return host.Script{
 		Manifest:     m,
-		EntryName:    host.EntryScheme + "://" + m.ID + "/index.js",
+		EntryName:    pluginapi.EntryScheme + "://" + m.ID + "/index.js",
 		Source:       string(src),
 		StaticAssets: assets,
 		Root:         absDir(dir),
@@ -195,7 +195,7 @@ func loadBackendDir(dir string, m *plugins.Manifest) (host.Script, error) {
 	}, nil
 }
 
-func loadFrontendDir(dir string, m *plugins.Manifest) (host.Script, error) {
+func loadFrontendDir(dir string, m *pluginapi.Manifest) (host.Script, error) {
 	bundle := map[string]string{}
 	tmpls, err := filepath.Glob(filepath.Join(dir, "*.tsx"))
 	if err != nil {

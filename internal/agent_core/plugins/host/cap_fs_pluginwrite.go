@@ -2,7 +2,7 @@ package host
 
 // 写插件目录：ctx.fs.writeText 除工作区外，还允许写「已安装插件」目录
 // （<home>/.adago/plugins/<id>/…）。这是为了让 agent 能维护工作区外的插件源码
-// （block 模板、Schema、入口），仍然逐次走 write 审批。
+// （block 模板、Schema、入口），由路径判定控制写入范围。
 //
 // 边界：
 //   - 只认已存在的插件目录（目录名 = id、含 plugin.json）；不能在插件根新建插件；
@@ -16,7 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // pluginWriteRoots 返回允许写插件文件的两个根：全局安装目录。
@@ -35,7 +35,7 @@ func pluginWriteRoots() []string {
 //   - 第三方插件只能写自己的插件目录；builtin 系统插件可维护其它插件源码；
 //   - 任何插件都不能写 plugin.json（信任/能力声明）与 dist/（可执行产物）；
 //   - 符号链接仍必须落在该插件目录内。
-func allowPluginWrite(roots []string, target, pluginID string, trust plugins.Trust) (string, error) {
+func allowPluginWrite(roots []string, target, pluginID string, trust pluginapi.Trust) (string, error) {
 	abs, err := filepath.Abs(target)
 	if err != nil {
 		return "", err
@@ -57,10 +57,10 @@ func allowPluginWrite(roots []string, target, pluginID string, trust plugins.Tru
 			return "", fmt.Errorf("不能直接写插件根目录 %s（只能写 <id>/ 下已安装插件的文件）", baseForLog(rootAbs))
 		}
 		id := parts[0]
-		if !plugins.ValidID(id) {
+		if !pluginapi.ValidID(id) {
 			return "", fmt.Errorf("插件目录名 %q 非法", id)
 		}
-		if id != pluginID && trust != plugins.TrustBuiltin {
+		if id != pluginID && trust != pluginapi.TrustBuiltin {
 			return "", fmt.Errorf("第三方插件只能写自己的插件目录 %s，不能写 %s", pluginID, id)
 		}
 		inside := strings.Join(parts[1:], "/")

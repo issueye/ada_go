@@ -1,3 +1,8 @@
+// Package plugins 是插件运行期的内核侧实现：钩子链与插件状态摘要。
+//
+// 契约（清单结构、能力词汇、钩子点位、插槽、Script、TSX 渲染器）在
+// internal/common/pluginapi：它们同时被 Gateway 的前端渲染消费，放在 common 才能让
+// gateway 不依赖插件宿主（2026-11-10 的分层收敛）。本包只剩执行侧。
 package plugins
 
 import (
@@ -10,6 +15,7 @@ import (
 	"time"
 
 	"github.com/adag/ada-go/internal/common/domain"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/common/ports"
 )
 
@@ -22,7 +28,7 @@ type HookHandler struct {
 	// Priority 越小越先执行；同级按 PluginID 稳定排序，保证回放确定性（06 §6.5）。
 	Priority int
 	// MaxAction 是该插件清单声明的最高动作等级（未声明点位调用时拒绝，6.2）。
-	MaxAction HookAction
+	MaxAction pluginapi.HookAction
 	// Timeout 为 0 时取 DefaultHookTimeout（200ms，最大 2s）。
 	Timeout time.Duration
 	Fn      func(ctx context.Context, evt ports.HookEvent) (ports.HookOutcome, error)
@@ -54,14 +60,14 @@ func (c *HookChain) Register(h *HookHandler) error {
 	if h == nil || h.Fn == nil {
 		return fmt.Errorf("plugins: 钩子处理器为空（INV-2 不允许 nil 处理器）")
 	}
-	point, ok := LookupHookPoint(string(h.Point))
+	point, ok := pluginapi.LookupHookPoint(string(h.Point))
 	if !ok {
 		return fmt.Errorf("plugins: 未知钩子点位 %q", h.Point)
 	}
 	if h.MaxAction == "" {
-		h.MaxAction = ActionObserve
+		h.MaxAction = pluginapi.ActionObserve
 	}
-	if HookAction(h.MaxAction).Rank() < 0 {
+	if pluginapi.HookAction(h.MaxAction).Rank() < 0 {
 		return fmt.Errorf("plugins: 点位 %q 的未知动作等级 %q", h.Point, h.MaxAction)
 	}
 	if !point.AllowsAction(h.MaxAction, h.Trust == domain.TrustBuiltin) {
@@ -111,7 +117,7 @@ func (c *HookChain) RemovePlugin(pluginID string) int {
 
 // AllowedActions 实现端口：点位允许集合 ∩ 该信任级别可用集合。
 func (c *HookChain) AllowedActions(point ports.HookPoint, trust domain.Trust) []ports.HookAction {
-	p, ok := LookupHookPoint(string(point))
+	p, ok := pluginapi.LookupHookPoint(string(point))
 	if !ok {
 		return nil
 	}
@@ -137,7 +143,7 @@ func (c *HookChain) Run(ctx context.Context, evt ports.HookEvent) (ports.HookVer
 	if evt.Point == "" {
 		return verdict, fmt.Errorf("plugins: 钩子事件缺少点位")
 	}
-	point, ok := LookupHookPoint(string(evt.Point))
+	point, ok := pluginapi.LookupHookPoint(string(evt.Point))
 	if !ok {
 		return verdict, fmt.Errorf("plugins: 未知钩子点位 %q", evt.Point)
 	}
@@ -178,7 +184,7 @@ func (c *HookChain) Run(ctx context.Context, evt ports.HookEvent) (ports.HookVer
 		case ports.HookNote:
 			verdict.Notes = append(verdict.Notes, mergeNotes(outcome.Note)...)
 		case ports.HookReplace:
-			if !point.AllowsAction(HookAction(ports.HookReplace), h.Trust == domain.TrustBuiltin) {
+			if !point.AllowsAction(pluginapi.HookAction(ports.HookReplace), h.Trust == domain.TrustBuiltin) {
 				c.noteWarning(fmt.Sprintf("插件 %q（trust=%s）无权在 %q 替换，忽略该动作（06 §6.6）",
 					h.PluginID, h.Trust, evt.Point))
 				continue
@@ -193,7 +199,7 @@ func (c *HookChain) Run(ctx context.Context, evt ports.HookEvent) (ports.HookVer
 			}
 			verdict.Replacements = outcome.Replacement
 		case ports.HookAbort:
-			if !point.AllowsAction(HookAction(ports.HookAbort), h.Trust == domain.TrustBuiltin) {
+			if !point.AllowsAction(pluginapi.HookAction(ports.HookAbort), h.Trust == domain.TrustBuiltin) {
 				c.noteWarning(fmt.Sprintf("插件 %q（trust=%s）无权 abort %q，忽略（06 §6.6）", h.PluginID, h.Trust, evt.Point))
 				continue
 			}

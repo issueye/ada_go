@@ -2295,7 +2295,7 @@ func (s *Server) setPluginEnabled(w http.ResponseWriter, r *http.Request, enable
 		return
 	}
 	if _, err := s.call(r, "plugin.setEnabled", map[string]any{"pluginId": id, "enabled": enabled}); err != nil {
-		// 业务拒绝（例如禁用唯一审批策略插件）回到列表用提示条说明，不渲染 502。
+		// 业务拒绝（例如插件与管理操作冲突）回到列表用提示条说明，不渲染 502。
 		redirect(w, flashRedirect(path, "error", cleanRPCError(err)))
 		return
 	}

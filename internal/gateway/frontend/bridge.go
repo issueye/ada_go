@@ -2,7 +2,7 @@ package frontend
 
 // Bridge 是 web.PluginUI 的渲染桥（M4，设计 7.5、7.6）：
 //
-//	host.Script（清单 + TSX 模板 + 静态资源）→ host.Renderer（TSX→VNode）
+//	pluginapi.Script（清单 + TSX 模板 + 静态资源）→ pluginapi.Renderer（TSX→VNode）
 //	→ RenderHTML（VNode→HTML，唯一 template.HTML 出口）→ web 的 12 个插槽与 /ext 页面。
 //
 // 协议合规取数（不新增 RPC 方法）：插件用既有 registerAction(mode=read) 提供取数
@@ -29,20 +29,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
-	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/gateway/contracts"
 	"github.com/adag/ada-go/internal/gateway/web"
 )
 
 // BackendActionTimeout 是单个只读动作预取的预算（7.5：单个 300ms）。
-var BackendActionTimeout = plugins.BackendActionTimeoutMS * time.Millisecond
+var BackendActionTimeout = pluginapi.BackendActionTimeoutMS * time.Millisecond
 
 // BridgeOptions 是 Bridge 的装配输入。
 type BridgeOptions struct {
 	// Scripts 是前端插件（frontend-only）的加载单元：清单 + 模板源码（Script.Bundle）
 	// + 静态资源（Script.StaticAssets）。
-	Scripts []host.Script
+	Scripts []pluginapi.Script
 	// Supervisor 用于动作预取（action.invoke）与只读数据投影（provider/usage/interaction）；
 	// nil 时跳过（props 无对应数据）。
 	Supervisor contracts.Supervisor
@@ -78,21 +77,21 @@ type BlockAuditEvent struct {
 
 // unit 是一个已登记的前端插件。
 type unit struct {
-	script    host.Script
-	manifest  *plugins.Manifest
+	script    pluginapi.Script
+	manifest  *pluginapi.Manifest
 	templates map[string]string
 }
 
 // slotContrib 是一条「插件 × 插槽」贡献。
 type slotContrib struct {
 	u       *unit
-	contrib plugins.SlotContribution
+	contrib pluginapi.SlotContribution
 }
 
 // blockEntry 是一个已登记的 Markdown 动态块渲染器。
 type blockEntry struct {
 	u       *unit
-	def     plugins.BlockContribution
+	def     pluginapi.BlockContribution
 	schema  *DataSchema
 	profile string
 	version int
@@ -110,7 +109,7 @@ type Bridge struct {
 	byID         map[string]*unit
 	blocks       map[string]blockEntry
 	slotIndex    map[string][]slotContrib
-	renderer     *host.Renderer
+	renderer     *pluginapi.Renderer
 	sup          contracts.Supervisor
 	workspaceFor func(*http.Request) string
 	product      string
@@ -146,11 +145,11 @@ func NewBridge(opts BridgeOptions) (*Bridge, error) {
 		blockAudit:     opts.BlockAudit,
 		disableIslands: opts.DisableIslands,
 	}
-	pairs := make([]host.ComponentPair, 0, len(AllowedComponents)+1)
+	pairs := make([]pluginapi.ComponentPair, 0, len(AllowedComponents)+1)
 	for _, name := range AllowedComponents {
-		pairs = append(pairs, host.ComponentPair{Export: name, Canonical: name})
+		pairs = append(pairs, pluginapi.ComponentPair{Export: name, Canonical: name})
 	}
-	pairs = append(pairs, host.ComponentPair{Export: "Todo", Canonical: "TodoList"})
+	pairs = append(pairs, pluginapi.ComponentPair{Export: "Todo", Canonical: "TodoList"})
 	engine, ok := web.StaticAsset("ada-render.js")
 	if !ok {
 		return nil, fmt.Errorf("frontend: 内嵌静态资源缺少 ada-render.js（同构渲染不可用）")
@@ -159,16 +158,16 @@ func NewBridge(opts BridgeOptions) (*Bridge, error) {
 	if !ok {
 		return nil, fmt.Errorf("frontend: 内嵌静态资源缺少 ada-ui-iso.js（同构组件不可用）")
 	}
-	b.renderer = host.NewRenderer(
-		host.WithComponentsModule(host.ComponentModuleSource(pairs)),
-		host.WithRenderEngineSource(string(engine)),
-		host.WithIsoComponentsSource(string(iso)),
+	b.renderer = pluginapi.NewRenderer(
+		pluginapi.WithComponentsModule(pluginapi.ComponentModuleSource(pairs)),
+		pluginapi.WithRenderEngineSource(string(engine)),
+		pluginapi.WithIsoComponentsSource(string(iso)),
 		// 注意毫秒换算：frontend 常量是 int 毫秒，Duration 直接传会变成纳秒。
-		host.WithRenderBudgets(SlotTimeoutMS*time.Millisecond, PageTimeoutMS*time.Millisecond),
-		host.WithIslandRenderBudget(PageTimeoutMS*time.Millisecond),
+		pluginapi.WithRenderBudgets(SlotTimeoutMS*time.Millisecond, PageTimeoutMS*time.Millisecond),
+		pluginapi.WithIslandRenderBudget(PageTimeoutMS*time.Millisecond),
 		// 动态块用独立预算：Schema 的 x-limits.renderTimeoutMs 与这里必须同源，
 		// 否则门禁比对的不是真正生效的值。
-		host.WithBlockRenderBudget(web.MarkdownBlockRenderTimeoutMS*time.Millisecond),
+		pluginapi.WithBlockRenderBudget(web.MarkdownBlockRenderTimeoutMS*time.Millisecond),
 	)
 
 	ids := make([]string, 0, len(opts.Scripts))
@@ -181,7 +180,7 @@ func NewBridge(opts BridgeOptions) (*Bridge, error) {
 	sort.Strings(ids)
 
 	for _, id := range ids {
-		var script host.Script
+		var script pluginapi.Script
 		for _, s := range opts.Scripts {
 			if s.Manifest != nil && s.Manifest.ID == id {
 				script = s
@@ -204,7 +203,7 @@ func NewBridge(opts BridgeOptions) (*Bridge, error) {
 		for _, dc := range f.Dashboard {
 			b.slotIndex["dashboard.widgets"] = append(b.slotIndex["dashboard.widgets"], slotContrib{
 				u: u,
-				contrib: plugins.SlotContribution{
+				contrib: pluginapi.SlotContribution{
 					Slot: "dashboard.widgets", Template: dc.Template, Order: dc.Order,
 				},
 			})
@@ -247,7 +246,7 @@ func NewBridge(opts BridgeOptions) (*Bridge, error) {
 }
 
 // newUnit 校验一个前端插件的模板与样式引用。
-func newUnit(s host.Script) (*unit, error) {
+func newUnit(s pluginapi.Script) (*unit, error) {
 	u := &unit{script: s, manifest: s.Manifest, templates: map[string]string{}}
 	if u.manifest.Frontend == nil {
 		return nil, fmt.Errorf("frontend: 插件 %s 没有 frontend 段", u.manifest.ID)
@@ -470,7 +469,7 @@ func (b *Bridge) RenderBlock(r *http.Request, rendererID, blockID string, versio
 		return nil, "", err
 	}
 	// 模板返回 null 表示「这个块没有内容可展示」，是合法结果而不是失败：
-	// 与插槽的 null 语义一致（host.Renderer 用字面量 null 表示留空）。
+	// 与插槽的 null 语义一致（pluginapi.Renderer 用字面量 null 表示留空）。
 	// 不能把它当零值 VNode 去校验，否则会误报 invalid_vnode 并画出错误卡。
 	if trimmed := bytes.TrimSpace(vnode); len(trimmed) == 0 || string(trimmed) == "null" {
 		b.storeBlock(cacheKey, json.RawMessage("null"), "")
@@ -605,15 +604,15 @@ func (b *Bridge) buildBlockProps(entry blockEntry, r *http.Request, blockID, ren
 
 // Styles 实现 web.PluginUI：插件样式的 /ext URL。
 func (b *Bridge) Styles() []string {
-	return b.assetURLs(func(f *plugins.Frontend) []string { return f.Styles })
+	return b.assetURLs(func(f *pluginapi.Frontend) []string { return f.Styles })
 }
 
 // Scripts 实现 web.PluginUI：插件脚本的 /ext URL（清单已保证能力位与信任级别）。
 func (b *Bridge) Scripts() []string {
-	return b.assetURLs(func(f *plugins.Frontend) []string { return f.Scripts })
+	return b.assetURLs(func(f *pluginapi.Frontend) []string { return f.Scripts })
 }
 
-func (b *Bridge) assetURLs(pick func(*plugins.Frontend) []string) []string {
+func (b *Bridge) assetURLs(pick func(*pluginapi.Frontend) []string) []string {
 	ids := make([]string, 0, len(b.byID))
 	for id := range b.byID {
 		ids = append(ids, id)
@@ -990,7 +989,7 @@ func (b *Bridge) buildProps(u *unit, r *http.Request, kind, name string) (json.R
 		}
 	}
 	// 只读数据投影：供应商/模型、用量、待答交互。统一由 backend.read 能力位约束。
-	if hasCapability(u.manifest.Frontend.Capabilities, plugins.CapBackendRead) {
+	if hasCapability(u.manifest.Frontend.Capabilities, pluginapi.CapBackendRead) {
 		if providers, err := b.loadProviders(r); err == nil {
 			p.Data.Providers = providers
 		} else {
@@ -1012,7 +1011,7 @@ func (b *Bridge) buildProps(u *unit, r *http.Request, kind, name string) (json.R
 }
 
 // invokeAction 通过既有 action.invoke 取一次只读动作结果（预算 = BackendActionTimeoutMS）。
-func (b *Bridge) invokeAction(r *http.Request, binding plugins.ActionBinding, threadID string) (json.RawMessage, error) {
+func (b *Bridge) invokeAction(r *http.Request, binding pluginapi.ActionBinding, threadID string) (json.RawMessage, error) {
 	if b.sup == nil {
 		return nil, fmt.Errorf("frontend: 装配没有注入 Supervisor，跳过动作预取")
 	}

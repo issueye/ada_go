@@ -2262,15 +2262,15 @@ func TestPluginFilePreview(t *testing.T) {
 	}
 }
 
-// 业务拒绝（例如禁用唯一审批策略插件）回到插件页用提示条说明，而不是 502 错误页。
+// 业务拒绝（例如插件启停被后端拒绝）回到插件页用提示条说明，而不是 502 错误页。
 func TestPluginToggleRejectionShowsFlash(t *testing.T) {
 	core := newFakeCore().
 		on("thread.list", emptyThreadList).
-		on("plugin.list", `{"plugins":[{"id":"policy-default","name":"默认审批策略","enabled":true,"status":"ready","contributions":{"backend":true}}]}`).
-		fail("plugin.setEnabled", errors.New("relay: RPC 错误 3005: plugin policy-default 是审批策略插件，目录里仍有写/执行工具，禁用会被拒绝（失败关闭，5.4）"))
+		on("plugin.list", `{"plugins":[{"id":"demo-plugin","name":"示例插件","enabled":true,"status":"ready","contributions":{"backend":true}}]}`).
+		fail("plugin.setEnabled", errors.New("relay: RPC 错误 3005: plugin demo-plugin 正在被装配占用，暂时不能停用"))
 	srv, _ := newServer(t, core)
 
-	req := httptest.NewRequest(http.MethodPost, "/extensions/policy-default/disable", nil)
+	req := httptest.NewRequest(http.MethodPost, "/extensions/demo-plugin/disable", nil)
 	req.Header.Set("Referer", "http://example.com/extensions")
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -2286,12 +2286,12 @@ func TestPluginToggleRejectionShowsFlash(t *testing.T) {
 		t.Fatal(err)
 	}
 	msg := u.Query().Get("error")
-	wantContains(t, msg, "审批策略插件")
+	wantContains(t, msg, "正在被装配占用")
 	wantNotContains(t, msg, "relay:")
 	wantNotContains(t, msg, "RPC 错误")
 
 	page := serve(t, srv, "GET", loc, nil).Body.String()
-	wantContains(t, page, "审批策略插件")
+	wantContains(t, page, "正在被装配占用")
 	wantContains(t, page, `data-flash="error"`)
 	wantNotContains(t, page, "Core 暂时不可用")
 }

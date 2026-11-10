@@ -44,7 +44,7 @@ script-src 'self'; connect-src 'self'; frame-ancestors 'none'
 
 - 不做 SPA、客户端路由、整页 CSR。
 - 不做客户端插件运行时；插件仍走服务端 VNode 渲染。
-- 不替代表单提交：发送、审批、重试继续走原生 `POST` + `303`。
+- 不替代表单提交：发送、交互响应、重试继续走原生 `POST` + `303`。
 - 不做 `eval` 表达式、动态 `import`、异步组件、Suspense、Teleport。
 - 不在服务端用字符串模板：字符串模板依赖 DOM 解析，只在浏览器可用；
   服务端要么用 `render(h)`，要么由 Go 直接构造 VNode。
@@ -277,7 +277,7 @@ AdaRender.createApp({
 
 #### 14.6.4 如果希望服务端也执行同一份 JS
 
-仓库已经有 moejs 与 `host.Renderer`（TSX → VNode）。可以把同一份组件定义交给
+仓库已经有 moejs 与 `pluginapi.Renderer`（TSX → VNode，位于 `internal/common/pluginapi`）。可以把同一份组件定义交给
 moejs 执行，得到 VNode JSON，再走 `frontend.RenderHTML`。这样服务端不再有第二套
 DOM 代码。
 
@@ -958,7 +958,7 @@ ada 词根统一，四种写法各有边界，**不得混用**：
 - [ ] 缺省态零影响：不设 `data-theme` 时渲染与黑天鹅逐像素一致；
 - [ ] 色卡预览三色 `--sw-canvas/--sw-brand/--sw-ink` 与主题值同步（同文件内定义）；
 - [ ] 桌面壳 `desktop/main.cjs` 的 `backgroundColor` 若画布值变化则同步；
-- [ ] 8 态截图走查（每色板 × 明暗）：主按钮、代码块语法高亮、滚动条、弹窗、审批托盘；
+- [ ] 8 态截图走查（每色板 × 明暗）：主按钮、代码块语法高亮、滚动条、弹窗、交互托盘；
 - [ ] 登记进 19.2.2 色板清单与主题面板（`ui.go` 色板表）。
 
 ### 19.4 组件与 DOM 规范
@@ -1036,7 +1036,7 @@ ada 词根统一，四种写法各有边界，**不得混用**：
 
 ### 19.7 治理与门禁
 
-- **门禁**：`go test ./...`、`go vet ./...`、staticcheck、`adag verify`（13 项，其中 ui 项校验 tokens 来源头、a_da 副本清单、模板无内联 style）；UI 变更加走 19.3.3 主题清单 / 本篇对应条款的自查。
+- **门禁**：`go test ./...`、`go vet ./...`、staticcheck、`adag verify`（11 项，其中 ui 项校验 tokens 来源头、a_da 副本清单、模板无内联 style）；UI 变更加走 19.3.3 主题清单 / 本篇对应条款的自查。
 - **文档先行**（沿 design.md 约定）：改令牌、组件、交互模式前先改本篇与 07 §7.7，再改实现；`adag verify ui` 的基线断言同步更新。
 - **镜像纪律**：`tokens.css`、`app.css`、`theme.js` 等上游镜像文件不做本地修改；本地能力一律以新文件叠加（先例：`app.js` 的窄屏补丁、本次的 `themes.js`/`themes.css`）。
 - **自成一体模块的界面同样遵守本篇**：`mcp_projects/adago_design` 是独立 Go module（`GOWORK=off`），

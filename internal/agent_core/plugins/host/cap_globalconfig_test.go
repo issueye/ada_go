@@ -11,14 +11,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/common/globalconfig"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 func TestGlobalConfigContextMember(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("ADAGO_HOME", home)
-	caps := testCaps(t, plugins.TrustVerified, plugins.CapGlobalConfig)
+	caps := testCaps(t, pluginapi.TrustVerified, pluginapi.CapGlobalConfig)
 	src := `
 export default function (agent) {
   agent.registerTool({

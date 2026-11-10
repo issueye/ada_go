@@ -2,7 +2,7 @@
 
 > 上级索引：[ada-go 设计文档](design.md)  
 > 对应章节：§2 参考项目分析、§3 总体架构、§4 Gateway、§5.1–5.2 Core 分层与端口  
-> 版本：0.2 · 2026-11-09
+> 版本：0.3 · 2026-11-10
 
 ## 2. 参考项目分析
 
@@ -16,6 +16,7 @@
 - **steering 队列**：用户中途插话在固定边界排空，不靠 abort 打断循环，语义可预测。
 - **工具结果的 `content` / `details` 分离**：前者给模型，后者给界面；工具并行采用“顺序预检、并发执行、按源序回填”。
 - **审批即扩展**：`tool_call` 钩子可在执行前阻止或改写工具调用，`ctx.ui` 提供通用的 confirm/select/input；内核不内置审批策略，非交互模式由扩展决定失败方向。
+   > ada-go 的取舍：**审批已整体移除**（2026-11-10 决策），执行前没有可阻塞的钩子；`ctx.ui` 作为通用交互原语保留，供工具实现自己使用。
 
 必须避免：
 
@@ -23,7 +24,7 @@
 - 三套重叠的运行时，主会话文件膨胀到数千行。
 - 缺少内建的循环检测与资源上限；模型原地打转时只能人工中断；重试靠错误字符串正则。
 - 热路径同步等待所有钩子，慢扩展拖住整个循环。
-- 审批完全依赖用户自觉：不装 permission 扩展时危险命令直接执行；ada-go 用产品门禁要求“有写/执行工具就必须有策略插件”。
+- 审批完全依赖用户自觉：不装 permission 扩展时危险命令直接执行；ada-go 曾用产品门禁要求“有写/执行工具就必须有策略插件”，该门禁已随审批策略一起移除——现在的取舍是**把风险显式写进 UI 与审计**，不再假装有门禁。
 
 ada-go 的取舍：保留双层消息、统一流、树形会话、steering、content/details 分离；用**进程隔离 + moejs 沙箱 + 显式终止条件 + 循环检测 + 钩子超时**补上短板。
 
@@ -46,7 +47,7 @@ ada-go 的取舍：保留双层消息、统一流、树形会话、steering、co
 - 协议在 JSON、Rust 常量、TS 客户端、dispatch 四处手写；ada-go 只保留一份 JSON 源 + 生成常量，DTO 由契约测试盯住。
 - 插件没有内存上限；ada-go 每个运行时都设内存/时间/调用深度上限。
 - 过度耦合的 OOB DOM id 协议；ada-go 的 SSE 事件带显式目标与序号，前端只做“替换目标 + 断序重同步”。
-- 审批层被整体删除后，危险工具缺少可替换的安全策略；ada-go 采用 pi 式解耦——交互桥在基座，审批规则放在 `policy-default` 插件，并用产品门禁保证“有写/执行工具就必须有策略插件”。
+- 审批层被整体删除后，危险工具缺少可替换的安全策略；ada-go 的选择是**不重建审批链**：执行前不再有钩子，改用显式的效果声明（`Access`）、审计与 UI 风险提示，把「是否允许」交给使用者的部署边界。
 
 ### 2.3 moejs
 
@@ -73,11 +74,11 @@ ada-go 的取舍：保留双层消息、统一流、树形会话、steering、co
 | 维度 | pi | a_da | ada-go |
 |---|---|---|---|
 | 进程模型 | 单 Node 进程 | 网关 + 一工作区一节点 | 网关 + 一工作区一 Core，单二进制两角色 |
-| 扩展安全 | 无隔离 | Boa + 能力开关，无内存上限 | moejs + 能力安装 + 内存/时间/深度上限 |
+| 扩展安全 | 无隔离 | Boa + 能力开关，无内存上限 | moejs + 内存/时间/深度上限 + 路径/命令边界 |
 | 工具来源 | 内置 + TS 扩展 | 内置 Rust + TS 插件 | 基座零工具；官方与第三方都是 TS 插件，走同一 moejs 引擎与目录契约 |
 | 会话存储 | JSONL 树 | 会话文件 | SQLite append-only DAG + 快照投影 |
 | 协议 | SDK/内部事件 | 83 个方法，多处手写 | 33 个方法，JSON 单源 + 生成常量 |
-| 审批 | 扩展钩子 | 当前实现已移除 | 策略插件（`tool.beforeCall` + `ctx.ui`）+ 通用交互桥；基座无审批规则 |
+| 审批 | 扩展钩子 | 当前实现已移除 | **已移除**（2026-11-10 决策）：没有审批策略插件，也没有执行前钩子；保留通用交互桥 `ctx.ui` 供工具自己提问 |
 | 前端 | TUI | Askama + HTMX + TSX（Black Swan 设计系统） | html/template + HTMX + TSX（moejs），直接复用同一套 token、`ada-*` 组件与 DOM |
 | 产品装配 | 代码装配 | 声明式 spec | 声明式 spec + 逐字段消费者门禁 |
 | 子智能体 | 有 | 有，隔离靠装配 | v1.5，复用同一引擎与装配 |
@@ -139,7 +140,8 @@ ada-go 的取舍：保留双层消息、统一流、树形会话、steering、co
 ```
 domain（消息/工具/事件/错误）
    ▲
-   ├── engine（RunTurn + 钩子编排 + 工具前策略）
+   ├── pluginapi（插件契约：清单、能力词汇、钩子点位、插槽、Script、TSX 渲染）
+   ├── engine（RunTurn + 钩子编排）
    ├── ports（接口）
    ├── adapters（sqlite / scope / clock / secret）
    ├── toolkit（工具描述符、执行包装、文件变更队列；不含具体工具）
@@ -168,7 +170,7 @@ gateway
 
 - `domain` 不 import 任何适配器，不出现产品名。
 - `engine` 只依赖 `ports` 与 `domain`。
-- Gateway 不 import Core 的执行内核（`engine`/`toolkit`/`adapters`）与系统插件包；允许复用共享基座包 `coreapp`（产品声明）、`plugins/host`（前端渲染类型）、`plugins`、`proto`、`domain`、`version`、`workspacepath`，但不得调用工具或模型。
+- Gateway 不 import Core 的执行内核（`engine`/`toolkit`/`adapters`）、系统插件包与插件宿主；允许复用共享基座包 `coreapp`（产品声明）、`common/pluginapi`（清单/插槽/渲染契约）、`proto`、`domain`、`version`、`workspacepath`，但不得调用工具或模型（2026-11-10：插件契约下沉到 `common/pluginapi`，gateway 不再依赖 `agent_core/plugins`）。
 - 插件运行时只通过 `ports.ScriptHost` 进入引擎；引擎不知道 moejs 的存在。
 - Gateway 的进程分两类：`supervisor` 只管工作区 ↔ Core 的 lease/RPC；`processmgr` 只管插件注册的长驻进程（启动、退避重启、引用计数、进程树回收、日志环）。两者都不解释业务语义。
 
@@ -179,8 +181,8 @@ gateway
 3. Core 获取线程写锁，追加用户消息 entry，开始 `RunTurn`。
 4. Core 流式调用模型，边收边发事件：`evt.message.delta`、`evt.item.updated`、`evt.run.status`。
 5. Gateway 把事件投影进内存中的 `ThreadView`，向该线程的 SSE 客户端广播；结构变化时用 Go 模板渲染 HTML 片段一并推送。
-6. 模型产生工具调用：Core 过 `tool.beforeCall` 钩子 → 执行 → 结构化回执 → 作为工具结果回给模型。策略插件可以在钩子里调用 `ctx.ui.confirm` 决定是否放行。
-7. 需要用户确认时，`ctx.ui` 经交互桥发 `evt.interaction.requested`；Gateway 渲染输入框上方的通用交互托盘；用户 `POST /interactions/{id}`；Gateway 转 `interaction.respond`；Core 唤醒策略插件，钩子返回 allow/deny。
+6. 模型产生工具调用：Core 校验 schema/scope 后**直接执行**（执行前没有审批钩子）→ 结构化回执 → 作为工具结果回给模型。
+7. 工具实现需要用户输入时，调 `ctx.ui` 经交互桥发 `evt.interaction.requested`；Gateway 渲染输入框上方的通用交互托盘；用户 `POST /interactions/{id}`；Gateway 转 `interaction.respond`；Core 把答案（或 `timeout`/`unavailable`）返回给该工具，由它自己决定是继续还是返回 `denied` 回执。
 8. 本轮结束：Core 恰好发一次 `TurnFinished`（`evt.run.status` 的终态），Gateway 重新渲染 transcript 尾部与状态条。
 9. 用户关闭页面不影响轮次；Core 继续跑，Gateway 无客户端时仍保留投影，空闲回收由 Registry 负责。
 

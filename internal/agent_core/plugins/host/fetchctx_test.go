@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/common/domain"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 func TestCtxFetchReturnsStringText(t *testing.T) {
@@ -23,7 +23,7 @@ func TestCtxFetchReturnsStringText(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	caps := testCaps(t, plugins.TrustThirdParty, plugins.CapNetFetch)
+	caps := testCaps(t, pluginapi.TrustThirdParty, pluginapi.CapNetFetch)
 	src := `
 export default function register(agent) {
   agent.registerTool({

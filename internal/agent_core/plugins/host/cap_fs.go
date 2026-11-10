@@ -26,7 +26,7 @@ import (
 	"github.com/MoeForge/moejs/engine"
 	mojsnode "github.com/MoeForge/moejs/node"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // fsGuard 是一个 Runtime 的文件系统边界：同一份 Root/Mount/Write 也交给上游。
@@ -39,11 +39,11 @@ type fsGuard struct {
 	limits      Limits
 	pluginRoots []string // 允许写的已安装插件根（默认 ~/.adago/plugins）
 	pluginID    string   // 发起写入的插件 id（只能写自己的目录，builtin 例外）
-	trust       plugins.Trust
+	trust       pluginapi.Trust
 }
 
 func init() {
-	// ctx.fs / ctx.exec 的成员由能力安装方补（agentapi.go 只装身份与通用桥）。
+	// ctx.fs / ctx.exec 的成员由成员安装方补（agentapi.go 只装身份与通用桥）。
 	InstallContextMembers = installContextMembers
 }
 
@@ -72,7 +72,7 @@ func newFSGuard(st *capsState) (*fsGuard, error) {
 	}
 	return &fsGuard{
 		st: st, root: abs, mount: mount,
-		write:       st.caps != nil && true,
+		write:       st.caps != nil,
 		limits:      st.limits,
 		pluginRoots: pluginWriteRoots(),
 		pluginID:    capsPluginID(st.caps),
@@ -88,14 +88,14 @@ func capsPluginID(caps *CapabilitySet) string {
 	return caps.PluginID
 }
 
-func capsTrust(caps *CapabilitySet) plugins.Trust {
+func capsTrust(caps *CapabilitySet) pluginapi.Trust {
 	if caps == nil {
-		return plugins.TrustThirdParty
+		return pluginapi.TrustThirdParty
 	}
 	return caps.Trust
 }
 
-// options 交给上游 node 包：根、挂载点、只读、逐次访问审批。
+// options 交给上游 node 包：根、挂载点、写边界。
 func (g *fsGuard) options() *mojsnode.FSOptions {
 	return &mojsnode.FSOptions{
 		Root:    g.root,
@@ -188,7 +188,7 @@ func (g *fsGuard) writePath(virtual string) (string, bool, error) {
 	allowed, err := allowPluginWrite(g.pluginRoots, abs, g.pluginID, g.trust)
 	if err != nil {
 		return "", true, throwCodedPathCap(g, fmt.Errorf(
-			"路径 %q 越出工作区根（挂载点 %s）：%v", baseForLog(virtual), g.mount, err), string(plugins.CapFSWrite))
+			"路径 %q 越出工作区根（挂载点 %s）：%v", baseForLog(virtual), g.mount, err), string(pluginapi.CapFSWrite))
 	}
 	return allowed, true, nil
 }
@@ -303,7 +303,7 @@ func (g *fsGuard) denyMember(r *engine.Realm, binding *engine.Object, key engine
 		g.st.audit("fs", name, "", 0, codeAccessDenied, nil)
 		return moejs.Undefined(), throwCoded(r, codeAccessDenied,
 			fmt.Sprintf("fs.%s 需要能力 fs.write，清单未声明（12 §6.12.2；成员存在但调用即失败）", name),
-			map[string]any{"capability": string(plugins.CapFSWrite), "method": name})
+			map[string]any{"capability": string(pluginapi.CapFSWrite), "method": name})
 	})
 	return binding.DefinePropertyOrThrow(r, key, engine.DataDescriptor(engine.ObjectValue(fn), 1|2|4))
 }
@@ -415,7 +415,7 @@ func (g *fsGuard) limitEntries(r *engine.Realm, res moejs.Value, name string) (m
 	return res, nil
 }
 
-// installContextMembers 给 ToolContext 补 fs / exec（05 §6.3：按能力安装）。
+// installContextMembers 给 ToolContext 补 fs / exec 等成员（05 §6.3；能力位不再决定装什么）。
 func installContextMembers(rt *mojsRuntime, put func(name string, v moejs.Value) error, kind callKind, caps *CapabilitySet, hc Context) error {
 	st, ok := stateFor(rt)
 	if !ok {
@@ -552,7 +552,7 @@ func ctxFSMember(st *capsState, hc Context) moejs.NativeFunc {
 				case "writeText":
 					if !guard.write {
 						return moejs.Undefined(), throwCoded(r, codeAccessDenied,
-							"ctx.fs.writeText 需要能力 fs.write", map[string]any{"capability": string(plugins.CapFSWrite)})
+							"ctx.fs.writeText 越出可写范围", map[string]any{"capability": string(pluginapi.CapFSWrite)})
 					}
 					text := moejs.Arg(args, 2).String()
 					if len(text) > guard.limits.MaxFileBytes {

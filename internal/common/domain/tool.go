@@ -44,7 +44,7 @@ const (
 const (
 	// ToolFindName 列出发现式工具（名称/说明/参数 Schema）。
 	ToolFindName = "find_tool"
-	// ToolExecTool 按名执行一个发现式工具；审批与超时沿用该工具自己的描述符。
+	// ToolExecTool 按名执行一个发现式工具；超时与循环检测沿用该工具自己的描述符。
 	ToolExecName = "exec_tool"
 )
 
@@ -74,7 +74,7 @@ type Descriptor struct {
 	// ask_user 不在此列：它返回后要把回答喂回模型继续本轮。
 	TerminatesTurn bool `json:"terminatesTurn"`
 	// Discovery 标记「发现式」注册（05 §6.3 ToolDef.discovery）：不注入模型工具清单，
-	// 模型经 find_tool 发现、exec_tool 执行；审批/超时/循环检测沿用本描述符。
+	// 模型经 find_tool 发现、exec_tool 执行；超时/循环检测沿用本描述符。
 	// 与 TerminatesTurn 互斥（exec_tool 包装不了轮次终止语义），注册期拒绝。
 	Discovery bool `json:"discovery"`
 	// PluginID 是贡献该工具的插件 id（“官方工具插件”或第三方；基座源码不出现具体插件 id）。

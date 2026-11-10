@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 func makePluginRoot(t *testing.T) (root, demo, outside string) {
@@ -31,13 +31,13 @@ func TestAllowPluginWrite(t *testing.T) {
 	root, demo, outside := makePluginRoot(t)
 	roots := []string{root}
 
-	if got, err := allowPluginWrite(roots, filepath.Join(demo, "blocks", "card.tsx"), "demo", plugins.TrustThirdParty); err != nil || got == "" {
+	if got, err := allowPluginWrite(roots, filepath.Join(demo, "blocks", "card.tsx"), "demo", pluginapi.TrustThirdParty); err != nil || got == "" {
 		t.Fatalf("插件内新文件应允许: %v", err)
 	}
-	if _, err := allowPluginWrite(roots, filepath.Join(demo, "plugin.json"), "demo", plugins.TrustThirdParty); err == nil {
+	if _, err := allowPluginWrite(roots, filepath.Join(demo, "plugin.json"), "demo", pluginapi.TrustThirdParty); err == nil {
 		t.Fatal("插件清单 plugin.json 应被拒绝改写")
 	}
-	if _, err := allowPluginWrite(roots, filepath.Join(demo, "dist", "index.js"), "demo", plugins.TrustThirdParty); err == nil {
+	if _, err := allowPluginWrite(roots, filepath.Join(demo, "dist", "index.js"), "demo", pluginapi.TrustThirdParty); err == nil {
 		t.Fatal("插件产物 dist/ 应被拒绝改写")
 	}
 
@@ -48,7 +48,7 @@ func TestAllowPluginWrite(t *testing.T) {
 		"目录穿越":    filepath.Join(demo, "..", "evil", "a.tsx"),
 		"插件外绝对路径": outside,
 	} {
-		if _, err := allowPluginWrite(roots, target, "demo", plugins.TrustThirdParty); err == nil {
+		if _, err := allowPluginWrite(roots, target, "demo", pluginapi.TrustThirdParty); err == nil {
 			t.Fatalf("%s 应被拒绝: %s", name, target)
 		}
 	}
@@ -63,10 +63,10 @@ func TestAllowPluginWriteOtherPluginRequiresBuiltin(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(other, "plugin.json"), []byte(`{"id":"other"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := allowPluginWrite([]string{root}, filepath.Join(other, "a.tsx"), "demo", plugins.TrustThirdParty); err == nil {
+	if _, err := allowPluginWrite([]string{root}, filepath.Join(other, "a.tsx"), "demo", pluginapi.TrustThirdParty); err == nil {
 		t.Fatal("第三方插件不应能写别的插件目录")
 	}
-	if _, err := allowPluginWrite([]string{root}, filepath.Join(other, "a.tsx"), "demo", plugins.TrustBuiltin); err != nil {
+	if _, err := allowPluginWrite([]string{root}, filepath.Join(other, "a.tsx"), "demo", pluginapi.TrustBuiltin); err != nil {
 		t.Fatalf("builtin 系统插件应可维护其它插件源码: %v", err)
 	}
 	_ = demo
@@ -78,7 +78,7 @@ func TestAllowPluginWriteRejectsSymlinkEscape(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(demo, "escape")); err != nil {
 		t.Skipf("当前环境不支持创建符号链接: %v", err)
 	}
-	if _, err := allowPluginWrite(roots, filepath.Join(demo, "escape", "a.tsx"), "demo", plugins.TrustThirdParty); err == nil {
+	if _, err := allowPluginWrite(roots, filepath.Join(demo, "escape", "a.tsx"), "demo", pluginapi.TrustThirdParty); err == nil {
 		t.Fatal("目录符号链接逃逸应被拒绝")
 	}
 
@@ -89,7 +89,7 @@ func TestAllowPluginWriteRejectsSymlinkEscape(t *testing.T) {
 	if err := os.Symlink(target, filepath.Join(demo, "link.tsx")); err != nil {
 		t.Skipf("当前环境不支持创建符号链接: %v", err)
 	}
-	if _, err := allowPluginWrite(roots, filepath.Join(demo, "link.tsx"), "demo", plugins.TrustThirdParty); err == nil {
+	if _, err := allowPluginWrite(roots, filepath.Join(demo, "link.tsx"), "demo", pluginapi.TrustThirdParty); err == nil {
 		t.Fatal("文件符号链接逃逸应被拒绝")
 	}
 }
@@ -97,7 +97,7 @@ func TestAllowPluginWriteRejectsSymlinkEscape(t *testing.T) {
 func TestWritePathWorkspaceAndPlugin(t *testing.T) {
 	root, demo, outside := makePluginRoot(t)
 	ws := t.TempDir()
-	g := &fsGuard{root: ws, mount: "/workspace", pluginRoots: []string{root}, pluginID: "demo", trust: plugins.TrustThirdParty}
+	g := &fsGuard{root: ws, mount: "/workspace", pluginRoots: []string{root}, pluginID: "demo", trust: pluginapi.TrustThirdParty}
 
 	real, external, err := g.writePath("/workspace/a.txt")
 	if err != nil || external || real != filepath.Join(ws, "a.txt") {

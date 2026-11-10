@@ -75,6 +75,6 @@ go run ./tools/pluginbuild -dir plugins/official/provider-admin -entry client.ts
 
 ## 相关文档
 
-- [模型与审批](../../../docs/03-model-and-approval.md)
+- [模型适配与交互确认](../../../docs/03-model-and-approval.md)
 - [SSR 前端](../../../docs/07-ssr-frontend.md)
 - [插件模型与后端 API](../../../docs/05-plugins.md)

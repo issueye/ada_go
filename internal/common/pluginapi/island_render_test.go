@@ -1,4 +1,4 @@
-package host
+package pluginapi
 
 // P1-3 同构渲染模式：TSX 通过 ada:render 使用 ada-render.js，在 moejs 里
 // renderToJSON 成 VNode；事件函数不进入线格式。与 P0 探针的区别是走正式
@@ -14,7 +14,7 @@ import (
 
 func islandEngineSource(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join("..", "..", "..", "gateway", "web", "static", "ada-render.js")
+	path := filepath.Join("..", "..", "gateway", "web", "static", "ada-render.js")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("读取 ada-render.js: %v", err)
@@ -78,7 +78,7 @@ export default defineComponent({
 `
 
 func TestRenderIslandWithIsoComponents(t *testing.T) {
-	iso, err := os.ReadFile(filepath.Join("..", "..", "..", "gateway", "web", "static", "ada-ui-iso.js"))
+	iso, err := os.ReadFile(filepath.Join("..", "..", "gateway", "web", "static", "ada-ui-iso.js"))
 	if err != nil {
 		t.Fatalf("读取 ada-ui-iso.js: %v", err)
 	}

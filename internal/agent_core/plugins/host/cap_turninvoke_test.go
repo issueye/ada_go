@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 func TestTurnInvokeBridge(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapTurnInvoke)
+	caps := testCaps(t, pluginapi.TrustBuiltin, pluginapi.CapTurnInvoke)
 	src := `
 export default function (agent) {
   agent.registerTool({

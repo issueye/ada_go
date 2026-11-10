@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // TestProcessHelper 是子进程侧的测试助手：读 stdin 行，回写 echo:<line>。
@@ -26,7 +26,7 @@ func TestProcessHelper(t *testing.T) {
 }
 
 func TestProcessContext(t *testing.T) {
-	caps := testCaps(t, plugins.TrustVerified, plugins.CapProcess)
+	caps := testCaps(t, pluginapi.TrustVerified, pluginapi.CapProcess)
 	caps.Env = map[string]string{"ADAG_PROCESS_HELPER": "1"}
 	src := `
 export default function (agent) {
@@ -85,7 +85,7 @@ func TestProcessBigHelper(t *testing.T) {
 // TestProcessReadKeepsRemainder：read(maxBytes) 必须返回头部片段并把余量留到下一次，
 // 不能 tail 截断丢字节——stdio MCP 的按行 JSON-RPC 依赖这一点。
 func TestProcessReadKeepsRemainder(t *testing.T) {
-	caps := testCaps(t, plugins.TrustVerified, plugins.CapProcess)
+	caps := testCaps(t, pluginapi.TrustVerified, pluginapi.CapProcess)
 	caps.Env = map[string]string{"ADAG_PROCESS_HELPER": "1"}
 	src := `
 export default function (agent) {

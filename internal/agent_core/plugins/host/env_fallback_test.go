@@ -3,7 +3,7 @@ package host
 import (
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // TestCapabilitySetEnvFallsBackToHostEnv 钉住 backend.env 的生产语义：
@@ -13,12 +13,12 @@ func TestCapabilitySetEnvFallsBackToHostEnv(t *testing.T) {
 	t.Setenv("ADAG_TEST_ENV_FALLBACK", "fallback")
 	t.Setenv("ADAG_TEST_ENV_UNUSED", "ignored")
 
-	m := &plugins.Manifest{
-		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
-		Trust: plugins.TrustBuiltin,
-		Backend: &plugins.Backend{
+	m := &pluginapi.Manifest{
+		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: pluginapi.APIVersionMajor,
+		Trust: pluginapi.TrustBuiltin,
+		Backend: &pluginapi.Backend{
 			Entry:        "index.js",
-			Capabilities: []plugins.Capability{plugins.CapFSRead},
+			Capabilities: []pluginapi.Capability{pluginapi.CapFSRead},
 			Env:          []string{"ADAG_TEST_ENV_FALLBACK", "ADAG_TEST_ENV_MISSING"},
 		},
 	}

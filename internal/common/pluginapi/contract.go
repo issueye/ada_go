@@ -1,11 +1,15 @@
-// Package plugins 是插件契约的注册表面：清单结构、能力位、钩子点位与前端插槽。
+// Package pluginapi 是插件契约的共享表面：清单结构、能力位词汇、钩子点位与前端插槽。
 //
 // 这里是「单一真源」在 Go 侧的落点：能力位、钩子点位、插槽名各只有一份声明，
 // adag verify 拿它们与 spec/manifest.schema.json 逐字比对，并检查每个点位都有调用方、
 // 每个插槽都有宿主（设计 1.3、6.2、6.6、7.2）。
 //
+// 分包位置：这些类型**同时被 Core 的插件宿主与 Gateway 的前端渲染消费**，因此放在
+// internal/common（下层），而不是 internal/agent_core/plugins（上层）。放上层会让
+// gateway 被迫依赖插件宿主（2026-11-10 的分层收敛）。
+//
 // 基座源码不出现任何官方插件 id（设计 1.5.5 的硬边界），选择哪些插件由产品声明决定。
-package plugins
+package pluginapi
 
 import (
 	"fmt"
@@ -370,7 +374,7 @@ func ValidateCapabilityList(caps []Capability, t Trust, backend bool) error {
 	}
 	for _, c := range caps {
 		if seen[c] {
-			return fmt.Errorf("plugins: 能力位重复声明 %q", c)
+			return fmt.Errorf("pluginapi: 能力位重复声明 %q", c)
 		}
 		seen[c] = true
 		known := false
@@ -385,10 +389,10 @@ func ValidateCapabilityList(caps []Capability, t Trust, backend bool) error {
 			if !backend {
 				kind = "前端"
 			}
-			return fmt.Errorf("plugins: 未知%s能力位 %q", kind, c)
+			return fmt.Errorf("pluginapi: 未知%s能力位 %q", kind, c)
 		}
 		if !c.TrustAllows(t) {
-			return fmt.Errorf("plugins: 信任级别 %q 不允许能力 %q（需要至少 %q）", t, c, c.MinTrust())
+			return fmt.Errorf("pluginapi: 信任级别 %q 不允许能力 %q（需要至少 %q）", t, c, c.MinTrust())
 		}
 	}
 	return nil
@@ -398,21 +402,21 @@ func ValidateCapabilityList(caps []Capability, t Trust, backend bool) error {
 func ValidateHookDeclaration(declared map[string]HookAction, t Trust) error {
 	for point, max := range declared {
 		if strings.TrimSpace(point) == "" {
-			return fmt.Errorf("plugins: 钩子点位名为空")
+			return fmt.Errorf("pluginapi: 钩子点位名为空")
 		}
 		p, ok := LookupHookPoint(point)
 		if !ok {
-			return fmt.Errorf("plugins: 未知钩子点位 %q", point)
+			return fmt.Errorf("pluginapi: 未知钩子点位 %q", point)
 		}
 		if max.Rank() < 0 {
-			return fmt.Errorf("plugins: 未知动作等级 %q（点位 %q）", max, point)
+			return fmt.Errorf("pluginapi: 未知动作等级 %q（点位 %q）", max, point)
 		}
 		for _, a := range ActionsAtOrBelow(max) {
 			if !containsAction(p.Allowed, a) {
-				return fmt.Errorf("plugins: 点位 %q 不允许动作 %q", point, a)
+				return fmt.Errorf("pluginapi: 点位 %q 不允许动作 %q", point, a)
 			}
 			if !p.AllowsAction(a, t == TrustBuiltin) {
-				return fmt.Errorf("plugins: 信任级别 %q 在点位 %q 不能使用 %q", t, point, a)
+				return fmt.Errorf("pluginapi: 信任级别 %q 在点位 %q 不能使用 %q", t, point, a)
 			}
 		}
 	}

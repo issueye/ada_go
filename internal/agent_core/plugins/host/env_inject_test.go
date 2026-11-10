@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // TestEnvHelper 是被 exec / process 拉起的子进程助手：打印托管环境变量后退出。
@@ -26,7 +26,7 @@ func TestExecInjectsManagedEnv(t *testing.T) {
 	t.Setenv("ADA_PROBE_ENV", "host")
 	t.Setenv("ADA_HOSTONLY_ENV", "host-only")
 
-	caps := testCaps(t, plugins.TrustVerified, plugins.CapExec)
+	caps := testCaps(t, pluginapi.TrustVerified, pluginapi.CapExec)
 	src := `
 export default function (agent) {
   agent.registerTool({
@@ -73,7 +73,7 @@ export default function (agent) {
 func TestProcessInjectsManagedEnv(t *testing.T) {
 	t.Setenv("ADA_HOSTONLY_ENV", "host-only")
 
-	caps := testCaps(t, plugins.TrustVerified, plugins.CapProcess)
+	caps := testCaps(t, pluginapi.TrustVerified, pluginapi.CapProcess)
 	src := `
 export default function (agent) {
   agent.registerTool({

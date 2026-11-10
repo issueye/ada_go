@@ -417,7 +417,7 @@ type ProductIdentity struct {
 	Locale string `json:"locale"`
 }
 
-// ProductPolicies 是引擎与工具运行参数（刻意不含审批规则）。
+// ProductPolicies 是引擎与工具运行参数（刻意不含审批规则；审批策略已整体移除）。
 type ProductPolicies struct {
 	ToolTimeoutMS   int `json:"toolTimeoutMs"`
 	TurnTimeoutMS   int `json:"turnTimeoutMs"`

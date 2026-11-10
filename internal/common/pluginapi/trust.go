@@ -1,4 +1,4 @@
-package plugins
+package pluginapi
 
 // Origin 是插件的来源。信任级别不能超过来源允许的上限（09 §9.1、6.9）：
 // builtin 只接受随包/官方目录；磁盘来源最高 verified（必须验签）；未验签/未知

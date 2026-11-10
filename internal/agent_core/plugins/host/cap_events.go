@@ -23,7 +23,7 @@ import (
 )
 
 func addEventsContextMember(st *capsState, hc Context, put func(string, moejs.Value) error) error {
-	if st == nil || st.caps == nil || false {
+	if st == nil || st.caps == nil {
 		return nil
 	}
 	if hc.Events == nil && hc.Usage == nil {

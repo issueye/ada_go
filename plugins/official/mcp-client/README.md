@@ -81,7 +81,7 @@ stdio 子进程默认继承宿主白名单里的 `PATH`/`HOME`/`USERPROFILE`/`Sy
 name/description 与 SKILL.md 的绝对路径，模型按路径读取正文。内容覆盖：
 
 - 从工具目录挑 `mcp_<server>_<tool>`（前缀与 `[MCP <id>]` 来源标记、Schema 被简化时的注意事项）；
-- 审批与两类失败的区分（`isError` 是 server 业务错误；`mcpError` 是传输/认证/超时）；
+- 交互确认与两类失败的区分（`isError` 是 server 业务错误；`mcpError` 是传输/认证/超时）；
 - 输出按不可信数据处理、截断与资源索引、不要把 token 复述出来；
 - 新增/启停 server 走管理页，或按本 README 改 `.adago/mcp.json` 后重载插件。
 

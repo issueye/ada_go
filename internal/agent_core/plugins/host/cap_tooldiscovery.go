@@ -2,10 +2,10 @@ package host
 
 // ctx.catalog / ctx.tool —— 发现式工具系统插件的宿主桥（capability: tool.discovery，仅 builtin）。
 //
-// 这条路径把 find_tool/exec_tool 从引擎搬到插件后仍然保持单份审批链：
+// 这条路径把 find_tool/exec_tool 从引擎搬到插件后仍然保持单份执行链：
 //   - ctx.catalog.list 只返回 tool.Discovery=true 的目录快照（只读投影）；
 //   - ctx.tool.invoke 把内层调用交回宿主，宿主按内层描述符重跑 beforeCall、
-//     policy 失败关闭与 Runner.Execute；脚本不能直接调用 Executor。
+//     schema/scope 校验与 Runner.Execute；脚本不能直接调用 Executor。
 //
 // 不提供注册面、不暴露任意工具句柄；能力位仅 builtin，且只应授予 tool-discovery。
 

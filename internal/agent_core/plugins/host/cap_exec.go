@@ -40,7 +40,7 @@ export default b;
 
 // ExecPolicy 是程序级执行策略（Run.Allow 的落点，设计 6.13）。
 //
-// 返回非 nil 即拒绝；nil 表示放行。产品装配层（命令工具插件或审批策略插件）
+// 返回非 nil 即拒绝；nil 表示放行。产品装配层（命令工具插件）
 // 注入它来限制「能跑什么」；基座只保证「怎么跑」——无 shell、cwd 不越界、有上限、有审计。
 var ExecPolicy func(program string, args []string) error
 

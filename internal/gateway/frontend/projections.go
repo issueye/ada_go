@@ -15,7 +15,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 type providersProjection struct {
@@ -55,7 +55,7 @@ type interactionProjection struct {
 	Status   string   `json:"status"`
 }
 
-func hasCapability(caps []plugins.Capability, want plugins.Capability) bool {
+func hasCapability(caps []pluginapi.Capability, want pluginapi.Capability) bool {
 	for _, c := range caps {
 		if c == want {
 			return true

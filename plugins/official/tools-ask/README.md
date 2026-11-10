@@ -40,7 +40,7 @@
 ## 前端提问卡片
 
 - 数据来自 `props.data.interactions`（线程待答交互的只读投影）。
-- 提交仍走基座交互路由 `/threads/{id}/interaction/{requestId}`，审批/提问的安全语义由基座负责，插件只决定怎么展示。
+- 提交仍走基座交互路由 `/threads/{id}/interaction/{requestId}`，交互的持久化、幂等与超时由基座负责，插件只决定怎么展示。
 - 没有待答项时返回 `null`，由基座默认托盘接手。
 - `kind=form`（多题分步表单）让位给基座托盘渲染，插件不重复实现翻页。
 
@@ -52,6 +52,6 @@
 
 ## 相关文档
 
-- [模型与审批](../../../docs/03-model-and-approval.md)
+- [模型适配与交互确认](../../../docs/03-model-and-approval.md)
 - [插件模型与后端 API](../../../docs/05-plugins.md)
 - [SSR 前端](../../../docs/07-ssr-frontend.md)

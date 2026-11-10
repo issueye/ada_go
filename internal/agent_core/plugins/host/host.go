@@ -22,8 +22,8 @@ import (
 	"github.com/MoeForge/moejs"
 	"github.com/MoeForge/moejs/eventloop"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/common/domain"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // 默认预算（06 §6.4、09 §9.5）。工具默认 120s，钩子默认 200ms 上限 2s，脚本调用 5s。
@@ -56,27 +56,12 @@ const (
 // 本次调用已失败，插件降级为 degraded，下一次调用前重建 Runtime（06 §6.4 回收策略）。
 var ErrDirtyRuntime = errors.New("host: 插件运行时需重建")
 
-// Script 是一个待加载插件的编译产物与清单。
+// Script 是一个待加载插件的编译产物与清单（契约在 internal/common/pluginapi）。
 //
 // Source 是 esbuild 之后的 ESM bundle（官方插件构建期预编译，第三方安装期编译）；
-// 宿主不做 TypeScript 编译，也不做磁盘 node_modules 解析（6.10）。
-type Script struct {
-	Manifest *plugins.Manifest
-	// EntryName 是入口模块的虚拟名，形如 plugin://<id>/index.js。
-	EntryName string
-	// Source 是入口模块源码。
-	Source string
-	// Bundle 是随包的其它模块（specifier → 源码）；loader 只在其中解析，不落盘。
-	Bundle map[string]string
-	// StaticAssets 是插件包内静态资源的只读视图（plugin://<id>/…）。
-	StaticAssets map[string][]byte
-	// Schemas 是前端 block 数据 Schema 的原文（清单路径 → JSON 字节）。
-	Schemas map[string][]byte
-	// Root 是插件包在宿主上的绝对目录（可选）；技能路径按它拼出 SKILL.md 的绝对路径。
-	Root string
-	// Readme 是插件包内 README.md 的原文（可选；详情页展示用）。
-	Readme string
-}
+// 宿主不做 TypeScript 编译，也不做磁盘 node_modules 解析（6.10）。类型下沉到 common
+// 是为了让 Gateway 的前端渲染桥不必依赖插件宿主（2026-11-10 的分层收敛）。
+type Script = pluginapi.Script
 
 // CapabilitySet 是装配期算出的「这个插件实际能拿到什么」。
 //
@@ -86,15 +71,15 @@ type CapabilitySet struct {
 	PluginID string
 	// ConfigNamespace 是 ctx.config 的命名空间（缺省插件 id；可用清单 backend.configNamespace 覆盖）。
 	ConfigNamespace string
-	Trust           plugins.Trust
-	Backend         map[plugins.Capability]bool
-	Frontend        map[plugins.Capability]bool
+	Trust           pluginapi.Trust
+	Backend         map[pluginapi.Capability]bool
+	Frontend        map[pluginapi.Capability]bool
 	// Secrets 是清单 backend.secrets 声明、且宿主确实配置了的密钥名。
 	Secrets []string
 	// Env 是清单 backend.env 白名单与宿主环境的交集；缺失的名字不注入（6.2）。
 	Env map[string]string
 	// Hooks 是点位 → 该插件使用的最高动作等级。
-	Hooks map[string]plugins.HookAction
+	Hooks map[string]pluginapi.HookAction
 	// WorkspaceRoot 是宿主真实工作区根（fs 的 Root；脚本里挂到 Mount）。
 	WorkspaceRoot string
 	// Mount 是脚本视图里的工作区绝对路径，固定 "/workspace"。
@@ -102,7 +87,7 @@ type CapabilitySet struct {
 }
 
 // NewCapabilitySet 由清单与宿主环境算出实际授予集合。
-func NewCapabilitySet(m *plugins.Manifest, workspaceRoot string, hostEnv map[string]string, availableSecrets func(string) bool) (*CapabilitySet, error) {
+func NewCapabilitySet(m *pluginapi.Manifest, workspaceRoot string, hostEnv map[string]string, availableSecrets func(string) bool) (*CapabilitySet, error) {
 	if m == nil {
 		return nil, fmt.Errorf("host: 缺少清单")
 	}
@@ -110,9 +95,9 @@ func NewCapabilitySet(m *plugins.Manifest, workspaceRoot string, hostEnv map[str
 		PluginID:        m.ID,
 		ConfigNamespace: configNamespaceOf(m),
 		Trust:           m.Trust,
-		Backend:         map[plugins.Capability]bool{},
-		Frontend:        map[plugins.Capability]bool{},
-		Hooks:           map[string]plugins.HookAction{},
+		Backend:         map[pluginapi.Capability]bool{},
+		Frontend:        map[pluginapi.Capability]bool{},
+		Hooks:           map[string]pluginapi.HookAction{},
 		Env:             map[string]string{},
 		WorkspaceRoot:   workspaceRoot,
 		Mount:           DefaultMount,
@@ -294,7 +279,7 @@ type ProcessSupervisor interface {
 	List(ctx context.Context, pluginID string) ([]ProcessStatus, error)
 }
 
-func configNamespaceOf(m *plugins.Manifest) string {
+func configNamespaceOf(m *pluginapi.Manifest) string {
 	if m == nil {
 		return ""
 	}
@@ -308,7 +293,7 @@ func configNamespaceOf(m *plugins.Manifest) string {
 const DefaultMount = "/workspace"
 
 // Has 报告后端能力是否被授予。
-func (c *CapabilitySet) Has(cap plugins.Capability) bool { return c.Backend[cap] }
+func (c *CapabilitySet) Has(cap pluginapi.Capability) bool { return c.Backend[cap] }
 
 // Context 是一次调用注入的宿主上下文。
 //
@@ -345,7 +330,7 @@ type Context struct {
 	TurnInvoke func(ctx context.Context, req TurnRequest) (TurnResult, error)
 	// Catalog 返回当前工具目录快照（capability: tool.discovery，仅 builtin）。
 	Catalog func(ctx context.Context) ([]domain.Descriptor, error)
-	// InvokeTool 按内层工具描述符重跑审批链后执行（capability: tool.discovery，仅 builtin）。
+	// InvokeTool 按内层工具描述符重跑 schema/scope 校验后执行（capability: tool.discovery）。
 	InvokeTool func(ctx context.Context, meta CallMeta, call domain.ToolCall) (domain.Result, error)
 	// Dispatch 把消息投递给调度层（capability: dispatch.send，仅 builtin）；nil 表示
 	// 本 Core 未接入网关调度层（CLI 直连、无网关的部署）。
@@ -579,18 +564,18 @@ type HTTPResult struct {
 // M1 里保持 domain 不 import plugins，由宿主在边界处转换）。
 func (c *CapabilitySet) DomainTrust() domain.Trust {
 	switch c.Trust {
-	case plugins.TrustBuiltin:
+	case pluginapi.TrustBuiltin:
 		return domain.TrustBuiltin
-	case plugins.TrustVerified:
+	case pluginapi.TrustVerified:
 		return domain.TrustVerified
 	default:
 		return domain.TrustThirdParty
 	}
 }
 
-// InstallCapabilities 是「能力安装」的挂载点，由 caps.go 在同包内赋值（init）。
+// InstallCapabilities 是「成员与模块安装」的挂载点，由 caps.go 在同包内赋值（init）。
 //
-// 拆成函数变量的原因：Runtime 生命周期（runtime.go）与能力安装（caps.go）由两条
+// 拆成函数变量的原因：Runtime 生命周期（runtime.go）与安装逻辑（caps.go）由两条
 // 并行工作流实现，用变量解耦可以让两边各自编译与测试；装配路径必须走同一份实现，
 // 因此这里只允许一个赋值点。未赋值时宿主拒绝加载插件，而不是静默不装能力。
 var InstallCapabilities func(rt *mojsRuntime, loop *mojsLoop, caps *CapabilitySet, hc Context) error

@@ -2,7 +2,7 @@ package domain
 
 // InteractionKind 是通用交互的类型，取值来源 04 §5.7 的 interactions.kind 列
 // （confirm|select|input|form；对应 05 §6.3 UIContext 的 confirm/select/input/form）。
-// 它是通用交互原语、不含审批语义；审批规则属于“官方默认策略插件”（03 §5.6）。
+// 它是通用交互原语、不含审批语义；审批策略已移除（2026-11-10 决策），03 §5.6 只描述桥本身。
 type InteractionKind string
 
 const (
@@ -35,17 +35,17 @@ const (
 
 // FailureDirection 是“安全判定拿不准时往哪边失败”的方向声明。
 // 基座的失败判定默认关闭（FailClosed）；FailOpen 仅出现在文档明确“不阻塞主循环”
-// 的观测类钩子点位（06 §6.6 表的“失败方向”列）。
+// 的观测类钩子点位（06 §6.6 表的“失败方向”列）。审批策略已移除后，失败时的“拒绝”
+// 由调用方（工具实现）执行，基座不再有执行前拦截。
 type FailureDirection string
 
 const (
 	// FailClosed 失败即拒绝：交互超时记 timeout、断线/无 UI 记 unavailable，
-	// 策略插件必须都当作拒绝，基座不会替它放行（02 §5.3 INV-4、03 §5.6、06 §6.6 tool.beforeCall 行）。
-	// 无 active 策略插件时，write/exec/network 工具返回 denied: no policy ——
-	// 这是“空策略”的失败关闭，不是审批规则（02 §5.4）。
+	// 调用方必须都当作拒绝，基座不会替它放行（02 §5.3 INV-4、03 §5.6）。
+	// 审批策略已移除，基座不再产生 denied: no policy 这类回执（02 §5.4）。
 	FailClosed FailureDirection = "closed"
-	// FailOpen 失败即继续：仅适用于 observe/note 类点位与“写/执行工具立即拒绝”路径之外的
-	// 非安全点；超时/异常不阻塞主循环（06 §6.6 约束）。
+	// FailOpen 失败即继续：仅适用于 observe/note 类点位等非安全点；
+	// 超时/异常不阻塞主循环（06 §6.6 约束）。
 	FailOpen FailureDirection = "open"
 )
 
@@ -59,7 +59,7 @@ func (s InteractionStatus) Direction() FailureDirection {
 	return FailClosed
 }
 
-// IsDenial 报告交互状态是否应被策略插件当作拒绝（INV-4 的判定辅助，
-// 供 M1-A 的策略链与契约测试使用；基座不替插件做裁决）。
+// IsDenial 报告交互状态是否应被调用方当作拒绝（INV-4 的判定辅助，
+// 供工具实现与契约测试使用；基座不替调用方做裁决）。
 // 未知/空值按拒绝处理（失败关闭优先于失败开放）。
 func (s InteractionStatus) IsDenial() bool { return s != InteractionAccepted }

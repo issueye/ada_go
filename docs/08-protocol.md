@@ -2,7 +2,7 @@
 
 > 上级索引：[ada-go 设计文档](design.md)  
 > 对应章节：§8 协议契约  
-> 版本：0.2 · 2026-11-09
+> 版本：0.3 · 2026-11-10
 
 ## 8. 协议契约
 
@@ -24,7 +24,7 @@
 | system | `system.ping` | 健康检查 |
 | system | `system.shutdown` | 优雅退出（刷盘、关运行时） |
 | workspace | `workspace.info` | 路径、产品、配置、数据目录 |
-| workspace | `workspace.updatePolicy` | 资源上限、循环检测、模型等运行参数（审批等策略设置由插件自己管理） |
+| workspace | `workspace.updatePolicy` | 资源上限、循环检测、模型等运行参数 |
 | thread | `thread.create` | 创建线程 |
 | thread | `thread.list` | 列表（分页、归档过滤） |
 | thread | `thread.get` | 快照（当前 head 路径的 items 窗口 + 运行状态） |
@@ -110,13 +110,13 @@
 
 `discovery` 标记「发现式」注册（05 §6.3 ToolDef.discovery）：缺省 `false`（注入式，
 声明随模型请求下发）；`true` 时不注入模型清单，模型经 `find_tool` 拿到
-名称/说明/参数 Schema 后用 `exec_tool` 按名执行——审批、超时、循环检测沿用
+名称/说明/参数 Schema 后用 `exec_tool` 按名执行——超时、循环检测沿用
 该工具自己的描述符。`exec_tool` **只**执行发现式工具：注入式工具本来就随声明下发，
 经旁路执行会被拒（`tool_not_discoverable`）。`find_tool`/`exec_tool` 是**保留名**，由 `tool-discovery`
 系统插件提供，不进入普通工具目录，也不属于第三方插件；目录里没有发现式工具时，
-这两个入口不注入模型请求。宿主只向该 builtin 插件安装 `tool.discovery`
-（`ctx.catalog` 目录只读投影 + `ctx.tool.invoke` 内层执行）受控桥；内层执行仍走同一套
-`tool.beforeCall` → policy 失败关闭 → Runner 链路，脚本不能绕过审批。
+这两个入口不注入模型请求。宿主向该插件注入 `tool.discovery`
+（`ctx.catalog` 目录只读投影 + `ctx.tool.invoke` 内层执行）桥；内层执行仍走同一条
+schema/scope 校验 → Runner 链路（审批策略已移除，执行前没有插件判决）。
 
 回执（工具结果 entry 的 payload）：
 
@@ -138,7 +138,7 @@
 }
 ```
 
-`content` 给模型；`details` 只给界面。拒绝：
+`content` 给模型；`details` 只给界面。插件自己拒绝时（例如 `ctx.ui` 没拿到用户确认）：
 
 ```json
 {
@@ -167,7 +167,7 @@ JSON-RPC 标准错误码用于传输层；业务错误用 4 位应用码：
 | 3002 | `tool_invalid_args` | Schema 校验失败 |
 | 3003 | `plugin_timeout` | 插件调用超时 |
 | 3004 | `plugin_crashed` | 插件运行时重建 |
-| 3005 | `plugin_denied` | 能力/信任不允许 |
+| 3005 | `plugin_denied` | 插件自己拒绝该调用（能力位与信任级别不再产生） |
 | 4001 | `auth_required` | 未登录/ cookie 过期 |
 | 4002 | `csrf_invalid` | 表单 token 不匹配 |
 | 4003 | `origin_denied` | Origin/Host 校验失败 |
@@ -193,7 +193,6 @@ JSON-RPC 标准错误码用于传输层；业务错误用 4 位应用码：
     "tools-ask",
     "tools-skill",
     "tool-discovery",
-    "policy-default",
     "persona-coding",
     "provider-admin",
     "token-usage",
@@ -228,9 +227,9 @@ JSON-RPC 标准错误码用于传输层；业务错误用 4 位应用码：
 | 字段 | 消费者 |
 |---|---|
 | `plugins` | 系统插件（builtin）的启用清单；第三方插件由发现目录与用户启用状态决定，装配时合并 |
-| `capabilities.skills/images/subagents/markdownBlocks/pluginIslands` | 技能装配、图片输入门、子智能体装配、Markdown 动态块总开关、客户端岛开关 |
+| `capabilities.skills/images/subagents/markdownBlocks/pluginIslands` | 技能装配、图片输入门、子智能体装配、Markdown 动态块总开关、客户端岛开关（这是**产品功能开关**，与插件安装能力位无关） |
 | `identity.name/locale` | 界面品牌与语言；**不含人格**，人格来自 `persona-*` 插件 |
-| `policies` | 引擎并发、单工具超时、可选的墙钟/token 上限、循环检测阈值；**不含审批规则**，审批属于 `policy-*` 插件自己的设置 |
+| `policies` | 引擎并发、单工具超时、可选的墙钟/token 上限、循环检测阈值；**不含审批规则**（审批策略已移除，没有任何插件的策略设置参与工具执行） |
 
 `adag verify` 逐字段查找消费者，找不到就失败；`products/skeleton.agent.json` 只声明最小字段且 `plugins: []`，用来证明“产品只是一份声明、空基座可运行”。
 

@@ -2,7 +2,7 @@
 //
 //   - 目录布局：工作区 <workspace>/.adago/plugins/<id>/ 与全局 ~/.adago/plugins/<id>/；
 //     同 id 冲突时工作区优先并记 warning（MergeByPriority）。
-//   - LoadDir/LoadDirDetailed 读取 plugin.json → plugins.LoadManifest → m.Validate(目录名)，
+//   - LoadDir/LoadDirDetailed 读取 plugin.json → pluginapi.LoadManifest → m.Validate(目录名)，
 //     并把入口源码（manifest.backend.entry 指向的文件）读成 host.Script。
 //     不做 node_modules 解析、不做 TypeScript 编译（05 §6.1、06 §6.10）：入口与随包
 //     模块必须是宿主可直接执行的 ESM JavaScript。
@@ -22,8 +22,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // 来源标记（plugin.list 的 source 字段）。
@@ -155,22 +155,22 @@ func loadOne(dir, dirName, source string) (Plugin, *Warning) {
 		}
 		return fail("读取 plugin.json 失败: %v", err)
 	}
-	m, err := plugins.LoadManifest(raw)
+	m, err := pluginapi.LoadManifest(raw)
 	if err != nil {
 		return fail("%v", err)
 	}
 	// 来源→信任上限 + 验签：磁盘来源不得自声明 builtin；verified 只有验签通过
 	// 才保留，否则降级 third-party。降级后重新校验能力/钩子/前端，builtin-only
-	// 能力在 third-party 下非法时按失败关闭跳过（09 §9.1、6.9）。
-	origin := plugins.Origin(source)
+	// 能力声明在 third-party 下非法时按失败关闭跳过（09 §9.1、6.9）；装什么已不再由能力位决定。
+	origin := pluginapi.Origin(source)
 	reason := ""
-	if m.Trust == plugins.TrustVerified && origin != plugins.OriginOfficial {
-		if verr := plugins.VerifyManifestSignature(m, dir); verr != nil {
-			m.Trust = plugins.TrustThirdParty
+	if m.Trust == pluginapi.TrustVerified && origin != pluginapi.OriginOfficial {
+		if verr := pluginapi.VerifyManifestSignature(m, dir); verr != nil {
+			m.Trust = pluginapi.TrustThirdParty
 			reason = "验签失败，降级为 third-party: " + verr.Error()
 		}
 	}
-	if capped := plugins.CapTrust(m.Trust, origin); capped != m.Trust {
+	if capped := pluginapi.CapTrust(m.Trust, origin); capped != m.Trust {
 		m.Trust = capped
 		reason = fmt.Sprintf("来源 %q 不允许更高信任，降级为 %s", source, capped)
 	}
@@ -202,7 +202,7 @@ func loadOne(dir, dirName, source string) (Plugin, *Warning) {
 	}
 	script := host.Script{
 		Manifest:     m,
-		EntryName:    host.EntryScheme + "://" + m.ID + "/" + m.Backend.Entry,
+		EntryName:    pluginapi.EntryScheme + "://" + m.ID + "/" + m.Backend.Entry,
 		Source:       string(src),
 		Bundle:       bundle,
 		StaticAssets: assets,

@@ -42,7 +42,7 @@ Markdown 动态块的通用图表渲染器：**横向条**、**纵向柱**、**�
 | --- | --- |
 | `kind` | 可选；`bar`/`column`/`compare`/`stacked`/`heatmap`/`spark`。省略时返回全部 |
 
-`access=read`，不触发审批。非法 `kind` 以 `ERR_INVALID_ARG_VALUE` 失败。
+`access=read`（只是效果声明）。非法 `kind` 以 `ERR_INVALID_ARG_VALUE` 失败。
 
 ## 随包技能：`charts-render`
 

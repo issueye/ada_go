@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/common/binpaths"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 // TestPathHelper 是子进程助手：打印 PATH 后退出（父进程里未设置门禁变量，直接返回）。
@@ -26,7 +26,7 @@ func TestExecPrependsServiceBinPath(t *testing.T) {
 	t.Setenv("ADAGO_HOME", t.TempDir())
 	t.Setenv("ADA_PATH_HELPER", "1")
 
-	caps := testCaps(t, plugins.TrustVerified, plugins.CapExec)
+	caps := testCaps(t, pluginapi.TrustVerified, pluginapi.CapExec)
 	dirs, err := binpaths.Dirs(caps.WorkspaceRoot)
 	if err != nil {
 		t.Fatalf("binpaths.Dirs: %v", err)
@@ -102,7 +102,7 @@ export default function (agent) {
 func TestProcessStartsWithServiceBinPath(t *testing.T) {
 	t.Setenv("ADAGO_HOME", t.TempDir())
 
-	caps := testCaps(t, plugins.TrustVerified, plugins.CapProcess)
+	caps := testCaps(t, pluginapi.TrustVerified, pluginapi.CapProcess)
 	caps.Env = map[string]string{"ADA_PATH_HELPER": "1"}
 	dirs, err := binpaths.Dirs(caps.WorkspaceRoot)
 	if err != nil {

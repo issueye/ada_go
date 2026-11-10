@@ -21,7 +21,7 @@ type Invoker interface {
 
 // Executor 是工具执行包装：校验 → 超时 → panic 收敛 → 截断 → 回执（02 §5.4）。
 //
-// 审批策略已整体移除：这里不再有「没有策略插件就拒绝写/执行工具」的失败关闭。
+// 审批策略已整体移除：这里没有「没有策略插件就拒绝写/执行工具」的失败关闭。
 type Executor struct {
 	catalog  *Catalog
 	invoker  Invoker

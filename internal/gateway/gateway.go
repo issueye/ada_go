@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/adag/ada-go/internal/agent_core/coreapp"
-	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/gateway/contracts"
 	"github.com/adag/ada-go/internal/gateway/dispatch"
 	"github.com/adag/ada-go/internal/gateway/frontend"
@@ -69,7 +69,7 @@ type Config struct {
 	// FrontendScripts 是带 frontend 段的插件加载单元（M4，7.5；含统一插件包）：
 	// 非空时组合根构建 web.PluginUI 渲染桥，SSR 填充插槽并提供 /ext 页面。
 	// 脚本由上层组合根注入（app/ 层）——internal/ 不 import official/。
-	FrontendScripts []host.Script
+	FrontendScripts []pluginapi.Script
 	// WorkspacesFile 是工作区列表的持久化文件；FilePicker 新登记的工作区
 	// 会写到这里，下次启动再合并回列表。空表示不持久化。
 	// 显式传 DataDir 时忽略（隔离数据目录不共享用户级工作区列表）。
@@ -786,12 +786,12 @@ const DefaultIdle = 15 * time.Minute
 // 哪些插件真正渲染由 frontendGate 在请求时按工作区的 plugin_meta 过滤：
 // 产品声明的默认启用，未声明的只有用户显式启用后才渲染。这里不能再按产品
 // 过滤，否则界面上的「启用」要重启 Gateway 才生效。
-func selectFrontendScripts(scripts []host.Script) ([]host.Script, error) {
+func selectFrontendScripts(scripts []pluginapi.Script) ([]pluginapi.Script, error) {
 	if len(scripts) == 0 {
 		return nil, nil
 	}
 	ids := make([]string, 0, len(scripts))
-	byID := map[string]host.Script{}
+	byID := map[string]pluginapi.Script{}
 	for _, s := range scripts {
 		if s.Manifest == nil {
 			return nil, fmt.Errorf("gateway: 前端插件缺少清单")
@@ -800,7 +800,7 @@ func selectFrontendScripts(scripts []host.Script) ([]host.Script, error) {
 		ids = append(ids, s.Manifest.ID)
 	}
 	sort.Strings(ids)
-	out := make([]host.Script, 0, len(ids))
+	out := make([]pluginapi.Script, 0, len(ids))
 	for _, id := range ids {
 		out = append(out, byID[id])
 	}

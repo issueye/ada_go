@@ -8,8 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
-	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 var benchSlots = []string{
@@ -24,21 +23,21 @@ export default defineComponent({
   render(h) { return <div class="slot-bench">ok</div>; },
 });
 `
-	scripts := make([]host.Script, 0, len(benchSlots))
+	scripts := make([]pluginapi.Script, 0, len(benchSlots))
 	for i, slot := range benchSlots {
 		id := "bench-" + string(rune('a'+i))
-		m := &plugins.Manifest{
-			ID: id, Name: id, Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
-			Trust: plugins.TrustBuiltin,
-			Frontend: &plugins.Frontend{
-				Capabilities: []plugins.Capability{plugins.CapFrontendScript},
+		m := &pluginapi.Manifest{
+			ID: id, Name: id, Version: "0.1.0", APIVersion: pluginapi.APIVersionMajor,
+			Trust: pluginapi.TrustBuiltin,
+			Frontend: &pluginapi.Frontend{
+				Capabilities: []pluginapi.Capability{pluginapi.CapFrontendScript},
 				Client:       "client.js",
-				Slots: []plugins.SlotContribution{{
+				Slots: []pluginapi.SlotContribution{{
 					Slot: slot, Template: "slot.tsx", Hydrate: true,
 				}},
 			},
 		}
-		scripts = append(scripts, host.Script{
+		scripts = append(scripts, pluginapi.Script{
 			Manifest:     m,
 			Bundle:       map[string]string{"slot.tsx": src},
 			StaticAssets: map[string][]byte{"client.js": []byte("export default {}")},

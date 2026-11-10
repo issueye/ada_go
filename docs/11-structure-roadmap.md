@@ -2,7 +2,7 @@
 
 > 上级索引：[ada-go 设计文档](design.md)  
 > 对应章节：§13 目录结构、§14 里程碑与交付状态、§15 风险与开放问题、§16 系统插件迁移、§17 文档治理
-> 版本：0.2 · 2026-11-09
+> 版本：0.3 · 2026-11-10
 > 本文吸收原 `11-structure-roadmap.md` 与 `11-structure-roadmap.md`：不再单独维护计划/决策文档。
 
 ## 13. 目录结构
@@ -18,14 +18,15 @@ ada-go/
       domain/              消息、Part、工具描述符/回执、事件、错误、失败方向
       ports/               12 个端口接口（内核 seam）
       proto/               生成的方法常量、DTO、错误码
+      pluginapi/           插件契约：manifest、能力词汇、钩子点位、插槽、Script、TSX 渲染器
     gateway/               唯一对外 HTTP 进程的全部实现
       gateway.go           Gateway 装配、路由与生命周期
       contracts/ security/ supervisor/ relay/ sse/ dispatch/ processmgr/
       web/                 SSR handlers、模板、静态资源、投影缓存、ui/
-      frontend/            esbuild、moejs render、VNode、插槽注册表
+      frontend/            esbuild、VNode、插槽注册表（TSX 执行走 common/pluginapi）
     agent_core/            Agent Core：唯一引擎、插件宿主、会话运行时
       engine/              RunTurn、终止条件、Compactor seam
-      plugins/             manifest、loader、host(moejs)、contrib、hooks、skills、provider
+      plugins/             loader、host(moejs)、contrib、hooks、skills、provider
       coreapp/ corecontracts/ coreproto/ corerpc/ cli/
       conformance/         端口契约、不变量、golden、nodecompat、ui 基线
     common/adapters/       sqlite、scope、clock、idgen、secret（零 provider 实现）
@@ -120,7 +121,7 @@ go work init . ../moejs
 | D-4 | 错误码真源分层：`spec/proto.json` → `methods_gen.go` → `domain/errors.go` → `diag/codes.go`，verify 对齐 |
 | D-5 | 系统插件 id 只允许出现在 `products/*.agent.json`、`tools/verify/boundary.go`、插件包自身与测试夹具；基座源码（含注释）禁止 |
 | D-6 | 压缩 entry 的 payload = `CompactSummary` + `firstKeptEntryId`；循环检测的 `Repeatable` 只进 Core 内存，不上 wire |
-| D-7 | moejs 上游缺口实测：模块白名单在宿主 resolver；`node:fs` 用上游 + 宿主包装；`node:child_process` 由 ada-go 自建；`http/net/dns/worker_threads/vm` 不装；`.node` 拒绝 |
+| D-7 | moejs 上游缺口实测：`node:fs` 用上游 + 宿主成员包装；`node:child_process` 由 ada-go 自建；`http/net/dns/worker_threads/vm` 不装；`.node` 拒绝。模块白名单与安装矩阵已放弃（2026-11-10 决策） |
 
 ### 14.2 契约缺口（G 系列）
 
@@ -136,7 +137,7 @@ go work init . ../moejs
 | G-10 `pool` 位置 | `backend.pool`，v1 >1 装配失败 |
 | G-12 时间格式 | RPC 层 RFC3339Nano UTC；DB 层 INTEGER |
 | G-14 动态路由 path 参数 | 插件从 `Path` 自行解析；`HTTPAPIRequest` 暂无 `pathParams` |
-| G-15 产品能力位 `images` | 由 coreapp 注入引擎 `Params.ImagesAllowed` |
+| G-15 产品功能开关 `images` | 由 coreapp 注入引擎 `Params.ImagesAllowed` |
 
 其余 G-4/5/6/8/11/13/16 已在 02/04/07/08 统一措辞或按现状冻结；新增缺口先改设计再改实现。
 
@@ -186,7 +187,7 @@ go work init . ../moejs
 | P0 安全前置 | 来源→信任上限、Ed25519 验签、安装/预检不执行代码、`fs.write` 对插件清单/`dist/` 写保护 | 无 | 磁盘插件不能声明 builtin/verified；`check_plugin` 不再触发装配 |
 | P0 文档/门禁 | 文档地图收敛；删除测试；`verify boundary` 增“基座无产品数据文件/端点”断言 | 无 | 新增文档必须登记；禁用系统插件测试全绿 |
 | P1 通用原语 | `global.config`（命名空间/0600/原子写/跨进程锁）、`events.read`（只读/游标/脱敏） | 无 | 契约测试；限额；审计 |
-| P1 工具发现 | `tool-discovery` 系统插件；builtin-only `tool.discovery`（`ctx.catalog`/`ctx.tool.invoke`） | P1 原语 | 禁用后 find/exec 消失；内层审批链不绕过 |
+| P1 工具发现 | `tool-discovery` 系统插件；builtin-only `tool.discovery`（`ctx.catalog`/`ctx.tool.invoke`） | P1 原语 | 禁用后 find/exec 消失；内层执行不绕过超时与循环检测 |
 | P1 用量/遥测 | `token-usage`/`composer-telemetry` 改用 `events.read` 自聚合；基座只留每轮原始计数 | `events.read` | 禁用后页面/卡片消失；基座不再聚合展示 |
 | P1 工具管理 | 基座内部 `ToolManager` 集中工具注册/按 owner 摘除/可见性视图/turn 快照/执行路由；可见性规则收敛到 `domain.ToolVisibility` | P1 工具发现 | 模型声明、`find_tool`、`exec_tool` 与 `tool.list` 用同一份规则；`exec_tool` 不能执行注入式工具 |
 | P2 调度层 | 网关唯一发送路径 `Dispatcher`（界面与插件共用）；builtin-only `dispatch.send` 宿主桥 + 回环控制端点（token 认进程、sender 由宿主盖章） | P1 工具管理 | 伪造 sender 无效；非令牌 401；`/internal/*` 不走用户鉴权；插件子进程拿不到宿主凭据 |
@@ -227,7 +228,7 @@ go work init . ../moejs
 - **正文 16 份**：00–15；`design.md` 只做索引与阅读路径。
 - **不新增计划/评估/交付文档**：开发计划、风险、决策、性能实测、发布清单分别并入 11、10、09；一次性分析不进 `docs/`。
 - **合并保留章节号**：14/15/19 合并后仍用 §14/§15/§19；16/18 合并后仍用 §16/§18；代码注释引用继续有效。
-- **文档先行**：改能力位、钩子、插槽、协议、基座边界时，先改文档与 `spec/`，再改实现；`adag verify` 负责链接、地图与核心数字。
+- **文档先行**：改钩子、插槽、协议、能力词汇、基座边界时，先改文档与 `spec/`，再改实现；`adag verify` 负责链接、地图与核心数字。
 - **过期即缺陷**：文档未登记、成为孤岛、核心数字不符、链接失效，均按门禁失败处理。
 
 ---

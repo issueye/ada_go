@@ -19,7 +19,7 @@ import (
 	"github.com/adag/ada-go/internal/common/binpaths"
 )
 
-// 本文件实现 host.InstallCapabilities：把每个 Runtime 需要的宿主桥与 node 模块装上。
+// 本文件实现 host.InstallCapabilities：把每个 Runtime 需要的宿主桥与 node 模块装上（对系统插件与第三方一致）。
 //
 // 能力位与模块白名单已整体移除（2026-11-10 决策）：宿主不再按清单裁剪「装什么」，
 // 也不再有链接期 ERR_ACCESS_DENIED。仍然保留的是**功能边界**本身：
@@ -169,7 +169,7 @@ func baseForLog(p string) string {
 	return path.Base(filepath.ToSlash(p))
 }
 
-// capsState 是一个 Runtime 的能力安装结果：resolver 判定、上限、审计与宿主回调都在这一份状态里。
+// capsState 是一个 Runtime 的成员与模块安装结果：上限、审计与宿主回调都在这一份状态里。
 //
 // ctx.fs / ctx.http / node:fs / node:child_process 共用同一个 capsState，
 // 因此「一条访问路径」不是口头承诺：同一 Scope、同一出网边界、同一审计器、同一能力位。

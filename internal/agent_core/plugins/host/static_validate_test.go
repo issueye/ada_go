@@ -5,15 +5,15 @@ package host
 import (
 	"testing"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
-func staticScript(t *testing.T, source string, caps []plugins.Capability) (Script, *CapabilitySet) {
+func staticScript(t *testing.T, source string, caps []pluginapi.Capability) (Script, *CapabilitySet) {
 	t.Helper()
-	m := &plugins.Manifest{
-		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: plugins.APIVersionMajor,
-		Trust: plugins.TrustThirdParty,
-		Backend: &plugins.Backend{
+	m := &pluginapi.Manifest{
+		ID: "demo", Name: "Demo", Version: "0.1.0", APIVersion: pluginapi.APIVersionMajor,
+		Trust: pluginapi.TrustThirdParty,
+		Backend: &pluginapi.Backend{
 			Entry:        "index.ts",
 			Capabilities: caps,
 		},

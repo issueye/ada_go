@@ -54,7 +54,7 @@ func addSessionFlags(fs *flag.FlagSet, f *sessionFlags, interactive bool) {
 	fs.StringVar(&f.baseURL, "base-url", "", "OpenAI 兼容端点（默认 https://api.openai.com/v1）")
 	fs.BoolVar(&f.fake, "fake", false, "使用确定性回显模型（不需要 API key）")
 	fs.BoolVar(&f.debug, "debug", false, "把每次出网请求/响应摘要写到 stderr（密钥脱敏；也可设 ADAG_DEBUG=1）")
-	fs.BoolVar(&f.interactive, "interactive", interactive, "把审批/提问转到终端（默认 chat 开启，print 关闭）")
+	fs.BoolVar(&f.interactive, "interactive", interactive, "把交互/提问转到终端（默认 chat 开启，print 关闭）")
 	fs.StringVar(&f.events, "events", "", "把领域事件写成 JSONL 文件")
 	fs.StringVar(&f.thread, "thread", "", "继续已有线程")
 }

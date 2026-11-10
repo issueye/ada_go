@@ -3,7 +3,7 @@ package host
 // 本文件是「agent 对象与结算」（05 §6.3 的 AgentAPI、06 §6.5 的装配期注册）：
 //
 //   - 入口工厂收到的 agent 对象、以及与它同一份形状的 agent:host 模块绑定；
-//   - 每次调用的入参（payload + ctx），ctx 按能力安装（没声明的属性不存在）；
+//   - 每次调用的入参（payload + ctx），ctx 成员由宿主统一注入（能力位不再决定有没有）；
 //   - 返回值结算：工具结果、钩子动作、前端动作、路由响应；
 //   - 钩子处理器：把 HookChain 的一次调用排进本实例的 Runtime 队列。
 //
@@ -24,6 +24,7 @@ import (
 
 	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/common/domain"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/common/ports"
 )
 
@@ -358,7 +359,7 @@ func buildAgentAPI(rt *mojsRuntime, owner func() *Instance) moejs.Value {
 		}
 		point := strings.TrimSpace(moejs.Arg(args, 0).String())
 		fn := moejs.Arg(args, 1)
-		if _, ok := plugins.LookupHookPoint(point); !ok {
+		if _, ok := pluginapi.LookupHookPoint(point); !ok {
 			return moejs.Undefined(), r.TypeError("on(%q): 未知钩子点位（06 §6.6 只有 15 个）", point)
 		}
 		if !engine.IsCallable(fn) {
@@ -376,7 +377,7 @@ func buildAgentAPI(rt *mojsRuntime, owner func() *Instance) moejs.Value {
 			}
 		}
 		if def.Action == "" {
-			def.Action = string(plugins.ActionObserve)
+			def.Action = string(pluginapi.ActionObserve)
 		}
 		ordinal := st.nextHookOrdinal(point)
 		slot, err := st.add(slotKindHook, fmt.Sprintf("%s#%d", point, ordinal), fn)
@@ -399,15 +400,15 @@ func (p *Instance) newHookHandler(def HookDef) (*plugins.HookHandler, error) {
 	if def.Handler.Slot == 0 {
 		return nil, fmt.Errorf("钩子 %s 没有脚本句柄", def.Point)
 	}
-	point, ok := plugins.LookupHookPoint(def.Point)
+	point, ok := pluginapi.LookupHookPoint(def.Point)
 	if !ok {
 		return nil, fmt.Errorf("未知钩子点位 %q", def.Point)
 	}
-	action := plugins.HookAction(def.Action)
+	action := pluginapi.HookAction(def.Action)
 	if action == "" {
-		action = plugins.ActionObserve
+		action = pluginapi.ActionObserve
 	}
-	if !point.AllowsAction(action, p.caps.Trust == plugins.TrustBuiltin) {
+	if !point.AllowsAction(action, p.caps.Trust == pluginapi.TrustBuiltin) {
 		return nil, fmt.Errorf("插件 %s（trust=%s）不能在 %s 上使用 %s", p.id, p.caps.Trust, point.Name, action)
 	}
 	declared, ok := p.caps.Hooks[def.Point]
@@ -462,7 +463,7 @@ func (p *Instance) callArgs(rt *mojsRuntime, c *call) ([]moejs.Value, error) {
 // contextObject 是一次调用的 ctx：身份字段恒有，能力成员按清单安装（05 §6.3）。
 //
 // 「没声明的属性不存在」是硬要求：这里不是给 undefined，而是根本不设置该属性，
-// 脚本侧 `ctx.exec` 因此是 undefined，与设计 6.3 的「按能力安装」一致。
+// 脚本侧 `ctx.exec` 因此是 undefined（宿主未注入该成员，不是能力位裁剪）。
 func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 	r := rt.Realm()
 	obj := r.NewObject()
@@ -517,7 +518,7 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 	}))
 
 	// state：capability: state。KV 是线程级命名空间，宿主负责落库（04 §5.4）。
-	if true && hc.State != nil {
+	if hc.State != nil {
 		state := r.NewObject()
 		op := func(kind string) engine.NativeFunc {
 			return func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
@@ -563,7 +564,7 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 
 	// providers：capability: model.admin。只暴露目录读取与当前模型切换；
 	// 不暴露密钥、端点客户端或任何出网能力。
-	if true && hc.Providers != nil {
+	if hc.Providers != nil {
 		providers := r.NewObject()
 		_ = providers.SetProp(r, r.KeyFromGoString("list"), rt.Function("providers.list", 0,
 			func(_ *moejs.Realm, _ moejs.Value, _ []moejs.Value) (moejs.Value, error) {
@@ -590,7 +591,7 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 
 	// pluginAdmin：capability: plugin.admin。只暴露全局安装与健康检查入口；
 	// id/路径/大小校验与「不覆盖」由宿主实现，脚本拿不到任意文件写权限。
-	if true && (hc.InstallPlugin != nil || hc.CheckPlugin != nil) {
+	if hc.InstallPlugin != nil || hc.CheckPlugin != nil {
 		admin := r.NewObject()
 		if hc.InstallPlugin != nil {
 			_ = admin.SetProp(r, r.KeyFromGoString("install"), rt.Function("pluginAdmin.install", 1,
@@ -670,17 +671,17 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 		if c.onDelta != nil {
 			set("emit", p.emitFunction(rt, c))
 		}
-		if true && hc.HTTP != nil {
+		if hc.HTTP != nil {
 			set("http", p.httpObject(rt, c, hc))
 		}
 	}
 
 	// fetch：capability: net.fetch。出网只经宿主的 HTTP 桥（03 §5.5）。
-	if true && hc.HTTP != nil {
+	if hc.HTTP != nil {
 		set("fetch", p.fetchFunction(rt, c, hc))
 	}
 
-	// 能力安装方补成员（ctx.fs / ctx.exec）：caps.go 的 fs guard 与 exec 适配器
+	// 成员安装方补成员（ctx.fs / ctx.exec）：caps.go 的 fs guard 与 exec 适配器
 	// 通过 InstallContextMembers 挂进来，agentapi 不重复实现能力细节。
 	if InstallContextMembers != nil {
 		put := func(name string, v moejs.Value) error {
@@ -696,7 +697,7 @@ func (p *Instance) contextObject(rt *mojsRuntime, c *call) moejs.Value {
 // assemblyContextObject 是入口工厂的第二个参数：装配期只读上下文。
 //
 // 与 ToolContext 的区别是刻意收窄：没有 state/ui/exec，也没有 fs.writeText。
-// process 按能力安装（stdio MCP 在装配期启动长驻 server），这是唯一的装配期副作用。
+// process 成员同样由宿主注入（stdio MCP 在装配期启动长驻 server），这是唯一的装配期副作用。
 // 它只解决「插件在 registerTool 之前需要读配置、访问网络、取密钥」这一类装配期需求
 // （MCP 的 tools/list 是第一个消费者），不能把装配期变成有副作用的运行期。
 func (p *Instance) assemblyContextObject(rt *mojsRuntime, c *call) moejs.Value {
@@ -739,11 +740,11 @@ func (p *Instance) assemblyContextObject(rt *mojsRuntime, c *call) moejs.Value {
 	}))
 
 	// fs 只安装读成员：装配期读 .adago/mcp.json、~/.adago/mcp.json，不允许写。
-	if st, ok := stateFor(rt); ok && true && st.fs != nil {
+	if st, ok := stateFor(rt); ok && st.fs != nil {
 		set("fs", ctxFSReadObject(st, hc))
 	}
 	// fetch 与运行时 ctx.fetch 同一条宿主 HTTP 桥；没有 net.fetch 就不存在。
-	if true && hc.HTTP != nil {
+	if hc.HTTP != nil {
 		set("fetch", p.fetchFunction(rt, c, hc))
 	}
 	// secret 只暴露清单声明过的名字。
@@ -821,7 +822,7 @@ func (p *Instance) uiObject(rt *mojsRuntime, c *call, hc Context) moejs.Value {
 			}
 			return p.hostAsync(c, "ui."+string(kind), func(ctx context.Context) (any, error) {
 				if hc.UI == nil {
-					return nil, nil // 未授予：按拒绝处理（INV-4 失败关闭）
+					return nil, nil // 宿主没给 UI：返回 nil，由调用方按 INV-4 处理
 				}
 				res, err := hc.UI(ctx, req)
 				if err != nil {
@@ -872,7 +873,7 @@ func (p *Instance) uiObject(rt *mojsRuntime, c *call, hc Context) moejs.Value {
 			}
 			return p.hostAsync(c, "ui.form", func(ctx context.Context) (any, error) {
 				if hc.UI == nil {
-					return nil, nil // 未授予：按拒绝处理（INV-4 失败关闭）
+					return nil, nil // 宿主没给 UI：返回 nil，由调用方按 INV-4 处理
 				}
 				res, err := hc.UI(ctx, req)
 				if err != nil {

@@ -29,13 +29,13 @@ import (
 	"github.com/adag/ada-go/internal/agent_core/coreproto"
 	"github.com/adag/ada-go/internal/agent_core/devfake"
 	"github.com/adag/ada-go/internal/agent_core/engine"
-	"github.com/adag/ada-go/internal/agent_core/plugins"
 	"github.com/adag/ada-go/internal/agent_core/plugins/discovery"
 	"github.com/adag/ada-go/internal/agent_core/plugins/host"
 	"github.com/adag/ada-go/internal/agent_core/plugins/provider"
 	"github.com/adag/ada-go/internal/common/adapters"
 	"github.com/adag/ada-go/internal/common/adapters/sqlite"
 	"github.com/adag/ada-go/internal/common/domain"
+	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/common/ports"
 	"github.com/adag/ada-go/internal/common/toolkit"
 )
@@ -55,7 +55,7 @@ type Config struct {
 	Fake bool
 	// ThreadID 非空时打开后直接切到该线程。
 	ThreadID string
-	// Interactive 为 true 时把审批/提问转到终端（y/n）；false 时按无 UI 失败关闭。
+	// Interactive 为 true 时把交互/提问转到终端（y/n）；false 时按无 UI 处理。
 	Interactive bool
 	// HasUI 表示「这个会话背后有界面可以回答交互」：CLI 交互模式是终端，
 	// Gateway 是网页里的交互托盘。它决定 ctx.ui.available 与 broker 的 HasUI，
@@ -328,7 +328,7 @@ func Open(ctx context.Context, cfg Config) (*Session, error) {
 	hc.Usage = s.queryPluginUsage
 	// 通用轮次触发桥（turn.invoke，仅 builtin）：到期任务等由插件提交提示词。
 	hc.TurnInvoke = s.invokeTurnFromPlugin
-	// 发现式工具宿主桥（tool.discovery，仅 builtin）：目录只读投影 + 内层审批链。
+	// 发现式工具宿主桥（tool.discovery）：目录只读投影 + 内层执行链。
 	hc.Catalog = func(ctx context.Context) ([]domain.Descriptor, error) {
 		if s.asm == nil {
 			return nil, nil
@@ -506,7 +506,7 @@ func (s *Session) CurrentThread() string {
 	return s.threadID
 }
 
-// ReadLine 读一行输入（与审批提示共用同一个缓冲 reader，避免吞掉用户的下一行）。
+// ReadLine 读一行输入（与交互提示共用同一个缓冲 reader，避免吞掉用户的下一行）。
 func (s *Session) ReadLine() (string, error) {
 	line, err := s.in.ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
@@ -1750,7 +1750,7 @@ func (s *Session) onInteraction(evt domain.Event) {
 }
 
 func (s *Session) ask(kind, title, body string, options []string) (domain.InteractionStatus, string) {
-	fmt.Fprintf(s.cfg.Err, "\n[审批] %s\n%s\n", title, body)
+	fmt.Fprintf(s.cfg.Err, "\n[交互] %s\n%s\n", title, body)
 	switch kind {
 	case string(domain.InteractionSelect):
 		for i, opt := range options {
@@ -2527,7 +2527,7 @@ func (s *Session) pluginViews(ctx context.Context, detailID string) []PluginView
 		}
 		seen[id] = true
 		v := PluginView{ID: id, Status: "failed", LastError: msg, Enabled: true, Backend: true,
-			Trust: string(plugins.TrustThirdParty)}
+			Trust: string(pluginapi.TrustThirdParty)}
 		if rec, ok := meta[id]; ok {
 			v.Enabled = rec.Enabled
 			v.Version = rec.Version
@@ -2589,7 +2589,7 @@ func pluginFiles(base, front *host.Script, dir string) []PluginFile {
 		return walkPluginFiles(dir)
 	}
 	sizes := map[string]int64{}
-	var manifest *plugins.Manifest
+	var manifest *pluginapi.Manifest
 	if base != nil && base.Manifest != nil {
 		manifest = base.Manifest
 	} else if front != nil {

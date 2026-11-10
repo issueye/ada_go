@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginapi"
 )
 
 func TestEveryTimerInvokesHandlerWithFreshContext(t *testing.T) {
-	caps := testCaps(t, plugins.TrustBuiltin, plugins.CapGlobalConfig)
+	caps := testCaps(t, pluginapi.TrustBuiltin, pluginapi.CapGlobalConfig)
 	src := `
 export default function (agent) {
   agent.every(1000, async (_req, ctx) => {

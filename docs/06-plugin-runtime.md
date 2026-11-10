@@ -2,7 +2,7 @@
 
 > 上级索引：[ada-go 设计文档](design.md)  
 > 对应章节：§6.4 moejs 运行时与沙箱、§6.5 装配期结算、§6.6 钩子、§6.7 技能、§6.8 系统插件、§6.9 信任与热重载、§6.10 内核 seam
-> 版本：0.2 · 2026-11-09
+> 版本：0.3 · 2026-11-10
 
 ## 6.4 moejs 运行时与沙箱
 
@@ -21,9 +21,10 @@ opts := moejs.Options{
 rt := moejs.NewRuntime(opts)
 defer rt.Close()
 
-// 只安装声明过的能力；没有安装的能力在脚本里根本不存在。
-host := NewHostBridge(pluginID, capabilities, scope, state, globalConfig, events, secrets)
-// 宿主模块表 + 能力安装由 host 封装；具体 API 见 12。
+// 宿主把 ctx.* 桥与 node:* 模块都装上；能力位与模块白名单已删除，
+// 不再按清单裁剪「装什么」（2026-11-10 决策）。
+host := NewHostBridge(pluginID, scope, state, globalConfig, events, secrets)
+// 宿主模块表 + 上下文成员由 host 封装；具体 API 见 12。
 mod, err := moejs.Link(entry, moduleResolver(policy))
 if err != nil { return err }
 if err := rt.Load(mod); err != nil { return err }
@@ -51,9 +52,9 @@ if _, err := ret.Await(ctx); err != nil { return err }
 - 取消不算插件的错（不计连续失败）。
 - 关闭时取消它启动的所有异步工作，避免 goroutine 泄漏。
 
-**Node 兼容模块**：默认只安装纯计算模块；`fs`、`fetch`、`child_process` 与 `process.env` 按能力安装，`http`/`net`/`dns`/`worker_threads`/`vm` 不安装。模块矩阵、成员裁剪、错误码与 Node 20 双跑语料见 [12 §6.12](12-node-compat.md)。
+**Node 兼容模块**：默认安装纯计算模块；`fs`、`child_process` 与 `process.env` 的**功能边界**仍由宿主执行（工作区根、无 shell、白名单），但模块白名单与安装矩阵已删除（2026-11-10 决策）——宿主不再按清单能力位否决 `node:*`。`http`/`net`/`dns`/`worker_threads`/`vm` 仍不安装。模块表、成员包装、错误码与 Node 20 双跑语料见 [12 §6.12](12-node-compat.md)。
 
-**为什么不在脚本里给 `node:fs` 全量**：`node:fs` 的写成员受 Scope 约束；但 `ctx.fs` 的读成员按 2026-10-31 决定不限制目标路径，因此 agent 的 `read_file`/`list_files`/`search_files` 可以读宿主绝对路径，包括插件目录、配置目录与 `secrets.toml` 所在目录。密钥的**值**仍只经 `secret` broker 按名提供；磁盘上的密钥文件是否可读由操作系统权限与部署方式决定。只读时写成员不是返回 `undefined`，而是调用即抛 `ERR_ACCESS_DENIED`。
+**为什么不在脚本里给 `node:fs` 全量**：`node:fs` 的写成员受 Scope 约束；但 `ctx.fs` 的读成员按 2026-10-31 决定不限制目标路径，因此 agent 的 `read_file`/`list_files`/`search_files` 可以读宿主绝对路径，包括插件目录、配置目录与 `secrets.toml` 所在目录。密钥的**值**仍只经 `secret` broker 按名提供；磁盘上的密钥文件是否可读由操作系统权限与部署方式决定。写成员现在不再按能力裁剪：越出工作区根时调用抛越界错误。
 
 **前端渲染运行时**：Gateway 侧独立一套 Runtime，只执行 TSX 产物，不安装任何 stdlib；每个页面/插槽渲染 100ms/300ms 超时，超时重建。详见 [14 §14](14-ui-runtime.md)。
 
@@ -66,12 +67,12 @@ if _, err := ret.Await(ctx); err != nil { return err }
    → 来源决定信任上限；系统插件取预编译 bundle，第三方编译 TS
    → 创建 Runtime → 执行入口
    → 工厂调用 register* 收集到 staging
-   → 校验（重名、schema、能力、钩子等级、插槽名、模板可编译）
+   → 校验（重名、schema、钩子等级、插槽名、模板可编译）
    → 原子提交：provider 目录 / 工具目录 / 提示词 / 动作 / 路由 / 钩子链 / 前端注册表
    → 运行期只读
 ```
 
-- 任何一个贡献非法，整个插件回滚，其他插件不受影响；错误记录到 `plugin_meta.last_error` 与页面。Node 模块导入在链接期校验：没装 `fs` 却 `import "node:fs"` 属于装配失败，不是运行期空值。
+- 任何一个贡献非法，整个插件回滚，其他插件不受影响；错误记录到 `plugin_meta.last_error` 与页面。`.node` 原生扩展在静态检查期拒绝；`node:*` 模块不再按白名单在链接期否决（2026-11-10 决策）。
 - 运行期再次 `registerTool` 等调用只记警告，不改变当前目录；要生效必须 `plugin.reload`。
 - 重载采用“双代”：新 Runtime + 新贡献构建完成后，原子替换注册表；在途调用继续用旧代，结束后关闭旧代。系统插件单插件重载是原地重建，不重建全部装配；第三方变更触发装配级重载。
 - 钩子链按 `priority` 排序；同级按插件 id 稳定排序，保证回放确定性。
@@ -80,7 +81,7 @@ if _, err := ret.Await(ctx); err != nil { return err }
 
 ## 6.6 钩子
 
-15 个点位，全部有真实调用方；成对点位必须成对出现（`turn.before/after`、`model.beforeRequest/afterResponse`、`tool.beforeCall/afterCall`、`compaction.before/after`）。
+14 个点位，全部有真实调用方；成对点位必须成对出现（`turn.before/after`、`model.beforeRequest/afterResponse`、`compaction.before/after`）。`tool.beforeCall` 点位已随审批策略删除（2026-11-10 决策），`tool.afterCall` 保留为纯观察点。
 
 | 点位 | 时机 | 允许动作 | 失败方向 |
 |---|---|---|---|
@@ -92,7 +93,6 @@ if _, err := ret.Await(ctx); err != nil { return err }
 | `turn.after` | 轮次结束、TurnFinished 前 | observe, note | 开 |
 | `model.beforeRequest` | 请求模型前 | observe, note, replace/abort（builtin） | 开 |
 | `model.afterResponse` | 收到终止信号后 | observe, note | 开 |
-| `tool.beforeCall` | 参数校验后、执行前 | observe, note, deny, replace/abort（builtin） | **关（拒绝）** |
 | `tool.afterCall` | 工具回执生成后 | observe, note | 开 |
 | `compaction.before` | 生成摘要前 | observe, note | 开 |
 | `compaction.after` | 压缩 entry 写入后 | observe, note | 开 |
@@ -104,31 +104,20 @@ if _, err := ret.Await(ctx); err != nil { return err }
 
 - `observe`：只读，任何插件。
 - `note`：向界面/日志附加说明，不改变数据面。
-- `deny`：仅 `tool.beforeCall`；拒绝理由作为工具结果。
-- `replace`：仅 builtin 系统插件；`tool.beforeCall` 替换参数后重新校验，`model.beforeRequest` 替换系统提示/注入上下文。
-- `abort`：仅 builtin；`turn.before` / `model.beforeRequest` / `tool.beforeCall`。
+- `replace`：仅 builtin 系统插件；`model.beforeRequest` 替换系统提示/注入上下文。
+- `abort`：仅 builtin；`turn.before` / `model.beforeRequest`。
+
+`deny` 动作等级已随审批策略删除：基座没有「执行前拒绝」的钩子路径，工具执行不受任何插件判决。
 
 约束：
 
 - 第三方插件不能进入控制面；系统插件进入控制面也必须有清单声明与门禁检查。
-- 钩子超时默认 200ms；超时/异常不阻塞主循环（安全点除外，默认拒绝）。
-- `tool.beforeCall` 中的 `ctx.ui` 等待不计入 200ms 钩子预算，而受交互超时（默认 300s）与轮次墙钟上限约束。
+- 钩子超时默认 200ms；超时/异常不阻塞主循环。
 - 钩子内不能再次触发同一钩子（防递归）；调用深度上限 2。
 - 钩子收到的是 JSON 快照，不是可变的引擎对象；要改数据必须返回动作，由引擎裁决。
 - **钩子不是内核替换机制**：要替换压缩、存储、模型等内核机制，走 §6.10 的 seam，不要给钩子加超级权限。
 
-`tool.beforeCall` 事件是 `{ callId, tool, access, input, threadId }`；`input` 是已校验的参数快照。策略插件的典型写法：
-
-```ts
-agent.on("tool.beforeCall", async (event, ctx) => {
-  if (event.access === "read") return;
-  if (!ctx.ui?.available) return { action: "deny", reason: "没有可用交互界面，按失败关闭处理" };
-  const ok = await ctx.ui.confirm("允许执行这个工具？", event.tool + "\n\n" + JSON.stringify(event.input, null, 2), { timeoutMs: 300_000, signal: ctx.signal });
-  if (ok !== true) return { action: "deny", reason: "用户拒绝、取消或超时" };
-});
-```
-
-基座只负责把 `ctx.ui` 的请求送到 Gateway、等待响应并返回；它不知道这次询问叫“审批”，也不知道什么工具该问。
+需要「执行前询问」的场景不再是钩子：由工具实现在自己的调用里用 `ctx.ui.confirm/select/input` 完成（`tools-ask` 就是这么做的），或者由工具返回 `denied` 回执。基座只负责把 `ctx.ui` 的请求送到 Gateway、等待响应并返回，它不知道这次询问的业务含义。
 
 ## 6.7 技能
 
@@ -139,7 +128,7 @@ agent.on("tool.beforeCall", async (event, ctx) => {
 
 ## 6.8 系统插件
 
-系统插件是 `trust=builtin`、随产品发布、可禁用的普通插件；它们与第三方使用同一个 moejs 宿主、同一份清单与同一套注册契约。区别只有信任级别（可用控制面钩子与受信能力）与随包发布。
+系统插件是 `trust=builtin`、随产品发布、可禁用的普通插件；它们与第三方使用同一个 moejs 宿主、同一份清单与同一套注册契约。区别只有信任级别（可用控制面钩子）与随包发布。`trust` 不再决定「装什么」：能力位与模块白名单已删除（2026-11-10 决策），宿主对系统插件与第三方插件安装同一套桥与模块。
 
 | 类别 | 系统插件 | 贡献 / 拥有的逻辑 |
 |---|---|---|
@@ -150,10 +139,9 @@ agent.on("tool.beforeCall", async (event, ctx) => {
 | 工具 + UI | `tools-plan` | `update_plan`/`read_plan`/`reflect_plan` + `chat.corner` Todo 卡片 |
 | 工具 + UI | `tools-ask` | `ask_user` + `thread.tray` 提问卡片 |
 | 工具 | `tools-skill` | `skill_search`（正文由模型按 path 读取） |
-| 工具发现 | `tool-discovery` | `find_tool`/`exec_tool`；目录只读投影 + 按名执行，复用宿主审批链 |
+| 工具发现 | `tool-discovery` | `find_tool`/`exec_tool`；目录只读投影 + 按名执行，内层执行沿用同一套超时与循环检测 |
 | 外部工具 | `mcp-client` | 装配期发现 MCP `tools/list`，注册为普通工具；HTTP/stdio，见 [15 §18](15-extensions.md) |
 | 外部工具 | `browser-use` | browser-use 回环 API 的 14 个工具 + 随包技能 |
-| 策略 | `policy-default` | `tool.beforeCall` + `ctx.ui`；readonly/ask/auto/full |
 | 人格 | `persona-coding` | `registerPrompt`：编码助手人格与领域规则 |
 | 定时任务 | `cron-manager` | cron 表达式、任务模型、调度循环、运行历史、到期触发；`global.config` 存任务，不依赖基座 cron |
 | 环境变量 | `env-manager` | env 命名空间、校验、管理页与覆盖语义；`global.config` 存值 |
@@ -170,7 +158,7 @@ agent.on("tool.beforeCall", async (event, ctx) => {
 - `provider-admin` 禁用后，基座不得继续提供供应商/模型 CRUD 页面；`model.list`/`model.set` 只作为只读目录与当前模型选择的通用 RPC。
 - `token-usage`/`composer-telemetry` 禁用后，基座不得继续渲染对应页面/卡片；`events.read` 只提供事件缓冲与每轮原始用量行，展示口径聚合归插件。
 
-禁用策略插件后写/执行工具立即被基座拒绝；这是安全失败关闭，不是业务兜底。
+`policy-default` 已删除（2026-11-10 决策）：写/执行工具现在直接执行，没有策略插件、没有「无策略即拒绝」的失败关闭。禁用任何系统插件都只让该插件自己的贡献消失，基座不补位也不改判定。
 
 ## 6.9 信任、签名与热重载
 
@@ -178,7 +166,7 @@ agent.on("tool.beforeCall", async (event, ctx) => {
 - `verified`：`manifest.sig` 为 Ed25519 签名，覆盖清单 + 文件哈希；公钥在配置里。签名失败按第三方处理并提示。
 - `third-party`：默认；能力受限，但**前端贡献面与系统插件相同**（slots/pages/scripts/client/blocks 都可声明），由 `frontend.script` 能力、安装确认、CSP 与审计控制风险。
 - **来源决定信任上限**：磁盘插件最高 third-party；`builtin` 只接受随包/官方目录；`verified` 必须验签。当前发现期已强制来源上限并对磁盘 `verified` 做 Ed25519 验签：签名覆盖“去 sig 的清单 JSON + 除 plugin.json 外的目录摘要”，公钥来自 `ADAGO_PLUGIN_PUBKEYS` 或 `~/.adago/plugin-keys.json`；失败降级 `third-party`。实现见 [09 §10.2](09-security-operations.md)。
-- 安装：`adag plugin install <zip|dir>`，校验路径穿越、大小上限、文件类型；复制到目标目录后原子替换。安装/预检**不得执行插件代码**：当前预检只做清单、入口编译/链接与模块白名单静态检查；`registerTool` 等贡献形状留给显式启用/重载。
+- 安装：`adag plugin install <zip|dir>`，校验路径穿越、大小上限、文件类型；复制到目标目录后原子替换。安装/预检**不得执行插件代码**：当前预检只做清单、入口编译/链接与 `.node` 原生扩展的静态检查（模块白名单已删除）；`registerTool` 等贡献形状留给显式启用/重载。
 - 热重载：`plugin.reload` → 系统插件原地重建，第三方触发装配级双代；新代构建成功后才原子替换，在途调用走旧代。
 - 版本：插件 id + 版本 + 文件指纹写入 `plugin_meta`；`apiVersion` 主版本不兼容则禁用并提示，不阻止主程序启动。
 
@@ -190,12 +178,12 @@ agent.on("tool.beforeCall", async (event, ctx) => {
 |---|---|---|---|---|
 | 模型流 | provider 插件桥接 `ModelClient` | `ModelClient` 接口 | provider 插件 / 适配器 | 流式契约、终止信号、取消、重试边界 |
 | 压缩 | `ModelCompactor` | `Compactor` 接口 | 装配注入（系统插件或适配器） | 切点、结构化摘要、失败不丢历史、`context_overflow` |
-| 工具执行 | `toolkit.Executor` | `ToolRunner` 接口 | 装配注入 | 参数校验、policy 失败关闭、超时/截断/检查点 |
+| 工具执行 | `toolkit.Executor` | `ToolRunner` 接口 | 装配注入 | 参数校验、超时/截断/检查点 |
 | 会话存储 | SQLite `SessionStore` | `ports.SessionStore` | 适配器 | DAG、游标、分支、压缩 entry、单写者并发 |
 | 提示词 | 安全前言 + 插件片段 | `PromptSource` | 插件贡献 / 装配 | 安全前言不可移除、排序确定 |
 | 交互桥 | `InteractionBroker` | `ports.InteractionBroker` | 适配器 | 失败关闭、幂等、持久化、超时 |
 | 事件 | `EventSink` + 快照/补丁 | `ports.EventSink` | 适配器 | seq 单调、快照/补丁一致 |
-| 工具发现 | `tool-discovery` 系统插件 | `tool.discovery`（`ctx.catalog`/`ctx.tool.invoke`） | builtin 系统插件 | 目录只读、内层审批链不绕过 |
+| 工具发现 | `tool-discovery` 系统插件 | `tool.discovery`（`ctx.catalog`/`ctx.tool.invoke`） | builtin 系统插件 | 目录只读、内层执行不绕过超时与循环检测 |
 | 消息投递 | 网关 `Dispatcher`（界面与插件共用一条路径） | `dispatch.send`（`ctx.dispatch.send`） | builtin 系统插件 | 令牌认进程、sender 由宿主盖章、`/internal/*` 不进用户鉴权 |
 | 插件长驻进程 | 网关 `processmgr` + `/internal/processes/*`（注册/退避重启/引用计数/进程树） | `process.supervise`（`ctx.processes`） | builtin 系统插件 | owner 宿主盖章、entry 限插件目录、禁止 shell、环境剥宿主凭据 |
 | 定时任务 | `cron-manager` 系统插件 | `global.config` + `process` + 通用轮次触发桥 | builtin 系统插件 | 任务模型/调度/历史自持，基座无 cron |
@@ -205,8 +193,8 @@ agent.on("tool.beforeCall", async (event, ctx) => {
 规则：
 
 1. 替换实现只能在装配期注入，不能在运行期热替换。
-2. 替换实现必须通过对应契约测试与安全不变量；安全边界（能力授予、scope、交互失败关闭、进程树终止、审计、VNode 白名单、策略失败关闭）不可替换。
-3. 不为单一插件新增专用能力位；能用通用原语组合的，优先组合。
+2. 替换实现必须通过对应契约测试与安全不变量；安全边界（scope、交互失败方向、进程树终止、审计、VNode 白名单）不可替换。
+3. 不为单一插件新增专用原语；能用通用原语组合的，优先组合。
 4. seam 的 API 变更走版本与弃用周期；新增 seam 必须同时提交消费者与契约测试。
 
 ---
