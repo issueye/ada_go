@@ -214,10 +214,13 @@ type call struct {
 
 	mu       sync.Mutex
 	hostWork []context.CancelFunc
-	// replied 与 out 一起记录「本次调用已经结算」：roundTrip（调用方）与
-	// collectOutcome（owner）都要读到同一个结果，不能靠抢同一个 channel ——
-	// 抢输的一方会把「已成功的调用」误判成 Promise 未结算。
+	// replied / out 记录「本次调用的最终结果」。结算（reply）与发布（publish）分两步：
+	// 脚本结果在调用过程中就会结算，但送进 done 要等 owner 跑完 recordResult
+	// （熔断计数、禁用与冷却都落在那之后）。顺序颠倒会让调用方拿到返回值后立刻读
+	// Status() 时看到「上一次」的计数——这是 TestBreaker* 在 -race 下偶发
+	// 「三连败只记了 2 次」的根因。published 保证 done 只被投递一次。
 	replied   bool
+	published bool
 	out       *outcome
 	cancelled atomic.Bool
 	started   time.Time
@@ -236,7 +239,9 @@ func newCall(kind callKind, slot int, name string, args json.RawMessage, hc Cont
 	}
 }
 
-// reply 记录本次调用的最终结果（容量 1，绝不阻塞 loop）。
+// reply 记录本次调用的最终结果（只记不投递；投递由 publish 在熔断簿记之后做）。
+//
+// 重复 reply 保持第一次的结果：脚本侧 then 回调与 collectOutcome 可能都走到这里。
 func (c *call) reply(o outcome) {
 	c.mu.Lock()
 	if c.replied {
@@ -247,6 +252,29 @@ func (c *call) reply(o outcome) {
 	oc := o
 	c.out = &oc
 	c.mu.Unlock()
+}
+
+// publish 把已结算的结果交给调用方（owner goroutine 在 recordResult 之后调用）。
+//
+// 只有这里往 done 里投递，所以调用方从 roundTrip 返回时，宿主已经完成本次调用的
+// 熔断簿记（失败计数、禁用与冷却）——调用方紧接着读 Status() 看到的是本次结果。
+// 没有结算就走到这里说明 owner 漏了 reply：给一个拒绝而不是让调用方挂死。
+func (c *call) publish(fallback error) {
+	c.mu.Lock()
+	if c.published {
+		c.mu.Unlock()
+		return
+	}
+	c.published = true
+	o, ok := outcome{}, false
+	if c.out != nil {
+		o, ok = *c.out, true
+	}
+	replied := c.replied
+	c.mu.Unlock()
+	if !replied || !ok {
+		o = outcome{err: fallback}
+	}
 	c.done <- o
 }
 
@@ -423,6 +451,10 @@ func (p *Instance) serve() {
 }
 
 // handle 分派一次请求。
+//
+// 结算与投递分两步：run* 里完成熔断簿记并记下结果（c.reply），这里才把结果
+// 交给调用方（c.publish）。顺序颠倒会让「脚本结果已结算、recordResult 还没跑」
+// 的窗口暴露给调用方——调用方紧接着读 Status() 就会看到上一次的计数。
 func (p *Instance) handle(c *call) {
 	switch c.kind {
 	case callInit:
@@ -432,6 +464,13 @@ func (p *Instance) handle(c *call) {
 	default:
 		p.runCall(c)
 	}
+	c.publish(p.unsettledError(c))
+}
+
+// unsettledError 是「owner 走完了却没有结算结果」的兜底错误：宁可拒绝，不让调用方挂死。
+func (p *Instance) unsettledError(c *call) error {
+	return domain.WrapError(domain.NewError(domain.CodePluginCrashed,
+		fmt.Sprintf("host: 插件 %s 的 %s 调用没有结算结果（%v）", p.id, c.kind, ErrUnsettled)), ErrUnsettled)
 }
 
 // roundTrip 把调用交给 owner goroutine 并等待结果（取消贯穿、不挂死）。
@@ -583,15 +622,12 @@ func (p *Instance) runCall(c *call) {
 }
 
 // collectOutcome 取任务写回的结果；loop 在回执之前结束（中断、异常、空转）时给出分类结果。
+//
+// 只读 c.settled()，不碰 c.done：done 由 handle 结尾的 publish 独占投递，
+// owner 在这里取走的话调用方就永远等不到结果。
 func (p *Instance) collectOutcome(c *call, runErr error) outcome {
-	// 先看「已经结算」的副本：调用方可能已经把 channel 里那份取走了。
 	if o, ok := c.settled(); ok {
 		return o
-	}
-	select {
-	case o := <-c.done:
-		return o
-	default:
 	}
 	return outcome{err: p.classify(runErr, c)}
 }
@@ -1208,10 +1244,13 @@ func (p *Instance) warn(msg string) {
 func (p *Instance) shutdown() {
 	p.teardown(errInterruptClosed)
 	// 让还在排队的调用立刻拿到「已关闭」，不等它们自己的 ctx。
+	// 这些调用不会再走 handle，所以要在这里同时结算与投递。
 	for {
 		select {
 		case c := <-p.requests:
-			c.reply(outcome{err: p.closedError()})
+			err := p.closedError()
+			c.reply(outcome{err: err})
+			c.publish(err)
 		default:
 			return
 		}

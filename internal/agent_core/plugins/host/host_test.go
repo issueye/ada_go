@@ -505,6 +505,55 @@ export default function (agent) {
 	}
 }
 
+// TestBreakerBookkeepingIsVisibleOnReturn 钉「调用一返回，熔断簿记就已经落账」。
+//
+// 曾经的时序是：脚本结果先投进 done，owner 再跑 recordResult。调用方拿到返回值后
+// 立刻读 Status()，会看到上一次的失败计数——三连败里偶发只记 2 次，在 -race 下
+// 高频复现（干净树上 15 次跑 5 次失败）。现在 done 由 publish 独占，且在
+// recordResult 之后；每次失败返回时计数必须已经加到位。
+//
+// 用 20 轮「新实例 + 三连败」压这条时序：这是极小的时间窗，单跑一次不足以暴露，
+// 而每轮都重新 Load 才让窗口在每次调用前都被重新打开。
+func TestBreakerBookkeepingIsVisibleOnReturn(t *testing.T) {
+	const rounds = 20
+	src := `
+export default function (agent) {
+  agent.registerTool({ name: "flaky2", description: "flaky", parameters: { type: "object" }, access: "read",
+    execute(args) {
+      if (args && args.fail) { throw new Error("boom"); }
+      return { content: [{ type: "text", text: "fine" }] };
+    } });
+}
+`
+	for round := 0; round < rounds; round++ {
+		round := round
+		caps := testCaps(t, pluginapi.TrustThirdParty)
+		p, err := Load(context.Background(), testScript(t, caps, src), caps, Context{}, Options{Targets: Targets{Tools: &recordingTools{}}})
+		if err != nil {
+			t.Fatalf("round %d Load: %v", round, err)
+		}
+		handler := p.Contribution().Tools[0].Handler
+		for i := 0; i < 3; i++ {
+			if _, err := p.CallTool(context.Background(), handler, json.RawMessage(`{"fail":true}`), Context{}); err == nil {
+				t.Fatalf("round %d 第 %d 次调用应失败", round, i+1)
+			}
+			// 关键断言：失败返回的那一刻，计数已经加到位（不是「稍后才更新」）。
+			failures, _ := p.Status()
+			if failures != i+1 {
+				_ = p.Close(context.Background())
+				t.Fatalf("round %d 第 %d 次失败返回后立即读到 failures=%d（期望 %d）",
+					round, i+1, failures, i+1)
+			}
+		}
+		failures, disabled := p.Status()
+		if !disabled || failures != 3 {
+			_ = p.Close(context.Background())
+			t.Fatalf("round %d 三连败后应禁用且计数为 3：failures=%d disabled=%v", round, failures, disabled)
+		}
+		_ = p.Close(context.Background())
+	}
+}
+
 // TestBreakerAutoRecoversAfterCooldown 钉熔断自动恢复（06 §6.4）：三连败禁用后
 // 冷却期内拒绝并提示自动恢复；冷却到点下一次调用半开放行——重建重跑工厂后本次
 // 调用成功即完全恢复（计数、冷却清零），不需要任何人工重载。
