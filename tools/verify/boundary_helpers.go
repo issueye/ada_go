@@ -46,40 +46,110 @@ func checkDependencyDirection(root string) error {
 		}, "Gateway 不 import engine/toolkit/adapters/official（设计 3.3）"},
 	}
 	for _, r := range rules {
-		files, err := goFiles(filepath.Join(root, filepath.FromSlash(r.pkg)))
+		imports, err := packageImports(root, r.pkg)
 		if err != nil {
 			return err
 		}
-		if len(files) == 0 {
+		if len(imports) == 0 {
 			return fmt.Errorf("verify: %s 里没有 Go 文件", r.pkg)
 		}
-		for _, f := range files {
-			imports, err := fileImports(f)
-			if err != nil {
-				return err
+		for _, one := range imports {
+			if !strings.HasPrefix(one.imp, modulePrefix) {
+				continue // 标准库与外部库
 			}
-			for _, imp := range imports {
-				if !strings.HasPrefix(imp, modulePrefix) {
-					continue // 标准库与外部库
+			sub := strings.TrimPrefix(one.imp, modulePrefix)
+			if sub == r.pkg {
+				continue
+			}
+			allowed := false
+			for _, a := range r.allowSub {
+				if sub == a || strings.HasPrefix(sub, a+"/") {
+					allowed = true
 				}
-				sub := strings.TrimPrefix(imp, modulePrefix)
-				if sub == r.pkg {
-					continue
-				}
-				allowed := false
-				for _, a := range r.allowSub {
-					if sub == a || strings.HasPrefix(sub, a+"/") {
-						allowed = true
-					}
-				}
-				if !allowed {
-					return fmt.Errorf("verify: 依赖方向越界：%s 的 %s import 了 %s（%s）",
-						r.pkg, filepath.Base(f), imp, r.why)
-				}
+			}
+			if !allowed {
+				return fmt.Errorf("verify: 依赖方向越界：%s 的 %s import 了 %s（%s）",
+					r.pkg, filepath.Base(one.file), one.imp, r.why)
 			}
 		}
 	}
+	// 组级方向：common 不得反向依赖 agent_core / gateway；agent_core 不得依赖 gateway。
+	// 组内包级规则允许的东西（例如 globalconfig 曾 import plugins.ValidID）会在这里被拦下。
+	if err := checkGroupDirection(root); err != nil {
+		return err
+	}
 	return nil
+}
+
+// groupRule 声明一个目录组允许依赖的其它组。
+var groupRules = []struct {
+	group string
+	allow []string
+	why   string
+}{
+	{"common", nil, "common 是跨端共享底座，不得反向依赖 agent_core / gateway（设计 13 分层）"},
+	{"agent_core", []string{"common"}, "agent_core 只依赖 common；网关不被内核反向依赖（设计 3.3）"},
+	{"gateway", []string{"common", "agent_core"}, "gateway 可依赖 common 与 agent_core，但内核不得反向依赖它"},
+}
+
+// checkGroupDirection 检查 internal/ 三个目录组之间的依赖方向。
+func checkGroupDirection(root string) error {
+	for _, r := range groupRules {
+		imports, err := packageImports(root, filepath.Join("internal", r.group))
+		if err != nil {
+			return err
+		}
+		if len(imports) == 0 {
+			return fmt.Errorf("verify: internal/%s 里没有 Go 文件", r.group)
+		}
+		for _, one := range imports {
+			sub := strings.TrimPrefix(one.imp, modulePrefix)
+			if !strings.HasPrefix(sub, "internal/") {
+				continue
+			}
+			parts := strings.Split(sub, "/")
+			if len(parts) < 2 || parts[1] == r.group || parts[1] == "conformance" {
+				continue // 组内自引用
+			}
+			ok := false
+			for _, a := range r.allow {
+				if parts[1] == a {
+					ok = true
+				}
+			}
+			if !ok {
+				return fmt.Errorf("verify: 组级依赖方向越界：internal/%s 的 %s import 了 internal/%s（%s）",
+					r.group, filepath.Base(one.file), parts[1], r.why)
+			}
+		}
+
+	}
+	return nil
+}
+
+// importAt 是一条 import 及其来源文件。
+type importAt struct {
+	imp  string
+	file string
+}
+
+// packageImports 汇总某目录（含子目录）非测试源码的全部内部 import。
+func packageImports(root, pkg string) ([]importAt, error) {
+	files, err := goFiles(filepath.Join(root, filepath.FromSlash(pkg)))
+	if err != nil {
+		return nil, err
+	}
+	var out []importAt
+	for _, f := range files {
+		imports, err := fileImports(f)
+		if err != nil {
+			return nil, err
+		}
+		for _, imp := range imports {
+			out = append(out, importAt{imp: imp, file: f})
+		}
+	}
+	return out, nil
 }
 
 // goFiles 列出目录（含子目录）下的非测试 Go 文件。

@@ -24,7 +24,7 @@ import (
 
 	"github.com/gofrs/flock"
 
-	"github.com/adag/ada-go/internal/agent_core/plugins"
+	"github.com/adag/ada-go/internal/common/pluginid"
 )
 
 const (
@@ -74,7 +74,7 @@ func Root() (string, error) {
 
 // Path 返回某插件的配置文件路径；插件 id 必须合法，防止路径穿越。
 func Path(pluginID string) (string, error) {
-	if !plugins.ValidID(pluginID) {
+	if !pluginid.Valid(pluginID) {
 		return "", fmt.Errorf("globalconfig: 插件 id %q 非法", pluginID)
 	}
 	root, err := Root()
@@ -87,7 +87,7 @@ func Path(pluginID string) (string, error) {
 // OpenWorkspace 打开工作区级配置命名空间：<workspace>/.adago/config/<pluginID>.json。
 // 与机器级命名空间用同一文件格式与限额，只是根目录不同。
 func OpenWorkspace(workspaceDir, pluginID string) (*Store, error) {
-	if !plugins.ValidID(pluginID) {
+	if !pluginid.Valid(pluginID) {
 		return nil, fmt.Errorf("globalconfig: 插件 id %q 非法", pluginID)
 	}
 	if strings.TrimSpace(workspaceDir) == "" {
@@ -102,7 +102,7 @@ func OpenWorkspace(workspaceDir, pluginID string) (*Store, error) {
 
 // OpenAt 在指定根目录下打开某插件命名空间（显式 --data-dir 的隔离运行用）。
 func OpenAt(rootDir, pluginID string) (*Store, error) {
-	if !plugins.ValidID(pluginID) {
+	if !pluginid.Valid(pluginID) {
 		return nil, fmt.Errorf("globalconfig: 插件 id %q 非法", pluginID)
 	}
 	if strings.TrimSpace(rootDir) == "" {

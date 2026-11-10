@@ -9,8 +9,9 @@ package plugins
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
+
+	"github.com/adag/ada-go/internal/common/pluginid"
 )
 
 // APIVersionMajor 是当前插件 API 主版本；主版本不匹配直接拒绝加载（6.2）。
@@ -19,11 +20,9 @@ const APIVersionMajor = 1
 // APIVersionMinor 是次版本；宿主忽略未知字段并记录（6.2）。
 const APIVersionMinor = 0
 
-// idPattern 是插件 id 的约束，且必须等于目录名（6.2）。
-var idPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,63}$`)
-
-// ValidID 报告插件 id 是否合法。
-func ValidID(id string) bool { return idPattern.MatchString(id) }
+// ValidID 报告插件 id 是否合法；规则只有一份，在 internal/common/pluginid
+// （common 组与 gateway 组都要用，agent_core 只做转发）。
+func ValidID(id string) bool { return pluginid.Valid(id) }
 
 // Trust 是信任分级（6.9）。
 type Trust string
