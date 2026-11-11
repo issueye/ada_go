@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -30,8 +31,29 @@ func (s *Server) Store() *canvas.Store { return s.store }
 // Tasks 暴露截图任务队列（MCP 工具使用）。
 func (s *Server) Tasks() *canvas.TaskQueue { return s.tasks }
 
+// ErrInstanceExists 表示同数据目录的 adago-design 实例已在运行。
+// 用 errors.As 解包 *InstanceExistsError 可拿到已有实例的访问地址。
+var ErrInstanceExists = errors.New("同数据目录的 adago-design 实例已在运行")
+
+// InstanceExistsError 携带已运行实例的画布地址，供 serve 模式直接委派打开。
+type InstanceExistsError struct {
+	URL string
+}
+
+func (e *InstanceExistsError) Error() string {
+	return ErrInstanceExists.Error() + "：" + e.URL +
+		"（两个实例同时写同一份 canvas.json 会互相覆盖）"
+}
+
 // Start 启动画布 HTTP 服务；port=0 自动探测。
+//
+// 绑定端口前先探测 port..port+20 是否已有同数据目录的实例：有则返回
+// *InstanceExistsError（不打开存储、不启动服务），由调用方按模式处置 ——
+// serve 委派浏览器打开已有实例，mcp 快速失败并提示。
 func Start(ctx context.Context, cfg *config.Config) (*Server, error) {
+	if url, hit := canvas.ProbeInstance(cfg.Port, cfg.DataDir); hit {
+		return nil, &InstanceExistsError{URL: url}
+	}
 	// 自定义体系（品牌派生等）在打开存储前注册
 	if n, err := design.LoadCustomSystems(cfg.DataDir); err != nil {
 		log.Printf("自定义体系加载失败: %v", err)
@@ -48,6 +70,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Server, error) {
 	canvasSrv := canvas.NewServer(store, tasks, "")
 	canvasSrv.Catalog = Catalog{}
 	canvasSrv.Theme = canvas.NormalizeTheme(cfg.Theme)
+	canvasSrv.DataDir = cfg.DataDir
 	handler := canvasSrv.Handler()
 	var ln net.Listener
 	for port := cfg.Port; port <= cfg.Port+20; port++ {

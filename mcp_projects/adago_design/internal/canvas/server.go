@@ -53,6 +53,9 @@ type Server struct {
 	// Theme 是界面缺省主题（light|dark），来自 -theme；用户手动切换的
 	// localStorage 覆盖在页面 bootstrap 里完成（见 static/index.html）。
 	Theme string
+	// DataDir 是本实例的数据目录；健康检查回显它，供多实例探测比对
+	// 「是否撞在同一份数据上」（见 instance.go 的 ProbeInstance）。
+	DataDir string
 }
 
 // NewServer 构造画布服务。
@@ -87,10 +90,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/canvas/presets", s.handleCanvasPresets)
 	mux.HandleFunc("GET /api/nodes", s.handleListNodes)
 	mux.HandleFunc("POST /api/nodes", s.handleAddNode)
+	mux.HandleFunc("GET /api/nodes/{id}", s.handleGetNode)
 	mux.HandleFunc("PUT /api/nodes/{id}", s.handleUpdateNode)
 	mux.HandleFunc("DELETE /api/nodes/{id}", s.handleDeleteNode)
 	mux.HandleFunc("POST /api/nodes/clear", s.handleClearNodes)
 	mux.HandleFunc("POST /api/arrange", s.handleArrange)
+	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("POST /api/capture", s.handleCaptureCreate)
 	mux.HandleFunc("GET /api/tasks", s.handleTaskClaim)
 	mux.HandleFunc("POST /api/tasks/{id}/result", s.handleTaskResult)
@@ -201,13 +206,28 @@ func decodeBody[T any](w http.ResponseWriter, r *http.Request, dst *T) bool {
 // ---------------- handlers ----------------
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "node_count": len(s.store.List()),
+	m := map[string]any{
+		"ok":            true,
+		"server":        "adago-design",
+		"node_count":    len(s.store.List()),
 		"project_count": len(s.store.ListProjects()),
+		"data_dir":      s.DataDir,
+		"rev":           s.store.Rev(),
 		"time":          time.Now().Format(time.RFC3339),
-	})
+	}
+	if perr := s.store.PersistError(); perr != nil {
+		m["persist_error"] = perr.Error()
+	}
+	writeJSON(w, http.StatusOK, m)
 }
 
+// handleListNodes 返回节点列表。
+//
+// 默认**剥掉 html 大字段**（每张预览文档约 10KB+）：列表轮询只该传元数据，
+// 2s 轮询 × N 节点 × 每个标签页全量拉 HTML 是纯浪费。客户端需要正文时走
+// GET /api/nodes/{id} 按单节点取，或用 ?include=html 一次性拿全量（首屏/切项目）。
+// nodeMeta 用空指针把 html 键从 JSON 里整个去掉，而不是置空字符串 ——
+// 区分「没有正文信息」与「正文为空」。
 func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	project := strings.TrimSpace(r.URL.Query().Get("project"))
 	if project != "" {
@@ -226,7 +246,68 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		}
 		nodes = filtered
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes})
+	if r.URL.Query().Get("include") == "html" {
+		writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes})
+		return
+	}
+	metas := make([]nodeMeta, 0, len(nodes))
+	for i := range nodes {
+		metas = append(metas, nodeMeta{Node: nodes[i]})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"nodes": metas})
+}
+
+// nodeMeta 是节点列表视图：用空指针字段遮蔽嵌入 Node 的 html，
+// 让 "html" 键从 JSON 输出里彻底消失（omitempty 对 nil 指针生效）。
+type nodeMeta struct {
+	Node
+	HTML *struct{} `json:"html,omitempty"`
+}
+
+// handleGetNode 返回单个节点的完整数据（含 html 正文）。
+// 列表默认剥 HTML 后，这是画布 UI 与脚本按需取正文的入口。
+func (s *Server) handleGetNode(w http.ResponseWriter, r *http.Request) {
+	n, err := s.store.Get(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, &Error{Code: "not_found", Message: "节点不存在"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"node": n})
+}
+
+// handleEvents 以 SSE 推送存储变更（GET /api/events）。
+// 连接建立先发一条当前版本号；此后每次存储变更推一条 change 事件，
+// 15s 一条注释心跳保活。客户端收到事件就拉一次节点列表（列表已剥 HTML，代价很小），
+// 轮询保留作降级兜底。
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	fl, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, &Error{Code: "internal", Message: "streaming unsupported"})
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = io.WriteString(w, "retry: 2000\n\n")
+	events, cancel := s.store.Subscribe()
+	defer cancel()
+	writeRev := func() {
+		fmt.Fprintf(w, "event: change\ndata: {\"rev\":%d}\n\n", s.store.Rev())
+		fl.Flush()
+	}
+	writeRev()
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-events:
+			writeRev()
+		case <-heartbeat.C:
+			fmt.Fprint(w, ": ping\n\n")
+			fl.Flush()
+		}
+	}
 }
 
 type addNodeIn struct {
@@ -287,33 +368,49 @@ func (s *Server) handleAddNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"node": created})
 }
 
+// updateNodeIn 是节点部分更新的入参：全部用指针表达「未传 / 传了」，
+// PUT 语义下可以区分「没给字段」与「显式置空」（旧实现用零值判断，
+// 导致标题等字段永远清不掉、空 HTML 无法表达）。
+type updateNodeIn struct {
+	Title      *string  `json:"title"`
+	System     *string  `json:"system"`
+	Artboard   *string  `json:"artboard"`
+	HTML       *string  `json:"html"`
+	Width      *int     `json:"width"`
+	Height     *int     `json:"height"`
+	AutoHeight *bool    `json:"auto_height"`
+	X          *float64 `json:"x"`
+	Y          *float64 `json:"y"`
+	Tags       []string `json:"tags"`
+}
+
 func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var in addNodeIn
+	var in updateNodeIn
 	if !decodeBody(w, r, &in) {
 		return
 	}
 	updated, err := s.store.Update(id, func(n *Node) {
-		if in.Title != "" {
-			n.Title = in.Title
+		if in.Title != nil {
+			n.Title = *in.Title
 		}
-		if in.HTML != "" {
-			n.HTML = in.HTML
+		if in.HTML != nil {
+			n.HTML = *in.HTML
 		}
-		if in.System != "" {
-			n.System = in.System
+		if in.System != nil {
+			n.System = *in.System
 		}
-		if in.Artboard != "" {
-			n.Artboard = in.Artboard
+		if in.Artboard != nil {
+			n.Artboard = *in.Artboard
 		}
 		if in.AutoHeight != nil {
 			n.AutoHeight = *in.AutoHeight
 		}
-		if in.Width > 0 {
-			n.Width = in.Width
+		if in.Width != nil && *in.Width > 0 {
+			n.Width = *in.Width
 		}
-		if in.Height > 0 {
-			n.Height = in.Height
+		if in.Height != nil && *in.Height > 0 {
+			n.Height = *in.Height
 		}
 		if in.X != nil {
 			n.X = *in.X

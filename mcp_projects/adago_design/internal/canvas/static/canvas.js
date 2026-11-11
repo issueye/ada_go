@@ -593,15 +593,15 @@ function addNodeEl(n) {
   scheduleLabels();
 }
 
-function updateNodeEl(n) {
+function updateNodeEl(n, prev) {
   const el = S.els.get(n.id);
   if (!el) { addNodeEl(n); return; }
-  const prev = S.nodes.get(n.id);
   applyNodeGeom(el, n);
   const title = el.querySelector(".node__title");
   if (title.textContent !== (n.title || n.id)) title.textContent = n.title || n.id;
   const iframe = el.querySelector("iframe");
-  // 只在正文真的变了时重载 iframe（位置/高度变化不该重跑文档）
+  // 只在正文真的变了时重载 iframe（位置/高度变化不该重跑文档）。
+  // prev 必须传更新前的本地节点 —— 旧实现先 set 再取，prev===n，比较永远相等。
   if (iframe && n.html && prev && prev.html !== n.html) {
     iframe.srcdoc = n.html;
   }
@@ -934,24 +934,47 @@ function projectsSignature(list) {
   ]));
 }
 
-async function pollNodes() {
+// 列表接口默认剥掉 html 大字段（每张预览文档 10KB+）：轮询只传元数据；
+// 新节点 / 正文变更的节点再按需 GET /api/nodes/{id} 取正文，
+// 首屏与切项目用 ?include=html 一次拿全。html_rev 相同 ⇒ 正文没变，
+// 直接复用本地缓存 —— 挪个位置不再触发一次 10KB 拉取。
+async function pollNodes(opts) {
   if (S.drag) return;
-  const q = S.project ? "?project=" + encodeURIComponent(S.project) : "";
+  const full = !!(opts && opts.full);
+  const q0 = S.project ? "?project=" + encodeURIComponent(S.project) : "";
+  const q = q0 + (full ? (q0 ? "&" : "?") + "include=html" : "");
   try {
     const [data, ed] = await Promise.all([
       api("/api/nodes" + q),
-      api("/api/edges" + q).catch(() => ({ edges: [] })),
+      api("/api/edges" + q0).catch(() => ({ edges: [] })),
     ]);
+    const list = data.nodes || [];
+    const need = [];
+    for (const n of list) {
+      const local = S.nodes.get(n.id);
+      if (n.html === undefined && local && local.html !== undefined &&
+          local.html_rev === n.html_rev) {
+        n.html = local.html; // 正文没变，复用本地缓存
+      } else if (n.html === undefined && n.kind !== "frame") {
+        need.push(n); // frame 没有正文；其余等下面按需取
+      }
+    }
+    if (need.length) {
+      await Promise.all(need.map(async (n) => {
+        try { n.html = (await api("/api/nodes/" + n.id)).node.html || ""; }
+        catch (_) { n.html = ""; }
+      }));
+    }
     const seen = new Set();
-    for (const n of data.nodes || []) {
+    for (const n of list) {
       seen.add(n.id);
       const local = S.nodes.get(n.id);
       if (!local) {
         S.nodes.set(n.id, n);
         addNodeEl(n);
-      } else if (local.updated_at !== n.updated_at) {
+      } else if (local.updated_at !== n.updated_at || local.html !== n.html) {
         S.nodes.set(n.id, n);
-        updateNodeEl(n);
+        updateNodeEl(n, local);
       }
     }
     for (const id of [...S.nodes.keys()]) if (!seen.has(id)) removeNodeEl(id);
@@ -1168,7 +1191,7 @@ async function switchProject(id) {
   resetCanvas();
   syncCanvasFromScope();
   renderProjectTree();
-  await pollNodes();
+  await pollNodes({ full: true }); // 切作用域 = 全新节点集，一次 include=html 拿全
   if (isAllScope()) await ensureGroupLayout();
   if (S.nodes.size === 0) showEmptyHint();
   else hideEmptyHint();
@@ -2019,12 +2042,22 @@ try {
 loadCanvasPresets();
 loadProjects().then(() => {
   if (!S.projects.length) showEmptyHint();
-  pollNodes().then(() => {
+  pollNodes({ full: true }).then(() => {
     if (S.nodes.size === 0) showEmptyHint();
     if (S.canvas) centerView(true);
     else fitView();
   });
 });
 setInterval(pollNodes, 2000);
+// 服务端 SSE 推送：任何变更 150ms 合帧后立刻拉一次（列表已剥 HTML，代价很小）；
+// 2s 轮询保留作降级兜底（SSE 断线 EventSource 会自动重连）。
+try {
+  const es = new EventSource("/api/events");
+  let sseTimer = 0;
+  es.addEventListener("change", () => {
+    clearTimeout(sseTimer);
+    sseTimer = setTimeout(() => { pollNodes(); }, 150);
+  });
+} catch (_) { /* SSE 不可用时仍走 2s 轮询兜底 */ }
 loadCatalog();
 taskLoop();

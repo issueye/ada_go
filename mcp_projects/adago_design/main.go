@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"adagodesign/internal/app"
 	"adagodesign/internal/config"
 	"adagodesign/internal/mcpserver"
+	"adagodesign/internal/openbrowser"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -84,6 +86,15 @@ func runServe(args []string) error {
 	defer stop()
 	srv, err := app.Start(ctx, cfg)
 	if err != nil {
+		// 已有同数据目录实例：为避免双写覆盖，本进程不启动，直接委派浏览器
+		var ie *app.InstanceExistsError
+		if errors.As(err, &ie) {
+			log.Printf("已有实例在运行：%s —— 本次不启动新实例，直接打开该地址", ie.URL)
+			if cfg.Open {
+				openbrowser.Open(ie.URL)
+			}
+			return nil
+		}
 		return err
 	}
 	log.Printf("按 Ctrl+C 退出。")
@@ -113,6 +124,12 @@ func runMCP(args []string) error {
 
 	srv, err := app.Start(ctx, cfg)
 	if err != nil {
+		// mcp 模式没有「委派给已有实例」的退路（工具要写数据），只能快速失败：
+		// 消息给出三条出路 —— 关旧实例 / 用已有实例的画布 / 换数据目录
+		var ie *app.InstanceExistsError
+		if errors.As(err, &ie) {
+			return fmt.Errorf("mcp 模式无法启动: %v\n  处理：关闭旧实例（serve/另一个 mcp）后重试，或用 -data 指定其它数据目录", ie)
+		}
 		return err
 	}
 	// 截图任务 GC，防长驻泄漏
@@ -130,10 +147,11 @@ func runMCP(args []string) error {
 	}()
 
 	deps := mcpserver.Deps{
-		Store:   srv.Store(),
-		Tasks:   srv.Tasks(),
-		BaseURL: func() string { return srv.BaseURL },
-		DataDir: cfg.DataDir,
+		Store:    srv.Store(),
+		Tasks:    srv.Tasks(),
+		BaseURL:  func() string { return srv.BaseURL },
+		DataDir:  cfg.DataDir,
+		AutoOpen: true, // 截图超时自动拉起画布页并重试一次
 	}
 	server := mcpserver.NewServer(deps)
 	log.Printf("MCP(stdio) 已就绪，画布: %s", srv.BaseURL)

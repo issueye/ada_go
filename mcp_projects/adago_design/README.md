@@ -95,6 +95,17 @@ bin\adago-design.exe mcp
 `%APPDATA%\adago-design`，可被 `ADAGO_DESIGN_DATA` 覆盖）、`-open`、
 `-theme dark|light`。
 
+**单实例防护**：绑定端口前先探测 `port..port+20` 是否已有**同数据目录**的
+实例（`/api/health` 回显 `server`/`data_dir`/`rev` 供比对）。命中时：
+`serve` 模式直接委派浏览器打开已有实例并退出（exit 0）；`mcp` 模式快速失败，
+提示关闭旧实例或换 `-data` —— 两个实例同时写同一份 `canvas.json` 会互相覆盖。
+不同数据目录的实例互不冲突，各占各的端口共存。
+
+**持久化加固**：`canvas.json` 紧凑序列化；写盘走「tmp → 旧文件轮换进
+`.bak`/`.bak2` → 就位」三步，任一步失败记入 `lastPersistErr` 并打日志
+（`/api/health` 的 `persist_error` 字段可见），不再静默丢错误；
+主文件缺失或损坏时启动自动从备份降级恢复。
+
 ## MCP 工具
 
 | 工具 | 用途 |
@@ -107,12 +118,12 @@ bin\adago-design.exe mcp
 | `design_fonts` | **字体授权**：可商用 / 可嵌入 / 可再分发标记，各脚本默认字族栈，授权策略 |
 | `design_icons` | **图标库**：按名称/分组/别名检索，返回 `<use>` 引用或独立 `<svg>` |
 | `design_systems` | 列出全部设计体系（含默认画板） |
-| `design_tokens` | 查询 Token（system/theme/category：color/type/spacing/radius/shadow/motion） |
+| `design_tokens` | 查询 Token（system/theme/category：color/type/spacing/radius/shadow/motion）；`brief=true` 精简输出：关键语义色的值、字阶尺寸/字重、间距与圆角阶梯，省略阴影/动效/变体色 |
 | `design_components` | 组件清单；指定 component 返回详情与 HTML 片段 |
 | `design_search` | 跨体系搜索体系/组件/Token |
 | `design_derive` | 从品牌主色派生自定义体系（10 阶色板 + 语义色，结构继承基底），持久化注册 |
 | `design_register` | 注册自定义体系（Token JSON，结构缺省从基底兜底） |
-| `design_audit` | 设计走查：WCAG 对比度/字号/阶梯/状态色 + 字体授权 + 图标一致性 + 尺寸规范，评分 + 报告节点 |
+| `design_audit` | 设计走查：体系级（WCAG 对比度/字号/阶梯/状态色 + 字体授权 + 图标一致性 + 尺寸规范，评分 + 报告节点）；传 `node_id` 改为**节点级走查**（外链资源 / 图标与符号 / 尺寸契约 / 字体授权，走查已生成节点的正文） |
 | `design_preview` | 用某体系把组件渲染成真实预览页（`artboard` 决定宽高、`project` 决定归属），默认自动摆上画布 |
 | `design_screen` | 按模板（login/settings/feed/profile）生成整页真实预览，高度取画板 body 高 |
 | `design_compare` | 两体系 Token 对比（结构化 diff）；可选生成并排对比板节点 |
@@ -123,7 +134,7 @@ bin\adago-design.exe mcp
 | `canvas_export` | 导出整块画布为独立 HTML 文件 |
 | `canvas_connect` | 节点间连线（带标签的贝塞尔曲线，持久化） |
 | `canvas_group` | 分组框（自动包住成员节点，垫底虚线框） |
-| `canvas_screenshot` | 截图画布或单个节点，返回 PNG（需画布已在浏览器打开） |
+| `canvas_screenshot` | 截图画布或单个节点，返回 PNG（需画布已在浏览器打开；超时且允许时自动拉起浏览器并重试一次，每进程至多自动开一次） |
 | `canvas_url` | 获取画布访问地址 |
 
 错误以 `isError` 结果返回并携带稳定错误码：`project_required` / `unknown_project` /
@@ -180,6 +191,15 @@ bin\adago-design.exe mcp
 配对时切换为关联面板（间距 / 对齐 / 尺寸差 / 位移 / 包含）。面板渲染带 `panelGen`
 代际号：hover 高频切换 + `ensureCatalog` 异步，旧请求回来时若代际已变就丢弃，
 避免「鼠标停在 C、面板还显示 B」。
+
+## 同步机制（SSE 推送 + 轻量轮询兜底）
+
+- 画布页连接 `GET /api/events`（SSE）：任何变更 150ms 合帧后立刻拉一次节点列表；
+  节点列表默认**剥掉 html 大字段**（只传元数据 + `html_rev`），Agent 写入的
+  变更即时出现在其它打开的画布页里，空闲流量从「N 节点 × 10KB / 2s」降到 KB 级
+- 新节点 / `html_rev` 变化的节点才按需 `GET /api/nodes/{id}` 取正文；
+  首屏与切项目用 `?include=html` 一次拿全；2s 轮询保留作 SSE 断线兜底
+- Agent 修改画布版式后，画布 UI 即时同步（不再有约 30s 的轮询滞后）
 
 ## 交互性能
 
@@ -241,15 +261,21 @@ bin\adago-design.exe mcp
 
 画布纸张（`#canvas-paper`）只作版式参考：**不裁剪、不拦截事件**，节点仍可拖到边界外
 当草稿区。单画布聚焦（双击卡片/项目树子项）时纸张自动隐藏，居中改为对准该节点。
-Agent 修改画布版式后，画布 UI 约 30s 内低频率刷新同步（无需手动刷新页面）。
+Agent 修改画布版式后，画布 UI 经 SSE 即时同步（无需手动刷新页面）。
 
 ## 截图原理（无 CDP）
 
 `canvas_screenshot` 创建截图任务 → 已打开的画布页面长轮询领取 → 把目标
 预览 HTML 放进离屏 iframe → `SVG foreignObject` 序列化 → `<canvas>` 光栅化
-→ PNG 回传给 MCP。8 秒内没有页面响应则返回 `capture_timeout`，提示先打开
-画布地址。预览内容是纯 CSS（无外链资源、图标为内联 `<symbol>` 精灵），
-渲染安全不失真。
+→ PNG 回传给 MCP。8 秒内没有页面响应则返回 `capture_timeout`；生产模式
+（`mcp` 子命令）会在超时后自动拉起浏览器打开画布并重试一次
+（每进程至多自动开一次，测试/CI 可关）。
+预览内容是纯 CSS（无外链资源、图标为内联 `<symbol>` 精灵），渲染安全不失真；
+所有入库节点 HTML 统一注入 CSP
+（`default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:`，
+见 `internal/canvas/sanitize.go`）—— Agent 经 `canvas_add` 塞入的外链资源会被
+浏览器阻断，不再污染 `foreignObject` 光栅化（改前一张外链图会让整张截图失败），
+内联样式不受影响，设计预览渲染不变。
 
 ## 测试与门禁
 
@@ -259,11 +285,16 @@ GOWORK=off go vet ./...
 GOWORK=off go generate ./internal/design   # 改了图标后同步 icons.js
 ```
 
+- `internal/canvas`：Store CRUD/持久化/并发、HTTP API 全路径、截图任务闭环、
+  **P0 加固**（备份轮换与降级恢复、写盘失败可见、列表剥 HTML、SSE 推送、
+  部分更新指针语义、多实例探测，见 `hardening_test.go`）、
+  **CSP 注入**（注入位置/幂等/旧快照自愈，见 `sanitize_test.go`）。
 - `internal/design`：8 体系 Token 完备性、全部组件可渲染、图标库不变量、
-  字体授权（全部体系可商用）、画板推导值、**渲染产物无 emoji/字符图标**。
-- `internal/canvas`：Store CRUD/持久化/并发、HTTP API 全路径、截图任务闭环。
+  字体授权（全部体系可商用）、画板推导值、**渲染产物无 emoji/字符图标**、
+  **节点级走查**（外链/符号/尺寸契约/字体授权，见 `nodeaudit_test.go`）。
 - `internal/mcpserver`：内存 MCP 会话走 `tools/list` + `tools/call` 契约，
-  含 `design_icons` / `design_fonts` / `design_artboard` 与画板透传。
+  含 `design_icons` / `design_fonts` / `design_artboard` 与画板透传、
+  `design_audit` 节点级走查与 `design_tokens` brief（`enhance3_test.go`）。
 
 设计细节见 [DESIGN.md](DESIGN.md)；六项历史问题的分析与改造记录见
 [IMPROVEMENTS.md](IMPROVEMENTS.md)。

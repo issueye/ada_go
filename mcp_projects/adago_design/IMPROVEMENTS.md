@@ -1085,3 +1085,74 @@ staticcheck ./...
 - 检查模式的关系计算目前覆盖：水平/垂直间距、四边与中线对齐、包含、重叠、尺寸差；
   旋转元素、跨滚动容器的边界情况未处理。
 - 画板切换不会自动迁移已有节点宽度（刻意：避免打乱用户现有画布）。
+
+---
+
+## 9. 迭代 1：P0 数据正确性与性能加固（2026-11-12）
+
+基于全仓分析定下的三个迭代计划，本轮落地迭代 1（P0）。分析结论与计划见
+对话记录/仓库提案；四项改动 + 一个新增探测层，全部带机器门禁
+（`internal/canvas/hardening_test.go`）。
+
+### 9.1 落地内容
+
+| # | 问题 | 改动 | 落点 |
+|---|---|---|---|
+| 1 | `persistLocked` 静默吞掉全部写盘错误 + `MarshalIndent` 膨胀 | 紧凑序列化；写盘三步（tmp → 旧文件轮换进 `.bak`/`.bak2` → 就位）；失败记入 `Store.lastPersistErr` + 日志 + `/api/health` 的 `persist_error` 字段；`OpenStore` 主文件缺失/损坏时从备份降级恢复 | `store.go` |
+| 2 | 两进程同开一份数据目录 → 各自内存态全量覆盖写，后写覆盖先写 | 绑定端口前 `ProbeInstance` 探测 `port..port+20`（`/api/health` 回显 `server`/`data_dir`/`rev`）；同数据目录命中时 `serve` 委派浏览器打开已有实例（exit 0）、`mcp` 快速失败并给处置提示；不同数据目录共存 | `canvas/instance.go`、`app.go`、`main.go` |
+| 3 | 节点部分更新用零值判断（`Title != ""`），空值永远写不进去 | `updateNodeIn` 全指针字段：区分「未传」与「显式置空」；`Store.Update` 只在 HTML 真变时推进 `HTMLRev` | `server.go`、`store.go` |
+| 4 | 列表接口全量回传 HTML（~10KB/节点）× 2s 轮询 × 每标签页 | 列表默认剥 `html`（`nodeMeta` 空指针遮蔽嵌入字段）；新增 `GET /api/nodes/{id}` 按需取正文、`?include=html` 全量、`GET /api/events` SSE 推送；UI 改为 SSE 触发（150ms 合帧）+ 2s 轮询兜底 + 按 `html_rev` 复用缓存 | `server.go`、`canvas.js` |
+
+顺带修掉一个休眠 bug：`updateNodeEl` 原先先 `S.nodes.set` 再取 `prev`，
+`prev === n` 使「正文变了重载 iframe」的比较永远相等——现在由调用方显式传入更新前的本地节点。
+
+### 9.2 与原方案的偏差（刻意为之）
+
+| 项 | 原方案 | 实际实现 | 原因 |
+|---|---|---|---|
+| 写盘 debounce（500ms 合并） | 计划有 | **未做**，保持同步写 | 紧凑序列化后单次写毫秒级；debounce 引入崩溃丢失窗口与退出 flush 复杂度，收益不成比例 |
+| 多实例「客户端模式」 | 计划首选（第二实例把 Store 操作代理给已有实例） | 改为 serve 委派 + mcp 快速失败 | 客户端模式需要为整个 Store 面板维护第二套 HTTP 客户端实现（含 Update(mut) 这类无法直接代理的签名），长期维护成本高；快速失败同样消除数据丢失，且消息可行动。后续若两 mcp 会话并发成为常态再上客户端模式 |
+| 列表 `?since=` 增量 | 计划有 | **未做** | 元数据列表本身已降到 KB 级，SSE 已消灭轮询滞后；增量协议徒增对账复杂度 |
+
+### 9.3 验证
+
+- `GOWORK=off go test ./... && go vet ./...` 全绿（新增 `hardening_test.go` 8 项：
+  备份轮换与降级恢复、写盘失败可见、rev/订阅、列表剥 HTML、SSE 流、指针语义、探测命中/不命中）。
+- 真机冒烟：serve 起服务 → health 含新字段；建项目/节点 → 列表无 `html` 键；
+  SSE 首条 rev 与变更推送到位；备份三件套生成；同数据目录 serve 委派（exit 0）、
+  mcp 快速失败（exit 1）、不同数据目录共存（+1 端口）。
+- 浏览器端到端（IAB 真实渲染）：预览卡完整渲染（按需取正文成立）；页面开着时
+  服务端新增节点 → **不刷新即出现**（`.node` 1→2，iframe 正文与标题逐字核对通过）。
+
+---
+
+## 10. 迭代 2：Agent 体验（2026-11-12）
+
+四个工具面改动，全部带单测；与迭代 1 的区别：这次动的是「Agent 拿到的东西」
+（更干净的截图、可自愈的截图链路、面向节点的走查、更省 token 的规范输出）。
+
+### 10.1 落地内容
+
+| # | 问题 | 改动 | 落点 |
+|---|---|---|---|
+| 1 | `canvas_add` 任意 HTML 无消毒：外链 `<img>`/样式表真实加载 → 跨域资源污染 `foreignObject` 光栅化 → **整张截图失败** | 入库统一注入 CSP（`default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:`）：外链被浏览器阻断（画不出，不再 taint），内联样式不受影响；`Store.Add/Update/loadAll` 三处接线，旧快照装载自愈。**不做**字符串手术剥 `<script>`/改写 `src` —— script 本被 sandbox 挡住，外链被 CSP 挡住，正则改写 HTML 易碎 | `canvas/sanitize.go`（新） |
+| 2 | 截图强依赖「画布已在浏览器打开」：Agent 无人值守时 `capture_timeout` 高频 | 超时自动 `openbrowser` 拉起画布 + 再等一轮；每进程至多自动开一次（避免连环弹窗）；`Deps.AutoOpen` 开关，`mcp` 子命令开启、测试/CI 关闭（go test 不弹窗） | `mcpserver/server.go`、`main.go` |
+| 3 | `design_audit` 只审计体系 StyleSheet，Agent 要的是「我刚摆的这张稿有什么问题」 | 新增 `AuditNodeHTML`：节点级走查（外链资源 fail / emoji 与字符图标 fail / 画板契约 warn / 节点内 font-family 商用判定 warn）；`design_audit` 增加 `node_id` 入参（优先于 system；与 system 均缺报 bad_request） | `design/nodeaudit.go`（新）、`mcpserver/server.go` |
+| 4 | `design_tokens` 全量输出体量大（usage 说明 + hover/container 变体 + 阴影动效） | `brief=true`（仅 category=all）：关键语义色的值、字阶 size/weight、间距/圆角阶梯；省略 usage、变体色、阴影、动效 —— 概览后再按类目取全量 | `mcpserver/server.go` `briefTokens` |
+
+### 10.2 验证
+
+- `GOWORK=off go vet ./... && go test ./...` 全模块绿；新增
+  `canvas/sanitize_test.go`（注入位置/幂等/Add·Update·旧快照自愈）、
+  `design/nodeaudit_test.go`（干净满分 / 外链与 emoji fail / 画板三态 / 字族判定）、
+  `mcpserver/enhance3_test.go`（节点级走查契约含报错路径、brief/全量双形态）。
+- 真机冒烟：外链资源节点入库带 CSP；设计预览入库带 CSP 且结构完好
+  （`ds-page`/`ds-btn` 全数在位）。
+- 浏览器实测（IAB）：外链图卡片 `img` 未加载（被 CSP 阻断），
+  Element 预览按钮 `backgroundColor = rgb(64,158,255)`（#409EFF，内联样式无损）。
+
+### 10.3 遗留与后续
+
+- 迭代 3（结构与生态）待启动：canvas.js 模块化、节点 HTML 分文件存储 + undo 栈、
+  体系数据外置 embed JSON、组件扩充（tabs/table/pagination 优先）、e2e 回归收敛。
+- `staticcheck` 本机二进制版本不匹配（导出数据 v2 vs 工具链 v5）仍未跑，`go vet` 已过。

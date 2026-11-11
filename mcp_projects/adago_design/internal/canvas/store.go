@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -33,6 +34,11 @@ type Node struct {
 	Y          float64  `json:"y"`
 	Z          int      `json:"z"`
 	Tags       []string `json:"tags,omitempty"`
+
+	// HTMLRev 是正文最近一次变更的时间。节点列表默认剥掉 html 大字段，
+	// 客户端靠比较 html_rev 决定「要不要取正文/重载 iframe」——
+	// 只有位置/标题变化的更新不再触发正文拉取。
+	HTMLRev time.Time `json:"html_rev"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -130,6 +136,9 @@ var (
 )
 
 // Store 是线程安全的项目/节点/连线仓库，变更即持久化。
+//
+// 持久化策略（P0 加固）：紧凑序列化 + 备份轮换（canvas.json.bak/.bak2）+
+// 写盘失败记入 lastPersistErr 并打日志（健康检查可见），不再静默丢错误。
 type Store struct {
 	mu        sync.RWMutex
 	path      string // canvas.json；空 = 不持久化
@@ -141,6 +150,10 @@ type Store struct {
 	lastClear []*Node // 最近一次清空的快照（仅内存，供恢复）
 	lastEdges []*Edge // 清空时的连线快照
 	clearedAt time.Time
+
+	rev            uint64                     // 变更版本号：每次变更 +1（SSE 客户端据此判断有无新数据）
+	subs           map[chan struct{}]struct{} // 变更订阅者（SSE）
+	lastPersistErr error                      // 最近一次写盘失败原因（nil = 正常）
 }
 
 // persistedFile 是 canvas.json 的 v3 格式（项目 + 节点 + 连线）；
@@ -153,11 +166,16 @@ type persistedFile struct {
 }
 
 // OpenStore 打开（或创建）存储。dir 为空时仅内存。
+//
+// 主文件 canvas.json 缺失或损坏时依次尝试 canvas.json.bak / .bak2：
+// 备份轮换的「重命名三连」中断在中间态时（旧主文件已改名、新文件未就位），
+// 下一轮启动能从备份把画布捡回来，而不是当成空库。
 func OpenStore(dir string) (*Store, error) {
 	s := &Store{
 		projects: map[string]*Project{},
 		nodes:    map[string]*Node{},
 		edges:    map[string]*Edge{},
+		subs:     map[chan struct{}]struct{}{},
 		nextZ:    1,
 	}
 	if dir == "" {
@@ -167,28 +185,56 @@ func OpenStore(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
-	raw, err := os.ReadFile(s.path)
-	if err == nil && len(raw) > 0 {
-		var nodes []*Node
-		var migrated bool
-		if err := json.Unmarshal(raw, &nodes); err == nil {
-			// v1 裸数组格式
-			migrated = s.loadAll(nil, nodes, nil)
-		} else {
-			var file persistedFile
-			if err := json.Unmarshal(raw, &file); err != nil {
-				return nil, fmt.Errorf("parse %s: %w", s.path, err)
+	raw, readErr := os.ReadFile(s.path)
+	if readErr != nil {
+		// 主文件不可读（缺失/权限）：尝试备份，两个都没有就按新库处理
+		for _, alt := range []string{s.path + ".bak", s.path + ".bak2"} {
+			if b, e := os.ReadFile(alt); e == nil && len(b) > 0 {
+				log.Printf("主文件不可读（%v），已从 %s 恢复", readErr, alt)
+				raw = b
+				break
 			}
-			migrated = s.loadAll(file.Projects, file.Nodes, file.Edges)
 		}
-		// 迁移后立刻回写：否则磁盘还停在旧版本，API 已经是项目制，两边对不上
+	}
+	if len(raw) > 0 {
+		migrated, parseErr := s.loadSnapshot(raw)
+		if parseErr != nil {
+			// 主文件解析失败：先试备份，全失败才报错
+			for _, alt := range []string{s.path + ".bak", s.path + ".bak2"} {
+				b, e := os.ReadFile(alt)
+				if e != nil || len(b) == 0 {
+					continue
+				}
+				if m2, e2 := s.loadSnapshot(b); e2 == nil {
+					log.Printf("主文件损坏（%v），已从 %s 恢复", parseErr, alt)
+					migrated = m2
+					parseErr = nil
+					break
+				}
+			}
+		}
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse %s: %w", s.path, parseErr)
+		}
 		if migrated {
+			// 迁移后立刻回写：否则磁盘还停在旧版本，API 已经是项目制，两边对不上
 			s.persistLocked()
 		}
-	} else if err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("read %s: %w", s.path, err)
 	}
 	return s, nil
+}
+
+// loadSnapshot 解析并装载一份快照（v1 裸数组 / v2 / v3），返回是否发生迁移。
+func (s *Store) loadSnapshot(raw []byte) (bool, error) {
+	var nodes []*Node
+	if err := json.Unmarshal(raw, &nodes); err == nil {
+		return s.loadAll(nil, nodes, nil), nil
+	}
+	var file persistedFile
+	if err := json.Unmarshal(raw, &file); err != nil {
+		return false, err
+	}
+	return s.loadAll(file.Projects, file.Nodes, file.Edges), nil
 }
 
 // loadAll 装载 v1/v2/v3 任意版本的快照，并完成「节点必须归属项目」的迁移。
@@ -211,6 +257,11 @@ func (s *Store) loadAll(projects []*Project, nodes []*Node, edges []*Edge) bool 
 			continue
 		}
 		cp := n.Clone()
+		// 旧快照的节点没有 CSP：装载时补齐（自愈，只在真变了时算迁移）
+		if s := SanitizePreviewHTML(cp.HTML); s != cp.HTML {
+			cp.HTML = s
+			migrated = true
+		}
 		s.nodes[cp.ID] = &cp
 		if cp.ProjectID == "" {
 			orphans = append(orphans, s.nodes[cp.ID])
@@ -321,6 +372,10 @@ func (s *Store) Add(n Node) (Node, error) {
 	s.seq++
 	n.CreatedAt = now
 	n.UpdatedAt = now
+	if n.HTML != "" {
+		n.HTML = SanitizePreviewHTML(n.HTML) // 入库即注入 CSP（见 sanitize.go）
+		n.HTMLRev = now
+	}
 	if n.Z <= 0 {
 		if n.Kind == KindFrame {
 			n.Z = 0 // 分组框垫底
@@ -362,6 +417,8 @@ func (s *Store) Add(n Node) (Node, error) {
 }
 
 // Update 更新已有节点：以 mut 对副本做修改后写回。
+// 正文（HTML）真的变了才刷新 HTMLRev —— 列表剥掉 HTML 后，客户端靠它
+// 区分「正文变了要取要重载」与「只是挪了位置」。
 func (s *Store) Update(id string, mut func(*Node)) (Node, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -376,6 +433,12 @@ func (s *Store) Update(id string, mut func(*Node)) (Node, error) {
 	cp.ID = n.ID
 	cp.CreatedAt = n.CreatedAt
 	cp.UpdatedAt = time.Now()
+	if cp.HTML != n.HTML {
+		cp.HTML = SanitizePreviewHTML(cp.HTML)
+		cp.HTMLRev = cp.UpdatedAt
+	} else {
+		cp.HTMLRev = n.HTMLRev
+	}
 	s.nodes[id] = &cp
 	s.persistLocked()
 	return cp.Clone(), nil
@@ -581,8 +644,57 @@ func (s *Store) autoPositionLocked(projectID string, w, h int) (float64, float64
 	return maxX + gap, 80
 }
 
-// persistLocked 把当前状态原子写入磁盘（调用方需持写锁），v2 格式。
+// Rev 返回存储变更版本号：任何变更都会 +1，SSE 客户端据此判断有无新数据。
+func (s *Store) Rev() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rev
+}
+
+// PersistError 返回最近一次写盘失败的原因（nil = 一切正常）。
+// 健康检查用它把「看起来在保存、实际在丢数据」暴露出来。
+func (s *Store) PersistError() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastPersistErr
+}
+
+// Subscribe 订阅变更通知。变更时向每个订阅者非阻塞广播一次（容量 1，
+// 连续变更合帧成一条）；返回的 cancel 解除订阅。
+func (s *Store) Subscribe() (<-chan struct{}, func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ch := make(chan struct{}, 1)
+	if s.subs == nil {
+		s.subs = map[chan struct{}]struct{}{}
+	}
+	s.subs[ch] = struct{}{}
+	return ch, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		delete(s.subs, ch)
+	}
+}
+
+// notifyLocked 向全部订阅者广播（调用方需持锁；非阻塞，慢订阅者只保留最新信号）。
+func (s *Store) notifyLocked() {
+	for ch := range s.subs {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// persistLocked 把当前状态原子写入磁盘（调用方需持写锁），v3 格式。
+// 每次变更都会先推进版本号并广播订阅者 —— 版本推进不依赖写盘是否成功，
+// 内存态才是唯一真相，磁盘只是它的持久化。
+//
+// 写盘三步：tmp 写入 → 旧主文件轮换进备份（.bak → .bak2）→ tmp 就位主文件。
+// 任一步失败都记入 lastPersistErr 并打日志，不再静默吞掉。
 func (s *Store) persistLocked() {
+	s.rev++
+	s.notifyLocked()
 	if s.path == "" {
 		return
 	}
@@ -601,13 +713,27 @@ func (s *Store) persistLocked() {
 	}
 	sort.Slice(projects, func(i, j int) bool { return projects[i].CreatedAt.Before(projects[j].CreatedAt) })
 	file := persistedFile{Version: 3, Projects: projects, Nodes: nodes, Edges: edges}
-	raw, err := json.MarshalIndent(file, "", "  ")
+	// 紧凑序列化：缩进只让文件无谓膨胀 30%+，快照是给机器读的
+	raw, err := json.Marshal(file)
+	if err == nil {
+		tmp := s.path + ".tmp"
+		err = os.WriteFile(tmp, raw, 0o644)
+		if err == nil {
+			// 旧主文件轮换进备份：.bak → .bak2，主文件 → .bak。
+			// 中断在中间态也没关系：OpenStore 会从 .bak/.bak2 降级恢复。
+			if _, statErr := os.Stat(s.path); statErr == nil {
+				if _, bakErr := os.Stat(s.path + ".bak"); bakErr == nil {
+					_ = os.Rename(s.path+".bak", s.path+".bak2")
+				}
+				_ = os.Rename(s.path, s.path+".bak")
+			}
+			err = os.Rename(tmp, s.path)
+		}
+	}
 	if err != nil {
+		s.lastPersistErr = fmt.Errorf("persist %s: %w", s.path, err)
+		log.Printf("画布持久化失败（数据仍在内存，稍后变更会重试）: %v", s.lastPersistErr)
 		return
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
-		return
-	}
-	_ = os.Rename(tmp, s.path)
+	s.lastPersistErr = nil
 }
