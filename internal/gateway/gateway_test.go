@@ -121,7 +121,8 @@ func TestGatewayHandlerHomeAndAuth(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Bearer 访问首页状态 = %d，期望 200；正文: %.800s", resp.StatusCode, body)
 	}
-	for _, want := range []string{`class="ada-brand"`, "ada-go", "演示会话"} {
+	// SSR 移除后首页是 SPA shell：品牌进 bootstrap 投影，会话列表由客户端取数。
+	for _, want := range []string{`id="app"`, `id="ada-bootstrap"`, "ada-go"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("首页缺少 %q；正文片段: %.800s", want, body)
 		}
@@ -134,10 +135,11 @@ func TestGatewayHandlerCoreErrorPage(t *testing.T) {
 
 	resp, body := httpGet(t, srv.URL+"/", testAccessToken)
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("Core 不可用时首页状态 = %d，期望 200（外壳 + 未连接空态）；正文: %.800s", resp.StatusCode, body)
+		t.Fatalf("Core 不可用时首页状态 = %d，期望 200；正文: %.800s", resp.StatusCode, body)
 	}
-	if !strings.Contains(body, "暂时没有连上 agent") {
-		t.Fatalf("首页缺少「暂时没有连上 agent」；正文片段: %.800s", body)
+	// 页面渲染不再依赖 Core：shell 照常返回，数据端点按需报 502。
+	if !strings.Contains(body, `id="ada-bootstrap"`) {
+		t.Fatalf("Core 不可用时首页缺少 shell；正文片段: %.800s", body)
 	}
 }
 
@@ -212,12 +214,12 @@ func TestGatewayTokenQueryLogin(t *testing.T) {
 	}
 }
 
-// 实时 Markdown 渲染端点要经过鉴权中间件，并且复用服务端清洗管线。
+// Markdown AST 端点要经过鉴权中间件，并且复用服务端清洗管线（HTML 版已随 SSR 删除）。
 func TestGatewayMarkdownEndpoint(t *testing.T) {
 	srv := newFakeGateway(t, &fakeSupervisor{client: &fakeCoreClient{responses: map[string]json.RawMessage{}}})
 
 	makeReq := func(token string, body string) *http.Response {
-		req, err := http.NewRequest(http.MethodPost, srv.URL+"/markdown", strings.NewReader(body))
+		req, err := http.NewRequest(http.MethodPost, srv.URL+"/markdown.ast", strings.NewReader(body))
 		if err != nil {
 			t.Fatalf("构造请求失败: %v", err)
 		}
@@ -229,7 +231,7 @@ func TestGatewayMarkdownEndpoint(t *testing.T) {
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		}).Do(req)
 		if err != nil {
-			t.Fatalf("POST /markdown 失败: %v", err)
+			t.Fatalf("POST /markdown.ast 失败: %v", err)
 		}
 		return resp
 	}
@@ -249,7 +251,7 @@ func TestGatewayMarkdownEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), "<strong>粗体</strong>") {
+	if !strings.Contains(string(body), `"t":"strong"`) || !strings.Contains(string(body), "粗体") {
 		t.Fatalf("正文 = %s", body)
 	}
 }

@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
 	"io"
 	"io/fs"
 	"net/http"
@@ -68,140 +67,23 @@ type pluginListResult struct {
 	Plugins []pluginSummaryDTO `json:"plugins"`
 }
 
-// ---- 对话页 ----------------------------------------------------------------
+// ---- 对话流数据（SPA 取数面）------------------------------------------------
 
-// handleChatHome 渲染新建任务页：侧栏列已有会话，主区是居中的任务输入。
-func (s *Server) handleChatHome(w http.ResponseWriter, r *http.Request) {
-	s.pinWorkspaceQuery(w, r)
-	threads, err := s.listThreads(r, 50)
-	picker := s.modelOptions(r, "")
-	data := threadData{
-		baseData:           s.base(r, "chat", "新建任务", threads, "", err == nil),
-		Greeting:           greetingText(time.Now()),
-		Models:             picker.Models,
-		CurrentModelLabel:  picker.Label,
-		CurrentModelValue:  picker.Value,
-		CurrentModelLevels: picker.Levels,
-		CurrentModelLevel:  picker.Level,
-	}
-	s.render(w, http.StatusOK, "chat", data)
+// handleShell 渲染 SPA 外壳：history fallback 的统一出口。所有页面路径
+// （/、/threads/{id}、/overview、/workspaces、/extensions、/ext/{id}/…）都返回
+// 同一份 shell，数据由客户端按路径取 JSON 端点（dev-plan R3）。
+func (s *Server) handleShell(w http.ResponseWriter, r *http.Request) {
+	s.render(w, http.StatusOK, "shell", s.base(r, ""))
 }
 
-// handleThread 渲染会话页：thread.get + thread.entries（最近 100 条）。
-func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
-	s.pinWorkspaceQuery(w, r)
-	id := r.PathValue("id")
-	if strings.TrimSpace(id) == "" {
-		s.renderError(w, r, http.StatusNotFound, "没有找到这个会话",
-			"链接里缺少会话 id。请从会话列表重新打开一个会话。", "", "/", "返回会话列表")
+// handleFallback 是未匹配路径的兜底：GET 返回 shell（客户端路由自会给出
+// 404 视图），其余方法按 404 渲染错误页。
+func (s *Server) handleFallback(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		s.handleShell(w, r)
 		return
 	}
-	rawGet, err := s.call(r, "thread.get", map[string]any{"threadId": id, "itemLimit": 100})
-	if err != nil {
-		s.renderCoreError(w, r, err, threadPath(id))
-		return
-	}
-	var get threadGetResult
-	if err := json.Unmarshal(rawGet, &get); err != nil {
-		s.renderError(w, r, http.StatusBadGateway, "无法解析会话",
-			"Core 返回了无法识别的会话数据。请重试；若持续出现，请检查 Core 日志。",
-			err.Error(), threadPath(id), "重试")
-		return
-	}
-
-	rawEntries, err := s.call(r, "thread.entries", map[string]any{"threadId": id, "limit": 100})
-	if err != nil {
-		s.renderCoreError(w, r, err, threadPath(id))
-		return
-	}
-	var page entryPage
-	if err := json.Unmarshal(rawEntries, &page); err != nil {
-		s.renderError(w, r, http.StatusBadGateway, "无法解析会话历史",
-			"Core 返回了无法识别的历史数据。请重试；若出现持续错误，请检查 Core 日志。",
-			err.Error(), threadPath(id), "重试")
-		return
-	}
-	// 历史分页（协议 8.2 的游标严格排他：NextCursor = 本窗首条 seq-1）：
-	// 默认只渲染最近 100 条；?before=<cursor> 再取更早的一窗拼在前面，
-	// 两窗首尾相接无重复。是否还有更早的由页面顶部「加载更早消息」链接
-	// 继续（普通链接，无 JS 也能翻历史）。仅在用 before 翻页时才有取不到
-	// 中段的可能（两窗之间新落了超过一整窗的新消息），此场景极罕见且
-	// 顶部链接仍可继续向前翻。
-	olderCursor, olderHasMore := page.NextCursor, page.HasMore
-	if before := strings.TrimSpace(r.URL.Query().Get("before")); before != "" {
-		rawOlder, err := s.call(r, "thread.entries", map[string]any{"threadId": id, "cursor": before, "limit": 100})
-		if err != nil {
-			s.renderCoreError(w, r, err, threadPath(id))
-			return
-		}
-		var older entryPage
-		if err := json.Unmarshal(rawOlder, &older); err != nil {
-			s.renderError(w, r, http.StatusBadGateway, "无法解析会话历史",
-				"Core 返回了无法识别的历史数据。请重试；若出现持续错误，请检查 Core 日志。",
-				err.Error(), threadPath(id), "重试")
-			return
-		}
-		page.Entries = append(older.Entries, page.Entries...)
-		olderCursor, olderHasMore = older.NextCursor, older.HasMore
-	}
-
-	transcript := buildTranscript(page.Entries)
-	entriesUsable := len(transcript) > 0
-	if len(transcript) == 0 {
-		transcript = transcriptFromItems(get.Items)
-	}
-	transcript = append(transcript, noticesFromItems(get.Items)...)
-	if entriesUsable {
-		// 回退路径的 item key 不保证是 entry id，不能拿来做编辑重发的目标。
-		s.prepareTranscriptEdits(r, transcript, id, get.Run.Status)
-	}
-	run := buildRun(get.Run)
-	threads, _ := s.listThreads(r, 50)
-	title := strings.TrimSpace(get.Thread.Title)
-	if title == "" {
-		title = "新会话"
-	}
-	base := s.base(r, "chat", title, threads, id, true)
-	base.TopbarActions = threadTopbarActions(id, run.Active, s.csrf(r))
-	// 对话流岛需要引擎；但插件 hydrate 插槽也可能在空会话里出现，不能把
-	// base() 里 IslandDetector 的结果覆盖掉。
-	base.NeedsUI = base.NeedsUI || len(transcript) > 0
-	s.attachPartHTML(r, transcript, newBlockBudget())
-	picker := s.modelOptions(r, id)
-	models, modelLabel, modelValue := picker.Models, picker.Label, picker.Value
-	stateJSON, err := json.Marshal(s.transcriptPayload(r, id, get.Run.Status, transcript, newBlockBudget()))
-	if err != nil {
-		stateJSON = []byte(`{"threadId":"","runStatus":"","rows":[]}`)
-	}
-	// 历史分页链接：仅 entries 路径可用（item 回退路径的 key 不是 entry id，
-	// 没有可靠游标）且更早还有历史时才出现。
-	hasOlder, olderHref := false, ""
-	if entriesUsable && olderHasMore && olderCursor != "" {
-		hasOlder = true
-		olderHref = fmt.Sprintf("%s?before=%s", threadPath(id), url.QueryEscape(olderCursor))
-	}
-	data := threadData{
-		baseData:            base,
-		Thread:              buildThreadInfo(get.Thread),
-		Run:                 run,
-		Transcript:          transcript,
-		TranscriptStateJSON: string(stateJSON),
-		Interactions:        buildInteractions(get.Interactions, id, s.csrf(r)),
-		TurnKey:             newIdempotencyKey(),
-		Models:              models,
-		CurrentModelLabel:   modelLabel,
-		CurrentModelValue:   modelValue,
-		CurrentModelLevels:  picker.Levels,
-		CurrentModelLevel:   picker.Level,
-		HasOlder:            hasOlder,
-		OlderHref:           olderHref,
-	}
-	if run.Active && !jsClient(r) {
-		// 无 JS 轮询：运行中每 2 秒刷新一次，完成即停止（7.8）。
-		// 有 JS 的浏览器由 chat-live.js 吃 SSE 增量，绝不能再发 meta refresh。
-		data.RefreshSeconds = 2
-	}
-	s.render(w, http.StatusOK, "chat", data)
+	s.handleNotFound(w, r)
 }
 
 // handleThreadState 是会话页的遥测轮询接口：一次 thread.get，
@@ -229,14 +111,70 @@ func (s *Server) handleThreadState(w http.ResponseWriter, r *http.Request) {
 	if get.Context != nil {
 		out["context"] = get.Context
 	}
+	// 交互托盘是基座组件（docs/00 §1.5.7）：state 响应把 pending 交互一并投影，
+	// SPA 会话页据此渲染托盘（HEAD 页面的 .Interactions 同源：thread.get）。
+	out["interactions"] = interactionStates(get.Interactions)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_ = json.NewEncoder(w).Encode(out)
 }
 
-// handleTranscriptJSON 只返回对话流行，供浏览器岛做 keyed patch；
-// 行的 HTML 仍由服务端 row 模板渲染，客户端不持有 Markdown/转义逻辑。
+// interactionStates 把 Core 的交互列表投影成托盘数据：只留 pending；
+// form 交互的题目存在 body 里（interactions 表没有 payload 列），
+// 解析失败就当空表单，让用户至少能取消。
+func interactionStates(in []interactionDTO) []interactionViewState {
+	out := make([]interactionViewState, 0, len(in))
+	for _, x := range in {
+		if x.Status != "" && x.Status != "pending" {
+			continue
+		}
+		view := interactionViewState{
+			ID:      x.ID,
+			Kind:    x.Kind,
+			Title:   x.Title,
+			Body:    x.Body,
+			Options: append([]string(nil), x.Options...),
+		}
+		if strings.EqualFold(x.Kind, "form") {
+			view.Questions = parseInteractionQuestions(x.Body)
+			view.Body = ""
+		}
+		out = append(out, view)
+	}
+	return out
+}
+
+// parseInteractionQuestions 解析 form 交互 body 里的题目数组。
+func parseInteractionQuestions(raw string) []interactionQuestionState {
+	var items []struct {
+		Question string   `json:"question"`
+		Kind     string   `json:"kind"`
+		Options  []string `json:"options"`
+	}
+	if json.Unmarshal([]byte(raw), &items) != nil {
+		return nil
+	}
+	out := make([]interactionQuestionState, 0, len(items))
+	for i, it := range items {
+		kind := strings.TrimSpace(it.Kind)
+		if kind != "confirm" && kind != "select" && kind != "input" {
+			kind = "input"
+		}
+		out = append(out, interactionQuestionState{
+			Index: i, Question: it.Question, Kind: kind, Options: it.Options,
+		})
+	}
+	return out
+}
+
+// handleTranscriptJSON 只返回对话流 JSON 数据行（keyed patch 用）。
+// 行形状见 view.go 的 transcriptRowState 注释：助手行是 VNode 数据，
+// 用户/工具/notice 行是纯数据字段，渲染全部在客户端组件里。
+//
+// 历史分页（8.2 游标）：?before=<nextCursor>&limit=N 返回该游标之前更早的
+// 一窗，响应带 hasMore/nextCursor 供「加载更早消息」入口续翻；不带参数时
+// 返回最近 100 条（与 HEAD 的 OlderHref 语义对齐，只是从链接变成 fetch）。
 func (s *Server) handleTranscriptJSON(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" {
@@ -253,7 +191,17 @@ func (s *Server) handleTranscriptJSON(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadGateway, "Core 返回了无法识别的会话数据")
 		return
 	}
-	rawEntries, err := s.call(r, "thread.entries", map[string]any{"threadId": id, "limit": 100})
+	entriesParams := map[string]any{"threadId": id, "limit": 100}
+	cursor := strings.TrimSpace(r.URL.Query().Get("before"))
+	if cursor != "" {
+		entriesParams["cursor"] = cursor
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 500 {
+			entriesParams["limit"] = n
+		}
+	}
+	rawEntries, err := s.call(r, "thread.entries", entriesParams)
 	if err != nil {
 		writeJSONError(w, http.StatusBadGateway, publicReason(err))
 		return
@@ -268,29 +216,21 @@ func (s *Server) handleTranscriptJSON(w http.ResponseWriter, r *http.Request) {
 	if len(transcript) == 0 {
 		transcript = transcriptFromItems(get.Items)
 	}
-	transcript = append(transcript, noticesFromItems(get.Items)...)
+	if cursor == "" {
+		// 只在最新一窗追加 notice（更早的历史窗口没有实时 notice 概念）。
+		transcript = append(transcript, noticesFromItems(get.Items)...)
+	}
 	if entriesUsable {
 		s.prepareTranscriptEdits(r, transcript, id, get.Run.Status)
 	}
+	payload := s.transcriptPayload(r, id, get.Run.Status, transcript, newBlockBudget())
+	if entriesUsable {
+		payload.HasMore = page.HasMore
+		payload.NextCursor = page.NextCursor
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(s.transcriptPayload(r, id, get.Run.Status, transcript, newBlockBudget()))
-}
-
-// attachPartHTML 为助手文本预渲染 HTML（含 Markdown 动态块），供无 JS 模板使用。
-// budget 由调用方跨整份 transcript 共享，避免长会话按消息数线性放大渲染耗时。
-func (s *Server) attachPartHTML(r *http.Request, items []transcriptItem, budget *blockBudget) {
-	for i := range items {
-		if items[i].Kind != "assistant" {
-			continue
-		}
-		for j := range items[i].Parts {
-			p := &items[i].Parts[j]
-			if p.Type == "text" && strings.TrimSpace(p.Text) != "" {
-				p.HTML = s.renderMarkdownWithBlocks(r, p.Text, budget)
-			}
-		}
-	}
+	_ = json.NewEncoder(w).Encode(payload)
 }
 
 func (s *Server) transcriptPayload(r *http.Request, threadID, runStatus string, items []transcriptItem, budget *blockBudget) transcriptPayload {
@@ -300,7 +240,8 @@ func (s *Server) transcriptPayload(r *http.Request, threadID, runStatus string, 
 		if key == "" {
 			key = fmt.Sprintf("row:%d", i)
 		}
-		if item.Kind == "assistant" {
+		switch item.Kind {
+		case "assistant":
 			parts := make([]transcriptPartState, 0, len(item.Parts))
 			for _, part := range item.Parts {
 				switch part.Type {
@@ -321,15 +262,59 @@ func (s *Server) transcriptPayload(r *http.Request, threadID, runStatus string, 
 			rows = append(rows, transcriptRowState{
 				Key: key, Kind: "assistant", At: item.At, Parts: parts,
 			})
-			continue
+		case "user":
+			// 纯数据行：旧 SSR 模板 row/parts_user 用到的字段等价输出。
+			parts := make([]transcriptPartState, 0, len(item.Parts))
+			for _, part := range item.Parts {
+				switch part.Type {
+				case "text":
+					parts = append(parts, transcriptPartState{Type: "text", Text: part.Text})
+				case "thinking":
+					parts = append(parts, transcriptPartState{Type: "thinking", Text: part.Text})
+				case "image":
+					parts = append(parts, transcriptPartState{Type: "image", Mime: part.Mime, Data: part.Data})
+				}
+			}
+			row := transcriptRowState{Key: key, Kind: "user", At: item.At, Parts: parts}
+			if item.CanEdit {
+				row.CanEdit = true
+				row.EditKey = item.EditKey
+				row.EditText = item.EditText
+				row.ThreadID = item.ThreadID
+				row.CSRF = item.CSRF
+			}
+			rows = append(rows, row)
+		case "tool":
+			if item.Tool == nil {
+				continue
+			}
+			rows = append(rows, transcriptRowState{
+				Key: key, Kind: "tool", At: item.At,
+				Tool: &toolRowState{
+					CallID:      item.Tool.CallID,
+					Name:        item.Tool.Tool,
+					Status:      item.Tool.Status,
+					StatusLabel: item.Tool.StatusLabel,
+					DurationMS:  item.Tool.DurationMS,
+					Truncated:   item.Tool.Truncated,
+					Args:        item.Tool.Args,
+					ArgsHint:    item.Tool.ArgsHint,
+					Output:      item.Tool.Output,
+					Details:     item.Tool.Details,
+					Reason:      item.Tool.Reason,
+				},
+			})
+		case "notice":
+			rows = append(rows, transcriptRowState{
+				Key: key, Kind: "notice", At: item.At, Level: item.Level, Text: item.Text,
+			})
+		default:
+			// buildTranscript 只产出上述四种 kind；未知 kind 按纯文本行兜底
+			// （旧模板的 plain 行语义）。
+			rows = append(rows, transcriptRowState{
+				Key: key, Kind: "plain", At: item.At, Text: item.Text,
+			})
 		}
-		var buf strings.Builder
-		if err := s.tmpl.ExecuteTemplate(&buf, "row", item); err != nil {
-			continue
-		}
-		rows = append(rows, transcriptRowState{
-			Key: key, Kind: item.Kind, At: item.At, HTML: buf.String(),
-		})
 	}
 	return transcriptPayload{ThreadID: threadID, RunStatus: runStatus, Rows: rows}
 }
@@ -365,76 +350,11 @@ func (s *Server) prepareTranscriptEdits(r *http.Request, items []transcriptItem,
 	}
 }
 
-// handleSlotPartial 只返回一个插槽的宿主容器，供运行中动态刷新。
-//
-// 插件贡献仍由服务端渲染（同一个 PluginUI.Slot、同一套转义），客户端只做
-// 节点替换；工具落库后 chat-live.js 调它刷新 chat.corner，Todo 卡片不必等
-// 整页 reload 才出现。
-func (s *Server) handleSlotPartial(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimSpace(r.PathValue("name"))
-	host, ok := HostFor(name)
-	if !ok || host.Template != "thread" {
-		http.Error(w, "未知插槽", http.StatusNotFound)
-		return
-	}
-	if ThreadIDFromRequest(r) == "" {
-		http.Error(w, "需要 threadId", http.StatusBadRequest)
-		return
-	}
-	var body template.HTML
-	var contributors int
-	if s.cfg.PluginUI != nil {
-		var err error
-		body, contributors, err = s.cfg.PluginUI.Slot(name, r)
-		if err != nil {
-			http.Error(w, publicReason(err), http.StatusBadGateway)
-			return
-		}
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_, _ = w.Write([]byte(RenderSlot(name, body, contributors, "")))
-}
-
-// handleWorkspaceThreadsPartial 返回某个工作区的会话行 HTML 片段，供侧栏
-// 工作区组展开时懒加载（跨工作区查询要各自拉起 Core，不能全量预取）。
-func (s *Server) handleWorkspaceThreadsPartial(w http.ResponseWriter, r *http.Request) {
-	requested := strings.TrimSpace(r.URL.Query().Get("path"))
-	list := s.workspaceList()
-	index := workspaceIndexFolded(list, requested)
-	if index < 0 {
-		http.Error(w, "未知工作区", http.StatusNotFound)
-		return
-	}
-	raw, err := s.callWorkspace(r, list[index], "thread.list", map[string]any{"limit": 50, "archived": false})
-	if err != nil {
-		http.Error(w, "读取会话失败", http.StatusBadGateway)
-		return
-	}
-	var res threadListResult
-	if err := json.Unmarshal(raw, &res); err != nil {
-		http.Error(w, "读取会话失败", http.StatusBadGateway)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_, _ = w.Write([]byte(renderWorkspaceThreadRows(res.Threads, index, s.csrf(r), r.URL.Path)))
-}
-
 func writeJSONError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
-}
-
-// jsClient 判断这个浏览器是否已经在跑脚本（sidebar-boot.js 首屏种的 cookie）。
-// 判断错了只会影响「用轮询还是用增量」，两边的兜底都在：cookie 缺失时退到轮询。
-func jsClient(r *http.Request) bool {
-	c, err := r.Cookie(JSClientCookieName)
-	return err == nil && c.Value == "1"
 }
 
 // handleCreateThread 创建任务：可指定工作区，并可直接带上第一条消息。
@@ -540,20 +460,6 @@ func titleFromTask(text string) string {
 		return string(runes[:maxRunes]) + "…"
 	}
 	return text
-}
-
-// greetingText 给新建任务页一句按时间变化的问候。
-func greetingText(now time.Time) string {
-	switch h := now.Hour(); {
-	case h >= 5 && h < 11:
-		return "上午好，开始一个新任务吧"
-	case h >= 11 && h < 13:
-		return "中午好，开始一个新任务吧"
-	case h >= 13 && h < 18:
-		return "下午好，开始一个新任务吧"
-	default:
-		return "晚上好，今天辛苦啦"
-	}
 }
 
 // ThreadIDFromRequest 从 query threadId、页面路径（/threads/{id}、/thread/{id}）
@@ -1246,76 +1152,6 @@ func (s *Server) handleThreadArchive(w http.ResponseWriter, r *http.Request) {
 	redirect(w, flashRedirect(next, "notice", "会话已归档"))
 }
 
-// modelOptions 是输入框旁模型选择器的数据（model.list 投影）；失败时返回空列表，
-// 不阻塞会话页渲染。
-func (s *Server) modelOptions(r *http.Request, threadID string) modelPickerData {
-	raw, err := s.call(r, "model.list", map[string]any{"threadId": threadID})
-	if err != nil {
-		return modelPickerData{}
-	}
-	var res struct {
-		Models []struct {
-			Model struct {
-				ProviderID string `json:"providerId"`
-				ModelID    string `json:"modelId"`
-			} `json:"model"`
-			Info struct {
-				DisplayName    string   `json:"displayName"`
-				ThinkingLevels []string `json:"thinkingLevels"`
-			} `json:"info"`
-		} `json:"models"`
-		Current struct {
-			ProviderID    string `json:"providerId"`
-			ModelID       string `json:"modelId"`
-			ThinkingLevel string `json:"thinkingLevel"`
-		} `json:"current"`
-	}
-	if err := json.Unmarshal(raw, &res); err != nil {
-		return modelPickerData{}
-	}
-	out := make([]modelOption, 0, len(res.Models))
-	currentLabel := ""
-	var currentLevels []string
-	for _, m := range res.Models {
-		if m.Model.ProviderID == "" || m.Model.ModelID == "" {
-			continue
-		}
-		short := strings.TrimSpace(m.Info.DisplayName)
-		if short == "" {
-			short = m.Model.ModelID
-		}
-		label := short
-		if short != m.Model.ModelID {
-			label += " · " + m.Model.ModelID
-		}
-		current := res.Current.ProviderID == m.Model.ProviderID && res.Current.ModelID == m.Model.ModelID
-		if current {
-			currentLabel = short
-			currentLevels = append([]string(nil), m.Info.ThinkingLevels...)
-		}
-		out = append(out, modelOption{
-			ProviderID:        m.Model.ProviderID,
-			ModelID:           m.Model.ModelID,
-			Label:             label,
-			ShortLabel:        short,
-			Current:           current,
-			ThinkingLevels:    append([]string(nil), m.Info.ThinkingLevels...),
-			ThinkingLevelsCSV: strings.Join(m.Info.ThinkingLevels, "|"),
-		})
-	}
-	value := ""
-	if res.Current.ProviderID != "" && res.Current.ModelID != "" {
-		value = res.Current.ProviderID + "|" + res.Current.ModelID
-	}
-	if currentLabel == "" {
-		currentLabel = "选择模型"
-	}
-	return modelPickerData{
-		Models: out, Label: currentLabel, Value: value,
-		Levels: currentLevels, Level: res.Current.ThinkingLevel,
-	}
-}
-
 // handleCancel 取消当前轮。
 func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -1398,6 +1234,141 @@ func (s *Server) handleModelSelect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirect(w, safeReturnPath(r))
+}
+
+// modelOptions 是输入框旁模型选择器的数据（model.list 投影）；失败时返回空
+// 投影不阻塞页面：SPA 会话页只显示「选择模型」占位，不隐藏发送按钮。
+// label 与 HEAD 模板一致：displayName 与 modelId 不同时拼成 "displayName · modelId"。
+func (s *Server) modelOptions(r *http.Request, threadID string) modelPickerState {
+	raw, err := s.call(r, "model.list", map[string]any{"threadId": threadID})
+	if err != nil {
+		return modelPickerState{Models: []modelPickerOption{}, CurrentLabel: "选择模型"}
+	}
+	var res struct {
+		Models []struct {
+			Model struct {
+				ProviderID string `json:"providerId"`
+				ModelID    string `json:"modelId"`
+			} `json:"model"`
+			Info struct {
+				DisplayName    string   `json:"displayName"`
+				ThinkingLevels []string `json:"thinkingLevels"`
+			} `json:"info"`
+		} `json:"models"`
+		Current struct {
+			ProviderID    string `json:"providerId"`
+			ModelID       string `json:"modelId"`
+			ThinkingLevel string `json:"thinkingLevel"`
+		} `json:"current"`
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return modelPickerState{Models: []modelPickerOption{}, CurrentLabel: "选择模型"}
+	}
+	out := make([]modelPickerOption, 0, len(res.Models))
+	state := modelPickerState{Models: out, CurrentLabel: "选择模型"}
+	for _, m := range res.Models {
+		if m.Model.ProviderID == "" || m.Model.ModelID == "" {
+			continue
+		}
+		short := strings.TrimSpace(m.Info.DisplayName)
+		if short == "" {
+			short = m.Model.ModelID
+		}
+		label := short
+		if short != m.Model.ModelID {
+			label += " · " + m.Model.ModelID
+		}
+		current := res.Current.ProviderID == m.Model.ProviderID && res.Current.ModelID == m.Model.ModelID
+		opt := modelPickerOption{
+			Value:          m.Model.ProviderID + "|" + m.Model.ModelID,
+			ProviderID:     m.Model.ProviderID,
+			ModelID:        m.Model.ModelID,
+			Label:          label,
+			ShortLabel:     short,
+			Current:        current,
+			ThinkingLevels: append([]string(nil), m.Info.ThinkingLevels...),
+			ThinkingLevel:  res.Current.ThinkingLevel,
+		}
+		if current {
+			state.CurrentLabel = short
+			state.CurrentValue = opt.Value
+			state.CurrentLevels = append([]string(nil), m.Info.ThinkingLevels...)
+			state.CurrentLevel = res.Current.ThinkingLevel
+		}
+		state.Models = append(state.Models, opt)
+	}
+	return state
+}
+
+// handleModelJSON 是模型选择器的 JSON 端点（HEAD 模板由服务端注入模型选项，
+// SPA 改由这里按线程取：?threadId= 有值时线程级，否则工作区级）。
+func (s *Server) handleModelJSON(w http.ResponseWriter, r *http.Request) {
+	threadID := sanitizeThreadID(r.URL.Query().Get("threadId"))
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	state := s.modelOptions(r, threadID)
+	_ = json.NewEncoder(w).Encode(state)
+}
+
+// handleThreadsJSON 是侧栏/会话列表页的 JSON 端点：一次 thread.list 的展示
+// 投影（HEAD 侧栏 renderThreadRow 的字段语义）。跨工作区查询用 ?path= 显式
+// 指定（只接受网关已知的工作区，避免把任意目录拉起 Core）；缺省用当前请求
+// 解析出的工作区。thread.list 的 Core 内存态投影自带 running 标记。
+func (s *Server) handleThreadsJSON(w http.ResponseWriter, r *http.Request) {
+	workspace, _ := s.resolveWorkspace(r)
+	if requested := strings.TrimSpace(r.URL.Query().Get("path")); requested != "" {
+		if index := workspaceIndexFolded(s.workspaceList(), requested); index >= 0 {
+			workspace = s.workspaceList()[index]
+		} else {
+			writeJSONError(w, http.StatusBadRequest, "这个目录不是网关已知的工作区")
+			return
+		}
+	}
+	limit := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	client, release, err := s.acquireWorkspace(r.Context(), workspace)
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, publicReason(err))
+		return
+	}
+	params := map[string]any{}
+	if limit > 0 {
+		params["limit"] = limit
+	}
+	raw, err := client.Call(r.Context(), "thread.list", params)
+	release()
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, publicReason(err))
+		return
+	}
+	var list threadListResult
+	if err := json.Unmarshal(raw, &list); err != nil {
+		writeJSONError(w, http.StatusBadGateway, "Core 返回了无法识别的会话列表")
+		return
+	}
+	items := make([]threadListItem, 0, len(list.Threads))
+	for _, t := range list.Threads {
+		items = append(items, threadListItem{
+			ID:        t.ID,
+			Title:     t.Title,
+			UpdatedAt: t.UpdatedAt,
+			Archived:  t.Archived,
+			Running:   t.Running,
+		})
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(threadsPayload{
+		Workspace:     workspace,
+		WorkspaceName: workspaceName(workspace),
+		Threads:       items,
+		HasMore:       list.HasMore,
+		NextCursor:    list.NextCursor,
+	})
 }
 
 // ---- 工作区 ----------------------------------------------------------------
@@ -1698,95 +1669,6 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-// handleWorkspaces 渲染工作区页：磁盘/常用位置 + 最近工作区 + 目录浏览。
-// 浏览范围限制在当前工作区子树内（不把网关所在机器的整个文件系统暴露给浏览器）。
-func (s *Server) handleWorkspaces(w http.ResponseWriter, r *http.Request) {
-	root, _ := s.resolveWorkspace(r)
-	browse := strings.TrimSpace(r.URL.Query().Get("path"))
-	if browse == "" || !withinRoot(root, browse) {
-		browse = root
-	}
-	threads, _ := s.listThreads(r, 200)
-	rootKey := normalizePath(root)
-	currentCount := 0
-	if withinRoot(root, browse) {
-		currentCount = len(threads)
-	}
-
-	list := s.workspaceList()
-	roots := make([]workspaceRoot, 0, len(list))
-	for _, ws := range list {
-		name := filepath.Base(ws)
-		if name == "" || name == "." || name == string(filepath.Separator) {
-			name = ws
-		}
-		roots = append(roots, workspaceRoot{
-			Label: name,
-			Path:  ws,
-			Href:  "/workspaces?path=" + urlQueryEscape(ws),
-			Kind:  "project",
-		})
-	}
-	recent := make([]workspaceRecent, 0, len(list))
-	for _, ws := range list {
-		name := filepath.Base(ws)
-		if name == "" || name == "." || name == string(filepath.Separator) {
-			name = ws
-		}
-		row := workspaceRecent{Path: ws, Name: name, Known: normalizePath(ws) == rootKey}
-		if row.Known {
-			row.Sessions = currentCount
-		}
-		recent = append(recent, row)
-	}
-
-	entries, truncated, omitted := listDirectories(browse, 200)
-	parent := ""
-	if normalizePath(browse) != rootKey {
-		if up := filepath.Dir(browse); withinRoot(root, up) {
-			parent = up
-		}
-	}
-	parentHref := ""
-	if parent != "" {
-		parentHref = "/workspaces?path=" + urlQueryEscape(parent)
-	}
-	selectable := workspaceIndexFolded(list, browse) >= 0
-	state := workspacesState{
-		Roots:      roots,
-		Recent:     recent,
-		Current:    browse,
-		Parent:     parent,
-		ParentHref: parentHref,
-		Entries:    entries,
-		Truncated:  truncated,
-		Omitted:    omitted,
-		Selectable: selectable,
-		CSRF:       s.csrf(r),
-	}
-	raw, err := json.Marshal(state)
-	if err != nil {
-		raw = []byte(`{"roots":[],"recent":[],"entries":[]}`)
-	}
-	base := s.base(r, "workspaces", "工作区", threads, "", true)
-	base.NeedsUI = true
-	data := workspacesData{
-		baseData:   base,
-		Roots:      roots,
-		Recent:     recent,
-		Current:    browse,
-		Parent:     parent,
-		ParentHref: parentHref,
-		Entries:    entries,
-		Truncated:  truncated,
-		Omitted:    omitted,
-		BindThread: strings.TrimSpace(r.URL.Query().Get("bind")),
-		Selectable: selectable,
-		StateJSON:  string(raw),
-	}
-	s.render(w, http.StatusOK, "workspaces", data)
-}
-
 // handleWorkspaceMkdir 在工作区子树内新建目录（目录选择器的“新建文件夹”）。
 func (s *Server) handleWorkspaceMkdir(w http.ResponseWriter, r *http.Request) {
 	root, _ := s.resolveWorkspace(r)
@@ -1821,32 +1703,6 @@ func (s *Server) handleWorkspaceMkdir(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---- 概览 ----------------------------------------------------------------
-
-// handleOverview 渲染概览页：统计卡 + 最近会话 + 插件卡片。
-func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
-	threads, err := s.listThreads(r, 200)
-	if err != nil {
-		data := offlineData{
-			baseData: s.base(r, "overview", "概览", nil, "", false),
-			Reason:   publicReason(err),
-		}
-		s.render(w, http.StatusOK, "offline", data)
-		return
-	}
-	s.render(w, http.StatusOK, "overview", s.overviewData(r, threads))
-}
-
-// handleOverviewPartial 是概览页的 htmx 片段（每 5 秒换新）。
-func (s *Server) handleOverviewPartial(w http.ResponseWriter, r *http.Request) {
-	threads, err := s.listThreads(r, 200)
-	if err != nil {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		_, _ = w.Write([]byte(`<div class="ada-empty-card"><p class="text-sm font-medium text-ink">未连接</p><p class="mt-1 text-xs text-faint">` + esc(publicReason(err)) + `</p></div>`))
-		return
-	}
-	s.render(w, http.StatusOK, "overview_partial", s.overviewData(r, threads))
-}
 
 func (s *Server) overviewDashboard(r *http.Request, threads []threadSummaryDTO) dashboardState {
 	workspace, _ := s.resolveWorkspace(r)
@@ -1900,23 +1756,7 @@ func numericLabel(value string) bool {
 	return true
 }
 
-func (s *Server) overviewData(r *http.Request, threads []threadSummaryDTO) overviewData {
-	state := s.overviewDashboard(r, threads)
-	raw, err := json.Marshal(state)
-	if err != nil {
-		raw = []byte(`{"stats":[],"recent":[]}`)
-	}
-	base := s.base(r, "overview", "概览", threads, "", true)
-	base.NeedsUI = true
-	return overviewData{
-		baseData:  base,
-		Stats:     state.Stats,
-		Recent:    state.Recent,
-		StateJSON: string(raw),
-	}
-}
-
-// handleOverviewJSON 是概览岛的轮询接口；与 SSR 片段共用同一份数据投影。
+// handleOverviewJSON 是概览岛的轮询接口；数据投影与 SSR 时代同源。
 func (s *Server) handleOverviewJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
@@ -1931,36 +1771,7 @@ func (s *Server) handleOverviewJSON(w http.ResponseWriter, r *http.Request) {
 
 // ---- 插件 ----------------------------------------------------------------
 
-// handleExtensions 渲染插件页：前端与后端插件合并成一份列表（列表里不分区）。
-func (s *Server) handleExtensions(w http.ResponseWriter, r *http.Request) {
-	threads, err := s.listThreads(r, 50)
-	state := s.extensionsState(r)
-	raw, marshalErr := json.Marshal(state)
-	if marshalErr != nil {
-		raw = []byte(`{"plugins":[],"count":0,"csrf":""}`)
-	}
-	base := s.base(r, "extensions", "插件", threads, "", err == nil)
-	base.NeedsUI = true
-	enabled, disabled := 0, 0
-	for _, p := range state.Plugins {
-		if p.Enabled {
-			enabled++
-		} else {
-			disabled++
-		}
-	}
-	data := extensionsData{
-		baseData:      base,
-		Plugins:       state.Plugins,
-		PluginCount:   state.Count,
-		EnabledCount:  enabled,
-		DisabledCount: disabled,
-		StateJSON:     string(raw),
-	}
-	s.render(w, http.StatusOK, "extensions", data)
-}
-
-// extensionsState 合并插件列表与 CSRF，供 SSR 岛与 JSON 接口共用。
+// extensionsState 合并插件列表与 CSRF，供 /partials/extensions.json 输出。
 func (s *Server) extensionsState(r *http.Request) extensionsState {
 	plugins := s.collectPlugins(r, "")
 	return extensionsState{
@@ -1971,42 +1782,23 @@ func (s *Server) extensionsState(r *http.Request) extensionsState {
 }
 
 // handleExtensionsJSON 是插件列表岛的刷新接口（只读）。
+// ?detail=<id> 时按详情口径取那一个插件（清单文件、README 等只有详情请求
+// 才投影），供插件详情页复用同一端点。
 func (s *Server) handleExtensionsJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(s.extensionsState(r))
-}
-
-// handlePluginDetail 渲染单个插件的信息：前端/后端归属只在这里展示。
-func (s *Server) handlePluginDetail(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimSpace(r.PathValue("id"))
-	p, ok := s.pluginByID(r, id)
-	if !ok {
-		s.renderError(w, r, http.StatusNotFound, "没有这个插件",
-			"插件 "+id+" 不存在或未装配。请从插件列表重新进入。", "", "/extensions", "返回插件列表")
-		return
+	state := s.extensionsState(r)
+	if detail := strings.TrimSpace(r.URL.Query().Get("detail")); detail != "" {
+		if p, ok := s.pluginByID(r, detail); ok {
+			for i := range state.Plugins {
+				if state.Plugins[i].ID == detail {
+					state.Plugins[i] = p
+					break
+				}
+			}
+		}
 	}
-	p.ReadmeNodes = markdownNodesJSON(p.Readme)
-	file := s.pluginFileForView(p, initialPluginFile(p, r.URL.Query().Get("file")))
-	// ?view=md 是「预览」态的无 JS 入口（按钮是有 JS 时的同一个开关）：
-	// 只对 Markdown 文件生效，其它文件忽略该参数。
-	if file != nil && file.Markdown && strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("view")), "md") {
-		file.ShowPreview = true
-	}
-	threads, err := s.listThreads(r, 50)
-	state := pluginDetailState{Plugin: p, File: file, CSRF: s.csrf(r)}
-	raw, marshalErr := json.Marshal(state)
-	if marshalErr != nil {
-		raw = []byte(`{"plugin":{},"csrf":""}`)
-	}
-	base := s.base(r, "extensions", p.Name, threads, "", err == nil)
-	base.NeedsUI = true
-	s.render(w, http.StatusOK, "plugin_detail", pluginDetailData{
-		baseData:  base,
-		Plugin:    p,
-		File:      file,
-		StateJSON: string(raw),
-	})
+	_ = json.NewEncoder(w).Encode(state)
 }
 
 // handlePluginFile 返回插件包内单个文件的文本预览。
@@ -2042,38 +1834,6 @@ func (s *Server) pluginByID(r *http.Request, id string) (pluginRow, bool) {
 }
 
 const maxPluginFilePreview = 512 << 10
-
-// initialPluginFile 优先 README.md，其次第一个文件。
-func initialPluginFile(p pluginRow, requested string) string {
-	if requested = strings.TrimSpace(requested); requested != "" {
-		return requested
-	}
-	for _, f := range p.Files {
-		if !f.Dir && strings.EqualFold(f.Path, "README.md") {
-			return f.Path
-		}
-	}
-	for _, f := range p.Files {
-		if !f.Dir {
-			return f.Path
-		}
-	}
-	return ""
-}
-
-// pluginFileForView 把读取失败也包装成可展示的视图，让页面右侧显示原因而不是空白。
-func (s *Server) pluginFileForView(p pluginRow, filePath string) *pluginFileView {
-	if filePath == "" {
-		return nil
-	}
-	view, err := s.readPluginFile(p, filePath)
-	if err != nil {
-		meta := pluginFileMeta(p, filePath)
-		meta.Error = err.Error()
-		return &meta
-	}
-	return &view
-}
 
 func pluginFileMeta(p pluginRow, filePath string) pluginFileView {
 	for _, f := range p.Files {
@@ -2142,12 +1902,9 @@ func (s *Server) readPluginFile(p pluginRow, rel string) (pluginFileView, error)
 		return meta, nil
 	}
 	meta.Content = string(data)
-	meta.HTML, meta.Language = highlightPluginSource(meta.Content, meta.Path)
-	// Markdown 文件额外带一份渲染结果：前端据此提供「预览 / 源码」切换，
-	// 复用 README 同一套渲染与清洗，不引入第二套 Markdown 实现。
+	// Markdown 文件只标记能力：预览渲染由前端做（源码高亮同理，SSR 已移除）。
 	if isMarkdownFile(meta.Path) {
 		meta.Markdown = true
-		meta.PreviewHTML = renderMarkdown(meta.Content)
 	}
 	meta.Truncated = truncated
 	return meta, nil
@@ -2165,7 +1922,7 @@ func isMarkdownFile(name string) bool {
 }
 
 // collectPlugins 合并前端插件（渲染桥）与后端插件（Core plugin.list）。
-// 同一个 id 同时具备两段能力时合并成一条；前端/后端标记只在详情页展示。
+// 同一个 id 同时具备两段能力时合并成一条；前端/后端标记只在详情展示。
 func (s *Server) collectPlugins(r *http.Request, detailID string) []pluginRow {
 	byID := make(map[string]*pluginRow)
 	order := make([]string, 0, 8)
@@ -2191,11 +1948,6 @@ func (s *Server) collectPlugins(r *http.Request, detailID string) []pluginRow {
 			if p.Description != "" {
 				row.Description = p.Description
 			}
-			row.Slots = p.SlotCount
-			row.Pages = p.PageCount
-			row.Nav = p.NavCount
-			row.FirstPage = p.FirstPage
-			row.HasDashboard = p.HasDashboard
 			if p.Status != "" {
 				row.Status = p.Status
 			}
@@ -2377,18 +2129,6 @@ func pluginScope(source, trust string) string {
 	return source
 }
 
-// threadTopbarActions 是会话页顶栏右侧：刷新 + 运行中时的停止。
-// 停止是 POST，必须带 CSRF 字段；缺了会被安全中间件以 csrf_invalid 拒绝。
-func threadTopbarActions(threadID string, running bool, csrf string) template.HTML {
-	out := fmt.Sprintf(`<a class="ada-icon-btn" href="/threads/%s" title="刷新" aria-label="刷新">%s</a>`,
-		esc(threadID), iconHTML("i-refresh", 14))
-	if running {
-		out += fmt.Sprintf(`<form class="ada-action-form" method="post" action="/threads/%s/abort" data-confirm="确定中止当前轮次吗？">%s<button class="ada-btn ada-btn--danger ada-btn--sm" type="submit">%s<span class="ada-btn__label">停止</span></button></form>`,
-			esc(threadID), csrfInput(csrf), iconHTML("i-stop", 14))
-	}
-	return template.HTML(out)
-}
-
 func contributionCount(value any) int {
 	switch v := value.(type) {
 	case []any:
@@ -2548,33 +2288,6 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 // maxMarkdownBytes 是实时 Markdown 渲染请求的上限；助手单条消息远小于此。
 const maxMarkdownBytes = 512 << 10
 
-// handleMarkdown 把流式累积的助手正文渲染成清洗后的 HTML。
-//
-// 实时流在浏览器里只有原始文本；客户端按节流节奏把累积文本发到这里，
-// 复用服务端 goldmark + bluemonday 管线，让「正在生成」与「落库后」的
-// 排版一致，同时不把未清洗的 HTML 交给前端。
-func (s *Server) handleMarkdown(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxMarkdownBytes+1))
-	if err != nil {
-		http.Error(w, "读取请求体失败", http.StatusBadRequest)
-		return
-	}
-	if len(body) > maxMarkdownBytes {
-		http.Error(w, "正文超过上限", http.StatusRequestEntityTooLarge)
-		return
-	}
-	var req struct {
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		http.Error(w, "请求体不是合法 JSON", http.StatusBadRequest)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_, _ = io.WriteString(w, string(s.renderMarkdownWithBlocks(r, req.Text, newBlockBudget())))
-}
-
 // handleMarkdownAST 是实时 Markdown 的结构化版本：返回 VNode 数据，
 // 由浏览器 ui-markdown 组件渲染，不再把 HTML 字符串交给前端。
 func (s *Server) handleMarkdownAST(w http.ResponseWriter, r *http.Request) {
@@ -2614,24 +2327,22 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", staticContentType(name))
-	// 静态资源带 query 版本号（?v=…），可以长缓存；HTML 页面仍是 no-store。
-	w.Header().Set("Cache-Control", "public, max-age=3600")
+	// 带 ?v= 指纹的资源可以长缓存；例外是 SPA 运行时的内部 ESM 模块图：
+	// import "./sfc.mjs" 这类相对导入不带 query，必须 no-cache，否则重建网关后
+	// 浏览器继续执行旧模块（2026-11-11 SPA 重建期间实际踩到过）。
+	if r.URL.Query().Get("v") != "" || !isSpaModuleAsset(name) {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
+	if isSpaModuleAsset(name) {
+		// SPA 运行时模块必须每次协商校验（不管有没有 ?v）：模块图里的相对
+		// import 不带版本号，而浏览器已缓存的 max-age=3600 响应在 TTL 内不会
+		// 重新验证——重建网关后会继续执行旧模块（2026-11-11 走查踩到）。
+		w.Header().Set("Cache-Control", "no-cache")
+	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = w.Write(data)
-}
-
-// StaticAsset 返回内嵌静态资源的字节。宿主渲染器需要复用与浏览器同一份
-// ada-render.js，避免服务端与客户端两套引擎源；路径规则与 /static/ 一致。
-func StaticAsset(name string) ([]byte, bool) {
-	clean, ok := staticAssetName(staticPrefix + strings.TrimSpace(name))
-	if !ok {
-		return nil, false
-	}
-	data, err := fs.ReadFile(staticFS, "static/"+clean)
-	if err != nil {
-		return nil, false
-	}
-	return data, true
 }
 
 // staticAssetName 把 /static/ 之后的路径规范化；只接受规范相对路径。
@@ -2656,8 +2367,10 @@ func staticContentType(name string) string {
 	switch strings.ToLower(path.Ext(name)) {
 	case ".css":
 		return "text/css; charset=utf-8"
-	case ".js":
+	case ".js", ".mjs":
 		return "application/javascript; charset=utf-8"
+	case ".vue":
+		return "text/plain; charset=utf-8"
 	case ".txt":
 		return "text/plain; charset=utf-8"
 	case ".json":
@@ -2673,10 +2386,25 @@ func staticContentType(name string) string {
 	}
 }
 
+// isSpaModuleAsset 判断名字是否属于 SPA 运行时的内部 ESM 模块图
+// （static/ada/**/*.js|*.mjs）：这些文件由模块依赖图互相 import，URL 不带 ?v。
+func isSpaModuleAsset(name string) bool {
+	if !strings.HasPrefix(name, "ada/") {
+		return false
+	}
+	switch strings.ToLower(path.Ext(name)) {
+	case ".js", ".mjs", ".vue":
+		// .vue 也是运行时装载的文本组件（sfc.mjs fetch 后编译），不带 ?v 时
+		// 同样要协商校验，否则重建后浏览器继续用旧组件。
+		return true
+	default:
+		return false
+	}
+}
+
 // handleLoginPage 只说明认证由外部中间件负责，不做密码校验。
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
-	threads, _ := s.listThreads(r, 50)
-	s.render(w, http.StatusOK, "login", loginData{baseData: s.base(r, "chat", "登录", threads, "", true)})
+	s.render(w, http.StatusOK, "login", loginData{baseData: s.base(r, "登录")})
 }
 
 // handleLoginSubmit 只做 303；真正的认证在外部 Protect 里。
@@ -2715,12 +2443,11 @@ func (s *Server) renderCoreError(w http.ResponseWriter, r *http.Request, err err
 	s.renderError(w, r, status, heading, message, err.Error(), retryPath, "重试")
 }
 
-// handleNotFound 渲染带完整外壳的 404 页：未匹配的路径最后都走到这里，
-// 用户可以直接回到会话/插件/概览，而不是停在裸文本 404。
+// handleNotFound 渲染 404 错误页：非 GET 的未匹配路径走这里
+// （GET 一律由 handleFallback 返回 shell，由客户端路由给出 404 视图）。
 func (s *Server) handleNotFound(w http.ResponseWriter, r *http.Request) {
-	threads, err := s.listThreads(r, 50)
-	base := s.base(r, "", "页面不存在", threads, "", err == nil)
-	s.render(w, http.StatusNotFound, "not_found", notFoundData{baseData: base, Path: r.URL.Path})
+	s.renderError(w, r, http.StatusNotFound, "页面不存在",
+		"路径 "+r.URL.Path+" 没有对应的页面。", "", "/", "返回首页")
 }
 
 func (s *Server) renderError(w http.ResponseWriter, r *http.Request, status int, heading, message, detail, retryPath, retryLabel string) {
@@ -2730,9 +2457,8 @@ func (s *Server) renderError(w http.ResponseWriter, r *http.Request, status int,
 	if retryLabel == "" {
 		retryLabel = "重试"
 	}
-	threads, _ := s.listThreads(r, 50)
 	s.render(w, status, "error", errorData{
-		baseData:   s.base(r, "chat", heading, threads, "", false),
+		baseData:   s.base(r, heading),
 		Status:     status,
 		Heading:    heading,
 		Message:    message,

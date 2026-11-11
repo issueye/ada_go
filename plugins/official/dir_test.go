@@ -63,55 +63,26 @@ func TestScriptsFromRepoDir(t *testing.T) {
 			fe[s.Manifest.ID] = true
 		}
 	}
-	for _, want := range []string{"tools-plan", "provider-admin", "token-usage", "ui-hello-tsx", "ui-charts", "mcp-client", "env-manager", "composer-telemetry"} {
+	// SSR 前端资产已删（dev-plan R4）；M 阶段 slots/pages 以 component（SFC）形态回归
+	// （proposals/spa-frontend-framework.md §7.1）。SSR 期字段（client/scripts/
+	// hydrate/clientOnly/template）在结构体层面已不存在，这里钉住：官方插件不允许
+	// client bundle 与 scripts 静态 JS（可执行代码只允许 SFC + ESM 形态）。
+	for _, want := range []string{"tools-plan", "provider-admin", "token-usage", "ui-hello", "ui-charts", "mcp-client", "env-manager", "composer-telemetry"} {
 		if !fe[want] {
 			t.Fatalf("前端插件缺少 %q（现有：%v）", want, fe)
 		}
 	}
+	for _, s := range frontend {
+		if s.Manifest == nil || s.Manifest.Frontend == nil {
+			continue
+		}
+		f := s.Manifest.Frontend
+		if f.Client != "" || len(f.Scripts) != 0 {
+			t.Fatalf("%s 的 frontend 段仍声明 SSR 期可执行资产（client/scripts）: %+v", s.Manifest.ID, f)
+		}
+	}
 	if fe["plugin-helper"] {
 		t.Fatal("plugin-helper 不应有前端段：创建插件只走对话工具（前端向导页已移除）")
-	}
-}
-
-// TestClientBundlesHonorCSP 钉住随包浏览器 bundle：pluginbuild 产物不能含
-// eval/new Function；client.tsx 与 static/client.js 的同步由 pluginbuild --check
-// 在发布流程里校验（这里至少守住已提交产物）。
-func TestClientBundlesHonorCSP(t *testing.T) {
-	matches, err := filepath.Glob(filepath.Join("*", "static", "client.js"))
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
-	if len(matches) < 3 {
-		t.Fatalf("随包 client bundle 数量 = %d，期望至少 3（ui-hello-tsx/token-usage/provider-admin）", len(matches))
-	}
-	danger := regexp.MustCompile(`\beval\s*\(|new\s+Function\s*\(`)
-	for _, name := range matches {
-		data, rerr := os.ReadFile(name)
-		if rerr != nil {
-			t.Fatalf("读取 %s: %v", name, rerr)
-		}
-		if loc := danger.FindIndex(data); loc != nil {
-			t.Fatalf("%s 含 CSP 禁止的 eval/new Function（字节 %d 附近）", name, loc[0])
-		}
-	}
-}
-
-// TestClientBundleSizes 记录随包 bundle 体积并守住 512KB 上限（与 extAssetMaxBytes 同口径）。
-func TestClientBundleSizes(t *testing.T) {
-	matches, err := filepath.Glob(filepath.Join("*", "static", "client.js"))
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
-	const maxBytes = 512 << 10
-	for _, name := range matches {
-		info, serr := os.Stat(name)
-		if serr != nil {
-			t.Fatalf("Stat %s: %v", name, serr)
-		}
-		t.Logf("%s = %d bytes", name, info.Size())
-		if info.Size() > maxBytes {
-			t.Fatalf("%s = %d bytes，超过 %d 上限", name, info.Size(), maxBytes)
-		}
 	}
 }
 
@@ -145,23 +116,18 @@ func TestMCPSkillPackaged(t *testing.T) {
 	t.Fatal("没有加载到 mcp-client 后端脚本")
 }
 
-// TestOfficialPluginPagesAvoidNativeSelect：插件页的下拉必须走宿主 Select 组件
-// （SSR 成 <ada-select>），不能用原生 <select>——原生弹层由系统绘制，样式与键盘
-// 行为都不受控。页面源码与浏览器脚本都按同一规则检查。
-func TestOfficialPluginPagesAvoidNativeSelect(t *testing.T) {
+// TestOfficialPluginBlocksAvoidNativeSelect：插件 TSX（随包只余 block 模板）
+// 不能用原生 <select>——原生弹层由系统绘制，样式与键盘行为都不受控。
+// （页面/脚本面已随 SSR 删除；SFC 时代的等价检查进 verify preflight，V 阶段落地。）
+func TestOfficialPluginBlocksAvoidNativeSelect(t *testing.T) {
 	root, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
 	}
 	pages, err := filepath.Glob(filepath.Join(root, "*", "*.tsx"))
 	if err != nil || len(pages) == 0 {
-		t.Fatalf("没有扫描到官方插件页面模板: %v", err)
+		t.Fatalf("没有扫描到官方插件 TSX 模板: %v", err)
 	}
-	scripts, err := filepath.Glob(filepath.Join(root, "*", "static", "*.js"))
-	if err != nil {
-		t.Fatalf("Glob static: %v", err)
-	}
-	files := append(pages, scripts...)
 	checks := []struct {
 		name string
 		re   *regexp.Regexp
@@ -170,7 +136,7 @@ func TestOfficialPluginPagesAvoidNativeSelect(t *testing.T) {
 		{"原生 <select> 标签", regexp.MustCompile(`<select[\s>]`)},
 		{"动态创建原生 select", regexp.MustCompile(`createElement\(\s*["']select["']`)},
 	}
-	for _, path := range files {
+	for _, path := range pages {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("读取 %s: %v", path, err)
@@ -180,33 +146,6 @@ func TestOfficialPluginPagesAvoidNativeSelect(t *testing.T) {
 				line := 1 + strings.Count(string(raw[:loc[0]]), "\n")
 				t.Fatalf("%s:%d 使用了%s；请改用 ssr:components 的 Select 组件", path, line, check.name)
 			}
-		}
-	}
-}
-
-// TestOfficialPluginScriptsAvoidNativeDialogs：官方插件页面脚本不能用原生
-// window.confirm/alert/prompt——确认统一走基座的共享 ConfirmDialog（window.adaConfirm）。
-func TestOfficialPluginScriptsAvoidNativeDialogs(t *testing.T) {
-	root, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	files, err := filepath.Glob(filepath.Join(root, "*", "static", "*.js"))
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
-	if len(files) == 0 {
-		t.Fatal("没有扫描到任何官方插件页面脚本")
-	}
-	native := regexp.MustCompile(`window\.(?:confirm|alert|prompt)\s*\(`)
-	for _, path := range files {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("读取 %s: %v", path, err)
-		}
-		if loc := native.FindIndex(raw); loc != nil {
-			line := 1 + strings.Count(string(raw[:loc[0]]), "\n")
-			t.Fatalf("%s:%d 使用了原生对话框；请改用 window.adaConfirm / 页面内提示", path, line)
 		}
 	}
 }

@@ -7,21 +7,37 @@
   "trust": "builtin",
   "backend": {
     "entry": "index.ts",
-    "capabilities": ["model.admin", "global.config", "net.fetch"],
+    "capabilities": [
+      "model.admin",
+      "global.config",
+      "net.fetch"
+    ],
     "configNamespace": "provider-config"
   },
   "frontend": {
-    "capabilities": ["frontend.script", "backend.read"],
-    "client": "client.js",
-    "slots": [{ "slot": "composer.left", "template": "slot.tsx", "order": 10 }],
-    "nav": [{ "label": "供应商", "slug": "providers" }],
+    "capabilities": [
+      "frontend.script",
+      "backend.read"
+    ],
+    "slots": [
+      { "slot": "composer.left", "component": "ProviderChip.vue", "order": 10 }
+    ],
+    "nav": [
+      { "slug": "providers", "label": "供应商" }
+    ],
     "pages": [
-      { "slug": "providers", "title": "供应商", "template": "providers-next.tsx", "hydrate": true }
+      { "slug": "providers", "component": "Providers.vue", "title": "供应商" }
     ],
     "actions": {
-      "page_providers": { "action": "state", "read": true, "backend": "provider-admin" }
+      "page_providers": {
+        "action": "state",
+        "read": true,
+        "backend": "provider-admin"
+      }
     },
-    "styles": ["provider-admin.css"],
+    "styles": [
+      "provider-admin.css"
+    ],
     "assets": "static"
   }
 }

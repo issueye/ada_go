@@ -1,9 +1,10 @@
 package pluginapi
 
-// M4 渲染宿主测试：TSX → VNode JSON 的管线行为（7.3）。
+// 块渲染宿主测试：TSX → VNode JSON 的管线行为（7.3）。
 //
-// 覆盖：文本/嵌套/组件/Fragment/条件与列表、编译缓存、超时中断、
+// 覆盖：文本/嵌套/组件/Fragment/条件与列表、编译缓存、块档超时中断、
 // 结果上限、失败必须报错（语法错误、缺默认导出、未知 import、Promise 返回）。
+// 页面/插槽渲染已随 SSR 移除；RenderBlockTemplate（Markdown 动态块）是唯一出口。
 
 import (
 	"encoding/json"
@@ -21,14 +22,14 @@ func testRenderer() *Renderer {
 
 func mustRender(t *testing.T, r *Renderer, src, props string) string {
 	t.Helper()
-	raw, err := r.RenderTemplate(src, json.RawMessage(props))
+	raw, err := r.RenderBlockTemplate(src, json.RawMessage(props))
 	if err != nil {
-		t.Fatalf("RenderTemplate: %v", err)
+		t.Fatalf("RenderBlockTemplate: %v", err)
 	}
 	return string(raw)
 }
 
-func TestRenderTemplateTextAndNesting(t *testing.T) {
+func TestRenderBlockTextAndNesting(t *testing.T) {
 	r := testRenderer()
 	got := mustRender(t, r, `
 		export default function (props) {
@@ -57,7 +58,7 @@ func TestRenderTemplateTextAndNesting(t *testing.T) {
 	}
 }
 
-func TestRenderTemplateComponentsAndFragment(t *testing.T) {
+func TestRenderBlockComponentsAndFragment(t *testing.T) {
 	r := testRenderer()
 	got := mustRender(t, r, `
 		import { Icon, Todo } from "ssr:components";
@@ -84,15 +85,15 @@ func TestRenderTemplateComponentsAndFragment(t *testing.T) {
 	}
 }
 
-func TestRenderTemplateNullSlot(t *testing.T) {
+func TestRenderBlockNullResult(t *testing.T) {
 	r := testRenderer()
 	got := mustRender(t, r, `export default function (props) { return props.hide ? null : <p>显示</p>; }`, `{"hide":true}`)
 	if got != "null" {
-		t.Fatalf("空插槽应返回字面量 null，got %s", got)
+		t.Fatalf("空块应返回字面量 null，got %s", got)
 	}
 }
 
-func TestRenderTemplateCacheHit(t *testing.T) {
+func TestRenderBlockCacheHit(t *testing.T) {
 	r := testRenderer()
 	src := `export default function (props) { return <p>{props.n}</p>; }`
 	first := mustRender(t, r, src, `{"n":1}`)
@@ -111,39 +112,28 @@ func TestRenderTemplateCacheHit(t *testing.T) {
 	}
 }
 
-func TestRenderTemplateTimeoutInterrupts(t *testing.T) {
-	r := NewRenderer(WithRenderBudgets(30*time.Millisecond, time.Second))
-	_, err := r.RenderTemplate(`export default function () { for (;;) {} }`, nil)
-	if err == nil || !strings.Contains(err.Error(), "超出预算") {
-		t.Fatalf("死循环应超时失败，got %v", err)
-	}
-}
-
-// TestRenderBlockTemplateBudget 钉住块档预算独立于插槽/页面档：
-// Markdown 动态块的 renderTimeoutMs 走这里，而不是借页面预算。
+// TestRenderBlockTemplateBudget 钉住块档预算：Markdown 动态块的
+// renderTimeoutMs 走这里（默认值 = DefaultBlockRenderTimeout，可被装配方覆盖）。
 func TestRenderBlockTemplateBudget(t *testing.T) {
-	r := NewRenderer(
-		WithRenderBudgets(time.Second, time.Second),
-		WithBlockRenderBudget(30*time.Millisecond),
-	)
+	r := NewRenderer(WithBlockRenderBudget(30 * time.Millisecond))
 	_, err := r.RenderBlockTemplate(`export default function () { for (;;) {} }`, nil)
 	if err == nil || !strings.Contains(err.Error(), "超出预算") {
 		t.Fatalf("块档超时应生效，got %v", err)
 	}
 }
 
-func TestRenderTemplateSizeLimit(t *testing.T) {
+func TestRenderBlockSizeLimit(t *testing.T) {
 	r := testRenderer()
 	src := `export default function () {
 		const big = "#".repeat(300000);
 		return <p>{big}</p>;
 	}`
-	if _, err := r.RenderTemplate(src, nil); err == nil || !strings.Contains(err.Error(), "超过") {
+	if _, err := r.RenderBlockTemplate(src, nil); err == nil || !strings.Contains(err.Error(), "超过") {
 		t.Fatalf("超大结果应被拒绝，got %v", err)
 	}
 }
 
-func TestRenderTemplateFailures(t *testing.T) {
+func TestRenderBlockFailures(t *testing.T) {
 	r := testRenderer()
 	cases := []struct {
 		name string
@@ -161,7 +151,7 @@ export default function () { return <F />; }`, "__ada_component"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := r.RenderTemplate(tc.src, nil)
+			_, err := r.RenderBlockTemplate(tc.src, nil)
 			if err == nil {
 				t.Fatalf("%s 必须失败（7.3：失败必须返回错误）", tc.name)
 			}
@@ -179,21 +169,5 @@ func TestComponentModuleSourceExports(t *testing.T) {
 	}
 	if !strings.Contains(src, "globalThis.jsx") || !strings.Contains(src, "globalThis.Fragment") {
 		t.Fatalf("组件桥必须预置全局 jsx 与 Fragment")
-	}
-}
-
-func TestRenderPageUsesLargerBudget(t *testing.T) {
-	r := NewRenderer(WithRenderBudgets(time.Millisecond, time.Second))
-	// 插槽档 1ms 会超时，页面档 1s 应完成（循环足够重，避免墙钟抖动造成假阴性）。
-	src := `export default function (props) {
-		let x = 0;
-		for (let i = 0; i < 5000000; i++) { x += i; }
-		return <p>{String(x)}</p>;
-	}`
-	if _, err := r.RenderPage(src, nil); err != nil {
-		t.Fatalf("RenderPage 应在页面预算内完成: %v", err)
-	}
-	if _, err := r.RenderTemplate(src, nil); err == nil {
-		t.Fatalf("RenderTemplate 用插槽预算应超时")
 	}
 }

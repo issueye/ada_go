@@ -149,19 +149,19 @@ func TestSessionEnableUndeclaredPlugin(t *testing.T) {
 	}
 
 	// 纯前端插件没有后端实例，但从界面同样要能启用/停用（状态来自 frontend 段）。
-	if _, err := sess.SetPluginEnabled(ctx, "ui-hello-tsx", true); err != nil {
-		t.Fatalf("启用 ui-hello-tsx: %v", err)
+	if _, err := sess.SetPluginEnabled(ctx, "ui-hello", true); err != nil {
+		t.Fatalf("启用 ui-hello: %v", err)
 	}
-	view, ok = viewOf(sess, ctx, "ui-hello-tsx")
+	view, ok = viewOf(sess, ctx, "ui-hello")
 	if !ok || !view.Enabled || view.Status != "ready" {
-		t.Fatalf("启用后 ui-hello-tsx = %+v（ok=%v）", view, ok)
+		t.Fatalf("启用后 ui-hello = %+v（ok=%v）", view, ok)
 	}
-	if _, err := sess.SetPluginEnabled(ctx, "ui-hello-tsx", false); err != nil {
-		t.Fatalf("停用 ui-hello-tsx: %v", err)
+	if _, err := sess.SetPluginEnabled(ctx, "ui-hello", false); err != nil {
+		t.Fatalf("停用 ui-hello: %v", err)
 	}
-	view, _ = viewOf(sess, ctx, "ui-hello-tsx")
+	view, _ = viewOf(sess, ctx, "ui-hello")
 	if view.Enabled || view.Status != "unused" {
-		t.Fatalf("停用后 ui-hello-tsx = %+v", view)
+		t.Fatalf("停用后 ui-hello = %+v", view)
 	}
 }
 
@@ -199,7 +199,7 @@ func TestPluginViewDetailFilesAndReadme(t *testing.T) {
 	for _, f := range view.Files {
 		paths[f.Path] = true
 	}
-	for _, want := range []string{"README.md", "plugin.json", "dist/index.js", "slot.tsx", "static/todo.css"} {
+	for _, want := range []string{"README.md", "plugin.json", "dist/index.js", "static/todo.css"} {
 		if !paths[want] {
 			t.Fatalf("文件清单缺少 %q（现有：%v）", want, paths)
 		}

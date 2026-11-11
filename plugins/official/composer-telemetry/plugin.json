@@ -7,21 +7,20 @@
   "trust": "builtin",
   "backend": {
     "entry": "index.ts",
-    "capabilities": ["events.read"]
+    "capabilities": [
+      "events.read"
+    ]
   },
   "frontend": {
-    "capabilities": ["frontend.script"],
-    "client": "client.js",
-    "slots": [
-      {
-        "slot": "composer.footer",
-        "template": "composer-footer.tsx",
-        "hydrate": true,
-        "clientOnly": true,
-        "order": 10
-      }
+    "capabilities": [
+      "frontend.script"
     ],
-    "styles": ["telemetry.css"],
+    "slots": [
+      { "slot": "composer.footer", "component": "Telemetry.vue", "order": 10 }
+    ],
+    "styles": [
+      "telemetry.css"
+    ],
     "assets": "static"
   }
 }

@@ -1,66 +1,27 @@
 package web_test
 
-// M4 web 接线测试：PluginUI 填充 12 插槽（失败隔离 / 贡献者计数）、
-// /ext 页面与静态资源路由、动作桥的 ActionEnvelope。
+// 插件前端接线测试（SSR 移除后的收缩版）：
+//   - /ext 静态资源 allowlist 与 512KB 限额（冻结契约）；
+//   - 动作桥（ActionEnvelope）；
+//   - PluginLister → /partials/extensions.json 的前端插件合并。
 
 import (
-	"errors"
-	"html/template"
+	"encoding/json"
 	"net/http"
 	"net/url"
-	"strings"
 	"testing"
 
 	"github.com/adag/ada-go/internal/gateway/web"
 )
 
-// stubUI 是 PluginUI 的可控替身：按插槽名给内容或报错。
+// stubUI 是 PluginUI 的可控替身：静态资源、动作绑定与插件列表。
 type stubUI struct {
-	// slots：插槽名 → (html, count)；err 按插槽名报错。
-	slots map[string]struct {
-		body  template.HTML
-		count int
-	}
-	errs map[string]error
-	// page：slug → html；pageErr：slug → error。
-	page    map[string]template.HTML
-	pageErr map[string]error
-	styles  []string
-	scripts []string
-	assets  map[string][]byte
+	assets map[string][]byte
 	// bindings："<plugin>/<binding>" → 解析结果。
 	bindings map[string]web.ActionBinding
-	// list：PluginLister 的前端插件清单（扩展页用）。
+	// list：PluginLister 的前端插件清单（extensions.json 用）。
 	list []web.FrontendPluginInfo
-	// hasIslands：IslandDetector 的返回值（P1-6 资源门禁）。
-	hasIslands bool
 }
-
-func (s *stubUI) Slot(name string, r *http.Request) (template.HTML, int, error) {
-	if err, ok := s.errs[name]; ok {
-		return "", 0, err
-	}
-	v, ok := s.slots[name]
-	if !ok {
-		return "", 0, nil
-	}
-	return v.body, v.count, nil
-}
-
-func (s *stubUI) Page(pluginID, slug string, r *http.Request) (template.HTML, error) {
-	if err, ok := s.pageErr[slug]; ok {
-		return "", err
-	}
-	if body, ok := s.page[slug]; ok {
-		return body, nil
-	}
-	return "", web.ErrExtNotFound
-}
-
-func (s *stubUI) Styles() []string  { return s.styles }
-func (s *stubUI) Scripts() []string { return s.scripts }
-
-func (s *stubUI) HasIslands(string, *http.Request) bool { return s.hasIslands }
 
 func (s *stubUI) List(_ *http.Request) []web.FrontendPluginInfo {
 	out := append([]web.FrontendPluginInfo(nil), s.list...)
@@ -100,126 +61,6 @@ func newServerWithUI(t *testing.T, core *fakeCore, ui web.PluginUI) (*web.Server
 	}
 	t.Cleanup(func() { _ = srv.Close() })
 	return srv, sup
-}
-
-// ---- 插槽填充与失败隔离 ----------------------------------------------------
-
-func TestPluginSlotsFillAndCount(t *testing.T) {
-	ui := &stubUI{slots: map[string]struct {
-		body  template.HTML
-		count int
-	}{
-		"chat.corner": {"<b>角落卡</b>", 1},
-		"thread.tray": {"<i>托盘卡</i>", 2},
-	}}
-	core := newFakeCore().
-		on("thread.get", threadGetRunning).
-		on("thread.entries", entriesAscending)
-	srv, _ := newServerWithUI(t, core, ui)
-
-	rec := serve(t, srv, "GET", "/thread/th_1", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /thread/th_1 = %d, want 200", rec.Code)
-	}
-	wantContains(t, rec.Body.String(), `data-slot="chat.corner" data-contributors="1"`)
-	wantContains(t, rec.Body.String(), `data-slot="thread.tray" data-contributors="2"`)
-	wantContains(t, rec.Body.String(), "角落卡")
-	// 未贡献的插槽保持 0。
-	wantContains(t, rec.Body.String(), `data-slot="composer.left" data-contributors="0"`)
-}
-
-func TestPluginSlotFailureIsolated(t *testing.T) {
-	ui := &stubUI{
-		slots: map[string]struct {
-			body  template.HTML
-			count int
-		}{
-			"chat.corner": {"<b>正常卡</b>", 1},
-		},
-		errs: map[string]error{"thread.tray": errors.New("boom")},
-	}
-	core := newFakeCore().
-		on("thread.get", threadGetRunning).
-		on("thread.entries", entriesAscending)
-	srv, _ := newServerWithUI(t, core, ui)
-
-	rec := serve(t, srv, "GET", "/thread/th_1", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("单槽抛错时整页仍应为 200，got %d\n%s", rec.Code, rec.Body.String())
-	}
-	body := rec.Body.String()
-	// 失败槽回退基座占位（空容器），其余槽与页面主体照常。
-	wantContains(t, body, `data-slot="thread.tray" data-contributors="0"`)
-	wantContains(t, body, `data-slot="chat.corner" data-contributors="1"`)
-	wantContains(t, body, "正常卡")
-	wantContains(t, body, "这是问题") // transcript 照常
-	wantNotContains(t, body, "boom")
-}
-
-// 运行中只刷新单个插槽：返回与整页同形的 .ada-slot 宿主，客户端直接替换。
-func TestSlotPartialRendersSingleSlot(t *testing.T) {
-	ui := &stubUI{slots: map[string]struct {
-		body  template.HTML
-		count int
-	}{
-		"chat.corner": {`<details id="todo-card"><summary>Todo 列表 3/3</summary></details>`, 1},
-	}}
-	srv, _ := newServerWithUI(t, newFakeCore(), ui)
-
-	rec := serve(t, srv, "GET", "/partials/slot/chat.corner?threadId=th_1", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET 单槽 = %d, want 200（body=%s）", rec.Code, rec.Body.String())
-	}
-	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
-		t.Fatalf("Content-Type = %q", ct)
-	}
-	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "no-store") {
-		t.Fatalf("Cache-Control = %q，局部刷新的响应必须 no-store", cc)
-	}
-	body := rec.Body.String()
-	wantContains(t, body, `data-slot="chat.corner" data-contributors="1"`)
-	wantContains(t, body, "todo-card")
-	// 其它插槽不应该被顺带渲染。
-	wantNotContains(t, body, "thread.tray")
-}
-
-func TestSlotPartialRejectsUnknownAndMissingThread(t *testing.T) {
-	srv, _ := newServerWithUI(t, newFakeCore(), &stubUI{})
-	if rec := serve(t, srv, "GET", "/partials/slot/not.a.slot?threadId=th_1", nil); rec.Code != http.StatusNotFound {
-		t.Fatalf("未知插槽 = %d, want 404", rec.Code)
-	}
-	if rec := serve(t, srv, "GET", "/partials/slot/chat.corner", nil); rec.Code != http.StatusBadRequest {
-		t.Fatalf("缺少 threadId = %d, want 400", rec.Code)
-	}
-	// 非 thread 宿主的插槽不通过这个端点（避免把整页级插槽当局部片段）。
-	if rec := serve(t, srv, "GET", "/partials/slot/topbar.right?threadId=th_1", nil); rec.Code != http.StatusNotFound {
-		t.Fatalf("topbar.right = %d, want 404", rec.Code)
-	}
-}
-
-// ---- /ext 页面路由 ---------------------------------------------------------
-
-func TestExtPageRoutes(t *testing.T) {
-	ui := &stubUI{
-		page:    map[string]template.HTML{"hello": "<p>插件页面</p>"},
-		pageErr: map[string]error{"boom": errors.New("渲染失败")},
-	}
-	srv, _ := newServerWithUI(t, newFakeCore(), ui)
-
-	rec := serve(t, srv, "GET", "/ext/p1/hello", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /ext/p1/hello = %d, want 200", rec.Code)
-	}
-	wantContains(t, rec.Body.String(), "插件页面")
-
-	rec = serve(t, srv, "GET", "/ext/p1/missing", nil)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("未知 slug = %d, want 404", rec.Code)
-	}
-	rec = serve(t, srv, "GET", "/ext/p1/boom", nil)
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("渲染失败 = %d, want 502", rec.Code)
-	}
 }
 
 // ---- 动作桥（ActionEnvelope）----------------------------------------------
@@ -291,6 +132,7 @@ func TestExtStaticAllowlist(t *testing.T) {
 	ui := &stubUI{assets: map[string][]byte{
 		"p1/style.css": []byte(".a{color:red}"),
 		"p1/app.js":    []byte("void 0;"),
+		"p1/app.mjs":   []byte("export {};"),
 		"p1/icon.svg":  []byte("<svg/>"),
 		"p1/data.json": []byte("{}"),
 		"p1/big.css":   make([]byte, 600<<10), // 超过 512KB 上限
@@ -302,6 +144,7 @@ func TestExtStaticAllowlist(t *testing.T) {
 	ok := map[string]string{
 		"/ext/p1/static/style.css": "text/css; charset=utf-8",
 		"/ext/p1/static/app.js":    "application/javascript; charset=utf-8",
+		"/ext/p1/static/app.mjs":   "application/javascript; charset=utf-8",
 		"/ext/p1/static/icon.svg":  "image/svg+xml",
 		"/ext/p1/static/data.json": "application/json; charset=utf-8",
 	}
@@ -334,55 +177,66 @@ func TestExtStaticAllowlist(t *testing.T) {
 	}
 }
 
-// ---- 插件样式与脚本注入 head ------------------------------------------------
+// ---- 插件列表 → extensions.json -------------------------------------------
 
-func TestPluginStylesAndScriptsInHead(t *testing.T) {
-	ui := &stubUI{styles: []string{"/ext/p1/static/style.css"}, scripts: []string{"/ext/p1/static/app.js"}}
-	srv, _ := newServerWithUI(t, newFakeCore(), ui)
-
-	rec := serve(t, srv, "GET", "/", nil)
-	wantContains(t, rec.Body.String(), `<link rel="stylesheet" href="/ext/p1/static/style.css">`)
-	wantContains(t, rec.Body.String(), `<script src="/ext/p1/static/app.js" defer></script>`)
-}
-
-// IslandDetector 为 true 的页面才加载插件岛屿引导；没有 hydrate 贡献的页面
-// 不额外下载引擎/引导脚本。
-func TestIslandDetectorGatesPluginIslandAssets(t *testing.T) {
-	withIslands := &stubUI{hasIslands: true}
-	srv, _ := newServerWithUI(t, newFakeCore(), withIslands)
-	rec := serve(t, srv, "GET", "/", nil)
-	wantContains(t, rec.Body.String(), `plugin-islands.js`)
-
-	// 空会话也要保留 base() 的 NeedsUI：hydrate 插槽不依赖 transcript。
+// PluginLister 提供的前端插件与 Core plugin.list 的后端插件合并成一份列表，
+// CSRF 一并带给客户端（启停表单用）。
+func TestExtensionsJSONIncludesFrontendLister(t *testing.T) {
 	core := newFakeCore().
-		on("thread.get", threadGetIdle).
-		on("thread.entries", `{"entries":[],"hasMore":false}`)
-	srv, _ = newServerWithUI(t, core, withIslands)
-	rec = serve(t, srv, "GET", "/threads/th_1", nil)
-	wantContains(t, rec.Body.String(), `plugin-islands.js`)
+		on("thread.list", emptyThreadList).
+		on("plugin.list", `{"plugins":[{"id":"tools-fs","name":"文件工具","version":"1.2.0","enabled":true,"status":"ready","contributions":{"tools":["read"],"frontend":false,"backend":true}}]}`)
+	ui := &stubUI{list: []web.FrontendPluginInfo{
+		{ID: "ui-demo", Name: "演示前端", Version: "0.1.0", Status: "ready", HasAssets: true},
+	}}
+	srv, _ := newServerWithUI(t, core, ui)
 
-	withoutIslands := &stubUI{}
-	srv, _ = newServerWithUI(t, newFakeCore(), withoutIslands)
-	rec = serve(t, srv, "GET", "/", nil)
-	if strings.Contains(rec.Body.String(), "plugin-islands.js") {
-		t.Fatal("没有 hydrate 贡献的页面不应加载 plugin-islands.js")
+	rec := serve(t, srv, "GET", "/partials/extensions.json", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /partials/extensions.json = %d, want 200", rec.Code)
+	}
+	var state struct {
+		Plugins []struct {
+			ID       string `json:"id"`
+			Name     string `json:"name"`
+			Enabled  bool   `json:"enabled"`
+			Backend  bool   `json:"backend"`
+			Frontend bool   `json:"frontend"`
+		} `json:"plugins"`
+		Count int    `json:"count"`
+		CSRF  string `json:"csrf"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &state); err != nil {
+		t.Fatalf("extensions.json 不是合法 JSON: %v\n%s", err, rec.Body.String())
+	}
+	if state.Count != 2 || len(state.Plugins) != 2 {
+		t.Fatalf("plugins/count = %+v/%d", state.Plugins, state.Count)
+	}
+	byID := map[string]struct {
+		Backend, Frontend bool
+	}{}
+	for _, p := range state.Plugins {
+		byID[p.ID] = struct{ Backend, Frontend bool }{p.Backend, p.Frontend}
+	}
+	if row, ok := byID["tools-fs"]; !ok || !row.Backend {
+		t.Fatalf("后端插件缺失或标记错误: %+v", state.Plugins)
+	}
+	if row, ok := byID["ui-demo"]; !ok || !row.Frontend {
+		t.Fatalf("前端插件缺失或标记错误: %+v", state.Plugins)
+	}
+	if state.CSRF != "csrf-token" {
+		t.Fatalf("csrf = %q, want csrf-token", state.CSRF)
 	}
 }
 
-// PluginUI 为 nil：插槽保持 0 贡献，/ext 404（现状不回归）。
+// PluginUI 为 nil：/ext 404（动作桥与静态资源都不可用）。
 func TestPluginUINilKeepsBaseBehavior(t *testing.T) {
-	core := newFakeCore().on("thread.list", `{"threads":[],"nextCursor":"","hasMore":false}`)
-	srv, _ := newServer(t, core)
-	rec := serve(t, srv, "GET", "/", nil)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `data-slot="sidebar.top" data-contributors="0"`) {
-		t.Fatalf("无 PluginUI 时首页插槽应保持空占位: %d", rec.Code)
-	}
-	rec = serve(t, srv, "GET", "/ext/p1/hello", nil)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("无 PluginUI 时 /ext 应 404, got %d", rec.Code)
-	}
-	rec = serve(t, srv, "GET", "/ext/p1/static/style.css", nil)
+	srv, _ := newServer(t, newFakeCore())
+	rec := serve(t, srv, "GET", "/ext/p1/static/style.css", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("无 PluginUI 时静态资源应 404, got %d", rec.Code)
+	}
+	rec = serve(t, srv, "GET", "/ext/p1/action/read", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("无 PluginUI 时动作桥应 404, got %d", rec.Code)
 	}
 }

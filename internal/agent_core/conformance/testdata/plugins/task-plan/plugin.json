@@ -7,7 +7,7 @@
   "trust": "third-party",
   "frontend": {
     "capabilities": ["backend.read"],
-    "slots": [{ "slot": "chat.corner", "template": "slot.tsx", "order": 10 }],
+    "slots": [{ "slot": "chat.corner", "component": "SlotCard.vue", "order": 10 }],
     "styles": ["task-plan.css"],
     "assets": "static",
     "actions": {

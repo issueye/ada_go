@@ -19,7 +19,7 @@ ada-go 是一个**本地优先、单二进制、插件优先**的 AI Agent 系�
 
 所有后端插件都走同一 TS 引擎：包括系统 provider、工具、cron、env 与人格。系统插件在构建期预编译成 `dist/`，运行时从 `plugins/official`（Electron resources）加载；第三方插件在安装/加载时编译。两者使用同一 `AgentAPI`、同一 moejs 宿主、同一套桥与审计；差别只有信任级别与控制面钩子权限。
 
-前端是**服务端渲染**：Go `html/template` + 组件库 + HTMX + SSE。插件用 TSX 写界面，但 TSX 在服务端执行：esbuild 去类型并转换 JSX，moejs 执行得到 VNode JSON，再由 Go 组件库渲染成 HTML。客户端岛只在显式声明 `hydrate`/`clientOnly` 时启用。界面与设计元语直接复用 a_da：Black Swan `--ph-*` token、`ada-*` 组件样式、DOM 结构、12 个插槽位置与交互规则。
+前端是**单页面应用（SPA，2026-11-11 起）**：Go 只渲染 shell（bootstrap JSON），页面由自研运行时 `static/ada/` 在浏览器渲染；插件前端是运行时装载的 SFC 单文件组件（零构建、无 SSR，详见 [SPA 提案](../proposals/spa-frontend-framework.md)）。历史上是 Go `html/template` 整页 SSR + TSX 服务端渲染 + 交互岛（见 docs/07/14 的状态横幅）。界面与设计元语直接复用 a_da：Black Swan `--ph-*` token、`ada-*` 组件样式、DOM 结构、12 个插槽位置与交互规则；模型生成内容仍走服务端校验的 VNode JSON（display profile）。
 
 核心数字：**2 个进程角色、1 条 RPC 契约、33 个 RPC 方法、14 个钩子点、12 个前端插槽、1 份协议源文件**。
 
@@ -57,7 +57,7 @@ MCP 不在基座内置；v2 以普通系统插件 `mcp-client` 接入，见 [15 
 | 事件即状态 | 会话是 append-only 事件日志；UI 是事件的投影，不是第二份真相 |
 | 失败方向明确 | 交互失败方向明确（`timeout`/`unavailable` 由调用方按拒绝处理）；拒绝是工具结果，不是异常；超时/取消必须可观察 |
 | 无隐藏全局态 | Core 的状态属于某个工作区实例；不靠进程级单例传状态 |
-| 渐进增强 | 没有 JS 也能发消息、响应交互、看结果；SSE 只是增强 |
+| 渐进增强 | **2026-11-11 起有意放弃（SPA）**：仅登录/错误页保留无 JS 可用；无 JS 的兜底能力由登录页与错误页承担 |
 | 稳定插槽 | 插槽集合宁少勿多，新增插槽视为一次兼容承诺 |
 | 零业务语义 | 基座不读产品数据文件、不提供产品端点、不解释业务规则 |
 | 零产品兜底 | 禁用系统插件后能力消失；基座不偷偷补一个同名实现 |
@@ -138,7 +138,7 @@ MCP 不在基座内置；v2 以普通系统插件 `mcp-client` 接入，见 [15 
 | 用量/遥测 | `token-usage`、`composer-telemetry` | 聚合、卡片、页面、上下文环与轮询节奏 |
 | 外部工具 | `mcp-client`、`browser-use` | MCP / browser-use 协议与工具映射 |
 | 插件管理 | `plugin-helper` | 插件脚手架与安装桥调用 |
-| 示例/图表 | `ui-charts`、`ui-hello-tsx` | 图表与示例页面 |
+| 示例/图表 | `ui-charts`、`ui-hello` | 图表块（模型内容）；SFC 插件参考示例（运行时装载） |
 
 表中的业务语义**不得回落到基座**。例如禁用 `cron-manager` 后，不应再有任务被调度；禁用 `env-manager` 后，不应再出现 env 管理入口；禁用 `token-usage` 后，基座不应继续渲染用量页。
 

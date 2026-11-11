@@ -3,14 +3,14 @@ package web
 // Markdown 动态块（adag-ui fence）的解析与降级。
 //
 // 只在 Markdown 顶层识别 ```adag-ui fence；其余文本仍走原有
-// goldmark + bluemonday + markdownVNodes 管线。块本身由前端插件桥渲染成
-// VNode（经 VNode block profile 校验），Markdown 只负责把结果放回原位置。
+// goldmark + bluemonday + markdownVNodes 管线。块由前端插件桥渲染成
+// **校验后的 VNode JSON**（经 VNode block profile 校验；HTML 渲染已随 SSR
+// 移除，由客户端 ui-markdown 消费），Markdown 只负责把结果放回原位置。
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"io"
 	"net/http"
 	"regexp"
@@ -33,9 +33,10 @@ const (
 	defaultBlockFailureText      = "动态内容暂不可用"
 )
 
-// BlockRenderer 由前端插件桥可选实现：把 adag-ui block 渲染成 VNode/HTML。
+// BlockRenderer 由前端插件桥可选实现：把 adag-ui block 渲染成校验后的
+// VNode JSON（可能是字面量 null，表示该块没有内容可展示）。
 type BlockRenderer interface {
-	RenderBlock(r *http.Request, rendererID, blockID string, version int, data json.RawMessage) (json.RawMessage, template.HTML, error)
+	RenderBlock(r *http.Request, rendererID, blockID string, version int, data json.RawMessage) (json.RawMessage, error)
 }
 
 var (
@@ -236,33 +237,6 @@ func (s *Server) blockRenderer() BlockRenderer {
 	return br
 }
 
-// renderMarkdownWithBlocks 是 renderMarkdown 的动态块版本：HTML 端点使用。
-// budget 为 nil 时按单次调用新建（单文档渲染）；线程页由 handler 传入共享预算。
-func (s *Server) renderMarkdownWithBlocks(r *http.Request, text string, budget *blockBudget) template.HTML {
-	if strings.TrimSpace(text) == "" {
-		return ""
-	}
-	br := s.blockRenderer()
-	if br == nil {
-		return renderMarkdown(text)
-	}
-	spans := scanMarkdownBlocks(text)
-	if len(spans) == 0 {
-		return renderMarkdown(text)
-	}
-	var out strings.Builder
-	last := 0
-	state := newBlockScanState(budget)
-	for _, sp := range spans {
-		out.WriteString(string(renderMarkdown(text[last:sp.start])))
-		last = sp.end
-		blockHTML, _ := s.renderMarkdownBlock(r, br, sp.payload, state)
-		out.WriteString(string(blockHTML))
-	}
-	out.WriteString(string(renderMarkdown(text[last:])))
-	return template.HTML(out.String())
-}
-
 // markdownNodesJSONWithBlocks 是 markdownNodesJSON 的动态块版本：AST 端点使用。
 func (s *Server) markdownNodesJSONWithBlocks(r *http.Request, text string, budget *blockBudget) json.RawMessage {
 	br := s.blockRenderer()
@@ -279,9 +253,11 @@ func (s *Server) markdownNodesJSONWithBlocks(r *http.Request, text string, budge
 	for _, sp := range spans {
 		nodes = append(nodes, markdownVNodes(text[last:sp.start])...)
 		last = sp.end
-		raw, _, _ := s.renderMarkdownBlockNodes(r, br, sp.payload, state)
+		// 失败路径（封套失败/预算耗尽/渲染错误）返回的是降级 VNode
+		// （代码块或错误卡），直接进 AST；null 表示渲染器显式留空。
+		raw, _ := s.renderMarkdownBlockNodes(r, br, sp.payload, state)
 		if isNullVNode(raw) {
-			continue // 渲染器显式返回空：不产出节点，也不画错误卡。
+			continue
 		}
 		if len(bytes.TrimSpace(raw)) > 0 {
 			var node markdownVNode
@@ -300,20 +276,9 @@ func (s *Server) markdownNodesJSONWithBlocks(r *http.Request, text string, budge
 	return raw
 }
 
-// renderMarkdownBlock 返回 HTML 降级/结果；解析失败时退回代码块。
-func (s *Server) renderMarkdownBlock(r *http.Request, br BlockRenderer, payload string, state *blockScanState) (template.HTML, bool) {
-	raw, html, ok := s.renderMarkdownBlockNodes(r, br, payload, state)
-	if isNullVNode(raw) {
-		// 渲染器显式返回空：合法结果，HTML 与 AST 两条路径都跳过该块。
-		return "", true
-	}
-	if html != "" {
-		return html, ok
-	}
-	return blockFallbackHTML(defaultBlockFailureText), false
-}
-
-func (s *Server) renderMarkdownBlockNodes(r *http.Request, br BlockRenderer, payload string, state *blockScanState) (json.RawMessage, template.HTML, bool) {
+// renderMarkdownBlockNodes 渲染一个 adag-ui 块：返回 VNode JSON 与 ok 标记。
+// 解析/预算失败时返回按普通代码块降级的 VNode（内容仍可见），ok=false。
+func (s *Server) renderMarkdownBlockNodes(r *http.Request, br BlockRenderer, payload string, state *blockScanState) (json.RawMessage, bool) {
 	if state == nil {
 		state = newBlockScanState(nil)
 	}
@@ -328,7 +293,7 @@ func (s *Server) renderMarkdownBlockNodes(r *http.Request, br BlockRenderer, pay
 	if err != nil {
 		// 封套 Schema 失败：保留为普通代码块，不执行。
 		raw, _ := json.Marshal(blockSyntaxFallbackVNode(payload))
-		return raw, blockSyntaxFallbackHTML(payload), false
+		return raw, false
 	}
 	// id 在同一 Markdown 内唯一：重复时降级当前块，而不是静默复用锚点。
 	if env.ID != "" {
@@ -340,9 +305,9 @@ func (s *Server) renderMarkdownBlockNodes(r *http.Request, br BlockRenderer, pay
 	if !state.budget.take() {
 		// 本次请求的块渲染预算已用完：按普通代码块降级，内容仍然可见。
 		raw, _ := json.Marshal(blockSyntaxFallbackVNode(payload))
-		return raw, blockSyntaxFallbackHTML(payload), false
+		return raw, false
 	}
-	raw, html, err := br.RenderBlock(r, env.Renderer, env.ID, env.Version, env.Data)
+	raw, err := br.RenderBlock(r, env.Renderer, env.ID, env.Version, env.Data)
 	if err != nil || len(bytes.TrimSpace(raw)) == 0 {
 		text := strings.TrimSpace(env.Fallback)
 		if text == "" {
@@ -350,7 +315,7 @@ func (s *Server) renderMarkdownBlockNodes(r *http.Request, br BlockRenderer, pay
 		}
 		return blockFallbackNodes(text)
 	}
-	return raw, html, true
+	return raw, true
 }
 
 // parseBlockEnvelope 按 spec/markdown-block.schema.json 校验封套：
@@ -396,15 +361,10 @@ func isNullVNode(raw json.RawMessage) bool {
 	return string(bytes.TrimSpace(raw)) == "null"
 }
 
-// blockFallbackNodes 让 HTML 与 AST 两条路径拿到同一份降级文案：
-// 只返回 HTML 会让 /markdown.ast 退回通用提示，两条渲染路径就不一致了。
-func blockFallbackNodes(text string) (json.RawMessage, template.HTML, bool) {
+// blockFallbackNodes 产出降级文案的错误卡 VNode（ok=false）。
+func blockFallbackNodes(text string) (json.RawMessage, bool) {
 	raw, _ := json.Marshal(blockFallbackVNode(text))
-	return raw, blockFallbackHTML(text), false
-}
-
-func blockSyntaxFallbackHTML(payload string) template.HTML {
-	return template.HTML(`<pre><code class="language-adag-ui">` + esc(payload) + `</code></pre>`)
+	return raw, false
 }
 
 func blockSyntaxFallbackVNode(payload string) markdownVNode {
@@ -412,13 +372,6 @@ func blockSyntaxFallbackVNode(payload string) markdownVNode {
 		T: "pre",
 		C: []markdownVNode{{T: "code", P: map[string]any{"class": "language-adag-ui"}, C: []markdownVNode{{T: "#text", V: payload}}}},
 	}
-}
-
-func blockFallbackHTML(text string) template.HTML {
-	if strings.TrimSpace(text) == "" {
-		text = defaultBlockFailureText
-	}
-	return template.HTML(`<div class="adag-ui-block adag-ui-block--error"><p class="adag-ui-block__error">` + esc(text) + `</p></div>`)
 }
 
 func blockFallbackVNode(text string) markdownVNode {

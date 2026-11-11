@@ -1,0 +1,165 @@
+/* shell.css —— SPA shell 的**增量**样式。
+   只放 a_da（ui/*.css + app.css）没有定义的 SPA 专属类，通用布局类
+   （.ada-shell/.ada-sidebar/.ada-main/.ada-topbar/.ada-composer/.ada-row…）
+   一律不在本文件重复定义——2026-11-11 走查发现的「左侧空白」正是
+   早期版本在这里重写了 .ada-shell 为 grid，覆盖掉 ui/shell.css 的 flex 外壳。
+   只使用 a_da 令牌（--ph-* / --ada-*），禁硬编码色值（verify ui 纪律）。 */
+
+/* ada-host：编译器没有 <template> 包装元素（保留标签），需要多兄弟节点的
+   v-for/v-if 分组时用它包一层；display:contents 让布局与无包装一致。 */
+.ada-host {
+	display: contents;
+}
+
+/* 插槽容器：基座按 12 插槽位置摆放贡献，不参与 a_da 布局语义。 */
+.ada-slot {
+	display: flex;
+	flex-direction: column;
+	gap: var(--ada-space-2, 8px);
+}
+
+.ada-slot-error {
+	padding: var(--ada-space-2, 8px);
+	border: 1px solid var(--ph-border-danger, currentColor);
+	border-radius: var(--ada-radius, 6px);
+	color: var(--ph-text-danger, inherit);
+}
+
+/* 确认对话框（基座组件；a_da 无同名类） */
+.ada-confirm-mask {
+	position: fixed;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--ph-overlay, rgb(0 0 0 / 40%));
+	z-index: 100;
+}
+
+.ada-confirm {
+	background: var(--ph-surface-primary, canvas);
+	border-radius: var(--ada-radius, 6px);
+	padding: var(--ada-space-4, 16px);
+	min-inline-size: 280px;
+	display: flex;
+	flex-direction: column;
+	gap: var(--ada-space-3, 12px);
+}
+
+.ada-confirm-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--ada-space-2, 8px);
+}
+
+/* 工具行/提示行的小标签（行容器本身用 a_da 的 .ada-*） */
+.row-tool {
+	color: var(--ph-text-secondary, inherit);
+}
+
+.row-notice.level-error {
+	color: var(--ph-text-danger, var(--ph-text-primary, inherit));
+}
+
+.ada-think summary {
+	color: var(--ph-text-secondary, inherit);
+}
+
+.ada-image {
+	color: var(--ph-text-secondary, inherit);
+}
+
+/* JSON 兜底视图（无 a_da 同名类） */
+.ada-json-view {
+	overflow: auto;
+	font-size: var(--ada-text-xs, 12px);
+	color: var(--ph-text-secondary, inherit);
+}
+
+/* ── Toast（复用 HEAD 的 .ada-flash + [data-flash] 观感）────────────────
+   队列化后由 stack 负责定位；单条 toast 回到流式布局，不再各自 fixed 重叠。 */
+.ada-toast-stack {
+	position: fixed;
+	left: 50%;
+	bottom: var(--ada-space-6, 24px);
+	z-index: 90;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--ada-space-2, 8px);
+	max-width: min(460px, calc(100vw - 40px));
+	transform: translateX(-50%);
+	pointer-events: none;
+}
+
+.ada-toast-stack .ada-flash.alert[data-flash] {
+	position: static;
+	left: auto;
+	bottom: auto;
+	width: max-content;
+	max-width: 100%;
+	transform: none;
+	animation: none;
+	pointer-events: auto;
+}
+
+/* ── 图片查看浮层（大图用 background-image，白名单仍无 <img>）──────────
+   遮罩与关闭按钮沿用 ui/components.css 的 .ada-image-viewer / __close，
+   这里补大图容器、多图切换按钮与计数。 */
+.ada-image-viewer__canvas {
+	width: min(92vw, 1400px);
+	height: min(86vh, 900px);
+	max-width: 100%;
+	max-height: 100%;
+	border-radius: var(--ada-radius-lg, 10px);
+	background-color: transparent;
+	background-position: center;
+	background-repeat: no-repeat;
+	background-size: contain;
+	box-shadow: var(--ph-shadow);
+}
+
+.ada-image-viewer__nav {
+	position: fixed;
+	top: 50%;
+	display: grid;
+	width: 36px;
+	height: 36px;
+	place-items: center;
+	border: 1px solid var(--ph-line-strong);
+	border-radius: 50%;
+	background: var(--ph-elevated);
+	color: var(--ph-ink);
+	opacity: 0.82;
+	transform: translateY(-50%);
+	cursor: pointer;
+}
+
+.ada-image-viewer__nav:hover {
+	opacity: 1;
+}
+
+.ada-image-viewer__nav--prev {
+	left: var(--ada-space-4, 16px);
+}
+
+.ada-image-viewer__nav--next {
+	right: var(--ada-space-4, 16px);
+}
+
+.ada-image-viewer__count {
+	position: fixed;
+	left: 50%;
+	bottom: var(--ada-space-4, 16px);
+	padding: 2px var(--ada-space-2, 8px);
+	border-radius: var(--ada-radius-sm, 4px);
+	background: var(--ph-elevated);
+	color: var(--ph-muted);
+	font-size: var(--ada-text-xs, 12px);
+	transform: translateX(-50%);
+}
+
+/* 助手消息里的内联图片：与正文段落留出一点间距。 */
+.ada-msg__image--inline {
+	margin-block: var(--ada-space-1, 4px);
+}

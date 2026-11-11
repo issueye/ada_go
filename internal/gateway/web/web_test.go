@@ -1,13 +1,15 @@
 package web_test
 
-// SSR 外壳的垂直切片验收：假 Supervisor + 假 CoreClient 驱动全部主流程，
-// 不依赖真实 Core、SQLite 或网络。
+// Web 宿主的垂直切片验收：假 Supervisor + 假 CoreClient 驱动主流程，
+// 不依赖真实 Core、SQLite 或网络。整页 SSR 移除后：
+//   - 页面路径（GET）一律返回 SPA shell（history fallback）；
+//   - 数据走 JSON 端点（transcript/dashboard/extensions/state…）；
+//   - POST 表单端点保持 303 PRG；错误页是无 JS 安全页。
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
-	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -251,16 +253,14 @@ func wantNotContains(t *testing.T, body, unwanted string) {
 	}
 }
 
+const emptyThreadList = `{"threads":[],"nextCursor":"","hasMore":false}`
+
 const threadGetRunning = `{
   "thread": {"id":"th_1","workspace":"/tmp/ws","title":"测试会话","createdAt":"2026-10-28T09:00:00Z","updatedAt":"2026-10-28T10:00:00Z","archived":false},
   "items": [],
   "seq": 3,
   "run": {"runId":"run_1","status":"running","startedAt":"2026-10-28T10:00:00Z"},
-  "interactions": [{
-    "id":"ir_1","threadId":"th_1","runId":"run_1","pluginId":"policy-default",
-    "kind":"select","title":"批准操作","body":"是否允许执行？",
-    "options":["允许一次","拒绝"],"status":"pending","createdAt":"2026-10-28T10:00:01Z"
-  }],
+  "interactions": [],
   "hasMore": false
 }`
 
@@ -330,51 +330,77 @@ const entriesResend = `{
   "hasMore": false
 }`
 
-// ---- 用例 ----
+// ---- SPA shell（history fallback）----
 
-func TestHomeRendersThreadList(t *testing.T) {
-	core := newFakeCore().on("thread.list", `{
-	  "threads":[
-	    {"id":"th_1","title":"第一个会话","updatedAt":"2026-10-28T10:00:00Z","archived":false},
-	    {"id":"th_2","title":"第二个会话","updatedAt":"2026-10-28T09:00:00Z","archived":true}
-	  ],
-	  "nextCursor":"","hasMore":false
-	}`)
-	srv, _ := newServer(t, core)
+// GET / 返回 SPA shell：#app 容器 + bootstrap JSON 投影 + 模块入口；
+// 不再引用已删除的 SSR 脚本，也没有内联脚本。
+func TestHomeReturnsShell(t *testing.T) {
+	srv, _ := newServer(t, newFakeCore())
 
 	rec := serve(t, srv, "GET", "/", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET / = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	wantContains(t, body, "第一个会话")
-	wantContains(t, body, "第二个会话")
-	wantContains(t, body, `action="/threads"`)
-	wantContains(t, body, "新建任务")
-	wantContains(t, body, "ada-newtask")
-	wantContains(t, body, `data-new-task`)
-	wantContains(t, body, `data-workspace-native`)
-	wantContains(t, body, `data-workspace-controls`)
-	wantContains(t, body, "选择工作区")
-	wantContains(t, body, "file-picker.js")
-	wantContains(t, body, "composer-draft.js")
-	wantContains(t, body, `data-draft-key="new-task"`)
-	wantContains(t, body, `data-thread-running="0"`)
-	wantContains(t, body, "描述你要完成的任务")
-	wantContains(t, body, `href="/threads/th_1"`)
-	wantContains(t, body, "ada-thread-list")
-	wantContains(t, body, `action="/threads/th_1/delete"`)
-	wantContains(t, body, "删除会话「第一个会话」")
-	wantContains(t, body, `name="next" value="/"`)
-
-	call, ok := core.lastCall("thread.list")
-	if !ok {
-		t.Fatal("没有调用 thread.list")
+	wantContains(t, body, `<div id="app"></div>`)
+	wantContains(t, body, `id="ada-bootstrap"`)
+	wantContains(t, body, `<script type="module" src="/static/ada/index.mjs?v=`)
+	wantContains(t, body, `<title>`)
+	// bootstrap 投影带身份与 CSRF。
+	wantContains(t, body, `"productName":"测试产品"`)
+	wantContains(t, body, `"csrf":"csrf-token"`)
+	// SSR 时代的资源引用必须消失。
+	for _, absent := range []string{"ada-render.js", "ada-ui.js", "chat-live.js", "app.js", "islands.js", "plugin-islands.js", "ada-ui.css"} {
+		wantNotContains(t, body, absent)
 	}
-	if got := call.Params["limit"]; got != 50 {
-		t.Fatalf("thread.list limit = %v, want 50", got)
+	// 只有外链脚本与 JSON 数据脚本，没有内联 JS。
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "<script") {
+			continue
+		}
+		if !strings.Contains(line, `src=`) && !strings.Contains(line, `type="application/json"`) {
+			t.Fatalf("出现内联脚本: %s", line)
+		}
 	}
 }
+
+// 未匹配路径的 GET 也是 shell（客户端路由给出 404 视图）；
+// 其余方法渲染 404 错误页。
+func TestUnknownPathFallsBackToShell(t *testing.T) {
+	srv, _ := newServer(t, newFakeCore())
+
+	rec := serve(t, srv, "GET", "/no/such/page", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET 未知路径 = %d, want 200 (shell)", rec.Code)
+	}
+	wantContains(t, rec.Body.String(), `<div id="app"></div>`)
+	wantContains(t, rec.Body.String(), `"route":"/no/such/page"`)
+
+	rec = serve(t, srv, "POST", "/no/such/page", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("POST 未知路径 = %d, want 404", rec.Code)
+	}
+	body := rec.Body.String()
+	wantContains(t, body, "页面不存在")
+	wantContains(t, body, "/no/such/page")
+	// 不再出现 Go 默认的裸文本 404。
+	wantNotContains(t, body, "404 page not found")
+}
+
+// 概览/工作区/扩展等旧页面路径现在都返回 shell。
+func TestLegacyPagePathsServeShell(t *testing.T) {
+	srv, _ := newServer(t, newFakeCore())
+	for _, target := range []string{"/overview", "/workspaces", "/extensions", "/threads/th_1", "/thread/th_1"} {
+		rec := serve(t, srv, "GET", target, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d, want 200 (shell)", target, rec.Code)
+		}
+		wantContains(t, rec.Body.String(), `id="ada-bootstrap"`)
+	}
+}
+
+// ---- 创建会话 ---------------------------------------------------------------
 
 func TestCreateThreadCallsCoreAndRedirects(t *testing.T) {
 	core := newFakeCore().on("thread.create", `{"thread":{"id":"th_new","workspace":"/tmp/ws","title":"新想法","createdAt":"2026-10-28T10:00:00Z","updatedAt":"2026-10-28T10:00:00Z","archived":false}}`)
@@ -532,12 +558,10 @@ func TestDynamicWorkspaceBeatsStaleWorkspaceFor(t *testing.T) {
 		t.Fatal("没有写工作区 cookie")
 	}
 
-	page := serveWithCookies(t, srv, "GET", "/threads/th_dyn", nil, cookie)
+	// 会话数据端点必须落在动态工作区的 Core 上。
+	page := serveWithCookies(t, srv, "GET", "/partials/transcript/th_dyn", nil, cookie)
 	if page.Code != http.StatusOK {
-		t.Fatalf("GET /threads/th_dyn = %d (body=%s)", page.Code, page.Body.String())
-	}
-	if strings.Contains(page.Body.String(), "没有找到这个会话") {
-		t.Fatalf("动态工作区会话被解析到了错误 Core:\n%s", page.Body.String())
+		t.Fatalf("GET /partials/transcript/th_dyn = %d (body=%s)", page.Code, page.Body.String())
 	}
 	real, err := filepath.EvalSymlinks(dyn)
 	if err != nil {
@@ -679,113 +703,195 @@ func TestFSListAPI(t *testing.T) {
 	}
 }
 
-// 已经在跑脚本的浏览器（adag_js=1）不再拿 meta refresh：运行中的页面由
-// chat-live.js 吃 SSE 增量。Chromium 里删掉已解析的 meta 不会取消排队的刷新，
-// 发了就等于整个运行期每 2 秒整页重载一次。
-func TestThreadPageSkipsMetaRefreshForJSClient(t *testing.T) {
+// ---- 对话流 JSON 数据行 ------------------------------------------------------
+
+// transcriptJSON 拉取 /partials/transcript/{id} 并解码为通用形状。
+func transcriptJSON(t *testing.T, srv *web.Server, threadID string) map[string]any {
+	t.Helper()
+	rec := serve(t, srv, "GET", "/partials/transcript/"+threadID, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET transcript = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("transcript Content-Type = %q", ct)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("transcript 不是合法 JSON: %v\n%s", err, rec.Body.String())
+	}
+	return payload
+}
+
+// 全部行都是纯数据行：不再有 HTML 字段；助手行保持 VNode parts；
+// 用户/工具/notice 行按 transcriptRowState 注释里的形状输出。
+func TestTranscriptJSONDataRows(t *testing.T) {
 	core := newFakeCore().
 		on("thread.get", threadGetRunning).
 		on("thread.entries", entriesAscending)
 	srv, _ := newServer(t, core)
 
-	rec := serveWithCookies(t, srv, "GET", "/thread/th_1", nil,
-		&http.Cookie{Name: web.JSClientCookieName, Value: "1"})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /thread/th_1 = %d (body=%s)", rec.Code, rec.Body.String())
+	payload := transcriptJSON(t, srv, "th_1")
+	if payload["threadId"] != "th_1" || payload["runStatus"] != "running" {
+		t.Fatalf("thread/run = %v/%v", payload["threadId"], payload["runStatus"])
 	}
-	if body := rec.Body.String(); strings.Contains(body, `http-equiv="refresh"`) {
-		t.Fatal("有 JS 的浏览器不该拿到 meta refresh")
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 没有任何行带服务端渲染的 HTML。
+	wantNotContains(t, string(raw), `"html"`)
+	// 用户消息原文不能以未转义 HTML 形态出现（JSON 字符串转义是浏览器的职责）。
+	wantNotContains(t, string(raw), `<script>`)
+
+	rows, _ := payload["rows"].([]any)
+	if len(rows) != 3 {
+		t.Fatalf("rows = %d, want 3", len(rows))
+	}
+
+	// row0：用户行是 parts 数据。
+	user, _ := rows[0].(map[string]any)
+	if user["key"] != "e1" || user["kind"] != "user" {
+		t.Fatalf("row0 = %+v", user)
+	}
+	userParts, _ := user["parts"].([]any)
+	if len(userParts) != 1 {
+		t.Fatalf("user parts = %+v", userParts)
+	}
+	part0, _ := userParts[0].(map[string]any)
+	if part0["type"] != "text" || part0["text"] != "这是问题" {
+		t.Fatalf("user part = %+v", part0)
+	}
+
+	// row1：助手行保持 VNode 形态（thinking 纯文本 + text 段 nodes）。
+	assistant, _ := rows[1].(map[string]any)
+	if assistant["key"] != "e2" || assistant["kind"] != "assistant" {
+		t.Fatalf("row1 = %+v", assistant)
+	}
+	assistantParts, _ := assistant["parts"].([]any)
+	if len(assistantParts) != 2 {
+		t.Fatalf("assistant parts = %+v", assistantParts)
+	}
+	thinking, _ := assistantParts[0].(map[string]any)
+	if thinking["type"] != "thinking" || thinking["text"] != "先想一下" {
+		t.Fatalf("thinking part = %+v", thinking)
+	}
+	textPart, _ := assistantParts[1].(map[string]any)
+	nodesJSON, _ := json.Marshal(textPart["nodes"])
+	if textPart["type"] != "text" || !strings.Contains(string(nodesJSON), "答案是 42") {
+		t.Fatalf("text part = %+v", textPart)
+	}
+
+	// row2：工具行是 tool 对象（旧 SSR 模板 row→tool 的字段投影）。
+	tool, _ := rows[2].(map[string]any)
+	if tool["key"] != "tool:call_1" || tool["kind"] != "tool" {
+		t.Fatalf("row2 = %+v", tool)
+	}
+	toolObj, _ := tool["tool"].(map[string]any)
+	if toolObj == nil || toolObj["name"] != "read_file" || toolObj["status"] != "ok" {
+		t.Fatalf("tool 对象 = %+v", toolObj)
+	}
+	if toolObj["durationMs"] != float64(12) || toolObj["truncated"] != true {
+		t.Fatalf("tool receipt 字段 = %+v", toolObj)
+	}
+	if toolObj["output"] != "file body" {
+		t.Fatalf("tool output = %v", toolObj["output"])
 	}
 }
 
-func TestThreadPageRendersTranscriptToolCardAndTray(t *testing.T) {
+// 空闲页的用户行带「编辑并重发」上下文；运行中不带（避免改写落库中的历史）。
+func TestTranscriptUserRowEditContext(t *testing.T) {
+	idle := newFakeCore().
+		on("thread.get", threadGetIdle).
+		on("thread.entries", entriesResend)
+	srv, _ := newServer(t, idle)
+
+	raw, err := json.Marshal(transcriptJSON(t, srv, "th_1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(raw)
+	for _, want := range []string{
+		`"canEdit":true`,
+		`"editKey":"`,
+		`"editText":"第二问"`,
+		`"threadId":"th_1"`,
+		`"csrf":"csrf-token"`,
+	} {
+		wantContains(t, body, want)
+	}
+
+	running := newFakeCore().
+		on("thread.get", threadGetRunning).
+		on("thread.entries", entriesResend)
+	srv2, _ := newServer(t, running)
+	raw2, err := json.Marshal(transcriptJSON(t, srv2, "th_1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, absent := range []string{`"canEdit"`, `"editKey"`, `"editText"`, `/resend`} {
+		wantNotContains(t, string(raw2), absent)
+	}
+}
+
+// 用户行里的图片以 data URL 两半输出（mime/data），由客户端拼 src。
+func TestTranscriptUserImagePart(t *testing.T) {
+	entries := `{"entries":[{
+	  "id":"e1","threadId":"th_1","seq":1,"kind":"message","role":"user",
+	  "payload":{"role":"user","parts":[
+	    {"type":"text","text":"看这张图"},
+	    {"type":"image","mime":"image/png","data":"iVBORw0KGgo="}
+	  ]},
+	  "createdAt":"2026-10-28T10:00:01Z"}],"hasMore":false}`
 	core := newFakeCore().
 		on("thread.get", threadGetRunning).
-		on("thread.entries", entriesAscending)
+		on("thread.entries", entries)
 	srv, _ := newServer(t, core)
 
-	rec := serve(t, srv, "GET", "/thread/th_1", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /thread/th_1 = %d (body=%s)", rec.Code, rec.Body.String())
+	raw, err := json.Marshal(transcriptJSON(t, srv, "th_1"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	body := rec.Body.String()
-
-	// 线程头、运行状态与无 JS 轮询。
-	wantContains(t, body, "测试会话")
-	wantContains(t, body, "运行中")
-	wantContains(t, body, `http-equiv="refresh"`)
-	wantContains(t, body, `content="2"`)
-
-	// 用户消息 / 思考 / 助手正文。
-	wantContains(t, body, "这是问题")
-	wantContains(t, body, "先想一下")
-	wantContains(t, body, "答案是 42")
-
-	// 工具卡字段。工具按名字挑图标：read_file 是文件图标，不是统一的终端。
-	wantContains(t, body, "read_file")
-	wantContains(t, body, "call_1")
-	wantContains(t, body, "12 ms")
-	wantContains(t, body, "已截断")
-	wantContains(t, body, `M14 3H7a2 2 0 0 0-2 2v14`) // i-file 的第一段路径
-
-	// 交互托盘：select 表单与选项；无 JS 时由 noscript 原生 select 提交，
-	// 自绘组件的隐藏 input 默认 disabled（JS 接管后才启用）。
-	wantContains(t, body, "批准操作")
-	wantContains(t, body, "允许一次")
-	wantContains(t, body, `name="decision"`)
-	wantContains(t, body, `name="value"`)
-	wantContains(t, body, `ada-select__fallback`)
-	wantContains(t, body, `data-select-input value="允许一次" disabled`)
-	wantContains(t, body, `/threads/th_1/abort`)
-	// 中止入口只在顶栏；输入区不再重复放「中止」按钮，避免和队列/指标抢空间。
-	// POST /abort 仍必须带 CSRF 字段，否则会被安全中间件以 csrf_invalid 拒绝。
-	if got := strings.Count(body, `action="/threads/th_1/abort" data-confirm="确定中止当前轮次吗？"><input type="hidden" name="csrf_token"`); got != 1 {
-		t.Fatalf("带 CSRF 的中止表单 = %d，期望 1（仅顶栏）", got)
-	}
-	// 辅助区整块由插件岛渲染：基座只留空壳宿主，不再输出缓存命中/上下文环。
-	wantContains(t, body, `<div id="composer-aux"><div class="ada-slot" data-slot="composer.footer"`)
-	if strings.Contains(body, "缓存命中") {
-		t.Fatal("缓存命中已迁到插件岛，基座页面不该再出现它（没有 SSR 回退）")
-	}
-
-	// Composer 表单。整页刷新（模型/工作区切换、桌面壳热更新）时草稿按会话恢复。
-	wantContains(t, body, `action="/threads/th_1/send"`)
-	wantContains(t, body, `name="text"`)
-	wantContains(t, body, `data-draft-key="thread:th_1"`)
-	wantContains(t, body, `data-thread-id="th_1"`)
-	wantContains(t, body, `data-outbox`)
-	wantContains(t, body, "深度求索中")
-	wantContains(t, body, `data-run-started-at="2026-10-28T10:00:00Z"`)
-	wantContains(t, body, "composer-draft.js")
-
-	call, ok := core.lastCall("thread.entries")
-	if !ok {
-		t.Fatal("没有调用 thread.entries")
-	}
-	if got := call.Params["limit"]; got != 100 {
-		t.Fatalf("thread.entries limit = %v, want 100", got)
+	body := string(raw)
+	for _, want := range []string{`"mime":"image/png"`, `"data":"iVBORw0KGgo="`, "看这张图"} {
+		wantContains(t, body, want)
 	}
 }
 
-// 输入框辅助区已迁到插件岛：基座页面只输出空壳宿主，指标由
-// GET /threads/{id}/state 提供（见 TestThreadStateJSON）。
-func TestThreadPageLeavesComposerAuxToPluginIsland(t *testing.T) {
+// 用户消息里的 HTML 文本以 JSON 字符串形态输出（编码转义），而不是未转义 HTML。
+func TestTranscriptJSONEscapesMessageContent(t *testing.T) {
+	payload, err := json.Marshal(map[string]any{
+		"role":  "user",
+		"parts": []map[string]any{{"type": "text", "text": `<script>alert("x")</script>`}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := json.Marshal(map[string]any{
+		"entries": []map[string]any{{
+			"id": "e1", "threadId": "th_1", "seq": 1, "kind": "message", "role": "user",
+			"payload": json.RawMessage(payload), "createdAt": "2026-10-28T10:00:00Z",
+		}},
+		"hasMore": false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	core := newFakeCore().
-		on("thread.get", `{"thread":{"id":"th_1","workspace":"","title":"指标会话","createdAt":"2026-10-28T09:00:00Z","updatedAt":"2026-10-28T10:00:00Z","archived":false},"items":[],"seq":1,"run":{"runId":"run_1","status":"terminal","terminal":"completed"},"context":{"tokens":705000,"window":1048576,"percent":67},"interactions":[],"hasMore":false}`).
-		on("thread.entries", `{"entries":[],"hasMore":false}`).
-		on("thread.list", emptyThreadList).
-		on("usage.get", `{"thread":{"inputTokens":1000,"cacheTokens":990},"workspace":{}}`)
+		on("thread.get", threadGetIdle).
+		on("thread.entries", string(entries))
 	srv, _ := newServer(t, core)
 
-	body := serve(t, srv, "GET", "/threads/th_1", nil).Body.String()
-	wantContains(t, body, `data-slot="composer.footer"`)
-	// 没有 SSR 回退：没有 JS / 插件停用时辅助区整块空白。
-	for _, absent := range []string{"ada-token-ring", "ada-context", "缓存命中", "工作区："} {
-		if strings.Contains(body, absent) {
-			t.Fatalf("基座不应再渲染辅助区内容 %q（已整体迁到插件岛）", absent)
-		}
+	raw, err := json.Marshal(transcriptJSON(t, srv, "th_1"))
+	if err != nil {
+		t.Fatal(err)
 	}
+	body := string(raw)
+	wantNotContains(t, body, `<script>alert("x")</script>`)
+	// JSON 编码把 < 转成 \u003c（json.Marshal 默认行为），解码后仍是原文。
+	wantContains(t, body, `\u003cscript\u003e`)
 }
+
+// ---- 会话状态与投递 ---------------------------------------------------------
 
 // 遥测轮询端点：只返回 run / context 两块通用会话投影；用量由插件自己的
 // route 聚合（events.read），基座不再调用 usage.get。
@@ -850,85 +956,6 @@ func TestThreadStateJSONCoreError(t *testing.T) {
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("GET /threads/th_1/state = %d，期望 502", rec.Code)
 	}
-}
-
-func TestThreadPageExposesLiveStreamHooks(t *testing.T) {
-	core := newFakeCore().
-		on("thread.get", threadGetRunning).
-		on("thread.entries", entriesAscending)
-	srv, _ := newServer(t, core)
-
-	rec := serve(t, srv, "GET", "/thread/th_1", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /thread/th_1 = %d", rec.Code)
-	}
-	body := rec.Body.String()
-	wantContains(t, body, `data-thread-id="th_1"`)
-	wantContains(t, body, `data-run-status="running"`)
-	wantContains(t, body, `<script src="/static/app.js?v=`)
-	wantContains(t, body, `<script src="/static/chat-live.js?v=`)
-	wantContains(t, body, `id="live-stream"`)
-	wantContains(t, body, `id="live-status"`)
-}
-
-func TestStaticAppJSServed(t *testing.T) {
-	srv, _ := newServer(t, newFakeCore())
-
-	for _, target := range []string{"/static/app.js", "/static/chat-live.js", "/static/composer-draft.js"} {
-		rec := serve(t, srv, "GET", target, nil)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s = %d", target, rec.Code)
-		}
-		if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/javascript") {
-			t.Fatalf("%s Content-Type = %q", target, ct)
-		}
-		if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
-			t.Fatalf("%s X-Content-Type-Options = %q", target, got)
-		}
-		if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "max-age") {
-			t.Fatalf("%s Cache-Control = %q", target, cc)
-		}
-	}
-	// a_da 外壳脚本：提示条 + 确认弹窗 + 侧栏 + 会话右键菜单。
-	appJS := serve(t, srv, "GET", "/static/app.js", nil).Body.String()
-	wantContains(t, appJS, "data-confirm")
-	wantContains(t, appJS, "contextmenu")
-	wantContains(t, appJS, "data-thread-menu-action")
-	wantContains(t, appJS, "/archive")
-	wantContains(t, appJS, "AdaOutbox")
-	wantContains(t, appJS, "data-outbox-action")
-	wantContains(t, appJS, "a_da_outbox:")
-	wantContains(t, serve(t, srv, "GET", "/static/components.js", nil).Body.String(), "tickRunStatusElapsed")
-	// 实时增强脚本：SSE 增量。
-	live := serve(t, srv, "GET", "/static/chat-live.js", nil).Body.String()
-	wantContains(t, live, "EventSource")
-	wantContains(t, live, "evt.message.delta")
-	wantContains(t, live, "AdaOutbox.onRunEnd")
-	// 实时块必须保存思考文本节点：handleDelta 通过 entry.thinkingText 追加增量，
-	// 漏存时每个思考事件都会抛 TypeError，界面只剩正文没有实时思考。
-	wantContains(t, live, "thinkingText: thinkingText")
-	wantContains(t, live, "entry.thinkingText.textContent")
-	// 实时思考与落库后的详情卡共用一套结构，不再保留第二种 .live-thinking 样式。
-	wantContains(t, live, "ada-disclosure__summary")
-	wantContains(t, live, "ada-thinking")
-	wantNotContains(t, live, "live-thinking")
-
-	// 草稿脚本：按 data-draft-key 恢复，提交与页面卸载都要走同一套清理/落盘。
-	draft := serve(t, srv, "GET", "/static/composer-draft.js", nil).Body.String()
-	wantContains(t, draft, "data-draft-key")
-	wantContains(t, draft, "a_da_draft:")
-	wantContains(t, draft, "pagehide")
-}
-
-// TestAskWizardEnablesAllFieldsBeforeSubmit 钉多题分步表单的提交契约：非当前步的字段
-// 是 disabled（19-ued §19.5.5「未到达步骤的字段必须 disabled」），而 disabled 控件不参与
-// 表单提交；末步提交前必须重新启用全部步骤，否则只提交末题，服务端按 q0、q1… 拼出的
-// answers 缺项，ask_user 会以「回答数量与问题不一致」失败（ERR_ASK_DENIED）。
-func TestAskWizardEnablesAllFieldsBeforeSubmit(t *testing.T) {
-	srv, _ := newServer(t, newFakeCore())
-	js := serve(t, srv, "GET", "/static/app.js", nil).Body.String()
-	wantContains(t, js, "data-ask-form")
-	wantContains(t, js, "setStepEnabled(steps[s], true)")
 }
 
 func TestTurnStartUsesTextAndIdempotencyKey(t *testing.T) {
@@ -1101,32 +1128,6 @@ func TestTurnResendRestoresHeadWhenStartFails(t *testing.T) {
 	}
 }
 
-// 空闲页的用户消息渲染“编辑并重发”内联表单；运行中不渲染（避免改写落库中的历史）。
-func TestThreadPageRendersEditResendForm(t *testing.T) {
-	idle := newFakeCore().
-		on("thread.get", threadGetIdle).
-		on("thread.entries", entriesResend)
-	srv, _ := newServer(t, idle)
-	body := serve(t, srv, "GET", "/threads/th_1", nil).Body.String()
-
-	for _, want := range []string{
-		`action="/threads/th_1/resend"`,
-		`name="entryId" value="e3"`,
-		`name="idempotencyKey" value="`,
-		`name="csrf_token" value="csrf-token"`,
-		">第二问</textarea>",
-		"这条消息及其之后的所有对话会被舍弃",
-	} {
-		wantContains(t, body, want)
-	}
-
-	running := newFakeCore().
-		on("thread.get", threadGetRunning).
-		on("thread.entries", entriesResend)
-	srv2, _ := newServer(t, running)
-	wantNotContains(t, serve(t, srv2, "GET", "/threads/th_1", nil).Body.String(), "/resend")
-}
-
 func TestTurnSendSteersWhileRunning(t *testing.T) {
 	core := newFakeCore().
 		on("turn.get", `{"run":{"runId":"run_1","status":"running","startedAt":"2026-10-28T10:00:00Z"},"queueLength":0}`).
@@ -1279,11 +1280,13 @@ func TestInteractionRespondMapsDecisionAndValue(t *testing.T) {
 	}
 }
 
+// Core 失败要转成人话错误页：线程不存在 404，其余 502，都不 panic。
+// （页面路径已全部改为 shell fallback，错误页只由 POST 端点触达。）
 func TestCoreErrorRendersPageInsteadOfPanicking(t *testing.T) {
-	core := newFakeCore().fail("thread.get", errors.New("thread not found"))
+	core := newFakeCore().fail("turn.cancel", errors.New("thread not found"))
 	srv, _ := newServer(t, core)
 
-	rec := serve(t, srv, "GET", "/thread/th_missing", nil)
+	rec := serve(t, srv, "POST", "/threads/th_missing/abort", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("线程不存在 = %d, want 404", rec.Code)
 	}
@@ -1293,79 +1296,16 @@ func TestCoreErrorRendersPageInsteadOfPanicking(t *testing.T) {
 	wantContains(t, body, "/threads/th_missing")
 
 	// Core 不可用（非「不存在」）走 502，也不 panic。
-	core2 := newFakeCore().fail("thread.get", errors.New("dial core: connection refused"))
+	core2 := newFakeCore().fail("turn.cancel", errors.New("dial core: connection refused"))
 	srv2, _ := newServer(t, core2)
-	rec = serve(t, srv2, "GET", "/thread/th_1", nil)
+	rec = serve(t, srv2, "POST", "/threads/th_1/abort", nil)
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("Core 不可用 = %d, want 502", rec.Code)
 	}
 	wantContains(t, rec.Body.String(), "Core 暂时不可用")
 }
 
-// 未匹配的路径渲染带外壳的 404，而不是裸文本 page not found。
-func TestNotFoundRendersNavigablePage(t *testing.T) {
-	core := newFakeCore().on("thread.list", emptyThreadList)
-	srv, _ := newServer(t, core)
-
-	rec := serve(t, srv, "GET", "/no/such/page", nil)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("未知路径 = %d, want 404", rec.Code)
-	}
-	body := rec.Body.String()
-	for _, want := range []string{
-		"页面不存在",
-		"请求路径",
-		"/no/such/page",
-		`href="/"`,
-		`href="/extensions"`,
-		`href="/overview"`,
-		`class="ada-shell"`,
-		`class="ada-sidebar`,
-	} {
-		wantContains(t, body, want)
-	}
-	// 不再出现 Go 默认的裸文本 404。
-	wantNotContains(t, body, "404 page not found")
-}
-
-func TestTemplateEscapesMessageContent(t *testing.T) {
-	payload, err := json.Marshal(map[string]any{
-		"role":  "user",
-		"parts": []map[string]any{{"type": "text", "text": `<script>alert("x")</script>`}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	entries, err := json.Marshal(map[string]any{
-		"entries": []map[string]any{{
-			"id": "e1", "threadId": "th_1", "seq": 1, "kind": "message", "role": "user",
-			"payload": json.RawMessage(payload), "createdAt": "2026-10-28T10:00:00Z",
-		}},
-		"hasMore": false,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	get := `{
-	  "thread":{"id":"th_1","workspace":"/tmp/ws","title":"转义测试","createdAt":"2026-10-28T09:00:00Z","updatedAt":"2026-10-28T10:00:00Z","archived":false},
-	  "items":[],"seq":1,
-	  "run":{"runId":"run_1","status":"terminal","terminal":"completed","startedAt":"2026-10-28T10:00:00Z","endedAt":"2026-10-28T10:00:05Z"},
-	  "interactions":[],"hasMore":false
-	}`
-	core := newFakeCore().
-		on("thread.get", get).
-		on("thread.entries", string(entries))
-	srv, _ := newServer(t, core)
-
-	rec := serve(t, srv, "GET", "/thread/th_1", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /thread/th_1 = %d", rec.Code)
-	}
-	body := rec.Body.String()
-	wantNotContains(t, body, `<script>alert("x")</script>`)
-	wantContains(t, body, "&lt;script&gt;")
-	wantContains(t, body, `data-run-status="terminal"`)
-}
+// ---- 工作区与周边路由 -------------------------------------------------------
 
 func TestAncillaryRoutes(t *testing.T) {
 	srv, _ := newServer(t, newFakeCore())
@@ -1398,31 +1338,6 @@ func TestAncillaryRoutes(t *testing.T) {
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/" {
 		t.Fatalf("POST /login = %d %q", rec.Code, rec.Header().Get("Location"))
 	}
-}
-
-const emptyThreadList = `{"threads":[],"nextCursor":"","hasMore":false}`
-
-func TestWorkspacePickerOnlyWhenMultiple(t *testing.T) {
-	core := newFakeCore().on("thread.list", emptyThreadList)
-
-	single, _ := newServer(t, core)
-	body := serve(t, single, "GET", "/", nil).Body.String()
-	// 单工作区也保留「打开工作区」入口（/workspaces）；内联 index 选择表单已移除。
-	wantContains(t, body, `href="/workspaces"`)
-	wantNotContains(t, body, `action="/workspace"`)
-
-	multi, _ := newServerWithWorkspaces(t, core, []string{"/tmp/ws-a", "/tmp/ws-b"})
-	rec := serve(t, multi, "GET", "/workspaces", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /workspaces = %d", rec.Code)
-	}
-	body = rec.Body.String()
-	wantContains(t, body, `action="/workspaces/select"`)
-	wantContains(t, body, `name="path"`)
-	wantContains(t, body, "ws-a")
-	wantContains(t, body, "/tmp/ws-a")
-	wantContains(t, body, "ws-b")
-	wantContains(t, body, "/tmp/ws-b")
 }
 
 func TestWorkspaceSelectSetsCookieAndRedirects(t *testing.T) {
@@ -1461,10 +1376,10 @@ func TestWorkspaceSelectSetsCookieAndRedirects(t *testing.T) {
 		t.Fatal("工作区选择 cookie 不应为 HttpOnly（选择器需要可读）")
 	}
 
-	// GET 只做 PRG 回工作区页。
+	// 旧的重定向端点已删除：GET /workspace 落入 shell fallback。
 	rec = serve(t, srv, "GET", "/workspace", nil)
-	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/workspaces" {
-		t.Fatalf("GET /workspace = %d %q", rec.Code, rec.Header().Get("Location"))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `id="ada-bootstrap"`) {
+		t.Fatalf("GET /workspace = %d，期望 shell", rec.Code)
 	}
 }
 
@@ -1484,6 +1399,7 @@ func TestWorkspaceSelectRejectsInvalidIndex(t *testing.T) {
 	}
 }
 
+// 数据端点必须用 cookie 指定的工作区取 Core（索引校验后越界回退第一个）。
 func TestAcquireUsesCookieWorkspace(t *testing.T) {
 	workspaces := []string{"/tmp/ws-a", "/tmp/ws-b"}
 
@@ -1502,10 +1418,10 @@ func TestAcquireUsesCookieWorkspace(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			core := newFakeCore().on("thread.list", emptyThreadList)
 			srv, sup := newServerWithWorkspaces(t, core, workspaces)
-			rec := serveWithCookies(t, srv, "GET", "/", nil,
+			rec := serveWithCookies(t, srv, "GET", "/partials/dashboard.json", nil,
 				&http.Cookie{Name: web.WorkspaceCookieName, Value: tc.value})
 			if rec.Code != http.StatusOK {
-				t.Fatalf("GET / = %d", rec.Code)
+				t.Fatalf("GET /partials/dashboard.json = %d", rec.Code)
 			}
 			if got := sup.lastWorkspace(); got != tc.want {
 				t.Fatalf("Acquire 工作区 = %q, want %q", got, tc.want)
@@ -1519,6 +1435,8 @@ func TestNewRequiresSupervisor(t *testing.T) {
 		t.Fatal("缺少 Supervisor 时 New 应返回错误")
 	}
 }
+
+// ---- 静态资源 ---------------------------------------------------------------
 
 // 导入的 a_da 基线资产必须能通过内嵌静态服务取到，且带正确的头。
 func TestStaticBaselineAssetsServed(t *testing.T) {
@@ -1536,6 +1454,13 @@ func TestStaticBaselineAssetsServed(t *testing.T) {
 		{"/static/ui/shell.css", ".ada-"},
 		{"/static/ui/pages.css", ""},
 		{"/static/app-local.css", ".shell"},
+		{"/static/api.js", ""},
+		{"/static/ada-select.js", ""},
+		{"/static/ada-modal.js", ""},
+		{"/static/file-picker.js", ""},
+		{"/static/chat-images.js", ""},
+		{"/static/theme.js", ""},
+		{"/static/themes.js", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.target, func(t *testing.T) {
@@ -1543,8 +1468,14 @@ func TestStaticBaselineAssetsServed(t *testing.T) {
 			if rec.Code != http.StatusOK {
 				t.Fatalf("%s = %d", tc.target, rec.Code)
 			}
-			if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/css") {
-				t.Fatalf("%s Content-Type = %q", tc.target, ct)
+			if strings.HasSuffix(tc.target, ".css") {
+				if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/css") {
+					t.Fatalf("%s Content-Type = %q", tc.target, ct)
+				}
+			} else {
+				if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/javascript") {
+					t.Fatalf("%s Content-Type = %q", tc.target, ct)
+				}
 			}
 			if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 				t.Fatalf("%s X-Content-Type-Options = %q", tc.target, got)
@@ -1605,8 +1536,7 @@ func TestStaticRejectsTraversalAndMissing(t *testing.T) {
 
 // head 里的样式顺序固定：tokens → a_da 产物 → ui 组件层 → 本地覆盖。
 func TestHeadLoadsBaselineCSSInOrder(t *testing.T) {
-	core := newFakeCore().on("thread.list", emptyThreadList)
-	srv, _ := newServer(t, core)
+	srv, _ := newServer(t, newFakeCore())
 	body := serve(t, srv, "GET", "/", nil).Body.String()
 
 	order := []string{
@@ -1632,515 +1562,9 @@ func TestHeadLoadsBaselineCSSInOrder(t *testing.T) {
 	}
 }
 
-// slotNamesInOrder 按文档顺序抽取 data-slot 值（golden 断言用）。
-func slotNamesInOrder(body string) []string {
-	const prefix = `data-slot="`
-	out := []string{}
-	for {
-		index := strings.Index(body, prefix)
-		if index < 0 {
-			return out
-		}
-		body = body[index+len(prefix):]
-		end := strings.Index(body, `"`)
-		if end < 0 {
-			return out
-		}
-		out = append(out, body[:end])
-		body = body[end:]
-	}
-}
+// ---- 插件 -------------------------------------------------------------------
 
-// 12 个插槽按 a_da 的页面归属分布：对话页 10 个，扩展页与概览页各 1 个。
-func TestAllTwelveSlotsHostedAcrossPages(t *testing.T) {
-	core := newFakeCore().
-		on("thread.get", threadGetRunning).
-		on("thread.entries", entriesAscending).
-		on("thread.list", emptyThreadList).
-		on("plugin.list", `{"plugins":[]}`)
-	srv, _ := newServerWithWorkspaces(t, core, []string{"/tmp/ws-a", "/tmp/ws-b"})
-
-	chatBody := serve(t, srv, "GET", "/threads/th_1", nil).Body.String()
-	got := slotNamesInOrder(chatBody)
-	want := []string{
-		"sidebar.top",
-		"sidebar.bottom",
-		"topbar.right",
-		"chat.corner",
-		"transcript.after",
-		"composer.above",
-		"thread.tray",
-		"composer.left",
-		"composer.right",
-		"composer.footer",
-	}
-	if len(got) != len(want) {
-		t.Fatalf("对话页 data-slot 数量 = %d, want %d：%v", len(got), len(want), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("对话页第 %d 个 data-slot = %q, want %q（全部：%v）", i+1, got[i], want[i], got)
-		}
-	}
-	if strings.Count(chatBody, `class="ada-slot"`) != len(want) {
-		t.Fatalf("对话页 ada-slot 容器数量 = %d, want %d", strings.Count(chatBody, `class="ada-slot"`), len(want))
-	}
-
-	extBody := serve(t, srv, "GET", "/extensions", nil).Body.String()
-	wantContains(t, extBody, `data-slot="extensions.list"`)
-
-	ovBody := serve(t, srv, "GET", "/overview", nil).Body.String()
-	wantContains(t, ovBody, `data-slot="dashboard.widgets"`)
-
-	// 三页合起来必须刚好覆盖 12 个契约插槽。
-	all := map[string]bool{}
-	for _, body := range []string{chatBody, extBody, ovBody} {
-		for _, name := range slotNamesInOrder(body) {
-			all[name] = true
-		}
-	}
-	for _, name := range []string{
-		"sidebar.top", "sidebar.bottom", "topbar.right", "chat.corner",
-		"composer.left", "composer.right", "composer.footer", "composer.above",
-		"thread.tray", "transcript.after", "extensions.list", "dashboard.widgets",
-	} {
-		if !all[name] {
-			t.Fatalf("插槽 %s 没有宿主位置（已见：%v）", name, all)
-		}
-	}
-}
-
-// 工作区与插件详情也是 AdaUI 岛：服务端标记 + 初始状态 + 资源按页加载。
-func TestWorkspacesAndPluginDetailUseAdaUI(t *testing.T) {
-	core := newFakeCore().
-		on("thread.list", emptyThreadList).
-		on("plugin.list", `{"plugins":[{"id":"tools-fs","name":"文件工具","version":"1.2.0","enabled":true,"status":"ready","contributions":{"tools":["read"],"frontend":false,"backend":true}}]}`)
-	srv, _ := newServerWithWorkspaces(t, core, []string{"/tmp/ws-a", "/tmp/ws-b"})
-
-	body := serve(t, srv, "GET", "/workspaces", nil).Body.String()
-	for _, want := range []string{
-		`data-ada-island="workspaces"`,
-		`data-ada-state=`,
-		`ada-render.js`,
-		`ada-ui.js`,
-		`islands.js`,
-		`ada-ui.css`,
-		`action="/workspaces/select"`,
-		`name="path"`,
-		"ws-a",
-	} {
-		wantContains(t, body, want)
-	}
-
-	detail := serve(t, srv, "GET", "/extensions/tools-fs", nil).Body.String()
-	for _, want := range []string{
-		`data-ada-island="plugin-detail"`,
-		`data-ada-state=`,
-		`文件工具`,
-		`ada-render.js`,
-		`ada-ui.js`,
-		`islands.js`,
-		`ada-ui.css`,
-		`action="/extensions/tools-fs/disable"`,
-	} {
-		wantContains(t, detail, want)
-	}
-}
-
-// 概览页是第一个 AdaUI 客户端岛：SSR 回退仍在，同时暴露 JSON 状态与轮询接口。
-func TestOverviewIslandAndDashboardJSON(t *testing.T) {
-	core := newFakeCore().on("thread.list", `{
-	  "threads":[{"id":"th_1","title":"第一个会话","updatedAt":"2026-10-28T10:00:00Z","archived":false}],
-	  "nextCursor":"","hasMore":false
-	}`)
-	srv, _ := newServer(t, core)
-
-	body := serve(t, srv, "GET", "/overview", nil).Body.String()
-	for _, want := range []string{
-		`data-ada-island="overview"`,
-		`data-ada-state=`,
-		`ada-render.js`,
-		`ada-ui.js`,
-		`islands.js`,
-		`ada-ui.css`,
-		`第一个会话`,
-		`ov-kpis`,
-		`ov-contrib`,
-		`dashboard.widgets`,
-		`ov-status`,
-	} {
-		wantContains(t, body, want)
-	}
-	// 旧 htmx 轮询必须让位给岛，否则会把客户端 DOM 整段换掉。
-	wantNotContains(t, body, `hx-get="/partials/dashboard"`)
-
-	rec := serve(t, srv, "GET", "/partials/dashboard.json", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /partials/dashboard.json = %d, want 200", rec.Code)
-	}
-	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
-		t.Fatalf("dashboard.json Content-Type = %q", got)
-	}
-	var state struct {
-		Stats []struct {
-			Label string `json:"label"`
-			Value string `json:"value"`
-			Hint  string `json:"hint"`
-			Tone  string `json:"tone"`
-		} `json:"stats"`
-		Recent []struct {
-			ID           string `json:"id"`
-			Title        string `json:"title"`
-			UpdatedLabel string `json:"updatedLabel"`
-		} `json:"recent"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &state); err != nil {
-		t.Fatalf("dashboard.json 不是合法 JSON: %v\n%s", err, rec.Body.String())
-	}
-	if len(state.Stats) != 4 {
-		t.Fatalf("stats 数量 = %d, want 4", len(state.Stats))
-	}
-	if len(state.Recent) != 1 || state.Recent[0].ID != "th_1" || state.Recent[0].Title != "第一个会话" {
-		t.Fatalf("recent = %+v", state.Recent)
-	}
-	if state.Recent[0].UpdatedLabel == "" {
-		t.Fatal("recent.updatedLabel 为空")
-	}
-}
-
-// 插件列表是第二个 AdaUI 客户端岛；SSR 表格仍在，JSON 供客户端/刷新使用。
-func TestExtensionsIslandAndJSON(t *testing.T) {
-	core := newFakeCore().
-		on("thread.list", emptyThreadList).
-		on("plugin.list", `{"plugins":[{"id":"tools-fs","name":"文件工具","version":"1.2.0","enabled":true,"status":"ready","contributions":{"tools":["read"],"frontend":false,"backend":true}}]}`)
-	srv, _ := newServer(t, core)
-
-	body := serve(t, srv, "GET", "/extensions", nil).Body.String()
-	for _, want := range []string{
-		`data-ada-island="extensions"`,
-		`data-ada-state=`,
-		`文件工具`,
-		`ex-toolbar`,
-		`ex-row--head`,
-		`ex-seg`,
-		`ada-render.js`,
-		`ada-ui.js`,
-		`islands.js`,
-	} {
-		wantContains(t, body, want)
-	}
-
-	rec := serve(t, srv, "GET", "/partials/extensions.json", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /partials/extensions.json = %d, want 200", rec.Code)
-	}
-	var state struct {
-		Plugins []struct {
-			ID      string `json:"id"`
-			Name    string `json:"name"`
-			Enabled bool   `json:"enabled"`
-			Backend bool   `json:"backend"`
-		} `json:"plugins"`
-		Count int    `json:"count"`
-		CSRF  string `json:"csrf"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &state); err != nil {
-		t.Fatalf("extensions.json 不是合法 JSON: %v\n%s", err, rec.Body.String())
-	}
-	if state.Count != 1 || len(state.Plugins) != 1 {
-		t.Fatalf("plugins/count = %+v/%d", state.Plugins, state.Count)
-	}
-	if state.Plugins[0].ID != "tools-fs" || state.Plugins[0].Name != "文件工具" || !state.Plugins[0].Backend {
-		t.Fatalf("plugin = %+v", state.Plugins[0])
-	}
-	if state.CSRF != "csrf-token" {
-		t.Fatalf("csrf = %q, want csrf-token", state.CSRF)
-	}
-}
-
-// 对话流岛：首屏继续 SSR，浏览器拿 key + 服务端行 HTML 做 keyed patch。
-func TestThreadTranscriptIslandAndJSON(t *testing.T) {
-	core := newFakeCore().
-		on("thread.get", threadGetRunning).
-		on("thread.entries", entriesAscending)
-	srv, _ := newServer(t, core)
-
-	body := serve(t, srv, "GET", "/threads/th_1", nil).Body.String()
-	for _, want := range []string{
-		`id="transcript-island"`,
-		`data-ada-island="transcript"`,
-		`data-ada-state=`,
-		`ada-render.js`,
-		`ada-ui.js`,
-		`islands.js`,
-		`ada-ui.css`,
-		`data-thread-id="th_1"`,
-		`data-item-key="e1"`,
-	} {
-		wantContains(t, body, want)
-	}
-
-	rec := serve(t, srv, "GET", "/partials/transcript/th_1", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /partials/transcript/th_1 = %d, want 200", rec.Code)
-	}
-	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
-		t.Fatalf("transcript Content-Type = %q", got)
-	}
-	var payload struct {
-		ThreadID  string `json:"threadId"`
-		RunStatus string `json:"runStatus"`
-		Rows      []struct {
-			Key   string `json:"key"`
-			Kind  string `json:"kind"`
-			HTML  string `json:"html"`
-			Parts []struct {
-				Type  string          `json:"type"`
-				Text  string          `json:"text"`
-				Nodes json.RawMessage `json:"nodes"`
-			} `json:"parts"`
-		} `json:"rows"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("transcript 不是合法 JSON: %v\n%s", err, rec.Body.String())
-	}
-	if payload.ThreadID != "th_1" || payload.RunStatus != "running" {
-		t.Fatalf("thread/run = %q/%q", payload.ThreadID, payload.RunStatus)
-	}
-	if len(payload.Rows) != 3 {
-		t.Fatalf("rows = %d, want 3", len(payload.Rows))
-	}
-	if payload.Rows[0].Key != "e1" || !strings.Contains(payload.Rows[0].HTML, "这是问题") {
-		t.Fatalf("row0 = %+v", payload.Rows[0])
-	}
-	// 助手行给的是结构化 parts：thinking 纯文本 + text 段 VNode 数据。
-	if payload.Rows[1].Key != "e2" || payload.Rows[1].Kind != "assistant" || len(payload.Rows[1].Parts) != 2 {
-		t.Fatalf("row1 = %+v", payload.Rows[1])
-	}
-	if payload.Rows[1].Parts[0].Type != "thinking" || payload.Rows[1].Parts[0].Text != "先想一下" {
-		t.Fatalf("row1 thinking = %+v", payload.Rows[1].Parts[0])
-	}
-	if payload.Rows[1].Parts[1].Type != "text" || !strings.Contains(string(payload.Rows[1].Parts[1].Nodes), "答案是 42") {
-		t.Fatalf("row1 text nodes = %+v", payload.Rows[1].Parts[1])
-	}
-	if payload.Rows[1].HTML != "" {
-		t.Fatalf("assistant row 不应再带 HTML: %q", payload.Rows[1].HTML)
-	}
-	if payload.Rows[2].Key != "tool:call_1" || !strings.Contains(payload.Rows[2].HTML, "read_file") {
-		t.Fatalf("row2 = %+v", payload.Rows[2])
-	}
-}
-
-// a_da 外壳与 M2 组件的关键 class 必须真的出现在 DOM 里。
-func TestThreadPageUsesAdaShellAndComponentDOM(t *testing.T) {
-	core := newFakeCore().
-		on("thread.get", threadGetRunning).
-		on("thread.entries", entriesAscending)
-	srv, _ := newServerWithWorkspaces(t, core, []string{"/tmp/ws-a", "/tmp/ws-b"})
-
-	body := serve(t, srv, "GET", "/thread/th_1", nil).Body.String()
-
-	for _, class := range []string{
-		`class="ada-shell"`,
-		`class="ada-sidebar"`,
-		`class="ada-sidebar__resizer"`,
-		`class="ada-side"`,
-		`class="ada-ws"`,
-		`class="ada-ws__summary"`,
-		`class="ada-search"`,
-		`class="ada-thread-list ada-thread-list--split"`,
-		`class="ada-rail"`,
-		`class="ada-main"`,
-		`class="ada-topbar"`,
-		`class="ada-topbar__actions"`,
-		`class="ada-scroll"`,
-		`class="ada-wrap"`,
-		`class="ada-corner-dock"`,
-		`class="ada-chat-viewport"`,
-		`class="ada-trays"`,
-		`class="ada-composer"`,
-		`class="ada-composer__card"`,
-		`class="ada-composer__group ada-composer__group--left"`,
-		`class="ada-composer__group ada-composer__group--right"`,
-		`class="ada-send"`,
-		// 辅助区外壳由基座保留，内容由插件岛填充（插件未启用时这里是空壳）。
-		`id="composer-aux"`,
-		`data-slot="composer.footer"`,
-		`class="ada-msg ada-msg--user"`,
-		`class="ada-msg ada-msg--assistant"`,
-		`class="ada-disclosure" data-kind="tool"`,
-		`class="ada-avatar"`,
-	} {
-		wantContains(t, body, class)
-	}
-
-	// 时间顺序：user → assistant → tool，不能反向（EntriesBefore 已是升序）。
-	userAt := strings.Index(body, "这是问题")
-	assistantAt := strings.Index(body, "答案是 42")
-	toolAt := strings.Index(body, "read_file")
-	if userAt < 0 || assistantAt < userAt || toolAt < assistantAt {
-		t.Fatalf("对话顺序不对：user=%d assistant=%d tool=%d", userAt, assistantAt, toolAt)
-	}
-
-	// 思考内容按普通说明文字渲染，不再塞进深色 code panel。
-	wantContains(t, body, `class="ada-thinking"`)
-	wantContains(t, body, "先想一下")
-
-	// 工具卡的展示字段（duration / truncated / details）保留；成功的工具不再挂
-	// 「成功」徽标——成功由行样式默认表达，失败才用红色左条与红色工具名。
-	if strings.Contains(body, ">成功<") {
-		t.Fatal("成功的工具不应再显示「成功」徽标")
-	}
-	wantContains(t, body, "12 ms")
-
-	// 折叠偏好必须在侧栏 DOM 之前同步应用，否则每次导航都会“展开→收起”闪一下。
-	bootAt := strings.Index(body, "sidebar-boot.js?v=")
-	sidebarAt := strings.Index(body, `class="ada-sidebar"`)
-	if bootAt < 0 || sidebarAt < 0 || bootAt > sidebarAt {
-		t.Fatalf("sidebar-boot.js 必须在 .ada-sidebar 之前加载（boot=%d sidebar=%d）", bootAt, sidebarAt)
-	}
-	wantContains(t, body, "已截断")
-	wantContains(t, body, "详情")
-
-	// 无 JS / 实时增强契约仍在。
-	wantContains(t, body, `id="transcript"`)
-	wantContains(t, body, `id="live-stream"`)
-	wantContains(t, body, `id="live-status"`)
-	wantContains(t, body, `data-thread-id="th_1"`)
-	wantContains(t, body, `data-run-status="running"`)
-	wantContains(t, body, `<script src="/static/app.js?v=`)
-	wantContains(t, body, `<script src="/static/chat-live.js?v=`)
-	wantContains(t, body, `href="/workspaces"`)
-	wantContains(t, body, `href="/overview"`)
-	wantContains(t, body, `href="/extensions"`)
-}
-
-// 插件列表不再分前端/后端；归属只在详情页展示。
-func TestPluginsUnifiedListAndDetail(t *testing.T) {
-	core := newFakeCore().
-		on("thread.list", emptyThreadList).
-		on("plugin.list", `{"plugins":[
-			{"id":"tools-fs","name":"文件工具","version":"1.2.0","enabled":true,"status":"ready","contributions":{"tools":["read","write"],"hooks":["tool.beforeCall"],"skills":[],"frontend":false,"backend":true}},
-			{"id":"tools-git","name":"Git 工具","version":"1.2.0","enabled":false,"status":"unused","contributions":{"tools":[],"frontend":false,"backend":true}}
-		]}`)
-	ui := &stubUI{list: []web.FrontendPluginInfo{
-		{ID: "ui-demo", Name: "演示前端", Version: "0.1.0", Status: "ready", PageCount: 1, SlotCount: 2, NavCount: 1, FirstPage: "home"},
-	}}
-	srv, _ := newServerWithUI(t, core, ui)
-
-	body := serve(t, srv, "GET", "/extensions", nil).Body.String()
-	wantContains(t, body, "文件工具")
-	wantContains(t, body, "演示前端")
-	// 随包但产品未声明的插件也在列表里，用「未启用」而不是 failed 表示。
-	wantContains(t, body, "Git 工具")
-	wantContains(t, body, "未启用")
-	wantNotContains(t, body, "前端插件")
-	wantNotContains(t, body, "后端插件")
-	wantContains(t, body, `href="/extensions/tools-fs"`)
-	wantContains(t, body, `href="/extensions/ui-demo"`)
-
-	backend := serve(t, srv, "GET", "/extensions/tools-fs", nil).Body.String()
-	wantContains(t, backend, "后端插件")
-	wantContains(t, backend, "文件工具")
-	wantContains(t, backend, "工具")
-
-	unused := serve(t, srv, "GET", "/extensions/tools-git", nil).Body.String()
-	wantContains(t, unused, "后端插件")
-	wantContains(t, unused, "未启用")
-	wantContains(t, unused, "当前产品没有默认启用这个插件")
-	// 所有插件都能从界面启用/停用：unused 也要有「启用」。
-	wantContains(t, unused, "action=\"/extensions/tools-git/enable\"")
-
-	frontend := serve(t, srv, "GET", "/extensions/ui-demo", nil).Body.String()
-	wantContains(t, frontend, "前端插件")
-	wantContains(t, frontend, "演示前端")
-	// 有独立页面的插件：页头动作组里同时给出「打开插件页面」。
-	wantContains(t, frontend, `href="/ext/ui-demo/home"`)
-	wantContains(t, frontend, "打开插件页面")
-
-	if rec := serve(t, srv, "GET", "/extensions/missing", nil); rec.Code != http.StatusNotFound {
-		t.Fatalf("未知插件详情 = %d, want 404", rec.Code)
-	}
-}
-
-// 插件详情：左侧文件树、右侧默认渲染 README；README/文件只对详情请求带
-// detailId 拉取，列表轮询保持轻量。
-func TestPluginDetailShowsReadmeAndFiles(t *testing.T) {
-	core := newFakeCore().
-		on("thread.list", emptyThreadList).
-		on("plugin.list", `{"plugins":[{
-			"id":"tools-fs","name":"文件工具","version":"1.2.0","apiVersion":1,"trust":"builtin",
-			"enabled":true,"status":"ready","source":"workspace","path":"/tmp/plugins/tools-fs",
-			"readme":"# 文件工具\n\n读写工作区文件。",
-			"files":[
-				{"path":"plugin.json","size":120},
-				{"path":"static/todo.css","size":2048,"depth":1}
-			],
-			"contributions":{"tools":["read"],"frontend":true,"backend":true}
-		}]}`)
-	ui := &stubUI{list: []web.FrontendPluginInfo{{
-		ID: "tools-fs", Name: "文件工具", Version: "1.2.0", Status: "ready",
-		PageCount: 2, SlotCount: 3, NavCount: 1,
-	}}}
-	srv, _ := newServerWithUI(t, core, ui)
-
-	body := serve(t, srv, "GET", "/extensions/tools-fs", nil).Body.String()
-	for _, want := range []string{
-		`class="pd-root"`,
-		// 元数据从页面底部提到首屏信息条：字段、能力徽章、路径复制都在岛容器内。
-		`class="pd-meta"`,
-		`aria-label="插件信息"`,
-		`pd-field__label">状态`,
-		`pd-field__label">信任级别`,
-		`pd-field__label">来源`,
-		"插件目录",
-		"1 工具", // 能力徽章（原来挤在三个 stat 里）
-		"2 页面",
-		"3 插槽",
-		`data-pd-copy="path"`,
-		`class="pd-doc__head"`,
-		"README",
-		"<h1>文件工具</h1>",
-		"/tmp/plugins/tools-fs",
-		"static/todo.css",
-		"2.0 KB",
-		"readmeNodes",
-	} {
-		wantContains(t, body, want)
-	}
-	if call, ok := core.lastCall("plugin.list"); !ok || call.Params["detailId"] != "tools-fs" {
-		t.Fatalf("详情页 plugin.list 没有带 detailId: %+v", call.Params)
-	}
-
-	// 插件级动作（停用/启用、打开插件页面、返回列表）在页头：它们必须出现在岛屿容器之前，
-	// 这样切文件、翻到「插件信息」面板时按钮不会跟着面板滚走。
-	islandAt := strings.Index(body, `id="plugin-detail-island"`)
-	if islandAt < 0 {
-		t.Fatal("详情页缺少 plugin-detail-island 容器")
-	}
-	head := body[:islandAt]
-	for _, want := range []string{
-		`class="pd-head__title"`,
-		`class="pd-chip pd-chip--mono"`,
-		`class="pd-state`,
-		`data-tip=`,
-		`ada-section-head__actions pd-head__actions`,
-		`action="/extensions/tools-fs/disable"`,
-		`href="/extensions"`,
-	} {
-		wantContains(t, head, want)
-	}
-
-	// 列表页不需要 README/文件，不应每次轮询都读盘。
-	serve(t, srv, "GET", "/extensions", nil)
-	if call, ok := core.lastCall("plugin.list"); ok {
-		if _, has := call.Params["detailId"]; has {
-			t.Fatalf("列表页不应请求 detailId: %+v", call.Params)
-		}
-	}
-}
-
-// 插件文件预览：只允许清单内的相对路径；内容由服务端读取，前端点击按路径拉取。
+// 插件文件预览：只允许清单内的相对路径；内容由服务端读取，前端按路径拉取。
 func TestPluginFilePreview(t *testing.T) {
 	parent := t.TempDir()
 	root := filepath.Join(parent, "demo-plugin")
@@ -2153,9 +1577,6 @@ func TestPluginFilePreview(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "index.ts"), []byte("export const answer = 42;\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "static", "todo.css"), []byte(".todo { color: red; }\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(filepath.Join(root, "binary.bin"), []byte{0, 1, 2, 3}, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -2166,7 +1587,6 @@ func TestPluginFilePreview(t *testing.T) {
 	files := []map[string]any{
 		{"path": "README.md", "size": 20},
 		{"path": "index.ts", "size": 27},
-		{"path": "static/todo.css", "size": 22, "depth": 1},
 		{"path": "binary.bin", "size": 4},
 		{"path": "../secret.txt", "size": 11},
 	}
@@ -2181,42 +1601,6 @@ func TestPluginFilePreview(t *testing.T) {
 	core := newFakeCore().on("thread.list", emptyThreadList).on("plugin.list", string(payload))
 	srv, _ := newServer(t, core)
 
-	// 默认选中 README，服务端直接渲染内容；左侧文件树保留所有路径。
-	page := serve(t, srv, "GET", "/extensions/demo-plugin", nil).Body.String()
-	for _, want := range []string{
-		`class="pd-tree__list"`,
-		`data-plugin-file-path="index.ts"`,
-		`data-plugin-file-content`,
-		"hello plugin",
-		`class="pd-tree__item is-active"`,
-	} {
-		wantContains(t, page, want)
-	}
-
-	// 无 JS 的回退：?file= 切换服务端渲染的选中文件。
-	indexPage := serve(t, srv, "GET", "/extensions/demo-plugin?file=index.ts", nil).Body.String()
-	wantContains(t, indexPage, "export const answer = 42;")
-
-	// Markdown 文件带「预览 / 源码」分段；源码态正文仍是高亮代码块。
-	wantContains(t, page, `class="pd-seg"`)
-	wantContains(t, page, `class="pd-doc__code`)
-	if strings.Contains(page, "pd-doc__preview") {
-		t.Fatal("默认应是源码态，不应直接渲染预览")
-	}
-	// ?view=md 是无 JS 的预览入口：同一份 README 由服务端渲染成 HTML。
-	preview := serve(t, srv, "GET", "/extensions/demo-plugin?file=README.md&view=md", nil).Body.String()
-	for _, want := range []string{
-		`class="markdown-body ada-markdown pd-doc__preview"`,
-		"<h1>Demo</h1>",
-		"切换到源码",
-	} {
-		wantContains(t, preview, want)
-	}
-	// 非 Markdown 文件没有这个分段控件。
-	if strings.Contains(indexPage, `class="pd-seg"`) {
-		t.Fatal("index.ts 不是 Markdown，不应出现预览/源码分段")
-	}
-
 	res := serve(t, srv, "GET", "/extensions/demo-plugin/file?path=index.ts", nil)
 	if res.Code != http.StatusOK {
 		t.Fatalf("GET file = %d, body=%s", res.Code, res.Body.String())
@@ -2225,6 +1609,7 @@ func TestPluginFilePreview(t *testing.T) {
 		Path     string `json:"path"`
 		Content  string `json:"content"`
 		Binary   bool   `json:"binary"`
+		Markdown bool   `json:"markdown"`
 		Size     int64  `json:"size"`
 		SizeText string `json:"sizeLabel"`
 	}
@@ -2234,26 +1619,29 @@ func TestPluginFilePreview(t *testing.T) {
 	if file.Path != "index.ts" || !strings.Contains(file.Content, "answer = 42") || file.Binary || file.Size == 0 {
 		t.Fatalf("文件预览内容错误: %+v", file)
 	}
+	if file.Markdown {
+		t.Fatal("index.ts 不应带 markdown 标记")
+	}
+	// 高亮/预览 HTML 已随 SSR 移除：JSON 不再携带 html/previewHtml 字段。
+	wantNotContains(t, res.Body.String(), `"html"`)
+	wantNotContains(t, res.Body.String(), `"previewHtml"`)
 
 	binary := serve(t, srv, "GET", "/extensions/demo-plugin/file?path=binary.bin", nil)
 	if binary.Code != http.StatusOK || !strings.Contains(binary.Body.String(), `"binary":true`) {
 		t.Fatalf("二进制文件 = %d %s", binary.Code, binary.Body.String())
 	}
 
-	// 岛屿（有 JS 时）靠文件 JSON 里的 previewHtml 做切换，这里钉住字段存在且已渲染。
+	// Markdown 文件带 markdown 标记：预览渲染由前端做。
 	mdRes := serve(t, srv, "GET", "/extensions/demo-plugin/file?path=README.md", nil)
 	var mdFile struct {
-		Markdown    bool   `json:"markdown"`
-		PreviewHTML string `json:"previewHtml"`
+		Markdown bool   `json:"markdown"`
+		Content  string `json:"content"`
 	}
 	if err := json.Unmarshal(mdRes.Body.Bytes(), &mdFile); err != nil {
 		t.Fatalf("README JSON: %v (%s)", err, mdRes.Body.String())
 	}
-	if !mdFile.Markdown || !strings.Contains(mdFile.PreviewHTML, "<h1>Demo</h1>") {
-		t.Fatalf("Markdown 预览字段缺失: %+v", mdFile)
-	}
-	if strings.Contains(res.Body.String(), `"markdown":true`) {
-		t.Fatal("index.ts 不应带 markdown 标记")
+	if !mdFile.Markdown || !strings.Contains(mdFile.Content, "hello plugin") {
+		t.Fatalf("Markdown 文件标记缺失: %+v", mdFile)
 	}
 	for _, unsafe := range []string{"../secret.txt", "static/../../secret.txt", "missing.ts"} {
 		if rec := serve(t, srv, "GET", "/extensions/demo-plugin/file?path="+url.QueryEscape(unsafe), nil); rec.Code != http.StatusNotFound {
@@ -2262,7 +1650,7 @@ func TestPluginFilePreview(t *testing.T) {
 	}
 }
 
-// 业务拒绝（例如插件启停被后端拒绝）回到插件页用提示条说明，而不是 502 错误页。
+// 业务拒绝（例如插件启停被后端拒绝）回到来源页用提示条说明，而不是 502 错误页。
 func TestPluginToggleRejectionShowsFlash(t *testing.T) {
 	core := newFakeCore().
 		on("thread.list", emptyThreadList).
@@ -2290,6 +1678,7 @@ func TestPluginToggleRejectionShowsFlash(t *testing.T) {
 	wantNotContains(t, msg, "relay:")
 	wantNotContains(t, msg, "RPC 错误")
 
+	// 回跳地址是页面路径 → shell；flash 提示条由 shell 直接表达。
 	page := serve(t, srv, "GET", loc, nil).Body.String()
 	wantContains(t, page, "正在被装配占用")
 	wantContains(t, page, `data-flash="error"`)
@@ -2324,28 +1713,118 @@ func TestPluginActionsReturnToExtensionsWithoutReferer(t *testing.T) {
 	}
 }
 
-// RenderSlot 是唯一的插槽输出函数：签名固定为 template.HTML，空贡献回退。
-func TestRenderSlotWrapsBodyAndFallsBack(t *testing.T) {
-	// 编译期固定签名：body/fallback 只能是 template.HTML，普通 string 不会通过。
-	var _ func(string, template.HTML, int, template.HTML) template.HTML = web.RenderSlot
+// ---- JSON 端点（概览/Markdown AST） ----------------------------------------
 
-	withBody := string(web.RenderSlot("sidebar.top", template.HTML("<b>插件内容</b>"), 2, template.HTML("<i>回退</i>")))
-	wantContains(t, withBody, `class="ada-slot" data-slot="sidebar.top" data-contributors="2"`)
-	wantContains(t, withBody, "<b>插件内容</b>")
-	wantNotContains(t, withBody, "<i>回退</i>")
+func TestOverviewJSONEndpoint(t *testing.T) {
+	core := newFakeCore().on("thread.list", `{
+	  "threads":[{"id":"th_1","title":"第一个会话","updatedAt":"2026-10-28T10:00:00Z","archived":false}],
+	  "nextCursor":"","hasMore":false
+	}`)
+	srv, _ := newServer(t, core)
 
-	fallback := string(web.RenderSlot("composer.left", "", 0, template.HTML("<i>回退</i>")))
-	wantContains(t, fallback, `class="ada-slot" data-slot="composer.left" data-contributors="0"`)
-	wantContains(t, fallback, "<i>回退</i>")
+	rec := serve(t, srv, "GET", "/partials/dashboard.json", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /partials/dashboard.json = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
+		t.Fatalf("dashboard.json Content-Type = %q", got)
+	}
+	var state struct {
+		Stats []struct {
+			Label string `json:"label"`
+			Value string `json:"value"`
+			Hint  string `json:"hint"`
+			Tone  string `json:"tone"`
+		} `json:"stats"`
+		Recent []struct {
+			ID           string `json:"id"`
+			Title        string `json:"title"`
+			UpdatedLabel string `json:"updatedLabel"`
+		} `json:"recent"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &state); err != nil {
+		t.Fatalf("dashboard.json 不是合法 JSON: %v\n%s", err, rec.Body.String())
+	}
+	if len(state.Stats) != 4 {
+		t.Fatalf("stats 数量 = %d, want 4", len(state.Stats))
+	}
+	if len(state.Recent) != 1 || state.Recent[0].ID != "th_1" || state.Recent[0].Title != "第一个会话" {
+		t.Fatalf("recent = %+v", state.Recent)
+	}
+	if state.Recent[0].UpdatedLabel == "" {
+		t.Fatal("recent.updatedLabel 为空")
+	}
 
-	empty := string(web.RenderSlot("composer.right", "", 0, ""))
-	wantContains(t, empty, `class="ada-slot" data-slot="composer.right" data-contributors="0"`)
-	wantNotContains(t, empty, "回退")
-
-	// 插槽名同样只输出一次且被转义，不会造成属性注入。
-	injected := string(web.RenderSlot(`a"b`, "", 0, ""))
-	wantContains(t, injected, `data-slot="a&#34;b"`)
+	// Core 不可用时如实报 503，不伪造空概览。
+	core2 := newFakeCore().fail("thread.list", errors.New("core down"))
+	srv2, _ := newServer(t, core2)
+	rec = serve(t, srv2, "GET", "/partials/dashboard.json", nil)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("Core 失败 = %d, want 503", rec.Code)
+	}
 }
+
+func TestMarkdownASTEndpointReturnsVNodeData(t *testing.T) {
+	srv, _ := newServer(t, newFakeCore())
+	body := "{\"text\":\"**粗体**\\n\\n```go\\nfmt.Println(1)\\n```\\n\\n<script>alert(1)</script>\"}"
+	req := httptest.NewRequest(http.MethodPost, "/markdown.ast", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
+		t.Fatalf("Content-Type = %q", got)
+	}
+	out := rec.Body.String()
+	wantContains(t, out, `"t":"strong"`)
+	wantContains(t, out, `"t":"pre"`)
+	wantContains(t, out, `"t":"code"`)
+	wantContains(t, out, "粗体")
+	wantNotContains(t, out, `"t":"script"`)
+}
+
+// HTML 版 /markdown 已删除：ast 是唯一路径。
+func TestMarkdownHTMLEndpointRemoved(t *testing.T) {
+	srv, _ := newServer(t, newFakeCore())
+	req := httptest.NewRequest(http.MethodPost, "/markdown", strings.NewReader(`{"text":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("POST /markdown = %d, want 404", rec.Code)
+	}
+
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/markdown.ast", strings.NewReader("not json"))
+	req2.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusBadRequest {
+		t.Fatalf("ast 非法 JSON = %d, want 400", rec2.Code)
+	}
+
+	rec3 := httptest.NewRecorder()
+	req3 := httptest.NewRequest(http.MethodPost, "/markdown.ast",
+		strings.NewReader(`{"text":"`+strings.Repeat("a", 512<<10)+`"}`))
+	req3.Header.Set("Content-Type", "application/json")
+	srv.Handler().ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("ast 超限 = %d, want 413", rec3.Code)
+	}
+}
+
+// ---- 12 插槽词汇表 ----------------------------------------------------------
+
+// 宿主模板已随 SSR 删除，但 12 个插槽名仍是冻结契约：
+// CheckSlotCoverage 守护词汇表自身的一致性（adag verify 的 checkSlots 复用它）。
+func TestCheckSlotCoverage(t *testing.T) {
+	if err := web.CheckSlotCoverage(); err != nil {
+		t.Fatalf("CheckSlotCoverage: %v", err)
+	}
+}
+
+// ---- 会话删除/归档 ----------------------------------------------------------
 
 func TestThreadDeleteCallsCoreAndRedirects(t *testing.T) {
 	core := newFakeCore().on("thread.delete", `{"deleted":true,"cleanupScheduled":true}`)
@@ -2415,35 +1894,6 @@ func TestThreadArchiveRejectsRunningThread(t *testing.T) {
 	}
 }
 
-func TestThreadComposerShowsModelPicker(t *testing.T) {
-	core := newFakeCore().
-		on("thread.get", threadGetRunning).
-		on("thread.entries", entriesAscending).
-		on("model.list", `{"models":[
-		  {"model":{"providerId":"openai","modelId":"gpt-4o"},"info":{"displayName":"GPT-4o","contextWindow":128000,"supportsTools":true}},
-		  {"model":{"providerId":"custom","modelId":"deepseek"},"info":{"displayName":"DeepSeek","contextWindow":1000000,"supportsTools":true,"thinkingLevels":["low","high","max"]}}
-		],"current":{"providerId":"custom","modelId":"deepseek","thinkingLevel":"high"}}`)
-	srv, _ := newServer(t, core)
-
-	body := serve(t, srv, "GET", "/thread/th_1", nil).Body.String()
-	wantContains(t, body, `data-model-picker`)
-	wantContains(t, body, `<ada-select class="ada-select ada-model-picker"`)
-	wantContains(t, body, `data-value="openai|gpt-4o"`)
-	wantContains(t, body, `data-value="custom|deepseek"`)
-	wantContains(t, body, `data-label="DeepSeek"`)
-	wantContains(t, body, `data-select-label`)
-	wantContains(t, body, `data-levels="low|high|max"`)
-	wantContains(t, body, `data-current-level="high"`)
-	wantContains(t, body, `ada-model-picker__chevron`)
-	wantNotContains(t, body, `data-model-level-picker`)
-	// 无 JS 时的原生 select 回退：随消息提交，基座在 turn.start 前切模型。
-	wantContains(t, body, `name="model"`)
-	wantContains(t, body, `ada-select__fallback`)
-	// 供应商管理入口由 provider-admin 插件贡献到 composer.left，
-	// 基座模板只保留插槽宿位（不再写死插件 id 与页面路由）。
-	wantContains(t, body, `data-slot="composer.left"`)
-}
-
 // 模型选择/推理等级切换：thinkingLevel 必须透传到 model.set。
 func TestModelSelectPassesThinkingLevel(t *testing.T) {
 	core := newFakeCore().on("model.set", `{"model":{"providerId":"custom","modelId":"deepseek","thinkingLevel":"high"},"scope":"thread"}`)
@@ -2471,83 +1921,290 @@ func TestModelSelectPassesThinkingLevel(t *testing.T) {
 	}
 }
 
-func TestThreadPageShowsRunError(t *testing.T) {
-	core := newFakeCore().
-		on("thread.get", `{
-		  "thread": {"id":"th_err","workspace":"/tmp/ws","title":"失败会话","createdAt":"2026-10-28T09:00:00Z","updatedAt":"2026-10-28T10:00:00Z","archived":false},
-		  "items": [], "seq": 1,
-		  "run": {"runId":"run_err","status":"terminal","terminal":"error","errorCode":5001,"errorDetail":"provider: HTTP 401 invalid api key","startedAt":"2026-10-28T10:00:00Z","endedAt":"2026-10-28T10:00:01Z"},
-		  "interactions": [], "hasMore": false
-		}`).
-		on("thread.entries", `{"entries":[],"hasMore":false}`).
-		on("thread.list", emptyThreadList).
-		on("model.list", `{"models":[],"current":{"providerId":"","modelId":""}}`)
+// ---- SPA 数据端点（基座页面重建新增）----
+
+// /partials/threads.json：thread.list 的展示投影（侧栏/会话列表页共用）。
+func TestThreadsJSONEndpoint(t *testing.T) {
+	core := newFakeCore().on("thread.list", `{"threads":[
+		{"id":"th_1","title":"排查构建失败","headEntryId":"e9","updatedAt":"2026-11-01T09:00:00Z","archived":false,"running":true},
+		{"id":"th_2","title":"写周报","headEntryId":"e3","updatedAt":"2026-10-30T18:00:00Z","archived":false,"running":false}
+	],"nextCursor":"","hasMore":false}`)
 	srv, _ := newServer(t, core)
 
-	body := serve(t, srv, "GET", "/thread/th_err", nil).Body.String()
-	wantContains(t, body, "本轮失败")
-	wantContains(t, body, "供应商调用失败")
-	wantContains(t, body, "错误码 5001")
-	wantContains(t, body, "HTTP 401 invalid api key")
-}
-
-// 实时流把累积文本发到 /markdown：必须复用服务端渲染管线并清洗掉原始 HTML。
-func TestMarkdownEndpointRendersAndSanitizes(t *testing.T) {
-	srv, _ := newServer(t, newFakeCore())
-	body := "{\"text\":\"**粗体**\\n\\n```go\\nfmt.Println(1)\\n```\\n\\n<script>alert(1)</script>\"}"
-	req := httptest.NewRequest(http.MethodPost, "/markdown", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
+	rec := serve(t, srv, "GET", "/partials/threads.json", nil)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		t.Fatalf("GET /partials/threads.json = %d (body=%s)", rec.Code, rec.Body.String())
 	}
-	out := rec.Body.String()
-	wantContains(t, out, "<strong>粗体</strong>")
-	wantContains(t, out, "<pre><code")
-	wantNotContains(t, out, "<script")
+	var out struct {
+		Workspace     string `json:"workspace"`
+		WorkspaceName string `json:"workspaceName"`
+		Threads       []struct {
+			ID        string `json:"id"`
+			Title     string `json:"title"`
+			UpdatedAt string `json:"updatedAt"`
+			Running   bool   `json:"running"`
+			Archived  bool   `json:"archived"`
+		} `json:"threads"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("响应不是合法 JSON: %v (body=%s)", err, rec.Body.String())
+	}
+	if out.Workspace != "/tmp/ws" || out.WorkspaceName != "ws" {
+		t.Fatalf("workspace 投影 = %q / %q", out.Workspace, out.WorkspaceName)
+	}
+	if len(out.Threads) != 2 || out.Threads[0].ID != "th_1" || out.Threads[0].Title != "排查构建失败" || !out.Threads[0].Running {
+		t.Fatalf("threads = %+v", out.Threads)
+	}
 }
 
-func TestMarkdownASTEndpointReturnsVNodeData(t *testing.T) {
-	srv, _ := newServer(t, newFakeCore())
-	body := "{\"text\":\"**粗体**\\n\\n```go\\nfmt.Println(1)\\n```\\n\\n<script>alert(1)</script>\"}"
-	req := httptest.NewRequest(http.MethodPost, "/markdown.ast", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
-		t.Fatalf("Content-Type = %q", got)
-	}
-	out := rec.Body.String()
-	wantContains(t, out, `"t":"strong"`)
-	wantContains(t, out, `"t":"pre"`)
-	wantContains(t, out, `"t":"code"`)
-	wantContains(t, out, "粗体")
-	wantNotContains(t, out, `"t":"script"`)
-}
+// ?path= 只接受网关已知的工作区；未知目录直接 400，不把任意路径拉起 Core。
+func TestThreadsJSONRejectsUnknownWorkspace(t *testing.T) {
+	core := newFakeCore().on("thread.list", `{"threads":[],"nextCursor":"","hasMore":false}`)
+	srv, _ := newServer(t, core)
 
-func TestMarkdownEndpointRejectsInvalidJSON(t *testing.T) {
-	srv, _ := newServer(t, newFakeCore())
-	req := httptest.NewRequest(http.MethodPost, "/markdown", strings.NewReader("not json"))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
+	rec := serve(t, srv, "GET", "/partials/threads.json?path="+url.QueryEscape("/elsewhere"), nil)
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d", rec.Code)
+		t.Fatalf("未知工作区 = %d，期望 400 (body=%s)", rec.Code, rec.Body.String())
 	}
 }
 
-func TestMarkdownEndpointRejectsOversizedBody(t *testing.T) {
-	srv, _ := newServer(t, newFakeCore())
-	req := httptest.NewRequest(http.MethodPost, "/markdown",
-		strings.NewReader(`{"text":"`+strings.Repeat("a", 512<<10)+`"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("status = %d", rec.Code)
+// ?limit= 透传给 thread.list（侧栏只取最近 N 条）。
+func TestThreadsJSONPassesLimit(t *testing.T) {
+	core := newFakeCore().on("thread.list", `{"threads":[],"nextCursor":"","hasMore":false}`)
+	srv, _ := newServer(t, core)
+
+	serve(t, srv, "GET", "/partials/threads.json?limit=50", nil)
+	call, ok := core.lastCall("thread.list")
+	if !ok || call.Params["limit"] != 50 {
+		t.Fatalf("thread.list 参数 = %+v，期望 limit=50", call.Params)
+	}
+}
+
+// /partials/model.json：model.list 的展示投影（HEAD 模板选项注入的 JSON 等价物）。
+func TestModelJSONEndpoint(t *testing.T) {
+	core := newFakeCore().on("model.list", `{"models":[
+		{"model":{"providerId":"openai","modelId":"gpt-4o"},"info":{"displayName":"GPT-4o","thinkingLevels":["low","high"]}},
+		{"model":{"providerId":"custom","modelId":"deepseek-r1"},"info":{"displayName":"DeepSeek R1"}}
+	],"current":{"providerId":"custom","modelId":"deepseek-r1","thinkingLevel":"high"}}`)
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "GET", "/partials/model.json?threadId=th_1", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /partials/model.json = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Models []struct {
+			Value          string   `json:"value"`
+			ProviderID     string   `json:"providerId"`
+			ModelID        string   `json:"modelId"`
+			Label          string   `json:"label"`
+			ShortLabel     string   `json:"shortLabel"`
+			Current        bool     `json:"current"`
+			ThinkingLevels []string `json:"thinkingLevels"`
+		} `json:"models"`
+		CurrentLabel string `json:"currentLabel"`
+		CurrentValue string `json:"currentValue"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("响应不是合法 JSON: %v", err)
+	}
+	if len(out.Models) != 2 {
+		t.Fatalf("models = %+v", out.Models)
+	}
+	first := out.Models[0]
+	if first.Value != "openai|gpt-4o" || first.Label != "GPT-4o · gpt-4o" || first.ShortLabel != "GPT-4o" {
+		t.Fatalf("第一项投影 = %+v", first)
+	}
+	if len(first.ThinkingLevels) != 2 || first.ThinkingLevels[0] != "low" {
+		t.Fatalf("thinkingLevels = %+v", first.ThinkingLevels)
+	}
+	if out.CurrentLabel != "DeepSeek R1" || out.CurrentValue != "custom|deepseek-r1" {
+		t.Fatalf("current 投影 = %q / %q", out.CurrentLabel, out.CurrentValue)
+	}
+	if call, ok := core.lastCall("model.list"); !ok || call.Params["threadId"] != "th_1" {
+		t.Fatalf("model.list 参数 = %+v", call.Params)
+	}
+}
+
+// model.list 失败时不阻塞页面：返回「选择模型」占位投影。
+func TestModelJSONCoreError(t *testing.T) {
+	core := newFakeCore().fail("model.list", errors.New("core down"))
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "GET", "/partials/model.json", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("model.list 失败 = %d，期望 200 占位", rec.Code)
+	}
+	var out struct {
+		CurrentLabel string `json:"currentLabel"`
+		Models       []any  `json:"models"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.CurrentLabel != "选择模型" || out.Models == nil {
+		t.Fatalf("占位投影 = %q / %+v", out.CurrentLabel, out.Models)
+	}
+}
+
+// /threads/{id}/state 现在携带 pending 交互投影（基座托盘外壳的数据面）；
+// form 交互的题目从 body 解析成 q0..qN 形态，已处理的交互不再出现。
+func TestThreadStateIncludesInteractions(t *testing.T) {
+	core := newFakeCore().on("thread.get", `{
+		"thread":{"id":"th_1","workspace":"","title":"","createdAt":"","updatedAt":"","archived":false},
+		"items":[],"seq":1,
+		"run":{"runId":"run_1","status":"waiting_input"},
+		"interactions":[
+			{"id":"ix_1","threadId":"th_1","kind":"confirm","title":"允许写文件","body":"","status":"pending","options":[]},
+			{"id":"ix_2","threadId":"th_1","kind":"form","title":"补充信息","body":"[{\"question\":\"叫什么\",\"kind\":\"input\"},{\"question\":\"确定吗\",\"kind\":\"confirm\"}]","status":"pending","options":[]},
+			{"id":"ix_3","threadId":"th_1","kind":"select","title":"选一个","body":"","status":"resolved","options":["a","b"]}
+		],
+		"hasMore":false}`)
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "GET", "/threads/th_1/state", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("state = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Interactions []struct {
+			ID        string   `json:"id"`
+			Kind      string   `json:"kind"`
+			Title     string   `json:"title"`
+			Body      string   `json:"body"`
+			Options   []string `json:"options"`
+			Questions []struct {
+				Index    int    `json:"index"`
+				Question string `json:"question"`
+				Kind     string `json:"kind"`
+			} `json:"questions"`
+		} `json:"interactions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("响应不是合法 JSON: %v", err)
+	}
+	if len(out.Interactions) != 2 {
+		t.Fatalf("只应保留 pending 交互: %+v", out.Interactions)
+	}
+	form := out.Interactions[1]
+	if form.ID != "ix_2" || form.Body != "" || len(form.Questions) != 2 {
+		t.Fatalf("form 交互投影 = %+v", form)
+	}
+	if form.Questions[0].Index != 0 || form.Questions[0].Kind != "input" || form.Questions[1].Kind != "confirm" {
+		t.Fatalf("题目投影 = %+v", form.Questions)
+	}
+}
+
+// transcript ?before 游标：透传给 thread.entries，响应带 hasMore/nextCursor
+// （「加载更早消息」的数据面）。
+func TestTranscriptBeforePagination(t *testing.T) {
+	threadGet := `{"thread":{"id":"th_1","workspace":"","title":"","createdAt":"","updatedAt":"","archived":false},"items":[],"seq":1,"run":{"status":"terminal","terminal":"completed"},"interactions":[],"hasMore":false}`
+	core := newFakeCore()
+	core.callFn = func(method string, params any) (json.RawMessage, error) {
+		if method == "thread.entries" {
+			m, _ := params.(map[string]any)
+			if m["cursor"] != "c previous" {
+				return nil, errors.New("cursor 未透传")
+			}
+			if m["limit"] != 50 {
+				return nil, errors.New("limit 未透传")
+			}
+			// 至少一条 entry：entriesUsable 才为真，hasMore/nextCursor 才会投影。
+			return json.RawMessage(`{"entries":[{"id":"e0","threadId":"th_1","seq":1,"kind":"message","role":"user","payload":{"role":"user","parts":[{"type":"text","text":"旧问题"}]},"createdAt":"2026-10-28T09:59:00Z"}],"nextCursor":"c older","hasMore":true}`), nil
+		}
+		if method == "thread.get" {
+			return json.RawMessage(threadGet), nil
+		}
+		return nil, errors.New("fake: 未配置方法 " + method)
+	}
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "GET", "/partials/transcript/th_1?before="+url.QueryEscape("c previous")+"&limit=50", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("transcript?before = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		HasMore    bool   `json:"hasMore"`
+		NextCursor string `json:"nextCursor"`
+		Rows       []any  `json:"rows"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.HasMore || out.NextCursor != "c older" {
+		t.Fatalf("分页投影 = %+v", out)
+	}
+}
+
+// 不带 before 的常规请求不带分页字段（rows-only 形态保持不变）。
+func TestTranscriptJSONNoPaginationFieldsByDefault(t *testing.T) {
+	core := newFakeCore().
+		on("thread.get", threadGetIdle).
+		on("thread.entries", entriesAscending)
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "GET", "/partials/transcript/th_1", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("transcript = %d", rec.Code)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["hasMore"]; ok {
+		t.Fatalf("常规请求不应带 hasMore: %s", rec.Body.String())
+	}
+	if _, ok := raw["nextCursor"]; ok {
+		t.Fatalf("常规请求不应带 nextCursor: %s", rec.Body.String())
+	}
+}
+
+// /partials/extensions.json?detail= 按详情口径返回该插件（Files/Readme），
+// 供插件详情页复用同一端点。
+func TestExtensionsJSONDetailIncludesFiles(t *testing.T) {
+	core := newFakeCore()
+	core.callFn = func(method string, params any) (json.RawMessage, error) {
+		if method == "plugin.list" {
+			m, _ := params.(map[string]any)
+			detailID, _ := m["detailId"].(string)
+			if detailID != "" && detailID != "demo" {
+				return json.RawMessage(`{"plugins":[]}`), nil
+			}
+			files := `[]`
+			readme := ""
+			if detailID == "demo" {
+				files = `[{"path":"plugin.json","size":120,"sizeLabel":"120 B"}]`
+				readme = "# 演示插件"
+			}
+			return json.RawMessage(`{"plugins":[{"id":"demo","name":"演示","version":"1.0.0","enabled":true,"status":"ready","readme":"` + readme + `","files":` + files + `,"contributions":{"backend":true}}]}`), nil
+		}
+		return nil, errors.New("fake: 未配置方法 " + method)
+	}
+	srv, _ := newServer(t, core)
+
+	rec := serve(t, srv, "GET", "/partials/extensions.json?detail=demo", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("extensions.json?detail = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Plugins []struct {
+			ID     string `json:"id"`
+			Readme string `json:"readme"`
+			Files  []struct {
+				Path string `json:"path"`
+			} `json:"files"`
+		} `json:"plugins"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Plugins) != 1 || out.Plugins[0].ID != "demo" {
+		t.Fatalf("plugins = %+v", out.Plugins)
+	}
+	if len(out.Plugins[0].Files) != 1 || out.Plugins[0].Files[0].Path != "plugin.json" {
+		t.Fatalf("详情口径应包含文件清单: %+v", out.Plugins[0].Files)
+	}
+	if out.Plugins[0].Readme == "" {
+		t.Fatal("详情口径应包含 README")
 	}
 }

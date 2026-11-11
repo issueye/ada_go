@@ -2,6 +2,7 @@ package web_test
 
 // 图片输入（7.7.4）：发送表单 multipart → handleTurn 校验 → turn.start/steer
 // 的 images 参数（base64 + mime，≤4 张、单张 ≤8MB、PNG/JPEG/WebP/GIF）。
+// 用户消息里图片的 JSON 行形状（mime/data）由 TestTranscriptUserImagePart 覆盖。
 
 import (
 	"bytes"
@@ -10,9 +11,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"testing"
 
 	"github.com/adag/ada-go/internal/gateway/web"
-	"testing"
 )
 
 // pngBytes 是一张 1x1 PNG 的最小合法字节（浏览器/服务端只看头部与长度）。
@@ -119,55 +120,7 @@ func TestTurnSendImageValidation(t *testing.T) {
 	}
 }
 
-// 用户消息里的图片按 data URL 渲染，并且是「可点开查看」的按钮：
-// 固定尺寸裁切会让宽截图看起来和输入框预览像两张图，所以只限最大宽高。
-func TestThreadPageRendersClickableUserImage(t *testing.T) {
-	entries := `{"entries":[{
-	  "id":"e1","threadId":"th_1","seq":1,"kind":"message","role":"user",
-	  "payload":{"role":"user","parts":[
-	    {"type":"text","text":"看这张图"},
-	    {"type":"image","mime":"image/png","data":"iVBORw0KGgo="}
-	  ]},
-	  "createdAt":"2026-10-28T10:00:01Z"}],"hasMore":false}`
-	core := newFakeCore().
-		on("thread.get", threadGetRunning).
-		on("thread.entries", entries)
-	srv, _ := newServer(t, core)
-
-	body := serve(t, srv, "GET", "/thread/th_1", nil).Body.String()
-	for _, want := range []string{
-		`<button class="ada-msg__image" type="button" data-image-viewer`,
-		`src="data:image/png;base64,iVBORw0KGgo="`,
-		"看这张图",
-	} {
-		wantContains(t, body, want)
-	}
-}
-
-// 无 JS 的浏览器也能用原生 file input 提交 multipart：模板里有 images 字段。
-func TestComposerTemplateHasImageInput(t *testing.T) {
-	core := newFakeCore().
-		on("thread.list", emptyThreadList).
-		on("thread.get", `{"thread":{"id":"th_1","workspace":"","title":"图片会话","createdAt":"2026-10-28T10:00:00Z","updatedAt":"2026-10-28T10:00:00Z","archived":false},"items":[],"seq":1,"run":{"runId":"run_x","status":"terminal","terminal":"completed"},"interactions":[],"hasMore":false}`).
-		on("thread.entries", `{"entries":[],"hasMore":false}`).
-		on("model.list", `{"models":[],"current":{"providerId":"fake","modelId":"fake-1"}}`)
-	srv, _ := newServer(t, core)
-
-	body := serve(t, srv, "GET", "/threads/th_1", nil).Body.String()
-	for _, want := range []string{
-		`enctype="multipart/form-data"`,
-		`type="file" name="images" multiple`,
-		`data-image-thumbs`,
-	} {
-		wantContains(t, body, want)
-	}
-	// 缩略图容器必须在输入框之前：新建任务页与会话页的位置要一致。
-	if strings.Index(body, "data-image-thumbs") > strings.Index(body, `name="text"`) {
-		t.Fatal("会话页的图片缩略图不在输入框上方")
-	}
-}
-
-// 新建任务页也支持图片：multipart 表单 → thread.create + turn.start 带 images。
+// 新建任务也支持图片：multipart 表单 → thread.create + turn.start 带 images。
 func TestCreateThreadWithImage(t *testing.T) {
 	ws := t.TempDir()
 	core := newFakeCore().
@@ -195,22 +148,5 @@ func TestCreateThreadWithImage(t *testing.T) {
 	imagesJSON, merr := json.Marshal(start.Params["images"])
 	if merr != nil || !strings.Contains(string(imagesJSON), "image/png") {
 		t.Fatalf("turn.start 缺少 images: %+v (%v)", start.Params, merr)
-	}
-
-	// 新建任务页模板：图片输入与缩略图容器存在。
-	core2 := newFakeCore().on("thread.list", emptyThreadList)
-	srv2, _ := newServerWithWorkspaces(t, core2, []string{ws})
-	home := serve(t, srv2, "GET", "/", nil).Body.String()
-	for _, want := range []string{
-		`id="ada-image-input-new"`,
-		`data-image-thumbs`,
-		`for="ada-image-input-new"`,
-		`chat-images.js`, // 新建任务页也要加载图片绑定脚本
-	} {
-		wantContains(t, home, want)
-	}
-	// 与会话页同一口径：缩略图在输入框上方。
-	if strings.Index(home, "data-image-thumbs") > strings.Index(home, `name="text"`) {
-		t.Fatal("新建任务页的图片缩略图不在输入框上方")
 	}
 }

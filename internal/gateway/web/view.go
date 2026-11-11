@@ -5,24 +5,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/adag/ada-go/internal/common/domain"
 )
 
 // 展示层裁剪阈值：Core 已对单字段做 32KB 截断（8.3），这里再收一层，
-// 避免一条历史消息把整页撑得不可用。
+// 避免一条历史消息把 JSON 端点的响应撑得不可用。
 const (
 	maxPartBytes   = 16 << 10
 	maxToolOutput  = 16 << 10
 	maxDetailsSize = 8 << 10
 )
 
-// ---- Core 返回的最小 DTO（只声明 SSR 用到的字段）----
+// ---- Core 返回的最小 DTO（只声明 JSON 端点用到的字段）----
 
 type threadDTO struct {
 	ID          string `json:"id"`
@@ -40,8 +37,7 @@ type threadSummaryDTO struct {
 	HeadEntryID string `json:"headEntryId"`
 	UpdatedAt   string `json:"updatedAt"`
 	Archived    bool   `json:"archived"`
-	// Running 是该会话是否有未终态的轮次（thread.list 的 Core 内存态投影）：
-	// 侧栏据此显示运行点并隐藏删除按钮（renderThreadRow）。
+	// Running 是该会话是否有未终态的轮次（thread.list 的 Core 内存态投影）。
 	Running bool `json:"running"`
 }
 
@@ -158,178 +154,72 @@ type toolPayload struct {
 
 // ---- 模板视图 ----
 
-// baseData 是所有页面共用的外壳字段（嵌入后模板按提升字段访问）。
+// baseData 是 shell/login/error 共用的最小外壳字段。整页 SSR 移除后，
+// 页面内容由 /static/ada 运行时装载；这里只保留身份/工作区/CSRF 与
+// bootstrap JSON 投影所需的数据。
 type baseData struct {
-	Title               string
-	Page                string // chat | overview | extensions | ext:<id>
-	NeedsUI             bool   // 页面含 AdaUI 客户端岛时才加载引擎/组件资源
-	ProductName         string
-	BrandName           string
-	ProductBadge        string
-	Locale              string
-	Identity            string
-	LoginPath           string
-	CSRF                string
-	Workspace           string
-	WorkspaceName       string
-	WorkspaceIndex      int
-	Workspaces          []workspaceOption
-	ShowWorkspacePicker bool
-	RefreshSeconds      int
-	Gateway             string
-	ActiveThreadID      string
-	Connected           bool
-	TopbarActions       template.HTML
-	// PluginNav 是前端插件声明的侧栏导航（供应商 / Token 用量等）。
-	PluginNav []pluginNavLink
-	// Flash 是提示条 HTML（空 = 不渲染）。
+	Title         string
+	ProductName   string
+	BrandName     string
+	ProductBadge  string
+	Locale        string
+	Identity      string
+	LoginPath     string
+	CSRF          string
+	Workspace     string
+	WorkspaceName string
+	// Workspaces 是工作区选择器的选项（bootstrap JSON 一并带给客户端）。
+	Workspaces []workspaceOption
+	// Gateway 是网关地址（bootstrap JSON 与「未连接」提示用）。
+	Gateway string
+	// Flash 是提示条 HTML（空 = 不渲染）；PRG 回跳的 ?error=/?notice= 仍由它表达。
 	Flash template.HTML
-	// Sidebar 是组件库渲染好的侧栏整块 HTML。
-	Sidebar template.HTML
-	// Icons 是页面级 SVG sprite。
-	Icons template.HTML
-	// ConfirmDialog 是共享确认弹窗（每个外壳都必须带上）。
-	ConfirmDialog template.HTML
-	// Slots 是 12 个稳定插槽的 SSR 宿主内容。M2 阶段由基座保持为空，
-	// M4 接上插件宿主后由渲染结果填充；模板通过 {{slot ...}} 落位。
-	Slots slotViews
-	// SlotCounts 是每个插槽的贡献者数量（data-contributors）；PluginUI 缺席时全为 0。
-	SlotCounts slotCounts
-	// PluginStyles / PluginScripts 是插件静态资源的 URL（/ext/{id}/static/...）。
-	PluginStyles  []string
-	PluginScripts []string
+	// BootstrapJSON 是 <script type="application/json" id="ada-bootstrap"> 的内容：
+	// app/workspace/csrf 投影。类型是 template.JS（script 上下文原样插入；
+	// json.Marshal 已把 < > & 转义成 \uXXXX，不会提前闭合 script 标签）。
+	BootstrapJSON template.JS
 }
 
-// slotCounts 是 12 个插槽的贡献者计数，字段与 slotViews 一一对应。
-type slotCounts struct {
-	SidebarTop       int
-	SidebarBottom    int
-	TopbarRight      int
-	ChatCorner       int
-	ComposerLeft     int
-	ComposerRight    int
-	ComposerFooter   int
-	ComposerAbove    int
-	ThreadTray       int
-	TranscriptAfter  int
-	ExtensionsList   int
-	DashboardWidgets int
-}
-
-// slotViews 是 12 个插槽的模板字段，字段名与 7.2 表格一一对应。
-// 所有值都是 template.HTML，只能由基座（或经过 VNode 校验的插件宿主）写入；
-// 插件与消息文本不会被提升为 template.HTML。
-type slotViews struct {
-	SidebarTop       template.HTML
-	SidebarBottom    template.HTML
-	TopbarRight      template.HTML
-	ChatCorner       template.HTML
-	ComposerLeft     template.HTML
-	ComposerRight    template.HTML
-	ComposerFooter   template.HTML
-	ComposerAbove    template.HTML
-	ThreadTray       template.HTML
-	TranscriptAfter  template.HTML
-	ExtensionsList   template.HTML
-	DashboardWidgets template.HTML
+// bootstrapData 是 ada-bootstrap JSON 的形状（dev-plan §F6/S1：shell 内联 props）。
+type bootstrapData struct {
+	Route          string            `json:"route"`
+	Locale         string            `json:"locale"`
+	Title          string            `json:"title"`
+	ProductName    string            `json:"productName"`
+	BrandName      string            `json:"brandName"`
+	ProductBadge   string            `json:"productBadge,omitempty"`
+	Identity       string            `json:"identity,omitempty"`
+	LoginPath      string            `json:"loginPath"`
+	CSRF           string            `json:"csrf,omitempty"`
+	Workspace      string            `json:"workspace"`
+	WorkspaceName  string            `json:"workspaceName"`
+	WorkspaceIndex int               `json:"workspaceIndex"`
+	Workspaces     []workspaceOption `json:"workspaces,omitempty"`
+	Gateway        string            `json:"gateway"`
 }
 
 // workspaceOption 是工作区选择器的一项。
 type workspaceOption struct {
-	Index int
-	Name  string
-	Path  string
+	Index int    `json:"index"`
+	Name  string `json:"name"`
+	Path  string `json:"path"`
 }
 
-// pluginNavLink 是前端插件贡献的一个侧栏导航项。
-type pluginNavLink struct {
-	PluginID string
-	Label    string
-	Href     string
-}
-
-type threadsData struct {
+type errorData struct {
 	baseData
-	IsHome     bool
-	Threads    []threadRow
-	Limit      int
-	NextCursor string
-	HasMore    bool
+	Status     int
+	Heading    string
+	Message    string
+	Detail     string
+	RetryPath  string
+	RetryLabel string
 }
 
-type threadRow struct {
-	ID        string
-	Title     string
-	UpdatedAt string
-	Archived  bool
-}
-
-type threadData struct {
+type loginData struct {
 	baseData
-	Thread       threadInfo
-	Run          runView
-	Transcript   []transcriptItem
-	Interactions []interactionView
-	TurnKey      string
-	// Greeting 是新建任务页按时间变化的问候语。
-	Greeting string
-	// TranscriptStateJSON 是对话流岛的初始数据：助手文本是 VNode 数据，
-	// 工具/用户/Notice 行仍是服务端渲染 HTML；没有 JS 时用 Transcript 的 SSR 行。
-	TranscriptStateJSON string
-	// Models 是当前可选的供应商/模型（model.list 投影，供输入框旁的选择器）。
-	Models            []modelOption
-	CurrentModelLabel string
-	CurrentModelValue string
-	// CurrentModelLevels/Level 是当前模型可选的推理档位与已选档位。
-	CurrentModelLevels []string
-	CurrentModelLevel  string
-	// HasOlder/OlderHref 是对话流顶部的「加载更早消息」链接（8.2 游标分页）：
-	// Core 的 thread.entries 默认只回最近 100 条，更早的历史靠它继续翻。
-	HasOlder  bool
-	OlderHref string
 }
 
-type modelOption struct {
-	ProviderID     string
-	ModelID        string
-	Label          string
-	ShortLabel     string
-	Current        bool
-	ThinkingLevels []string
-	ThinkingLevel  string
-	// ThinkingLevelsCSV 是模板用的档位串（low|high|max），供级联子菜单读取。
-	ThinkingLevelsCSV string
-}
-
-// modelPickerData 是 model.list 的展示投影：选项、当前标签/值、当前推理档位。
-type modelPickerData struct {
-	Models []modelOption
-	Label  string
-	Value  string
-	Levels []string
-	Level  string
-}
-
-type threadInfo struct {
-	ID        string
-	Title     string
-	CreatedAt string
-	UpdatedAt string
-	Archived  bool
-}
-
-type runView struct {
-	Status      string
-	Terminal    string
-	Label       string
-	StartedAt   string
-	EndedAt     string
-	Active      bool
-	ErrorCode   int
-	ErrorLabel  string
-	ErrorDetail string
-}
-
+// transcriptItem 是对话流的一行（中间形态：Core entries → JSON 数据行）。
 type transcriptItem struct {
 	Kind  string // user | assistant | tool | notice
 	Key   string
@@ -338,7 +228,7 @@ type transcriptItem struct {
 	Tool  *toolView
 	Level string
 	Text  string
-	// 以下字段只给 user 行：内联“编辑并重发”表单的上下文。
+	// 以下字段只给 user 行：「编辑并重发」的上下文。
 	// EditText 是原文（只含文本段，图片由服务端沿用），CanEdit 由轮次状态决定；
 	// EditKey 是每个表单独立的幂等键，防止双击重复起轮。
 	EditText string
@@ -348,38 +238,11 @@ type transcriptItem struct {
 	CanEdit  bool
 }
 
-// transcriptPartState 是助手消息的一段：text 段带 VNode 数据（由 ui-markdown
-// 渲染），thinking/image 只带原始数据。
-type transcriptPartState struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text,omitempty"`
-	Nodes json.RawMessage `json:"nodes,omitempty"`
-}
-
-// transcriptRowState 是对话流 JSON 的一行：key 用于浏览器 keyed diff。
-// 助手行提供 parts（前端组件渲染）；工具/用户/Notice 行提供服务端模板 HTML。
-type transcriptRowState struct {
-	Key   string                `json:"key"`
-	Kind  string                `json:"kind,omitempty"`
-	At    string                `json:"at,omitempty"`
-	Parts []transcriptPartState `json:"parts,omitempty"`
-	HTML  string                `json:"html,omitempty"`
-}
-
-// transcriptPayload 是 /partials/transcript/{id} 的响应。
-type transcriptPayload struct {
-	ThreadID  string               `json:"threadId"`
-	RunStatus string               `json:"runStatus"`
-	Rows      []transcriptRowState `json:"rows"`
-}
-
 type partView struct {
 	Type string // text | thinking | image
 	Text string
-	// HTML 是助手文本的预渲染结果（含 Markdown 动态块）；空时模板回退到 markdown 函数。
-	HTML template.HTML
 	// Mime/Data 仅在 Type=image 时有值：data URL 的两半，
-	// 模板拼成 src="data:{{.Mime}};base64,{{.Data}}" 渲染消息里的图片。
+	// JSON 行拼成 src="data:{{.Mime}};base64,{{.Data}}" 渲染消息里的图片。
 	Mime string
 	Data string
 }
@@ -398,57 +261,139 @@ type toolView struct {
 	Reason      string
 }
 
-type interactionView struct {
-	ID      string
-	Kind    string
-	Title   string
-	Body    string
-	Status  string
-	Options []string
-	Action  string
-	CSRF    string
-	// Questions 只在 kind=form 时有值：多题分步表单的题目（body 里的 JSON）。
-	Questions []interactionQuestion
+// transcriptPartState 是对话流 JSON 行里的一段：
+//   - assistant 行：text 段带 VNode 节点（nodes），thinking/image 只带原始数据；
+//   - user 行：text/thinking 带原文，image 带 data URL 的两半（mime/data）。
+type transcriptPartState struct {
+	Type  string          `json:"type"`
+	Text  string          `json:"text,omitempty"`
+	Nodes json.RawMessage `json:"nodes,omitempty"`
+	Mime  string          `json:"mime,omitempty"`
+	Data  string          `json:"data,omitempty"`
 }
 
-// interactionQuestion 是分步表单里的一题；Index 用于表单字段名 q0、q1…
-type interactionQuestion struct {
-	Index    int
-	Question string
-	Kind     string // confirm | select | input
-	Options  []string
+// toolRowState 是工具行 JSON 的 tool 对象（旧 SSR 模板 row→tool 的字段投影）。
+type toolRowState struct {
+	CallID      string `json:"callId,omitempty"`
+	Name        string `json:"name"`
+	Status      string `json:"status,omitempty"`
+	StatusLabel string `json:"statusLabel,omitempty"`
+	DurationMS  int64  `json:"durationMs,omitempty"`
+	Truncated   bool   `json:"truncated,omitempty"`
+	Args        string `json:"args,omitempty"`
+	ArgsHint    string `json:"argsHint,omitempty"`
+	Output      string `json:"output,omitempty"`
+	Details     string `json:"details,omitempty"`
+	Reason      string `json:"reason,omitempty"`
 }
 
-type errorData struct {
-	baseData
-	Status     int
-	Heading    string
-	Message    string
-	Detail     string
-	RetryPath  string
-	RetryLabel string
+// transcriptRowState 是 /partials/transcript/{id} 的一行：key 用于浏览器 keyed diff。
+//
+// 行 JSON 形状（kind → 字段）：
+//
+//	assistant: {key, kind:"assistant", at, parts[]}；
+//	           parts[i] = {type:"text", nodes:[VNode]} | {type:"thinking", text} | {type:"image"}
+//	           （助手行保持 VNode 形态，nodes 由 ui-markdown 渲染）
+//	user:      {key, kind:"user", at, parts[], canEdit?, editKey?, editText?, threadId?, csrf?}；
+//	           parts[i] = {type:"text", text} | {type:"thinking", text} | {type:"image", mime, data}
+//	           编辑上下文只在 canEdit=true 的行出现（threadId 用于表单地址，
+//	           csrf 供「编辑并重发」表单的双提交校验，语义与旧 SSR 行内表单一致）
+//	tool:      {key, kind:"tool", at, tool:{callId, name, status, statusLabel, durationMs,
+//	           truncated, args, argsHint, output, details, reason}}（图标/色调由客户端派生）
+//	notice:    {key, kind:"notice", at, level, text}（level: info | warn | error）
+//	plain:     {key, kind:"plain", at, text}（兜底行；正常投影不产出）
+type transcriptRowState struct {
+	Key   string                `json:"key"`
+	Kind  string                `json:"kind"`
+	At    string                `json:"at,omitempty"`
+	Parts []transcriptPartState `json:"parts,omitempty"`
+	Tool  *toolRowState         `json:"tool,omitempty"`
+	Level string                `json:"level,omitempty"`
+	Text  string                `json:"text,omitempty"`
+	// user 行的「编辑并重发」上下文；CanEdit=false 时全部省略。
+	CanEdit  bool   `json:"canEdit,omitempty"`
+	EditKey  string `json:"editKey,omitempty"`
+	EditText string `json:"editText,omitempty"`
+	ThreadID string `json:"threadId,omitempty"`
+	CSRF     string `json:"csrf,omitempty"`
 }
 
-// notFoundData 是 404 页：保留完整外壳与导航，避免用户落到裸文本 404。
-type notFoundData struct {
-	baseData
-	Path string
+// transcriptPayload 是 /partials/transcript/{id} 的响应。
+// HasMore/NextCursor 只在历史分页（?before=<cursor>）时有值：客户端据此
+// 渲染「加载更早消息」入口（8.2 游标分页，与 HEAD 的 OlderHref 语义一致）。
+type transcriptPayload struct {
+	ThreadID   string               `json:"threadId"`
+	RunStatus  string               `json:"runStatus"`
+	Rows       []transcriptRowState `json:"rows"`
+	HasMore    bool                 `json:"hasMore,omitempty"`
+	NextCursor string               `json:"nextCursor,omitempty"`
 }
 
-type loginData struct {
-	baseData
+// threadListItem 是 /partials/threads.json 的一行（侧栏/会话列表共用投影，
+// 字段语义与 HEAD 侧栏 renderThreadRow 一致：title 空串给客户端兜底，
+// running 是 Core 内存态的未终态轮次标记）。
+type threadListItem struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	UpdatedAt string `json:"updatedAt"`
+	Archived  bool   `json:"archived"`
+	Running   bool   `json:"running"`
 }
 
-// overviewData 是概览页（/overview）：统计卡 + 最近会话 + 插件卡片。
-type overviewData struct {
-	baseData
-	Stats  []overviewStat
-	Recent []overviewThread
-	// StateJSON 是给浏览器岛（AdaUI）的初始状态；无 JS 时仍渲染 Stats/Recent。
-	StateJSON string
+// threadsPayload 是 /partials/threads.json 的响应：单工作区一次 thread.list。
+// workspace 是该批会话归属的工作区路径（跨工作区查询用 ?path=<路径> 显式指定）。
+type threadsPayload struct {
+	Workspace     string           `json:"workspace"`
+	WorkspaceName string           `json:"workspaceName"`
+	Threads       []threadListItem `json:"threads"`
+	HasMore       bool             `json:"hasMore"`
+	NextCursor    string           `json:"nextCursor"`
 }
 
-// dashboardState 是 /partials/dashboard.json 与概览岛共用的数据形态。
+// modelPickerOption 是 /partials/model.json 里的一项（HEAD 模板 data-value/
+// data-labels 等属性的 JSON 等价物；value 是 "providerId|modelId" 组合键）。
+type modelPickerOption struct {
+	Value          string   `json:"value"`
+	ProviderID     string   `json:"providerId"`
+	ModelID        string   `json:"modelId"`
+	Label          string   `json:"label"`
+	ShortLabel     string   `json:"shortLabel"`
+	Current        bool     `json:"current"`
+	ThinkingLevels []string `json:"thinkingLevels"`
+	ThinkingLevel  string   `json:"thinkingLevel,omitempty"`
+}
+
+// modelPickerState 是 /partials/model.json 的响应（model.list 的展示投影）。
+type modelPickerState struct {
+	Models       []modelPickerOption `json:"models"`
+	CurrentLabel string              `json:"currentLabel"`
+	CurrentValue string              `json:"currentValue"`
+	// CurrentLevels/CurrentLevel 是当前模型的推理档位与已选档位。
+	CurrentLevels []string `json:"currentLevels,omitempty"`
+	CurrentLevel  string   `json:"currentLevel,omitempty"`
+}
+
+// interactionQuestionState 是 form 交互里的一题（body JSON 投影；
+// index 对应表单字段名 q0、q1…，与 handleInteraction 的 formAnswers 对齐）。
+type interactionQuestionState struct {
+	Index    int      `json:"index"`
+	Question string   `json:"question"`
+	Kind     string   `json:"kind"` // confirm | select | input
+	Options  []string `json:"options,omitempty"`
+}
+
+// interactionViewState 是 /threads/{id}/state 里 interactions 的一项：
+// 只保留 pending 的交互，字段与 HEAD interactions 子模板一致。
+type interactionViewState struct {
+	ID        string                     `json:"id"`
+	Kind      string                     `json:"kind"`
+	Title     string                     `json:"title"`
+	Body      string                     `json:"body,omitempty"`
+	Options   []string                   `json:"options,omitempty"`
+	Questions []interactionQuestionState `json:"questions,omitempty"`
+}
+
+// dashboardState 是 /partials/dashboard.json 的数据形态。
 type dashboardState struct {
 	Stats  []overviewStat   `json:"stats"`
 	Recent []overviewThread `json:"recent"`
@@ -472,70 +417,11 @@ type overviewThread struct {
 	UpdatedLabel string `json:"updatedLabel"`
 }
 
-// workspacesData 是工作区页（/workspaces）：磁盘/常用位置 + 最近工作区 + 目录浏览。
-type workspacesData struct {
-	baseData
-	Roots      []workspaceRoot
-	Recent     []workspaceRecent
-	Current    string
-	Parent     string
-	ParentHref string
-	Entries    []workspaceEntry
-	Truncated  bool
-	Omitted    int
-	BindThread string
-	// Selectable 表示当前浏览目录正好是某个已配置工作区，可以设为当前工作区。
-	Selectable bool
-	// StateJSON 是给浏览器岛的初始状态；无 JS 时仍渲染上面的字段。
-	StateJSON string
-}
-
-// workspacesState 是工作区岛与后续 JSON 刷新共用的数据形态。
-type workspacesState struct {
-	Roots      []workspaceRoot   `json:"roots"`
-	Recent     []workspaceRecent `json:"recent"`
-	Current    string            `json:"current"`
-	Parent     string            `json:"parent"`
-	ParentHref string            `json:"parentHref"`
-	Entries    []workspaceEntry  `json:"entries"`
-	Truncated  bool              `json:"truncated"`
-	Omitted    int               `json:"omitted"`
-	Selectable bool              `json:"selectable"`
-	CSRF       string            `json:"csrf"`
-}
-
-type workspaceRoot struct {
-	Label string `json:"label"`
-	Path  string `json:"path"`
-	Href  string `json:"href"`
-	Kind  string `json:"kind"`
-}
-
-type workspaceRecent struct {
-	Path     string `json:"path"`
-	Name     string `json:"name"`
-	Sessions int    `json:"sessions"`
-	Active   bool   `json:"active"`
-	// Known 表示该工作区的会话数已知（只有当前工作区查询过）。
-	Known bool `json:"known"`
-}
-
+// workspaceEntry 是目录浏览的一项（FilePicker /api/fs/list）。
 type workspaceEntry struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 	Href string `json:"href"`
-}
-
-// extensionsData 是插件页（/extensions）：统一列表（不再按前端/后端分区）。
-type extensionsData struct {
-	baseData
-	Plugins     []pluginRow
-	PluginCount int
-	// EnabledCount / DisabledCount 给 SSR 的筛选分段用；客户端岛从 plugins 自行统计。
-	EnabledCount  int
-	DisabledCount int
-	// StateJSON 是给浏览器岛的初始状态；无 JS 时仍渲染 Plugins。
-	StateJSON string
 }
 
 // extensionsState 是插件列表岛与 /partials/extensions.json 共用的数据形态。
@@ -545,8 +431,7 @@ type extensionsState struct {
 	CSRF    string      `json:"csrf"`
 }
 
-// pluginRow 是插件列表/详情的一行：同一个 id 的前端与后端能力合并成一条。
-// 前端/后端归属（Frontend/Backend）只在详情页展示，列表里不分区。
+// pluginRow 是插件列表的一行：同一个 id 的前端与后端能力合并成一条。
 type pluginRow struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -556,27 +441,20 @@ type pluginRow struct {
 	Description string `json:"description"`
 	Source      string `json:"source"`
 	// Path 是第三方插件的绝对目录；随包插件为空。
-	Path         string `json:"path,omitempty"`
-	Status       string `json:"status"`
-	StatusLabel  string `json:"statusLabel"`
-	StatusTone   string `json:"statusTone"`
-	Error        string `json:"error"`
-	Enabled      bool   `json:"enabled"`
-	Frontend     bool   `json:"frontend"`
-	Backend      bool   `json:"backend"`
-	Tools        int    `json:"tools"`
-	Hooks        int    `json:"hooks"`
-	Skills       int    `json:"skills"`
-	Slots        int    `json:"slots"`
-	Pages        int    `json:"pages"`
-	Nav          int    `json:"nav"`
-	FirstPage    string `json:"firstPage"`
-	HasDashboard bool   `json:"hasDashboard"`
-	// Readme 是插件 README（无 README 时回退为清单说明）；ReadmeNodes 是
-	// 给前端 ui-markdown 的 VNode 数据（详情页岛直接渲染，不再跑一次 Markdown）。
-	Readme      string          `json:"readme,omitempty"`
-	ReadmeNodes json.RawMessage `json:"readmeNodes,omitempty"`
-	// Files 是插件包内文件清单（详情页「插件目录」）。
+	Path        string `json:"path,omitempty"`
+	Status      string `json:"status"`
+	StatusLabel string `json:"statusLabel"`
+	StatusTone  string `json:"statusTone"`
+	Error       string `json:"error"`
+	Enabled     bool   `json:"enabled"`
+	Frontend    bool   `json:"frontend"`
+	Backend     bool   `json:"backend"`
+	Tools       int    `json:"tools"`
+	Hooks       int    `json:"hooks"`
+	Skills      int    `json:"skills"`
+	// Readme 是插件 README（无 README 时回退为清单说明）。
+	Readme string `json:"readme,omitempty"`
+	// Files 是插件包内文件清单（详情的「插件目录」）。
 	Files []pluginFileDTO `json:"files,omitempty"`
 }
 
@@ -590,199 +468,18 @@ type pluginFileDTO struct {
 	DepthClass string `json:"depthClass,omitempty"`
 }
 
-// pluginFileView 是右侧预览的单个文件内容。
+// pluginFileView 是 GET /extensions/{id}/file 返回的单个文件内容。
+// 高亮/预览 HTML 已随 SSR 删除：前端拿原文自行渲染（或走 /markdown.ast）。
 type pluginFileView struct {
-	Path      string        `json:"path"`
-	Size      int64         `json:"size"`
-	SizeLabel string        `json:"sizeLabel,omitempty"`
-	Content   string        `json:"content,omitempty"`
-	HTML      template.HTML `json:"html,omitempty"`
-	Language  string        `json:"language,omitempty"`
-	Binary    bool          `json:"binary,omitempty"`
-	Truncated bool          `json:"truncated,omitempty"`
-	Error     string        `json:"error,omitempty"`
-	// Markdown / PreviewHTML 让 Markdown 文件多一个「预览」视图：宿主用同一套
-	// goldmark+bluemonday 管线把正文渲染出来，前端只负责在源码与预览之间切换。
-	Markdown    bool          `json:"markdown,omitempty"`
-	PreviewHTML template.HTML `json:"previewHtml,omitempty"`
-	// ShowPreview 是当前这次渲染是否处于预览态（?view=md）。无 JS 时由模板消费，
-	// 有 JS 时岛屿用自己的 preview 状态，两者语义一致。
-	ShowPreview bool `json:"showPreview,omitempty"`
-}
-
-// pluginDetailData 是 /extensions/{id} 的详情页。
-type pluginDetailData struct {
-	baseData
-	Plugin pluginRow
-	File   *pluginFileView
-	// StateJSON 是给浏览器岛的初始状态；无 JS 时仍渲染 Plugin。
-	StateJSON string
-}
-
-// pluginDetailState 是插件详情岛的数据形态。
-type pluginDetailState struct {
-	Plugin pluginRow       `json:"plugin"`
-	File   *pluginFileView `json:"file,omitempty"`
-	CSRF   string          `json:"csrf"`
-}
-
-// offlineData 是二级页的离线壳：保留页面外壳，内容区如实说“未连接”。
-type offlineData struct {
-	baseData
-	Reason string
-}
-
-// buildRun 把 Core 的运行状态翻译成界面文案。
-func buildRun(rs runStateDTO) runView {
-	detail := trimRunErrorDetail(rs.ErrorDetail)
-	v := runView{
-		Status:      rs.Status,
-		Terminal:    rs.Terminal,
-		StartedAt:   rs.StartedAt,
-		EndedAt:     rs.EndedAt,
-		ErrorCode:   rs.ErrorCode,
-		ErrorLabel:  runErrorLabel(rs.Terminal, rs.ErrorCode, detail),
-		ErrorDetail: detail,
-	}
-	switch rs.Status {
-	case "running":
-		v.Label = "运行中"
-		v.Active = true
-	case "waiting_input":
-		v.Label = "等待答复"
-	case "finishing":
-		v.Label = "收尾中"
-		v.Active = true
-	case "terminal", "":
-		switch rs.Terminal {
-		case "completed":
-			v.Label = "完成"
-		case "cancelled":
-			v.Label = "已停止"
-		case "error":
-			v.Label = "失败"
-		case "interrupted":
-			v.Label = "已中断"
-		case "budget_exceeded":
-			v.Label = "超出预算"
-		default:
-			v.Label = "空闲"
-		}
-	default:
-		v.Label = rs.Status
-	}
-	return v
-}
-
-// runErrorLabel 把终态错误映射成给用户看的下一步；详情仍以诊断码为准。
-func runErrorLabel(terminal string, code int, detail string) string {
-	switch terminal {
-	case "error":
-		if domain.Code(code) == domain.CodeProviderError {
-			return "供应商调用失败：请检查 Base URL 与 API Key，或切换到其他模型后重试。"
-		}
-		if detail != "" {
-			return "本轮执行失败；原因见下方，请检查供应商配置后重试。"
-		}
-		return "本轮执行失败；请检查供应商配置后重试。"
-	case "interrupted":
-		return "本轮被中断（网关重启或进程退出），可以重新发送。"
-	case "budget_exceeded":
-		return "本轮超出配置的预算；调整预算或缩短任务后重试。"
-	}
-	return ""
-}
-
-// maxRunErrorDetail 是终态错误详情在页面上的上限：供应商原始响应可能是很长的
-// HTML/JSON，页面只保留能定位问题的那一段。
-const maxRunErrorDetail = 600
-
-// trimRunErrorDetail 去掉首尾空白并截断过长的错误详情。
-func trimRunErrorDetail(s string) string {
-	s = strings.TrimSpace(strings.ReplaceAll(s, "\r\n", "\n"))
-	if s == "" {
-		return ""
-	}
-	if utf8.RuneCountInString(s) > maxRunErrorDetail {
-		s = string([]rune(s)[:maxRunErrorDetail]) + "…"
-	}
-	return s
-}
-
-// buildThreadList 把线程列表投影成模板行。
-func buildThreadList(in []threadSummaryDTO) []threadRow {
-	out := make([]threadRow, 0, len(in))
-	for _, t := range in {
-		out = append(out, threadRow{
-			ID:        t.ID,
-			Title:     t.Title,
-			UpdatedAt: t.UpdatedAt,
-			Archived:  t.Archived,
-		})
-	}
-	return out
-}
-
-// buildThreadInfo 填充会话页头部。
-func buildThreadInfo(t threadDTO) threadInfo {
-	return threadInfo{
-		ID:        t.ID,
-		Title:     t.Title,
-		CreatedAt: t.CreatedAt,
-		UpdatedAt: t.UpdatedAt,
-		Archived:  t.Archived,
-	}
-}
-
-// buildInteractions 只保留 pending 的交互，并为每条生成无 JS 表单地址。
-func buildInteractions(in []interactionDTO, threadID, csrf string) []interactionView {
-	out := make([]interactionView, 0, len(in))
-	for _, x := range in {
-		if x.Status != "" && x.Status != "pending" {
-			continue
-		}
-		view := interactionView{
-			ID:      x.ID,
-			Kind:    x.Kind,
-			Title:   x.Title,
-			Body:    x.Body,
-			Status:  x.Status,
-			Options: append([]string(nil), x.Options...),
-			Action:  threadPath(threadID) + "/interaction/" + url.PathEscape(x.ID),
-			CSRF:    csrf,
-		}
-		if x.Kind == string(domain.InteractionForm) {
-			// 题目存在 body 里（interactions 表没有 payload 列）；解析失败就当空表单，
-			// 让用户至少能取消，而不是看到一段裸 JSON。
-			view.Questions = parseInteractionQuestions(x.Body)
-			view.Body = ""
-		}
-		out = append(out, view)
-	}
-	return out
-}
-
-// parseInteractionQuestions 解析 form 交互 body 里的题目数组。
-func parseInteractionQuestions(raw string) []interactionQuestion {
-	var items []struct {
-		Question string   `json:"question"`
-		Kind     string   `json:"kind"`
-		Options  []string `json:"options"`
-	}
-	if json.Unmarshal([]byte(raw), &items) != nil {
-		return nil
-	}
-	out := make([]interactionQuestion, 0, len(items))
-	for i, it := range items {
-		kind := strings.TrimSpace(it.Kind)
-		if kind != "confirm" && kind != "select" && kind != "input" {
-			kind = "input"
-		}
-		out = append(out, interactionQuestion{
-			Index: i, Question: it.Question, Kind: kind, Options: it.Options,
-		})
-	}
-	return out
+	Path      string `json:"path"`
+	Size      int64  `json:"size"`
+	SizeLabel string `json:"sizeLabel,omitempty"`
+	Content   string `json:"content,omitempty"`
+	Binary    bool   `json:"binary,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+	Error     string `json:"error,omitempty"`
+	// Markdown 标记该文件可按 Markdown 预览（前端据此提供「预览/源码」切换）。
+	Markdown bool `json:"markdown,omitempty"`
 }
 
 // buildTranscript 把 entries（Core 按 seq 降序返回）转成按时间正序的展示项。
@@ -880,7 +577,7 @@ func messageItem(raw json.RawMessage, role, at string) transcriptItem {
 			}
 			parts = append(parts, partView{Type: "thinking", Text: clip(p.Text, maxPartBytes)})
 		case "image":
-			// Data 直接进模板渲染 data URL；不截断（截断会让图片解码失败）。
+			// Data 进 JSON 行的 data URL 两半；不截断（截断会让图片解码失败）。
 			parts = append(parts, partView{Type: "image", Mime: p.Mime, Data: p.Data})
 		default:
 			if strings.TrimSpace(p.Text) == "" {

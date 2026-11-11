@@ -6,22 +6,24 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/adag/ada-go/internal/agent_core/coreapp"
+	"github.com/adag/ada-go/internal/common/domain"
 	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/gateway/contracts"
 	"github.com/adag/ada-go/internal/gateway/dispatch"
@@ -66,8 +68,8 @@ type Config struct {
 	// 生命周期也由调用方负责（Gateway.Shutdown 不会关闭它）。测试用于
 	// 在不 spawn Core 的情况下验证鉴权、SSR 与错误页。
 	Supervisor contracts.Supervisor
-	// FrontendScripts 是带 frontend 段的插件加载单元（M4，7.5；含统一插件包）：
-	// 非空时组合根构建 web.PluginUI 渲染桥，SSR 填充插槽并提供 /ext 页面。
+	// FrontendScripts 是带 frontend 段的插件加载单元（7.5；含统一插件包）：
+	// 非空时组合根构建插件宿主桥（/ext 静态资源、动作桥、Markdown 动态块）。
 	// 脚本由上层组合根注入（app/ 层）——internal/ 不 import official/。
 	FrontendScripts []pluginapi.Script
 	// WorkspacesFile 是工作区列表的持久化文件；FilePicker 新登记的工作区
@@ -254,10 +256,7 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 	if err != nil {
 		return nil, err
 	}
-	frontendScripts, err := selectFrontendScripts(cfg.FrontendScripts)
-	if err != nil {
-		return nil, err
-	}
+	frontendScripts := cfg.FrontendScripts
 
 	accessToken := strings.TrimSpace(cfg.Token)
 	if accessToken == "" {
@@ -344,21 +343,21 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 	resolveWorkspace := workspaceResolver(workspaces)
 	requestWorkspace := newWorkspaceRequestResolver(resolveWorkspace)
 	events := &eventHandler{sup: sup, workspaceFor: requestWorkspace.Resolve}
-	// M4 前端插件渲染桥（7.5）：脚本由上层注入；为空时全部插槽保持基座占位。
-	// 前端插件在进程内固定装配，是否渲染由 plugin.list 的启用状态实时过滤。
+	workspaceEvents := &workspaceEventsHandler{sup: sup, workspaceFor: requestWorkspace.Resolve}
+	// 插件宿主桥（7.5）：脚本由上层注入；为空时 /ext 静态资源与动作桥 404、
+	// 无 Markdown 动态块、前端注册表为空。插件前端贡献由客户端运行时装载
+	// （dev-plan R1），桥只提供静态资源、动作绑定、插件列表与块渲染。
 	var pluginUI web.PluginUI
+	var registrySource web.RegistrySource
 	if len(frontendScripts) > 0 {
 		gate := newFrontendGate(sup, requestWorkspace.Resolve)
 		bridge, err := frontend.NewBridge(frontend.BridgeOptions{
 			Scripts:           frontendScripts,
-			Supervisor:        sup,
 			WorkspaceFor:      requestWorkspace.Resolve,
 			ProductName:       product.Name,
-			CSRF:              mw.CSRFToken,
 			Enabled:           gate.Enabled,
 			InvalidateEnabled: gate.Invalidate,
 			MarkdownBlocks:    product.Capabilities.MarkdownBlocks,
-			DisableIslands:    disableIslandsFromEnv() || !product.Capabilities.PluginIslands,
 			BlockAudit: func(ev frontend.BlockAuditEvent) {
 				log.Printf("audit %s plugin=%s renderer=%s block=%s error=%s",
 					ev.Kind, ev.PluginID, ev.Renderer, ev.BlockID, ev.Error)
@@ -369,14 +368,15 @@ func New(ctx context.Context, cfg Config) (*Gateway, error) {
 			return nil, fmt.Errorf("gateway: 前端插件装配失败: %w", err)
 		}
 		pluginUI = bridge
+		registrySource = bridge
 	}
 	webSrv, err := web.New(web.Config{
 		Supervisor: sup, Workspace: cfg.Workspace, Workspaces: workspaces,
 		WorkspaceFor: resolveWorkspace, CookieSecure: cfg.Secure,
 		ProductName: product.Name, BrandName: product.Identity.Name,
 		Locale: product.Identity.Locale,
-		Events: events, CSRF: mw.CSRFToken, LoginPath: "/login",
-		PluginUI: pluginUI,
+		Events: events, WorkspaceEvents: workspaceEvents, CSRF: mw.CSRFToken, LoginPath: "/login",
+		PluginUI: pluginUI, Registry: registrySource,
 		WorkspacesChanged: func(list []string) {
 			if !persistWorkspaces {
 				return
@@ -647,6 +647,90 @@ func (h *eventHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	hub.ServeHTTP(w, r)
 }
 
+// workspaceEventsHandler 是 GET /events/workspace：工作区级事件
+// （evt.ready / evt.plugin.changed，docs/08 §8.2）的 SSE 流。
+//
+// 线程级事件不进这条流（sse.Hub 按 threadId 分发并跳过无 threadId 的事件，
+// hub.go 的 run()）；反过来工作区事件也独立成流，seq 取 params.workspaceSeq。
+// 事件稀疏：不做合并窗口，15s 心跳；不做历史回放——断线重连的客户端以
+// GET /frontend-registry 全量重同步为准（dev-plan §8.3）。
+type workspaceEventsHandler struct {
+	sup          contracts.Supervisor
+	workspaceFor func(*http.Request) string
+}
+
+func (h *workspaceEventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	workspace := ""
+	if h.workspaceFor != nil {
+		workspace = h.workspaceFor(r)
+	}
+	core, err := h.sup.Acquire(r.Context(), workspace)
+	if err != nil {
+		http.Error(w, "Core 不可用: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer h.sup.Release(workspace)
+
+	events, cancel := core.Subscribe(64)
+	defer cancel()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "连接不支持流式响应", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	if _, err := io.WriteString(w, "retry: 3000\n\n"); err != nil {
+		return
+	}
+	flusher.Flush()
+
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case evt, alive := <-events:
+			if !alive {
+				return
+			}
+			if !isWorkspaceEvent(evt.Method) {
+				continue
+			}
+			var buf bytes.Buffer
+			if seq := workspaceSeq(evt.Params); seq > 0 {
+				fmt.Fprintf(&buf, "id: %d\n", seq)
+			}
+			fmt.Fprintf(&buf, "event: %s\ndata: %s\n\n", evt.Method, evt.Params)
+			if _, err := w.Write(buf.Bytes()); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-heartbeat.C:
+			if _, err := io.WriteString(w, ": keepalive\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+func isWorkspaceEvent(method string) bool {
+	return method == string(domain.EvtReady) || method == string(domain.EvtPluginChanged)
+}
+
+func workspaceSeq(params json.RawMessage) int64 {
+	var meta struct {
+		WorkspaceSeq int64 `json:"workspaceSeq"`
+	}
+	_ = json.Unmarshal(params, &meta)
+	return meta.WorkspaceSeq
+}
+
 // normalizeWorkspaces 合并单/多工作区配置：Workspaces 非空时优先；
 // 每个路径取绝对路径，去重并保持顺序；至少保留一个。
 func normalizeWorkspaces(workspace string, workspaces []string) ([]string, error) {
@@ -780,38 +864,3 @@ func randomToken() (string, error) {
 
 // DefaultIdle 是 Gateway 默认的空闲回收时间（与 supervisor 默认一致）。
 const DefaultIdle = 15 * time.Minute
-
-// selectFrontendScripts 登记全部随包前端插件。
-//
-// 哪些插件真正渲染由 frontendGate 在请求时按工作区的 plugin_meta 过滤：
-// 产品声明的默认启用，未声明的只有用户显式启用后才渲染。这里不能再按产品
-// 过滤，否则界面上的「启用」要重启 Gateway 才生效。
-func selectFrontendScripts(scripts []pluginapi.Script) ([]pluginapi.Script, error) {
-	if len(scripts) == 0 {
-		return nil, nil
-	}
-	ids := make([]string, 0, len(scripts))
-	byID := map[string]pluginapi.Script{}
-	for _, s := range scripts {
-		if s.Manifest == nil {
-			return nil, fmt.Errorf("gateway: 前端插件缺少清单")
-		}
-		byID[s.Manifest.ID] = s
-		ids = append(ids, s.Manifest.ID)
-	}
-	sort.Strings(ids)
-	out := make([]pluginapi.Script, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, byID[id])
-	}
-	return out, nil
-}
-
-// disableIslandsFromEnv 是客户端岛屿的回滚开关；服务端 SSR 不受影响。
-func disableIslandsFromEnv() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("ADAG_DISABLE_ISLANDS"))) {
-	case "1", "true", "yes", "on":
-		return true
-	}
-	return false
-}

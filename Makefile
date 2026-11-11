@@ -36,7 +36,7 @@ help:
 	@echo "setup     准备相邻 moejs 检出（校验 tag）+ 下载依赖"
 	@echo "build     构建全部包（ldflags 注入 Revision/BuildTime）"
 	@echo "test      go test ./..."
-	@echo "test-js   Node tests for the VNode renderer and ada-ui components"
+	@echo "test-js   Node tests for the ada runtime (static/ada/test)"
 	@echo "race      go test -race ./...（Windows 腿见 gate/test 的 M0 已知限制说明）"
 	@echo "vet       go vet ./..."
 	@echo "lint      staticcheck ./...（配置 staticcheck.conf；@latest 钉版本由 M5 处理）"
@@ -63,7 +63,7 @@ test:
 	$(GO) test ./...
 
 test-js:
-	$(NODE) --test internal/gateway/web/testdata/ada-render.test.js internal/gateway/web/testdata/ada-ui.test.js internal/gateway/web/testdata/ada-state.test.js internal/gateway/web/testdata/ada-patch.test.js internal/gateway/web/testdata/ada-patch-stream.test.js internal/gateway/web/testdata/ada-block-consistency.test.js internal/gateway/web/testdata/ada-block-components.test.js internal/gateway/web/testdata/iso-hydrate.test.js internal/gateway/web/testdata/iso-parity.test.js internal/gateway/web/testdata/iso-components.test.js internal/gateway/web/testdata/plugin-islands.test.js internal/gateway/web/testdata/provider-next.test.js internal/gateway/web/testdata/composer-draft.test.js plugins/official/composer-telemetry/static/telemetry.test.js desktop/security.test.js
+	$(NODE) --test internal/gateway/web/static/ada/test/
 
 # M0 已知限制：-race 依赖 cgo，Windows 无 MSVC/clang 工具链时跑不了（11 §13.2 无 cgo）；
 # CI 与 ci-gate.sh 的 Windows 腿自动降级为 test，M5 发布加固时补 windows race。

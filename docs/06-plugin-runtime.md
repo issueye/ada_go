@@ -149,7 +149,7 @@ if _, err := ret.Await(ctx); err != nil { return err }
 | 用量/遥测 | `token-usage` | 工作区/线程 Token 与成本页面、概览卡；`events.read` 聚合 |
 | 用量/遥测 | `composer-telemetry` | 输入框下方辅助区（运行中/工作区/缓存/上下文环）；`clientOnly` |
 | 插件管理 | `plugin-helper` | 创建/检查/启停插件；`plugin.admin` 安装桥 |
-| 示例/图表 | `ui-charts`、`ui-hello-tsx` | 图表与示例页面 |
+| 示例/图表 | `ui-charts`、`ui-hello` | 图表块（模型内容）；SFC 插件参考示例（运行时装载） |
 
 系统插件不是基座：基座源码不出现这些 id；产品声明选择启用哪些；禁用后能力必须消失。**禁止把系统插件的业务逻辑回落到基座**：
 

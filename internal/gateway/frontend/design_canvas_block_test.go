@@ -66,11 +66,11 @@ func TestDesignCanvasLedgerBlock(t *testing.T) {
 			{"title": "Element 组件", "system": "element", "artboard": "web-1440", "size": "1440×1009"}
 		]
 	}`)
-	raw, html, err := b.RenderBlock(request(t, "/thread/th_1"), "design-canvas/canvas-ledger", "b1", 1, data)
+	raw, err := b.RenderBlock(request(t, "/thread/th_1"), "design-canvas/canvas-ledger", "b1", 1, data)
 	if err != nil {
 		t.Fatalf("RenderBlock: %v", err)
 	}
-	out := string(html)
+	out := string(raw)
 	for _, want := range []string{
 		"adag-chart", // 复用宿主令牌类，而不是插件自己的 CSS
 		"设计画布台账",
@@ -83,23 +83,17 @@ func TestDesignCanvasLedgerBlock(t *testing.T) {
 			t.Fatalf("渲染结果缺少 %q:\n%s", want, out)
 		}
 	}
-	// display profile 不允许交互元素
-	for _, banned := range []string{"<button", "<form", "<input", "style="} {
-		if strings.Contains(out, banned) {
-			t.Fatalf("渲染结果出现禁用项 %q: %s", banned, out)
-		}
-	}
 	if !strings.Contains(string(raw), `"adag-ui-block"`) {
 		t.Fatalf("block VNode 缺少包装: %s", raw)
 	}
 
 	// 多一个键就该被 Schema 拒绝（additionalProperties: false）
-	if _, _, err := b.RenderBlock(request(t, "/thread/th_1"), "design-canvas/canvas-ledger", "b2", 1,
+	if _, err := b.RenderBlock(request(t, "/thread/th_1"), "design-canvas/canvas-ledger", "b2", 1,
 		json.RawMessage(`{"title":"x","total":1,"unexpected":true}`)); err == nil {
 		t.Fatal("多余字段应被 Schema 拒绝")
 	}
 	// 缺必填字段同样拒绝
-	if _, _, err := b.RenderBlock(request(t, "/thread/th_1"), "design-canvas/canvas-ledger", "b3", 1,
+	if _, err := b.RenderBlock(request(t, "/thread/th_1"), "design-canvas/canvas-ledger", "b3", 1,
 		json.RawMessage(`{"title":"缺 total"}`)); err == nil {
 		t.Fatal("缺少 required 字段应被拒绝")
 	}

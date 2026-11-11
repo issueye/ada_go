@@ -55,7 +55,7 @@ func Registry() []Check {
 		{Name: "generated", Summary: "spec/proto.json 与生成物同步；协议常量、错误码与 diag 词汇表一致", Milestone: "M0", Run: checkGenerated},
 		{Name: "dispatch", Summary: "Core dispatch 覆盖 33 个协议方法，且没有协议外方法", Milestone: "M0", Run: checkDispatch},
 		{Name: "hooks", Summary: "14 个钩子点位都有引擎调用方，成对点位齐备", Milestone: "M0", Run: checkHooks},
-		{Name: "slots", Summary: "12 个插槽都有宿主位置与空贡献回退，基座所有权一致", Milestone: "M0", Run: checkSlots},
+		{Name: "slots", Summary: "12 插槽词汇表一致（数量 12、名字唯一、反查一致）；宿主模板已随 SSR 移除", Milestone: "M0", Run: checkSlots},
 		{Name: "manifest", Summary: "清单 Schema 字段与 Go 加载结构逐字一致，且每字段有消费者", Milestone: "M0", Run: checkManifestFields},
 		{Name: "vnode", Summary: "VNode Schema 的白名单与限制与 Go 校验器一致", Milestone: "M0", Run: checkVNode},
 		{Name: "markdown-block", Summary: "Markdown 动态块封套 Schema 与限额同运行时一致", Milestone: "M4", Run: checkMarkdownBlock},

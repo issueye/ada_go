@@ -365,18 +365,21 @@ func checkHooks(root string) error {
 	return nil
 }
 
-// checkSlots 检查 12 个插槽的宿主覆盖。
+// checkSlots 检查 12 插槽词汇表（宿主模板已随 SSR 移除，只守护词汇表本身）。
 func checkSlots(root string) error {
 	if err := web.CheckSlotCoverage(); err != nil {
 		return err
 	}
-	if n := len(pluginapi.Slots()); n != 12 {
+	slots := pluginapi.Slots()
+	if n := len(slots); n != 12 {
 		return fmt.Errorf("插槽数量是 %d，设计 7.2 声明 12（其中 thread.tray 是 ada-go 新增的第 12 个）", n)
 	}
-	for _, h := range web.SlotHosts() {
-		if strings.TrimSpace(h.Template) == "" || strings.TrimSpace(h.Fallback) == "" {
-			return fmt.Errorf("插槽 %s 缺少宿主模板或空贡献回退", h.Slot)
+	seen := map[string]bool{}
+	for _, s := range slots {
+		if seen[s.Name] {
+			return fmt.Errorf("插槽 %s 重复声明", s.Name)
 		}
+		seen[s.Name] = true
 	}
 	return nil
 }

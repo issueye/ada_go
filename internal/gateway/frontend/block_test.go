@@ -2,9 +2,6 @@ package frontend_test
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/adag/ada-go/internal/gateway/frontend"
@@ -36,32 +33,25 @@ func TestValidateBlockNodeProfile(t *testing.T) {
 	}
 }
 
-// TestBlockTodoListGolden 钉住 $C TodoList 的 Go 渲染结果。
-// 浏览器一致性用例（web/testdata/ada-block-components.test.js）读同一份 golden，
-// 两边任何一侧改动 DOM 都会让另一侧失败。
-func TestBlockTodoListGolden(t *testing.T) {
+// TestBlockTodoListVNode 钉住 $C TodoList 的 VNode 形态能通过整树校验
+// （HTML 渲染已随 SSR 移除；块以校验后的 VNode JSON 交给客户端）。
+func TestBlockTodoListVNode(t *testing.T) {
 	raw := json.RawMessage(`{"t":"div","p":{"class":"adag-ui-block","data-adag-renderer":"demo/todo"},"c":[{"t":"$C","n":"TodoList","p":{"notes":"发布前检查","steps":[{"step":"写文档","status":"done"},{"text":"跑测试","status":"in_progress"},{"title":"发布","status":"pending"}]}}]}`)
-	html, err := frontend.RenderHTML(raw)
-	if err != nil {
-		t.Fatalf("RenderHTML: %v", err)
+	var root frontend.Node
+	if err := json.Unmarshal(raw, &root); err != nil {
+		t.Fatalf("解码 VNode: %v", err)
 	}
-	golden, err := os.ReadFile(filepath.Join("testdata", "block", "todo-list.html"))
-	if err != nil {
-		t.Fatalf("读取 golden: %v", err)
-	}
-	if strings.TrimSpace(string(html)) != strings.TrimSpace(string(golden)) {
-		t.Fatalf("TodoList block HTML 与 golden 不一致:\n--- got ---\n%s\n--- want ---\n%s", html, golden)
+	if err := frontend.ValidateNode(root); err != nil {
+		t.Fatalf("TodoList block VNode 应通过校验: %v", err)
 	}
 
-	// 空清单（即使带 notes）Go 侧完全不输出内容（不画面板）。
-	// 浏览器端组件必须返回单根节点，会留一个无样式的空容器，这是唯一有意的 DOM 差异。
+	// 空清单（即使带 notes）也必须是合法节点：组件自己决定不画面板。
 	emptyRaw := json.RawMessage(`{"t":"div","p":{"class":"adag-ui-block","data-adag-renderer":"demo/todo"},"c":[{"t":"$C","n":"TodoList","p":{"notes":"不应出现","steps":[]}}]}`)
-	emptyHTML, err := frontend.RenderHTML(emptyRaw)
-	if err != nil {
-		t.Fatalf("RenderHTML(empty): %v", err)
+	var empty frontend.Node
+	if err := json.Unmarshal(emptyRaw, &empty); err != nil {
+		t.Fatalf("解码空 TodoList: %v", err)
 	}
-	want := `<div class="adag-ui-block" data-adag-renderer="demo/todo"></div>`
-	if string(emptyHTML) != want {
-		t.Fatalf("空 TodoList = %q，期望 %q", emptyHTML, want)
+	if err := frontend.ValidateNode(empty); err != nil {
+		t.Fatalf("空 TodoList block VNode 应通过校验: %v", err)
 	}
 }

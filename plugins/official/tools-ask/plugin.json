@@ -7,12 +7,20 @@
   "trust": "builtin",
   "backend": {
     "entry": "index.ts",
-    "capabilities": ["ui.ask"]
+    "capabilities": [
+      "ui.ask"
+    ]
   },
   "frontend": {
-    "capabilities": ["backend.read"],
-    "slots": [{ "slot": "thread.tray", "template": "slot.tsx", "order": 10 }],
-    "styles": ["ask-user.css"],
+    "capabilities": [
+      "backend.read"
+    ],
+    "slots": [
+      { "slot": "thread.tray", "component": "AskTray.vue", "order": 10 }
+    ],
+    "styles": [
+      "ask-user.css"
+    ],
     "assets": "static"
   }
 }

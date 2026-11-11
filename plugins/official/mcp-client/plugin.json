@@ -7,22 +7,47 @@
   "trust": "builtin",
   "backend": {
     "entry": "index.ts",
-    "capabilities": ["fs.read", "fs.write", "net.fetch", "process"],
-    "env": ["PATH", "HOME", "USERPROFILE", "SystemRoot", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME"],
-    "secrets": ["mcp_token"],
+    "capabilities": [
+      "fs.read",
+      "fs.write",
+      "net.fetch",
+      "process"
+    ],
+    "env": [
+      "PATH",
+      "HOME",
+      "USERPROFILE",
+      "SystemRoot",
+      "APPDATA",
+      "LOCALAPPDATA",
+      "XDG_CONFIG_HOME"
+    ],
+    "secrets": [
+      "mcp_token"
+    ],
     "initTimeoutMs": 30000
   },
   "frontend": {
-    "capabilities": ["frontend.script", "backend.read"],
-    "client": "client.js",
-    "nav": [{ "label": "MCP 服务端", "slug": "servers" }],
+    "capabilities": [
+      "frontend.script",
+      "backend.read"
+    ],
+    "nav": [
+      { "slug": "servers", "label": "MCP 服务端" }
+    ],
     "pages": [
-      { "slug": "servers", "title": "MCP 服务端", "template": "page.tsx", "hydrate": true }
+      { "slug": "servers", "component": "McpServers.vue", "title": "MCP 服务端" }
     ],
     "actions": {
-      "page_servers": { "action": "state", "read": true, "backend": "mcp-client" }
+      "page_servers": {
+        "action": "state",
+        "read": true,
+        "backend": "mcp-client"
+      }
     },
-    "styles": ["mcp-client.css"],
+    "styles": [
+      "mcp-client.css"
+    ],
     "assets": "static"
   }
 }

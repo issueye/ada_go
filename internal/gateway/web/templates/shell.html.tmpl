@@ -1,20 +1,21 @@
+{{/* SPA 外壳（R/S 阶段）：Go 只渲染 #app 与 bootstrap JSON 投影，页面由
+     /static/ada/index.mjs 运行时装载。login/error 是仅存的无 JS 安全页，
+     复用同一份 head（doc_head）。
+
+     样式加载顺序固定为：设计令牌 → 衍生主题色板 → a_da 产物 → a_da 组件层 → ada-go 本地覆盖。
+     themes.js/themes.css 是本地新增的主题扩展（明暗 × 调色板，docs/19-ued.md §19.2.2），
+     不属于上游镜像；app-local.css 最后加载。 */}}
 {{define "doc_head"}}<!doctype html>
 <html lang="{{.Locale}}" class="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {{if .CSRF}}<meta name="csrf-token" content="{{.CSRF}}">{{end}}
-{{if .RefreshSeconds}}<meta http-equiv="refresh" content="{{.RefreshSeconds}}">{{end}}
-<title>{{.Title}} · {{.BrandName}}</title>
+<title>{{if .Title}}{{.Title}} · {{end}}{{.BrandName}}</title>
 <link rel="icon" type="image/png" sizes="32x32" href="{{asset "favicon.png"}}">
 <link rel="apple-touch-icon" sizes="180x180" href="{{asset "apple-touch-icon.png"}}">
 <script src="{{asset "theme.js"}}"></script>
 <script src="{{asset "themes.js"}}"></script>
-<!--
-  样式加载顺序固定为：设计令牌 → 衍生主题色板 → a_da 产物 → a_da 组件层 → ada-go 本地覆盖。
-  themes.js/themes.css 是本地新增的主题扩展（明暗 × 调色板，docs/19-ued.md §19.2.2），
-  不属于上游镜像；app-local.css 最后加载，承接无 JS 表单与实时流的本地细节。
--->
 <link rel="stylesheet" href="{{asset "tokens.css"}}">
 <link rel="stylesheet" href="{{asset "ui/themes.css"}}">
 <link rel="stylesheet" href="{{asset "app.css"}}">
@@ -23,56 +24,32 @@
 <link rel="stylesheet" href="{{asset "ui/widgets.css"}}">
 <link rel="stylesheet" href="{{asset "ui/shell.css"}}">
 <link rel="stylesheet" href="{{asset "ui/pages.css"}}">
+<link rel="stylesheet" href="{{asset "ada/icons.css"}}">
+<link rel="stylesheet" href="{{asset "ada/shell.css"}}">
 <link rel="stylesheet" href="{{asset "app-local.css"}}">
-{{if .NeedsUI}}<link rel="stylesheet" href="{{asset "ada-ui.css"}}">
-{{end}}{{range .PluginStyles}}<link rel="stylesheet" href="{{.}}">
-{{end}}<script src="{{asset "ada-select.js"}}" defer></script>
+<script src="{{asset "api.js"}}" defer></script>
+<script src="{{asset "sidebar-boot.js"}}" defer></script>
+<script src="{{asset "ada-select.js"}}" defer></script>
 <script src="{{asset "ada-modal.js"}}" defer></script>
 <script src="{{asset "file-picker.js"}}" defer></script>
-<script src="{{asset "composer-draft.js"}}" defer></script>
-<script src="{{asset "app.js"}}" defer></script>
-<script src="{{asset "components.js"}}" defer></script>
-<script src="{{asset "api.js"}}" defer></script>
-{{if .NeedsUI}}<script src="{{asset "ada-render.js"}}" defer></script>
-<script src="{{asset "ada-patch-stream.js"}}" defer></script>
-<script src="{{asset "ada-ui.js"}}" defer></script>
-<script src="{{asset "ada-ui-iso.js"}}" defer></script>
-<script src="{{asset "islands.js"}}" defer></script>
-<script src="{{asset "plugin-islands.js"}}" defer></script>
-{{end}}{{range .PluginScripts}}<script src="{{.}}" defer></script>
-{{end}}</head>
+<script src="{{asset "chat-images.js"}}" defer></script>
+</head>
 <body class="ada-body">
 <a class="skip-link" href="#main">跳到主要内容</a>
-{{.Icons}}
 {{end}}
 
-{{define "shell_start"}}
-<div class="ada-shell">
-  <script src="{{asset "sidebar-boot.js"}}"></script>
-  {{.Sidebar}}
-  <div class="ada-backdrop" id="chat-backdrop" aria-hidden="true"></div>
-
-  <main id="main" class="ada-main">
-    <header class="ada-topbar">
-      <button class="ada-icon-btn ada-menu-toggle" type="button" data-sidebar-toggle aria-label="打开侧栏" title="打开侧栏">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
-      </button>
-      <div class="ada-topbar__title">
-        <h1 title="{{.Title}}">{{.Title}}</h1>
-        {{if .ProductBadge}}<span class="ada-chip">{{.ProductBadge}}</span>{{else}}<span class="ada-chip">{{.ProductName}}</span>{{end}}
-      </div>
-      <div class="ada-topbar__actions">
-        {{slot "topbar.right" .Slots.TopbarRight .SlotCounts.TopbarRight ""}}
-        <div id="topbar-actions">{{.TopbarActions}}</div>
-      </div>
-    </header>
+{{define "shell_start"}}<main id="main" class="ada-main">
 {{end}}
 
 {{define "shell_end"}}
-  </main>
-</div>
-{{.ConfirmDialog}}
-<script src="{{asset "chat-images.js"}}" defer></script>
+</main>
+{{end}}
+
+{{define "shell"}}{{template "doc_head" .}}
+<div id="app"></div>
+{{template "flash" .}}
+<script type="application/json" id="ada-bootstrap">{{.BootstrapJSON}}</script>
+<script type="module" src="{{asset "ada/index.mjs"}}"></script>
 </body>
 </html>
 {{end}}

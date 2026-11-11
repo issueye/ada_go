@@ -256,15 +256,15 @@ func loadFrontendDir(dir string, m *pluginapi.Manifest) (host.Script, error) {
 		}
 		script.Schemas[strings.TrimSpace(b.Schema)] = schemaData
 	}
-	// 清单引用的模板必须真实存在：缺件是打包错误而不是运行期才发现。
+	// 清单引用的 SFC 组件必须真实存在：缺件是打包错误而不是运行期才发现。
 	for _, sc := range m.Frontend.Slots {
-		if _, ok := bundle[strings.TrimSpace(sc.Template)]; !ok {
-			return host.Script{}, fmt.Errorf("official: 插件 %s 的插槽 %s 引用模板 %q，但包里没有它", m.ID, sc.Slot, sc.Template)
+		if _, ok := script.StaticAssets[strings.TrimSpace(sc.Component)]; !ok {
+			return host.Script{}, fmt.Errorf("official: 插件 %s 的插槽 %s 引用组件 %q，但 assets 里没有它", m.ID, sc.Slot, sc.Component)
 		}
 	}
 	for _, pc := range m.Frontend.Pages {
-		if _, ok := bundle[strings.TrimSpace(pc.Template)]; !ok {
-			return host.Script{}, fmt.Errorf("official: 插件 %s 的页面 %s 引用模板 %q，但包里没有它", m.ID, pc.Slug, pc.Template)
+		if _, ok := script.StaticAssets[strings.TrimSpace(pc.Component)]; !ok {
+			return host.Script{}, fmt.Errorf("official: 插件 %s 的页面 %s 引用组件 %q，但 assets 里没有它", m.ID, pc.Slug, pc.Component)
 		}
 	}
 	return script, nil

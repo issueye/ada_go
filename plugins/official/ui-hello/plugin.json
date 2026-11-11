@@ -1,0 +1,21 @@
+{
+  "id": "ui-hello",
+  "name": "Hello SFC",
+  "version": "0.2.0",
+  "apiVersion": 1,
+  "description": "前端插件最小示例：SFC 单文件组件 + 运行时装载（无 SSR、无构建步骤）",
+  "trust": "builtin",
+  "frontend": {
+    "capabilities": ["frontend.script"],
+    "slots": [
+      { "slot": "sidebar.top", "component": "Hello.vue", "order": 90 }
+    ],
+    "pages": [
+      { "slug": "hello", "component": "HelloPage.vue", "title": "Hello SFC" }
+    ],
+    "nav": [
+      { "slug": "hello", "label": "Hello", "order": 90 }
+    ],
+    "assets": "static"
+  }
+}
