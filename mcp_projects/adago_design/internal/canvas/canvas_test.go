@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -111,12 +112,22 @@ func TestStorePersistFileFormat(t *testing.T) {
 	if err := json.Unmarshal(raw, &file); err != nil {
 		t.Fatalf("canvas.json 不是合法 JSON: %v", err)
 	}
-	if file.Version != 3 || len(file.Projects) != 1 || len(file.Nodes) != 2 || len(file.Edges) != 1 {
+	if file.Version != 4 || len(file.Projects) != 1 || len(file.Nodes) != 2 || len(file.Edges) != 1 {
 		t.Fatalf("持久化内容异常: version=%d projects=%d nodes=%d edges=%d",
 			file.Version, len(file.Projects), len(file.Nodes), len(file.Edges))
 	}
 	if file.Edges[0].Label != "流向" {
 		t.Fatalf("连线标签异常: %+v", file.Edges[0])
+	}
+	// v4 分文件：索引不含正文，正文在 nodes/<id>.html
+	for _, idx := range file.Nodes {
+		if idx.HTML != "" || idx.HTMLFile == "" {
+			t.Fatalf("索引应只引用正文文件: %+v", idx)
+		}
+		rawHTML, err := os.ReadFile(filepath.Join(dir, "nodes", idx.HTMLFile))
+		if err != nil || !strings.Contains(string(rawHTML), "<p>") {
+			t.Fatalf("正文文件应存在且含内容: %v", err)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(dir, "canvas.json.tmp")); !os.IsNotExist(err) {
 		t.Error("临时文件应已被 rename 清理")
@@ -147,13 +158,16 @@ func TestStoreV1Migration(t *testing.T) {
 	if len(s.ListProjects()) != 1 || s.ListProjects()[0].ID != LegacyProjectID {
 		t.Fatalf("迁移后应存在历史项目: %+v", s.ListProjects())
 	}
-	// 迁移后的下一次写入应为 v3
+	// 迁移后的下一次写入应为 v4（正文迁到 nodes/ 分文件）
 	s.AddEdge("n-old-1", "n-old-1", "") // 自环报错，不写入
 	addNode(t, s, LegacyProjectID, newTestNode("new"))
 	raw, _ := os.ReadFile(filepath.Join(dir, "canvas.json"))
 	var file persistedFile
-	if err := json.Unmarshal(raw, &file); err != nil || file.Version != 3 {
-		t.Fatalf("迁移后应写 v3 格式: %v", err)
+	if err := json.Unmarshal(raw, &file); err != nil || file.Version != 4 {
+		t.Fatalf("迁移后应写 v4 格式: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "nodes", "n-old-1.html")); err != nil {
+		t.Fatalf("v1 内联正文应迁移为正文文件: %v", err)
 	}
 }
 

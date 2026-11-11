@@ -210,7 +210,7 @@ func TestHTTPProjectRequired(t *testing.T) {
 }
 
 // v2（无 projects）加载后应立刻回写 v3，避免「API 已是项目制、磁盘还是旧格式」。
-func TestV2MigrationPersistsV3(t *testing.T) {
+func TestV2MigrationPersistsV4(t *testing.T) {
 	dir := t.TempDir()
 	v2 := `{"version":2,"nodes":[
 		{"id":"n-1","title":"旧稿","kind":"note","html":"<html></html>","width":300,"height":200,"x":10,"y":20,"z":1}
@@ -230,14 +230,20 @@ func TestV2MigrationPersistsV3(t *testing.T) {
 	if err := json.Unmarshal(raw, &file); err != nil {
 		t.Fatalf("解析: %v", err)
 	}
-	if file.Version != 3 {
-		t.Fatalf("迁移后磁盘版本 = %d，期望 3", file.Version)
+	if file.Version != 4 {
+		t.Fatalf("迁移后磁盘版本 = %d，期望 4", file.Version)
 	}
 	if len(file.Projects) != 1 || file.Projects[0].ID != LegacyProjectID {
 		t.Fatalf("磁盘项目段异常: %+v", file.Projects)
 	}
 	if len(file.Nodes) != 1 || file.Nodes[0].ProjectID != LegacyProjectID {
 		t.Fatalf("节点未写入 project_id: %+v", file.Nodes)
+	}
+	if file.Nodes[0].HTMLFile != "n-1.html" {
+		t.Fatalf("v2 内联正文应迁移为 html_file 引用: %+v", file.Nodes[0])
+	}
+	if _, err := os.Stat(filepath.Join(dir, "nodes", "n-1.html")); err != nil {
+		t.Fatalf("正文文件应已落盘: %v", err)
 	}
 	if got := s.ListProjects(); len(got) != 1 || got[0].NodeCount != 1 {
 		t.Fatalf("内存项目摘要异常: %+v", got)
