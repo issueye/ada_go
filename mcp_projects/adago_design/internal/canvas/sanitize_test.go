@@ -64,7 +64,9 @@ func TestStoreSanitizesNodeHTML(t *testing.T) {
 	}
 
 	// Update 换正文：同样注入
-	up, err := s.Update(n.ID, func(x *Node) { x.HTML = `<html><body><link rel="stylesheet" href="https://cdn.example.com/x.css"></body></html>` })
+	up, err := s.Update(n.ID, func(x *Node) {
+		x.HTML = `<html><body><link rel="stylesheet" href="https://cdn.example.com/x.css"></body></html>`
+	})
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}

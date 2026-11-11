@@ -95,6 +95,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/nodes/{id}", s.handleDeleteNode)
 	mux.HandleFunc("POST /api/nodes/clear", s.handleClearNodes)
 	mux.HandleFunc("POST /api/arrange", s.handleArrange)
+	mux.HandleFunc("POST /api/undo", s.handleUndo)
+	mux.HandleFunc("POST /api/redo", s.handleRedo)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("POST /api/capture", s.handleCaptureCreate)
 	mux.HandleFunc("GET /api/tasks", s.handleTaskClaim)
@@ -273,6 +275,21 @@ func (s *Server) handleGetNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"node": n})
+}
+
+// handleUndo / handleRedo 撤销与重做最近一次画布内容操作（迭代 3-②）。
+// 历史在 Store 内存栈里，进程级共享：任意入口（UI 快捷键 / MCP 工具 /
+// HTTP）撤销后，SSE 会把刷新推给所有打开的画布页。
+func (s *Server) handleUndo(w http.ResponseWriter, _ *http.Request) {
+	desc, ok := s.store.Undo()
+	u, r := s.store.HistoryDepth()
+	writeJSON(w, http.StatusOK, map[string]any{"done": ok, "description": desc, "undo_depth": u, "redo_depth": r})
+}
+
+func (s *Server) handleRedo(w http.ResponseWriter, _ *http.Request) {
+	desc, ok := s.store.Redo()
+	u, r := s.store.HistoryDepth()
+	writeJSON(w, http.StatusOK, map[string]any{"done": ok, "description": desc, "undo_depth": u, "redo_depth": r})
 }
 
 // handleEvents 以 SSE 推送存储变更（GET /api/events）。

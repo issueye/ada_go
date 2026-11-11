@@ -838,6 +838,19 @@ window.addEventListener("keydown", (e) => {
   }
   else if (e.key === "=" || e.key === "+") zoomAt(innerWidth / 2, innerHeight / 2, 1.15);
   else if (e.key === "-") zoomAt(innerWidth / 2, innerHeight / 2, 1 / 1.15);
+  else if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+    // 撤销/重做走服务端历史（SSE 推送会让所有打开的画布页同步刷新）；
+    // 焦点在输入框时已提前 return，不与文本编辑的原生撤销冲突
+    if (e.key === "z" || e.key === "Z") {
+      e.preventDefault();
+      if (e.shiftKey) api("/api/redo", { method: "POST" }).catch(() => {});
+      else api("/api/undo", { method: "POST" }).catch(() => {});
+    }
+    else if (e.key === "y" || e.key === "Y") {
+      e.preventDefault();
+      api("/api/redo", { method: "POST" }).catch(() => {});
+    }
+  }
 });
 
 // ---------------- 连线（元素池化 + 脏边增量 + rAF 合帧） ----------------

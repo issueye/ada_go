@@ -110,6 +110,16 @@ func registerTools(server *mcp.Server, d Deps) {
 	}, clearTool(d))
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "canvas_undo",
+		Description: "撤销最近一次画布内容操作（新增/更新/删除节点、清空项目、连线增删）。项目增删改不进历史；历史最多 50 步且仅存于进程内存。",
+	}, undoTool(d))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "canvas_redo",
+		Description: "重做最近一次被撤销的画布内容操作（与 canvas_undo 配对）。",
+	}, redoTool(d))
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "canvas_screenshot",
 		Description: "对画布（或指定节点）截图并返回 PNG。需要画布页面已在浏览器打开；8 秒内无页面响应则报 capture_timeout。",
 	}, screenshotTool(d))
@@ -717,6 +727,39 @@ func clearTool(d Deps) mcp.ToolHandlerFor[canvasClearIn, struct{}] {
 			return projectFail[struct{}](struct{}{}, cerr, in.Project)
 		}
 		return textResult(fmt.Sprintf("已清空项目 %s 的 %d 个节点（可用 canvas_restore 恢复）。", in.Project, n)), struct{}{}, nil
+	}
+}
+
+// ---------------- canvas_undo / canvas_redo ----------------
+
+type historyOut struct {
+	OK          bool   `json:"ok"`
+	Description string `json:"description,omitempty"` // 被撤销/重做的操作描述
+	UndoDepth   int    `json:"undo_depth"`            // 剩余可撤销步数
+	RedoDepth   int    `json:"redo_depth"`            // 剩余可重做步数
+}
+
+func undoTool(d Deps) mcp.ToolHandlerFor[struct{}, historyOut] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, historyOut, error) {
+		desc, ok := d.Store.Undo()
+		u, r := d.Store.HistoryDepth()
+		out := historyOut{OK: ok, Description: desc, UndoDepth: u, RedoDepth: r}
+		if !ok {
+			return failWith[historyOut](out, "nothing_to_undo", "没有可撤销的操作", "只有画布内容操作（节点/连线）进历史，项目增删改不在内")
+		}
+		return textResult("已撤销：" + desc), out, nil
+	}
+}
+
+func redoTool(d Deps) mcp.ToolHandlerFor[struct{}, historyOut] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, historyOut, error) {
+		desc, ok := d.Store.Redo()
+		u, r := d.Store.HistoryDepth()
+		out := historyOut{OK: ok, Description: desc, UndoDepth: u, RedoDepth: r}
+		if !ok {
+			return failWith[historyOut](out, "nothing_to_redo", "没有可重做的操作", "")
+		}
+		return textResult("已重做：" + desc), out, nil
 	}
 }
 

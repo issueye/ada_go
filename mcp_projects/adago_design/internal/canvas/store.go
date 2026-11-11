@@ -163,6 +163,9 @@ type Store struct {
 	lastPersistErr error                      // 最近一次写盘失败原因（nil = 正常）
 
 	htmlDirty map[string]bool // 待写盘的节点正文（id -> true）
+
+	undoStack []undoEntry // 撤销栈（仅内存，见 undo.go）
+	redoStack []undoEntry // 重做栈
 }
 
 // nodeIndex 是索引文件里的节点形态：用自有字段遮蔽嵌入 Node 的 html ——
@@ -530,6 +533,11 @@ func (s *Store) Add(n Node) (Node, error) {
 	}
 	s.putNodeLocked(n)
 	s.touchProjectLocked(n.ProjectID)
+	s.pushUndoLocked(undoEntry{
+		desc: "新增节点 " + nodeDisplayTitle(n.Title, n.ID),
+		undo: func() { s.removeNodeLocked(n.ID) },
+		redo: func() { s.putNodeLocked(n.Clone()) },
+	})
 	s.persistLocked()
 	return n.Clone(), nil
 }
@@ -558,6 +566,17 @@ func (s *Store) Update(id string, mut func(*Node)) (Node, error) {
 		cp.HTMLRev = n.HTMLRev
 	}
 	s.putNodeLocked(cp)
+	before := n.Clone()
+	after := cp.Clone()
+	desc := "修改节点 " + nodeDisplayTitle(after.Title, after.ID)
+	if after.HTML != before.HTML {
+		desc = "更新正文 " + nodeDisplayTitle(after.Title, after.ID)
+	}
+	s.pushUndoLocked(undoEntry{
+		desc: desc,
+		undo: func() { s.putNodeLocked(before) },
+		redo: func() { s.putNodeLocked(after) },
+	})
 	s.persistLocked()
 	return cp.Clone(), nil
 }
@@ -589,15 +608,45 @@ func (s *Store) removeNodeLocked(id string) {
 func (s *Store) Remove(id string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.nodes[id]; !ok {
+	n, ok := s.nodes[id]
+	if !ok {
 		return false, nil
 	}
-	s.removeNodeLocked(id)
-	for eid, e := range s.edges {
+	removedNode := n.Clone()
+	var removedEdges []*Edge
+	for _, e := range s.edges {
 		if e.From == id || e.To == id {
-			delete(s.edges, eid)
+			cp := e.Clone()
+			removedEdges = append(removedEdges, &cp)
 		}
 	}
+	s.removeNodeLocked(id)
+	for _, e := range removedEdges {
+		delete(s.edges, e.ID)
+	}
+	s.pushUndoLocked(undoEntry{
+		desc: "删除节点 " + nodeDisplayTitle(removedNode.Title, id),
+		undo: func() {
+			// 项目已被删时不复活节点：那会造出无主设计稿（数据层不变量）
+			if _, ok := s.projects[removedNode.ProjectID]; ok {
+				s.putNodeLocked(removedNode)
+			}
+			for _, e := range removedEdges {
+				if _, okA := s.nodes[e.From]; okA {
+					if _, okB := s.nodes[e.To]; okB {
+						cp := e.Clone()
+						s.edges[e.ID] = &cp
+					}
+				}
+			}
+		},
+		redo: func() {
+			s.removeNodeLocked(id)
+			for _, e := range removedEdges {
+				delete(s.edges, e.ID)
+			}
+		},
+	})
 	s.persistLocked()
 	return true, nil
 }
@@ -645,6 +694,35 @@ func (s *Store) Clear(projectID string) (int, error) {
 		delete(s.edges, e.ID)
 	}
 	s.touchProjectLocked(projectID)
+	s.pushUndoLocked(undoEntry{
+		desc: fmt.Sprintf("清空项目 「%s」（%d 张）", s.projects[projectID].Name, len(snapshot)),
+		undo: func() {
+			for _, sn := range snapshot {
+				if _, ok := s.projects[sn.ProjectID]; !ok {
+					continue // 项目已被删：恢复会造出无主设计稿
+				}
+				if _, exists := s.nodes[sn.ID]; !exists {
+					s.putNodeLocked(sn.Clone())
+				}
+			}
+			for _, se := range edgeSnapshot {
+				if _, okA := s.nodes[se.From]; okA {
+					if _, okB := s.nodes[se.To]; okB {
+						cp := se.Clone()
+						s.edges[se.ID] = &cp
+					}
+				}
+			}
+		},
+		redo: func() {
+			for _, sn := range snapshot {
+				s.removeNodeLocked(sn.ID)
+			}
+			for _, se := range edgeSnapshot {
+				delete(s.edges, se.ID)
+			}
+		},
+	})
 	s.persistLocked()
 	return len(snapshot), nil
 }
@@ -721,6 +799,14 @@ func (s *Store) AddEdge(from, to, label string) (Edge, error) {
 	}
 	s.seq++
 	s.edges[e.ID] = &e
+	s.pushUndoLocked(undoEntry{
+		desc: "连线 " + nodeDisplayTitle(e.Label, e.From+"→"+e.To),
+		undo: func() { delete(s.edges, e.ID) },
+		redo: func() {
+			cp := e
+			s.edges[e.ID] = &cp
+		},
+	})
 	s.persistLocked()
 	return e.Clone(), nil
 }
@@ -741,10 +827,20 @@ func (s *Store) ListEdges() []Edge {
 func (s *Store) RemoveEdge(id string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.edges[id]; !ok {
+	e, ok := s.edges[id]
+	if !ok {
 		return false, nil
 	}
+	removed := e.Clone()
 	delete(s.edges, id)
+	s.pushUndoLocked(undoEntry{
+		desc: "删除连线 " + nodeDisplayTitle(removed.Label, removed.From+"→"+removed.To),
+		undo: func() {
+			cp := removed
+			s.edges[id] = &cp
+		},
+		redo: func() { delete(s.edges, id) },
+	})
 	s.persistLocked()
 	return true, nil
 }
