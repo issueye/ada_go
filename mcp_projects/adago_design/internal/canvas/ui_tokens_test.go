@@ -22,6 +22,35 @@ func readStatic(t *testing.T, name string) string {
 	return string(b)
 }
 
+// allStaticJS 返回画布 UI 的全部 JS 源码（icons.js 为 Go 侧生成物，一并纳入
+// 颜色扫描）。拆分后脚本分布在 static/js/ 下，门禁按目录聚合，新增文件自动覆盖。
+func allStaticJS(t *testing.T) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	entries, err := staticFS.ReadDir("static")
+	if err != nil {
+		t.Fatalf("枚举 static: %v", err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".js") {
+			out[e.Name()] = readStatic(t, e.Name())
+		}
+	}
+	sub, err := staticFS.ReadDir("static/js")
+	if err != nil {
+		t.Fatalf("枚举 static/js: %v", err)
+	}
+	for _, e := range sub {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".js") {
+			out["js/"+e.Name()] = readStatic(t, "js/"+e.Name())
+		}
+	}
+	if len(out) < 10 {
+		t.Fatalf("JS 文件数异常（拆分后应 ≥13 个）: %d", len(out))
+	}
+	return out
+}
+
 // cssBlock 取出某个选择器块内的声明文本（足够用于扁平令牌文件）。
 func cssBlock(css, selector string) string {
 	idx := strings.Index(css, selector+" {")
@@ -207,8 +236,7 @@ func TestCanvasCSSAccessibilityRules(t *testing.T) {
 }
 
 func TestCanvasJSNoLiteralColors(t *testing.T) {
-	for _, name := range []string{"canvas.js", "inspect.js"} {
-		js := readStatic(t, name)
+	for name, js := range allStaticJS(t) {
 		hexRe := regexp.MustCompile(`#[0-9a-fA-F]{3,8}\b`)
 		for _, m := range hexRe.FindAllString(js, -1) {
 			// 允许 SVG 片段标识引用（#ds-ic-*）之外的一切都会被上面匹配，
@@ -222,17 +250,23 @@ func TestCanvasJSNoLiteralColors(t *testing.T) {
 }
 
 func TestCanvasJSNoNativeDialogs(t *testing.T) {
-	js := readStatic(t, "canvas.js")
+	jsFiles := allStaticJS(t)
 	// 注释里会提到「原生 prompt/confirm」，只检查代码行，避免误报
-	code := stripLineComments(js)
+	var names []string
+	var all []string
+	for name, js := range jsFiles {
+		names = append(names, name)
+		all = append(all, stripLineComments(js))
+	}
+	code := strings.Join(all, "\n")
 	for _, bad := range []string{"prompt(", "confirm("} {
 		if strings.Contains(code, bad) {
-			t.Errorf("canvas.js 仍在使用原生 %s（应走 uiAsk/uiConfirm 弹层）", bad)
+			t.Errorf("画布 JS 仍在使用原生 %s（应走 uiAsk/uiConfirm 弹层）: %v", bad, names)
 		}
 	}
 	for _, want := range []string{"function uiAsk(", "function uiConfirm(", "function isAskOpen("} {
-		if !strings.Contains(js, want) {
-			t.Errorf("canvas.js 缺少 %s", want)
+		if !strings.Contains(code, want) {
+			t.Errorf("画布 JS 缺少 %s（应在 js/core.js / js/main.js）", want)
 		}
 	}
 }
