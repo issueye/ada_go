@@ -19,7 +19,11 @@
 
 组件（一份 HTML 结构 × 每体系一份皮肤 CSS）：button / input / select / switch /
 checkbox / radio / slider / card / tag / badge / avatar / alert / progress /
-navbar / tabbar / list / dialog / toast。
+navbar / tabbar / list / dialog / toast / tabs / table / pagination。
+
+体系数据的单一真源是 [`internal/design/data/*.json`](internal/design/data)
+（8 套内置体系，`gen_export` 可校验/回写）；新增或修订体系改 JSON 即可，
+颜色合法、字体可商用、组件可渲染等不变量仍由门禁测试把关。
 
 ## 项目 → 规范 → 预览（设计稿必须归属项目）
 
@@ -33,8 +37,9 @@ project_create（或 project_list 选已有）
               └─► 画布只显示该项目；canvas_export 也只导该项目
 ```
 
-> 升级说明：`canvas.json` 从 v2 升到 v3。旧数据（没有 `project_id` 的节点）在首次加载时
-> 自动归入固定项目 `p-default`「默认项目（历史数据）」，不会丢稿，也不会给新稿开后门。
+> 升级说明：`canvas.json` v2→v3 引入项目归属；v3→v4（当前）把节点正文拆到
+> `nodes/<id>.html` 分文件、索引只存元数据。旧数据在首次加载时自动迁移
+> （无主节点归入固定项目 `p-default`「默认项目（历史数据）」），不会丢稿。
 
 ## 三层规范（先定尺寸 → 定体系 → 出预览）
 
@@ -129,6 +134,7 @@ bin\adago-design.exe mcp
 | `design_compare` | 两体系 Token 对比（结构化 diff）；可选生成并排对比板节点 |
 | `canvas_add` | 添加任意 HTML 预览卡片（可带 `artboard` 取画板尺寸） |
 | `canvas_list` / `canvas_move` / `canvas_remove` / `canvas_clear` | 画布节点管理 |
+| `canvas_undo` / `canvas_redo` | 撤销 / 重做最近一次画布内容操作（节点增改删、清空、连线；50 步，仅进程内存） |
 | `canvas_arrange` | 节点自动网格排版（体系分组优先） |
 | `canvas_restore` | 恢复最近一次清空（内存快照） |
 | `canvas_export` | 导出整块画布为独立 HTML 文件 |
@@ -289,8 +295,9 @@ GOWORK=off go generate ./internal/design   # 改了图标后同步 icons.js
   **P0 加固**（备份轮换与降级恢复、写盘失败可见、列表剥 HTML、SSE 推送、
   部分更新指针语义、多实例探测，见 `hardening_test.go`）、
   **CSP 注入**（注入位置/幂等/旧快照自愈，见 `sanitize_test.go`）。
-- `internal/design`：8 体系 Token 完备性、全部组件可渲染、图标库不变量、
-  字体授权（全部体系可商用）、画板推导值、**渲染产物无 emoji/字符图标**、
+- `internal/design`：8 体系 Token 完备性（数据源 `data/*.json`）、全部组件可渲染
+  （21 个，含 tabs/table/pagination）、图标库不变量、字体授权（全部体系可商用）、
+  画板推导值、**渲染产物无 emoji/字符图标**、规格阶梯走查（CSS 字面值须落阶梯）、
   **节点级走查**（外链/符号/尺寸契约/字体授权，见 `nodeaudit_test.go`）。
 - `internal/mcpserver`：内存 MCP 会话走 `tools/list` + `tools/call` 契约，
   含 `design_icons` / `design_fonts` / `design_artboard` 与画板透传、

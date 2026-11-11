@@ -249,8 +249,10 @@ GOWORK=off go build ./... && GOWORK=off go vet ./... && GOWORK=off go test ./...
 2. 对比度：`ink/canvas`、`ink-2/surface`、`ink-3/surface`、`on-brand/brand`、
    `success-ink/success-soft`、`warn-ink/warn-soft`、`danger-ink/danger-soft` ≥ 4.5（Go 侧按 WCAG 公式验算）。
 3. `canvas.css` 内不得出现 `#hex` / `rgb(` / `rgba(`；`font-size` 与 `border-radius` 不得出现 px 字面值。
-4. `canvas.js` / `inspect.js` 不得出现 `#hex`（`icons.js` 为生成物，豁免）。
-5. `canvas.js` 不得出现 `prompt(` / `confirm(`。
+4. `static/**/*.js`（含 `js/` 下 12 个职责模块与 `inspect.js`）不得出现 `#hex`
+   （`icons.js` 为生成物，路径数据无颜色，一并纳入扫描）。
+5. 画布 JS（聚合扫描）不得出现 `prompt(` / `confirm(`，且必须包含
+   `uiAsk` / `uiConfirm` / `isAskOpen` 的定义。
 6. `index.html` 中 `tokens.css` 必须先于 `canvas.css`；含 `data-theme` 初始值。
 7. `canvas.css` 必须有 `prefers-reduced-motion` 与全局 `:focus-visible` 规则。
 

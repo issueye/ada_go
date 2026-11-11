@@ -1,0 +1,425 @@
+{
+  "id": "material",
+  "name": "Material Design 3",
+  "vendor": "Google",
+  "family": "cross",
+  "description": "Material You (M3)：基线紫 #6750A4、pill 胶囊按钮、12/16/28px 大圆角阶梯、色对（primary/on-primary）体系与 emphasized 动效。",
+  "style": {
+    "summary": "色彩成对出现（color/on-color），形态圆润（胶囊按钮、12-28 圆角），层级靠 surface-container 底色阶梯与柔和投影。",
+    "keywords": [
+      "M3 基线紫",
+      "胶囊按钮",
+      "color/on-color",
+      "surface 阶梯",
+      "emphasized 缓动"
+    ],
+    "density": "舒适",
+    "elevation": "surface-container 底色阶梯 + level1~3 双层投影"
+  },
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "light": {
+    "colors": {
+      "bg": {
+        "value": "#FEF7FF",
+        "usage": "surface 页面背景"
+      },
+      "border": {
+        "value": "#79747E",
+        "usage": "outline 控件描边"
+      },
+      "border-2": {
+        "value": "#CAC4D0",
+        "usage": "outline-variant 弱描边"
+      },
+      "danger": {
+        "value": "#B3261E",
+        "usage": "错误（error）"
+      },
+      "danger-bg": {
+        "value": "#F9DEDC",
+        "usage": "错误容器底"
+      },
+      "fill": {
+        "value": "#ECE6F0",
+        "usage": "surface-container-high（输入底）"
+      },
+      "fill-2": {
+        "value": "#E8DEF8",
+        "usage": "次要填充"
+      },
+      "info": {
+        "value": "#6750A4",
+        "usage": "信息"
+      },
+      "info-bg": {
+        "value": "#EADDFF",
+        "usage": "信息浅底"
+      },
+      "on-primary": {
+        "value": "#FFFFFF",
+        "usage": "主色上的文字"
+      },
+      "on-primary-container": {
+        "value": "#21005D",
+        "usage": "容器底上的文字"
+      },
+      "primary": {
+        "value": "#6750A4",
+        "usage": "主色（M3 baseline purple）"
+      },
+      "primary-container": {
+        "value": "#EADDFF",
+        "usage": "主色容器底"
+      },
+      "secondary": {
+        "value": "#625B71",
+        "usage": "次要色"
+      },
+      "secondary-container": {
+        "value": "#E8DEF8",
+        "usage": "次要容器底"
+      },
+      "success": {
+        "value": "#2E6B4F",
+        "usage": "成功（自定义语义位）"
+      },
+      "success-bg": {
+        "value": "#DEFBF0",
+        "usage": "成功浅底"
+      },
+      "surface": {
+        "value": "#FFFFFF",
+        "usage": "surface 容器"
+      },
+      "tertiary": {
+        "value": "#7D5260",
+        "usage": "第三色"
+      },
+      "tertiary-container": {
+        "value": "#FFD8E4",
+        "usage": "第三容器底"
+      },
+      "text-1": {
+        "value": "#1D1B20",
+        "usage": "on-surface 一级文字"
+      },
+      "text-2": {
+        "value": "#49454F",
+        "usage": "on-surface-variant 次级文字"
+      },
+      "text-3": {
+        "value": "#79747E",
+        "usage": "outline 层级辅助"
+      },
+      "text-4": {
+        "value": "#CAC4D0",
+        "usage": "outline-variant 禁用/弱分隔"
+      },
+      "warning": {
+        "value": "#8A5A00",
+        "usage": "警告"
+      },
+      "warning-bg": {
+        "value": "#FFDF99",
+        "usage": "警告浅底"
+      }
+    },
+    "type": {
+      "family": "Roboto, Inter, \"Noto Sans SC\", system-ui, \"PingFang SC\", sans-serif",
+      "levels": {
+        "body": {
+          "size": 14,
+          "weight": 400,
+          "lineHeight": 1.43,
+          "usage": "正文（body-medium）"
+        },
+        "body-large": {
+          "size": 16,
+          "weight": 400,
+          "lineHeight": 1.5,
+          "usage": "大正文（body-large）"
+        },
+        "display-large": {
+          "size": 57,
+          "weight": 400,
+          "lineHeight": 1.12,
+          "usage": "大展示字（display-large）"
+        },
+        "headline-large": {
+          "size": 32,
+          "weight": 400,
+          "lineHeight": 1.13,
+          "usage": "大标题（headline-large）"
+        },
+        "headline-mid": {
+          "size": 28,
+          "weight": 400,
+          "lineHeight": 1.14,
+          "usage": "中标题"
+        },
+        "label": {
+          "size": 14,
+          "weight": 500,
+          "lineHeight": 1.43,
+          "usage": "按钮/标签（label-large）"
+        },
+        "label-small": {
+          "size": 11,
+          "weight": 500,
+          "lineHeight": 1.45,
+          "usage": "小标签（label-small）"
+        },
+        "title-large": {
+          "size": 22,
+          "weight": 400,
+          "lineHeight": 1.27,
+          "usage": "顶栏标题（title-large）"
+        },
+        "title-mid": {
+          "size": 16,
+          "weight": 500,
+          "lineHeight": 1.5,
+          "usage": "卡片标题（title-medium）"
+        }
+      }
+    },
+    "spacing": {
+      "lg": 24,
+      "md": 16,
+      "sm": 12,
+      "xl": 32,
+      "xs": 8,
+      "xxl": 40,
+      "xxs": 4
+    },
+    "radius": {
+      "large": 16,
+      "medium": 12,
+      "pill": 100,
+      "small": 8,
+      "xlarge": 28
+    },
+    "shadows": {
+      "card": "0 1px 2px rgba(0,0,0,0.3), 0 1px 3px 1px rgba(0,0,0,0.15)",
+      "floating": "0 1px 3px rgba(0,0,0,0.3), 0 4px 8px 3px rgba(0,0,0,0.15)",
+      "level1": "0 1px 2px rgba(0,0,0,0.3), 0 1px 3px 1px rgba(0,0,0,0.15)",
+      "level2": "0 1px 2px rgba(0,0,0,0.3), 0 2px 6px 2px rgba(0,0,0,0.15)",
+      "level3": "0 1px 3px rgba(0,0,0,0.3), 0 4px 8px 3px rgba(0,0,0,0.15)",
+      "none": "none"
+    },
+    "motion": {
+      "emphasized": "500ms cubic-bezier(0.2,0,0,1)",
+      "fast": "150ms cubic-bezier(0.2,0,0,1)",
+      "standard": "300ms cubic-bezier(0.2,0,0,1)"
+    },
+    "grid": 8
+  },
+  "dark": {
+    "colors": {
+      "bg": {
+        "value": "#141218",
+        "usage": "surface 页面背景"
+      },
+      "border": {
+        "value": "#938F99",
+        "usage": "outline 控件描边"
+      },
+      "border-2": {
+        "value": "#49454F",
+        "usage": "outline-variant 弱描边"
+      },
+      "danger": {
+        "value": "#F2B8B5",
+        "usage": "错误"
+      },
+      "danger-bg": {
+        "value": "#4C1D1B",
+        "usage": "错误容器底"
+      },
+      "fill": {
+        "value": "#211F26",
+        "usage": "surface-container-high（输入底）"
+      },
+      "fill-2": {
+        "value": "#36343B",
+        "usage": "次要填充"
+      },
+      "info": {
+        "value": "#D0BCFF",
+        "usage": "信息"
+      },
+      "info-bg": {
+        "value": "#4F378B",
+        "usage": "信息浅底"
+      },
+      "on-primary": {
+        "value": "#381E72",
+        "usage": "主色上的文字"
+      },
+      "on-primary-container": {
+        "value": "#EADDFF",
+        "usage": "容器底上的文字"
+      },
+      "primary": {
+        "value": "#D0BCFF",
+        "usage": "主色（暗色）"
+      },
+      "primary-container": {
+        "value": "#4F378B",
+        "usage": "主色容器底"
+      },
+      "secondary": {
+        "value": "#CCC2DC",
+        "usage": "次要色"
+      },
+      "secondary-container": {
+        "value": "#4A4458",
+        "usage": "次要容器底"
+      },
+      "success": {
+        "value": "#7FD9A6",
+        "usage": "成功"
+      },
+      "success-bg": {
+        "value": "#0F2E1F",
+        "usage": "成功浅底"
+      },
+      "surface": {
+        "value": "#211F26",
+        "usage": "surface 容器"
+      },
+      "tertiary": {
+        "value": "#EFB8C8",
+        "usage": "第三色"
+      },
+      "tertiary-container": {
+        "value": "#633B48",
+        "usage": "第三容器底"
+      },
+      "text-1": {
+        "value": "#E6E0E9",
+        "usage": "on-surface 一级文字"
+      },
+      "text-2": {
+        "value": "#CAC4D0",
+        "usage": "on-surface-variant 次级文字"
+      },
+      "text-3": {
+        "value": "#938F99",
+        "usage": "outline 层级辅助"
+      },
+      "text-4": {
+        "value": "#49454F",
+        "usage": "outline-variant 禁用"
+      },
+      "warning": {
+        "value": "#FFC46B",
+        "usage": "警告"
+      },
+      "warning-bg": {
+        "value": "#33250B",
+        "usage": "警告浅底"
+      }
+    },
+    "type": {
+      "family": "Roboto, Inter, \"Noto Sans SC\", system-ui, \"PingFang SC\", sans-serif",
+      "levels": {
+        "body": {
+          "size": 14,
+          "weight": 400,
+          "lineHeight": 1.43,
+          "usage": "正文（body-medium）"
+        },
+        "body-large": {
+          "size": 16,
+          "weight": 400,
+          "lineHeight": 1.5,
+          "usage": "大正文（body-large）"
+        },
+        "display-large": {
+          "size": 57,
+          "weight": 400,
+          "lineHeight": 1.12,
+          "usage": "大展示字（display-large）"
+        },
+        "headline-large": {
+          "size": 32,
+          "weight": 400,
+          "lineHeight": 1.13,
+          "usage": "大标题（headline-large）"
+        },
+        "headline-mid": {
+          "size": 28,
+          "weight": 400,
+          "lineHeight": 1.14,
+          "usage": "中标题"
+        },
+        "label": {
+          "size": 14,
+          "weight": 500,
+          "lineHeight": 1.43,
+          "usage": "按钮/标签（label-large）"
+        },
+        "label-small": {
+          "size": 11,
+          "weight": 500,
+          "lineHeight": 1.45,
+          "usage": "小标签（label-small）"
+        },
+        "title-large": {
+          "size": 22,
+          "weight": 400,
+          "lineHeight": 1.27,
+          "usage": "顶栏标题（title-large）"
+        },
+        "title-mid": {
+          "size": 16,
+          "weight": 500,
+          "lineHeight": 1.5,
+          "usage": "卡片标题（title-medium）"
+        }
+      }
+    },
+    "spacing": {
+      "lg": 24,
+      "md": 16,
+      "sm": 12,
+      "xl": 32,
+      "xs": 8,
+      "xxl": 40,
+      "xxs": 4
+    },
+    "radius": {
+      "large": 16,
+      "medium": 12,
+      "pill": 100,
+      "small": 8,
+      "xlarge": 28
+    },
+    "shadows": {
+      "card": "0 1px 2px rgba(0,0,0,0.5), 0 1px 3px 1px rgba(0,0,0,0.3)",
+      "floating": "0 1px 3px rgba(0,0,0,0.5), 0 4px 8px 3px rgba(0,0,0,0.3)",
+      "level1": "0 1px 2px rgba(0,0,0,0.5), 0 1px 3px 1px rgba(0,0,0,0.3)",
+      "level2": "0 1px 2px rgba(0,0,0,0.5), 0 2px 6px 2px rgba(0,0,0,0.3)",
+      "level3": "0 1px 3px rgba(0,0,0,0.5), 0 4px 8px 3px rgba(0,0,0,0.3)",
+      "none": "none"
+    },
+    "motion": {
+      "emphasized": "500ms cubic-bezier(0.2,0,0,1)",
+      "fast": "150ms cubic-bezier(0.2,0,0,1)",
+      "standard": "300ms cubic-bezier(0.2,0,0,1)"
+    },
+    "grid": 8
+  },
+  "guideline": [
+    "色彩永远成对：color + on-color（如 primary + on-primary），不要跨对混用。",
+    "按钮是胶囊（radius full）；FAB/主操作用 primary 填充，次操作用 secondary-container。",
+    "输入框是填充式（surface-container-high 底），无描边；focus 用 primary 指示条。",
+    "卡片圆角 12（large），对话框 28（xlarge）；层级用 surface-container 阶梯而不是堆阴影。",
+    "字重跨度大：标题 400 也可靠字号建立层级，label 用 500。",
+    "动效 emphasized（500ms cubic-bezier(0.2,0,0,1)）用于大位移转场。"
+  ]
+}

@@ -1156,3 +1156,36 @@ staticcheck ./...
 - 迭代 3（结构与生态）待启动：canvas.js 模块化、节点 HTML 分文件存储 + undo 栈、
   体系数据外置 embed JSON、组件扩充（tabs/table/pagination 优先）、e2e 回归收敛。
 - `staticcheck` 本机二进制版本不匹配（导出数据 v2 vs 工具链 v5）仍未跑，`go vet` 已过。
+
+---
+
+## 11. 迭代 3：结构与生态（2026-11-12）
+
+四项结构改动 + 一次组件扩充，目标是「可维护、可扩展」：
+分文件存储解决规模瓶颈、操作历史补画布工具标配、前端拆分解决巨石文件、
+体系数据与组件库解除代码耦合。
+
+### 11.1 落地内容
+
+| # | 问题 | 改动 | 落点 |
+|---|---|---|---|
+| 1 | 正文内联在 canvas.json：每次变更全量重写全部 HTML，几百节点后写盘昂贵 | **v4 分文件存储**：索引只存元数据（KB 级），正文落 `nodes/<id>.html` 按脏标记写；正文清空/节点删除同步清理文件；启动 GC 孤儿文件；正文文件先于索引落盘（索引是提交点），写失败回退索引内联保持自洽；v1/v2/v3 自动迁移 | `canvas/store.go` |
+| 2 | 无 undo/redo（只有 canvas_restore 恢复清空） | **操作历史**：Store 命令模式，节点增改删/清空/连线增删压入 undo/redo 闭包对（前后副本），50 步、仅内存、项目增删改进历史；MCP `canvas_undo/canvas_redo` + `POST /api/undo|redo` + 画布页 Ctrl+Z/Shift+Z/Y（焦点在输入框时不抢原生撤销）；撤销经统一出口推进 rev 并持久化，SSE 推给所有画布页 | `canvas/undo.go`（新） |
+| 3 | canvas.js 巨石文件（2080 行，七类职责混装） | **按职责拆 12 个经典脚本**（连续切块、不重排顶层语句执行顺序）：core/view/nodes/keyboard/edges/sync/projects/panels/catalog/capture/dock/main，最大 327 行；ui_tokens 门禁改为聚合扫描 `static/**/*.js` | `static/js/`（新） |
+| 4 | 组件库 18 个，缺列表页骨架件 | **+tabs/table/pagination**（一份结构 × 8 皮肤）；`SpecConformance` 门禁在开发中即拦下非阶梯 padding（5/6/10px → 4/8px）——机器门禁兑现价值 | `design/components.go`、`style.go` |
+| 5 | 8 套体系 Token 内联在 Go 源码（~1000 行纯数据），社区无法贡献体系包 | **数据外置 embed JSON**：`data/<id>.json` 为单一真源（`go:embed` 装载），`gen_export` 工具负责迁移/校验/回写；门禁不变量继续把关 | `design/data/`、`systems_data.go`、`gen_export/`（新） |
+
+### 11.2 与原方案的偏差（刻意为之）
+
+| 项 | 原方案 | 实际实现 | 原因 |
+|---|---|---|---|
+| canvas.js 模块化 | ES modules + 显式 import/export | 经典脚本连续切块，保持全局契约 | canvas.js ↔ inspect.js 双向耦合（S/令牌/弹层/选择器互调），手工改写 ~2800 行引用图的回归风险大于收益；连续切块零行为差异，浏览器端到端验证全通过。模块化可作为后续 inspect.js 解耦后的独立事项 |
+
+### 11.3 验证
+
+- `GOWORK=off go vet ./... && go test ./...` 全模块绿；新增
+  `canvas/persistfile_test.go`（v4 round trip / 索引零正文 / 清空删文件 / 孤儿 GC）、
+  `canvas/undo_test.go`（可逆性 / 栈语义 / HTTP 契约）；既有 v3 格式断言升级为 v4。
+- 浏览器端到端（拆分后实测）：页面加载渲染、SSE 实时出现（1→2）、
+  检查模式开关、选中-删除-Ctrl+Z 复活、截图任务闭环（84KB PNG）。
+- 21 组件 × 8 体系渲染 + 无 emoji + 规格阶梯 + 字体授权门禁全过。

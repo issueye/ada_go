@@ -1,0 +1,319 @@
+{
+  "id": "douyin",
+  "name": "抖音设计体系",
+  "vendor": "字节跳动 · 抖音",
+  "family": "mobile",
+  "description": "抖音移动端视觉：品牌红 #FE2C55 与电光青 #25F4EE 的撞色、沉浸式墨黑 #161823、大圆角与强字重标题。",
+  "style": {
+    "summary": "内容即界面：沉浸式黑底、红青撞色点缀、超大字重标题、胶囊大按钮，装饰服务于内容。",
+    "keywords": [
+      "抖音红",
+      "电光青",
+      "墨黑",
+      "撞色",
+      "沉浸式"
+    ],
+    "density": "舒适",
+    "elevation": "弱阴影 + 遮罩分层，沉浸式场景用整层黑色"
+  },
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "light": {
+    "colors": {
+      "accent": {
+        "value": "#25F4EE",
+        "usage": "电光青/强调点缀"
+      },
+      "bg": {
+        "value": "#FFFFFF",
+        "usage": "页面背景"
+      },
+      "border": {
+        "value": "#1618231F",
+        "usage": "描边/分隔"
+      },
+      "danger": {
+        "value": "#FE2C55",
+        "usage": "危险（与品牌红同源）"
+      },
+      "fill": {
+        "value": "#F1F1F2",
+        "usage": "输入/填充底"
+      },
+      "gradient-live": {
+        "value": "linear-gradient(135deg,#FE2C55,#25F4EE)",
+        "usage": "直播/活动渐变"
+      },
+      "ink": {
+        "value": "#161823",
+        "usage": "墨黑（文本/沉浸底）"
+      },
+      "primary": {
+        "value": "#FE2C55",
+        "usage": "品牌红/主操作"
+      },
+      "success": {
+        "value": "#15C85D",
+        "usage": "成功"
+      },
+      "surface": {
+        "value": "#F8F8F8",
+        "usage": "浅灰表面"
+      },
+      "text-1": {
+        "value": "#161823",
+        "usage": "一级文字"
+      },
+      "text-2": {
+        "value": "#161823BF",
+        "usage": "二级文字（75%）"
+      },
+      "text-3": {
+        "value": "#16182380",
+        "usage": "三级文字（50%）"
+      },
+      "text-inverse": {
+        "value": "#FFFFFF",
+        "usage": "深底上的文字"
+      },
+      "warning": {
+        "value": "#FF7D00",
+        "usage": "警告"
+      }
+    },
+    "type": {
+      "family": "\"Douyin Sans\", Inter, \"Noto Sans SC\", system-ui, \"PingFang SC\", sans-serif",
+      "levels": {
+        "body": {
+          "size": 16,
+          "weight": 400,
+          "lineHeight": 1.5,
+          "usage": "正文（移动端偏大）"
+        },
+        "body-sm": {
+          "size": 14,
+          "weight": 400,
+          "lineHeight": 1.43,
+          "usage": "紧凑正文"
+        },
+        "caption": {
+          "size": 13,
+          "weight": 400,
+          "lineHeight": 1.38,
+          "usage": "辅助说明"
+        },
+        "display": {
+          "size": 32,
+          "weight": 800,
+          "lineHeight": 1.19,
+          "usage": "活动大字"
+        },
+        "tab": {
+          "size": 12,
+          "weight": 500,
+          "lineHeight": 1.17,
+          "usage": "底部标签"
+        },
+        "title-1": {
+          "size": 24,
+          "weight": 700,
+          "lineHeight": 1.33,
+          "usage": "页面大标题"
+        },
+        "title-2": {
+          "size": 20,
+          "weight": 700,
+          "lineHeight": 1.4,
+          "usage": "模块标题"
+        },
+        "title-3": {
+          "size": 17,
+          "weight": 600,
+          "lineHeight": 1.41,
+          "usage": "卡片标题"
+        }
+      }
+    },
+    "spacing": {
+      "lg": 20,
+      "md": 16,
+      "sm": 12,
+      "xl": 24,
+      "xs": 8,
+      "xxl": 32,
+      "xxs": 4
+    },
+    "radius": {
+      "large": 16,
+      "medium": 12,
+      "pill": 100,
+      "small": 8,
+      "xlarge": 24
+    },
+    "shadows": {
+      "card": "0 2px 12px rgba(22,24,35,0.08)",
+      "floating": "0 8px 28px rgba(22,24,35,0.16)",
+      "none": "none"
+    },
+    "motion": {
+      "fast": "180ms cubic-bezier(0.22,0.61,0.36,1)",
+      "spring": "420ms cubic-bezier(0.34,1.56,0.64,1)",
+      "standard": "300ms cubic-bezier(0.22,0.61,0.36,1)"
+    },
+    "grid": 8
+  },
+  "dark": {
+    "colors": {
+      "accent": {
+        "value": "#25F4EE",
+        "usage": "电光青/强调点缀"
+      },
+      "bg": {
+        "value": "#121212",
+        "usage": "页面背景（沉浸黑）"
+      },
+      "border": {
+        "value": "#FFFFFF1F",
+        "usage": "描边/分隔"
+      },
+      "danger": {
+        "value": "#FE2C55",
+        "usage": "危险"
+      },
+      "fill": {
+        "value": "#2A2A2E",
+        "usage": "输入/填充底"
+      },
+      "gradient-live": {
+        "value": "linear-gradient(135deg,#FE2C55,#25F4EE)",
+        "usage": "直播/活动渐变"
+      },
+      "ink": {
+        "value": "#161823",
+        "usage": "墨黑"
+      },
+      "primary": {
+        "value": "#FE2C55",
+        "usage": "品牌红/主操作"
+      },
+      "success": {
+        "value": "#15C85D",
+        "usage": "成功"
+      },
+      "surface": {
+        "value": "#1C1C1E",
+        "usage": "深灰表面"
+      },
+      "text-1": {
+        "value": "#FFFFFF",
+        "usage": "一级文字"
+      },
+      "text-2": {
+        "value": "#FFFFFFBF",
+        "usage": "二级文字"
+      },
+      "text-3": {
+        "value": "#FFFFFF80",
+        "usage": "三级文字"
+      },
+      "text-inverse": {
+        "value": "#161823",
+        "usage": "浅底上的文字"
+      },
+      "warning": {
+        "value": "#FF9F0A",
+        "usage": "警告"
+      }
+    },
+    "type": {
+      "family": "\"Douyin Sans\", Inter, \"Noto Sans SC\", system-ui, \"PingFang SC\", sans-serif",
+      "levels": {
+        "body": {
+          "size": 16,
+          "weight": 400,
+          "lineHeight": 1.5,
+          "usage": "正文（移动端偏大）"
+        },
+        "body-sm": {
+          "size": 14,
+          "weight": 400,
+          "lineHeight": 1.43,
+          "usage": "紧凑正文"
+        },
+        "caption": {
+          "size": 13,
+          "weight": 400,
+          "lineHeight": 1.38,
+          "usage": "辅助说明"
+        },
+        "display": {
+          "size": 32,
+          "weight": 800,
+          "lineHeight": 1.19,
+          "usage": "活动大字"
+        },
+        "tab": {
+          "size": 12,
+          "weight": 500,
+          "lineHeight": 1.17,
+          "usage": "底部标签"
+        },
+        "title-1": {
+          "size": 24,
+          "weight": 700,
+          "lineHeight": 1.33,
+          "usage": "页面大标题"
+        },
+        "title-2": {
+          "size": 20,
+          "weight": 700,
+          "lineHeight": 1.4,
+          "usage": "模块标题"
+        },
+        "title-3": {
+          "size": 17,
+          "weight": 600,
+          "lineHeight": 1.41,
+          "usage": "卡片标题"
+        }
+      }
+    },
+    "spacing": {
+      "lg": 20,
+      "md": 16,
+      "sm": 12,
+      "xl": 24,
+      "xs": 8,
+      "xxl": 32,
+      "xxs": 4
+    },
+    "radius": {
+      "large": 16,
+      "medium": 12,
+      "pill": 100,
+      "small": 8,
+      "xlarge": 24
+    },
+    "shadows": {
+      "card": "0 2px 12px rgba(0,0,0,0.4)",
+      "floating": "0 8px 28px rgba(0,0,0,0.55)",
+      "none": "none"
+    },
+    "motion": {
+      "fast": "180ms cubic-bezier(0.22,0.61,0.36,1)",
+      "spring": "420ms cubic-bezier(0.34,1.56,0.64,1)",
+      "standard": "300ms cubic-bezier(0.22,0.61,0.36,1)"
+    },
+    "grid": 8
+  },
+  "guideline": [
+    "品牌红只给关键动作与品牌元素，大面积使用会稀释点击欲。",
+    "红青同框仅用于活动/直播等高能场景，常规界面只出现其一。",
+    "沉浸式内容区用墨黑 #161823 整层铺底，白色文字 + 75%/50% 透明度分层。",
+    "按钮大而圆：主操作用 pill 胶囊 + 600/700 字重，禁用细描边小按钮。",
+    "标题靠字重（700/800）建立层级，正文保持 16px 保证移动端可读性。",
+    "图标/插画可带 8% 透明度的红青双色错位描边（品牌故障感）。"
+  ]
+}

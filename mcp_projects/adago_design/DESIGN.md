@@ -106,6 +106,10 @@ type Tokens struct {
 （字族+字号阶梯）、`Spacing`、`Radius`、`Shadows`、`Motion`、`Grid`，
 外加 `Components` 组件清单（见 3.2）与 `Guideline` 使用守则。
 
+**数据源（迭代 3-⑤）**：体系的单一真源是 `internal/design/data/<id>.json`
+（8 个文件，`go:embed` 装载，`gen_export` 工具可校验/回写）——
+数据与代码分离，新增/修订体系改 JSON 即可，不变量仍由门禁测试把关。
+
 ### 3.2 组件：一份结构，五份皮肤
 
 组件 HTML 结构全体系统一（class 前缀 `ds-`），差异全部落在每体系生成的
@@ -159,9 +163,10 @@ type Node struct {
 }
 ```
 
-`Store`：内存 map + 互斥锁；变更即写 `canvas.json`（原子替换，v3 格式
-`{version:3, projects, nodes, edges}`）；启动时载入并完成迁移。
-`projects[].canvas` 是 v3 的可选增量字段：旧文件没有该字段 = 自由画布，无需版本升级。
+`Store`：内存 map + 互斥锁；v4 分文件持久化 —— `canvas.json` 只存索引
+（项目/节点元数据/连线），节点正文落 `nodes/<id>.html`（按脏标记写，
+索引是提交点；正文写失败回退索引内联，整体自洽）；v1/v2/v3 装载时自动迁移。
+`projects[].canvas` 是可选增量字段：旧文件没有该字段 = 自由画布，无需版本升级。
 节点 HTML 由服务端（design 包）生成，画布 UI 不二次加工。
 
 **持久化策略（P0 加固）**：
@@ -184,7 +189,7 @@ type Node struct {
 
 | 方法/路径 | 说明 |
 |---|---|
-| `GET /` | 画布单页（embed.FS：index.html / canvas.css / canvas.js） |
+| `GET /` | 画布单页（embed.FS：index.html / tokens.css / canvas.css / icons.js / js/*.js（12 个职责模块）/ inspect.js） |
 | `GET /api/health` | `{ok, server, node_count, project_count, data_dir, rev, persist_error?, time}`；`server`/`data_dir`/`rev` 供多实例探测与 SSE 对账 |
 | `GET /api/projects` | 项目列表（含 `node_count` / `frame_count`） |
 | `POST /api/projects` | 建项目 `{name, note?}`；空名 400、同名 409 |
@@ -200,6 +205,7 @@ type Node struct {
 | `DELETE /api/nodes/{id}` | 删除（级联删连线） |
 | `POST /api/nodes/clear` | 清空**指定项目**，`project` 必填 |
 | `POST /api/arrange` | `{group_by:"project"}` 按项目分行重排（全部视图用），返回 `{moved}` |
+| `POST /api/undo` / `POST /api/redo` | 撤销 / 重做最近一次画布内容操作 → `{done, description, undo_depth, redo_depth}`（历史 50 步，仅进程内存） |
 | `GET /api/events` | SSE 变更推送：连接即推当前 `rev`，此后每次变更推 `change` 事件；15s 心跳 |
 | `POST /api/capture` | 创建截图任务（tool 调用）→ `{taskID}` |
 | `GET /api/tasks` | UI 长轮询领取任务（10s 内返回或超时空列表） |
@@ -310,7 +316,10 @@ style-src 'unsafe-inline'; img-src data:; font-src data:`）—— `canvas_add`
   现在函数入口显式拆成 `L/T/R/B`，只有兄弟节点才读 DOMRect。
 - 检查器面板带 `panelGen` 代际号：`ensureCatalog` 是异步的，hover 又高频，
   旧请求回来时若代际已变就丢弃结果，避免面板显示过期元素。
-- 代码在独立的 `static/inspect.js`（`canvas.js` 只管视图、拖动、同步、截图）。
+- 代码按职责拆为 `static/js/` 下 12 个经典脚本（core/view/nodes/keyboard/edges/
+  sync/projects/panels/catalog/capture/dock/main，连续切块、执行顺序不变，
+  最大 327 行），检查模式独立在 `static/inspect.js`（全局契约与拆分理由见
+  IMPROVEMENTS §11）。
 
 #### 界面设计系统（画布工具蒙皮）
 
@@ -411,6 +420,7 @@ SDK：`github.com/modelcontextprotocol/go-sdk v1.8.0`（与 mem-go 一致）。
 | `canvas_remove` | `id` | 删除确认 |
 | `canvas_arrange` | `columns?`（默认 sqrt 取整，1-8） | 按「体系分组→网格」自动排版结果 |
 | `canvas_clear` | `confirm=true` | 清空数量（保留内存快照） |
+| `canvas_undo` / `canvas_redo` | — | 撤销 / 重做最近一次画布内容操作（描述 + 剩余深度；无操作返回 `nothing_to_undo|redo`） |
 | `canvas_restore` | — | 恢复最近一次清空的节点 |
 | `canvas_export` | `title?` | 全画布独立 HTML 板文件路径 |
 | `canvas_screenshot` | `nodeID?`（空=全画布）, `scale?=1` | `ImageContent`（PNG）；超时且 `AutoOpen` 时自动拉起浏览器重试一次（每进程一次，测试/CI 关闭） |
@@ -531,14 +541,17 @@ GOWORK=off go build -trimpath -o bin/adago-design.exe .
 - `internal/design`：注册表完备性（8 体系、Token 非空、颜色合法 hex）、
   StyleSheet/Compose 生成物包含关键 token 值、组件 HTML 结构快照断言；
   新增规范层不变量：图标命名/路径/精灵覆盖、画板推导值、字体全体系可商用、
-  **渲染产物无 emoji 与字符图标**；节点级走查（`nodeaudit_test.go`）：
+  **渲染产物无 emoji 与字符图标**；规格阶梯走查（CSS 字面值须落阶梯——
+  新组件的非阶梯 padding 在此被门禁拦下）；节点级走查（`nodeaudit_test.go`）：
   外链 fail、emoji fail、画板契约三态、字族商用判定。
 - `internal/canvas`：Store CRUD/持久化/并发、HTTP API 全路径（httptest）、
   截图任务闭环（模拟 UI 回传）/超时路径；P0 加固（`hardening_test.go`）：
   备份轮换与降级恢复、写盘失败进 `PersistError()` 与健康检查、
   `Rev()`/订阅广播、列表剥 HTML 与单节点正文、部分更新指针语义、
   SSE 事件流、`ProbeInstance` 同数据目录判定；CSP 注入（`sanitize_test.go`）：
-  注入位置（head/html/片段）、幂等、Add/Update/旧快照装载自愈。
+  注入位置（head/html/片段）、幂等、Add/Update/旧快照装载自愈；
+  v4 分文件（`persistfile_test.go`）：round trip、索引零正文、清空删文件、
+  孤儿 GC；操作历史（`undo_test.go`）：增改删/连线/清空可逆、栈语义、HTTP 契约。
 - `internal/mcpserver`：内存 transport 走 `initialize` + `tools/list` +
   `tools/call`（design_tokens、design_preview、canvas_add、canvas_screenshot
   超时路径），断言结果结构；目录类工具与画板透传单测；
