@@ -1,12 +1,21 @@
-/* adago-design 画布 · 同步：节点轮询（列表已剥 HTML，按 html_rev 复用正文）、项目低频刷新。
- * 经典脚本按 index.html 顺序加载，全局作用域共享（与 inspect.js 同一契约）；
- * 各文件顶层语句的执行顺序与拆分前完全一致，请勿调换加载顺序。 */
+/* adago-design 画布 · 同步：节点轮询（列表已剥 HTML，按 html_rev 复用正文）、项目低频刷新。 */
 "use strict";
+
+import { S } from "./state.js";
+import { api } from "./net.js";
+import { addNodeEl, updateNodeEl, removeNodeEl } from "./nodes.js";
+import { scheduleEdges } from "./edges.js";
+import { scheduleLabels, renderProjectRows, isProjectModalOpen } from "./panels.js";
+import { renderProjectTree } from "./projects.js";
+import { syncCanvasFromScope } from "./view.js";
 // ---------------- 同步轮询 ----------------
 // 节点每 2s 增量合并；项目/画布版式低频刷新（约 30s）：
 // Agent 侧 project_create / project_canvas 不会触发 UI 事件，只能靠轮询兜底。
 let pollTicks = 0;
 let projectsSig = "";
+
+// projectsSig 由 sync 独占持有：其他模块只能通过 setter 更新，避免跨模块写外部绑定。
+export function setProjectsSig(sig) { projectsSig = sig; }
 
 function projectsSignature(list) {
   return JSON.stringify((list || []).map((p) => [
@@ -59,7 +68,8 @@ async function pollNodes(opts) {
       }
     }
     for (const id of [...S.nodes.keys()]) if (!seen.has(id)) removeNodeEl(id);
-    S.edges = new Map((ed.edges || []).map((e) => [e.id, e]));
+    S.edges.clear();
+    for (const e of ed.edges || []) S.edges.set(e.id, e);
     scheduleEdges("*");
     scheduleLabels();
     if (++pollTicks % 15 === 0) await refreshProjectsQuietly();
@@ -80,3 +90,5 @@ async function refreshProjectsQuietly() {
     if (isProjectModalOpen()) renderProjectRows();
   } catch (_) { /* 网络异常时保持现状 */ }
 }
+
+export { pollNodes, refreshProjectsQuietly, projectsSignature };

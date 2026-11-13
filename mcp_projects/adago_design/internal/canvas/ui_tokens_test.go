@@ -222,6 +222,82 @@ func TestCanvasCSSUsesTokensOnly(t *testing.T) {
 	}
 }
 
+// 几何令牌清单：canvas.css 的尺寸/间距/模糊等一律从这里取。
+var geometryTokens = []string{
+	"--ui-blur-toolbar", "--ui-blur-panel",
+	"--ui-icon-12", "--ui-icon-14", "--ui-icon-16", "--ui-icon-20", "--ui-icon-24",
+	"--ui-grid-cell", "--ui-grid-bleed",
+	"--ui-menu-min-w", "--ui-tb-menu-min-w", "--ui-tb-menu-max-w", "--ui-tb-menu-max-h",
+	"--ui-tip-max-w", "--ui-modal-w", "--ui-ask-w", "--ui-toast-max-w",
+	"--ui-empty-max-w", "--ui-solo-max-w", "--ui-solo-title-max-w", "--ui-solo-proj-max-w",
+	"--ui-control-xl", "--ui-zoom-min-w", "--ui-field-min-w", "--ui-textarea-min-h",
+	"--ui-edge-label-stroke", "--ui-focus-offset",
+	"--ui-inspect-border-w", "--ui-inspect-label-max-w", "--ui-note-min-h",
+}
+
+func TestUITokenGeometryComplete(t *testing.T) {
+	css := readStatic(t, "tokens.css")
+	light := cssBlock(css, ":root")
+	for _, name := range geometryTokens {
+		if cssVar(light, name) == "" {
+			t.Errorf("缺少几何令牌 %s（尺寸/间距/模糊必须在 tokens.css 统一定义）", name)
+		}
+	}
+}
+
+// stripCSSComments 去掉 /* ... */ 注释：注释里的历史数值不应触发门禁。
+func stripCSSComments(src string) string {
+	re := regexp.MustCompile(`(?s)/\*.*?\*/`)
+	return re.ReplaceAllString(src, "")
+}
+
+// geometryProps 是「必须走令牌」的几何/尺寸属性。
+var geometryProps = map[string]bool{
+	"padding": true, "margin": true,
+	"gap": true, "row-gap": true, "column-gap": true,
+	"width": true, "height": true,
+	"min-width": true, "max-width": true, "min-height": true, "max-height": true,
+	"inset": true, "top": true, "right": true, "bottom": true, "left": true,
+	"outline-offset": true, "background-size": true, "backdrop-filter": true,
+}
+
+func geometryValueAllowed(v string) bool {
+	v = strings.ToLower(strings.TrimSpace(strings.TrimSuffix(
+		strings.TrimSpace(v), "!important")))
+	if strings.Contains(v, "var(--ui-") || strings.Contains(v, "calc(") {
+		return true
+	}
+	// 发丝线与零值：1px 边框/描边、0、百分比、em（相对字号）、视口单位
+	for _, ok := range []string{
+		"0", "0px", "0%", "1px", "-1px", "1em",
+		"auto", "none", "inherit", "initial", "unset",
+		"transparent", "currentcolor", "max-content", "min-content", "fit-content",
+	} {
+		if v == ok {
+			return true
+		}
+	}
+	return strings.Contains(v, "%") || strings.Contains(v, "vh") || strings.Contains(v, "vw")
+}
+
+func TestCanvasCSSGeometryUsesTokens(t *testing.T) {
+	css := stripCSSComments(readStatic(t, "canvas.css"))
+	// @media 预置里的断点不能用自定义属性（CSS 规范限制），扫描前先摘掉。
+	css = regexp.MustCompile(`@media[^{]*\{`).ReplaceAllString(css, "")
+	declRe := regexp.MustCompile(`(?m)([a-z][a-z-]*)\s*:\s*([^;{}]+)`)
+	for _, m := range declRe.FindAllStringSubmatch(css, -1) {
+		prop, val := m[1], m[2]
+		if !geometryProps[prop] && !strings.HasPrefix(prop, "padding-") &&
+			!strings.HasPrefix(prop, "margin-") {
+			continue
+		}
+		if !geometryValueAllowed(val) {
+			t.Errorf("canvas.css %s 使用裸值 %q（应引用 --ui-* 几何令牌）",
+				prop, strings.TrimSpace(val))
+		}
+	}
+}
+
 func TestCanvasCSSAccessibilityRules(t *testing.T) {
 	css := readStatic(t, "canvas.css")
 	for _, want := range []string{
@@ -266,13 +342,14 @@ func TestCanvasJSNoNativeDialogs(t *testing.T) {
 	}
 	for _, want := range []string{"function uiAsk(", "function uiConfirm(", "function isAskOpen("} {
 		if !strings.Contains(code, want) {
-			t.Errorf("画布 JS 缺少 %s（应在 js/core.js / js/main.js）", want)
+			t.Errorf("画布 JS 缺少 %s（应在 js/ui.js / js/main.js）", want)
 		}
 	}
 }
 
-// stripLineComments 去掉 // 行注释（足够用于本文件的朴素检查）。
+// stripLineComments 去掉 // 行注释与 /* */ 块注释（足够用于本文件的朴素检查）。
 func stripLineComments(src string) string {
+	src = regexp.MustCompile(`(?s)/\*.*?\*/`).ReplaceAllString(src, "")
 	lines := strings.Split(src, "\n")
 	for i, line := range lines {
 		if idx := strings.Index(line, "//"); idx >= 0 {
@@ -297,6 +374,24 @@ func TestIndexLoadsTokensFirst(t *testing.T) {
 	}
 	if !strings.Contains(html, `id="ask-modal"`) {
 		t.Error("index.html 需要 ask-modal 骨架（替代原生 prompt/confirm）")
+	}
+}
+
+// 入口收敛：只允许一个 ES module 入口 + icons.js 经典脚本（精灵注入时序）。
+// 任何新增的经典 <script src> 都会绕过 import 图，回归成隐式加载顺序依赖。
+func TestIndexSingleModuleEntry(t *testing.T) {
+	html := readStatic(t, "index.html")
+	if n := strings.Count(html, `type="module"`); n != 1 {
+		t.Errorf("index.html 应有且仅有一个 module 入口，实际 %d 个", n)
+	}
+	if !strings.Contains(html, `<script type="module" src="js/main.js">`) {
+		t.Error("index.html 缺少入口模块 js/main.js")
+	}
+	re := regexp.MustCompile(`<script\s+src="([^"]+)"`)
+	for _, m := range re.FindAllStringSubmatch(html, -1) {
+		if m[1] != "icons.js" {
+			t.Errorf("index.html 不应再有经典脚本 %q（统一走 import 图）", m[1])
+		}
 	}
 }
 

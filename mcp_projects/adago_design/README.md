@@ -119,6 +119,7 @@ bin\adago-design.exe mcp
 | `project_list` | 列出项目与各自的设计稿数量；不确定 `project` 填什么时先调它 |
 | `project_remove` | 删除**空**项目（`confirm=true`）；项目下仍有设计稿会被拒绝 |
 | `project_canvas` | **画布版式**：按比例预设或自定义宽高设置当前画布，`free=true` 恢复自由画布；读取用 `project_list` |
+| `canvas_resync_artboards` | **按画板显式重算宽高**（可撤销，面板一次回退）：画板/比例切换不会自动迁移已有节点；组件只纠正宽度，整页稿同时纠正宽高 |
 | `design_artboard` | **画板（尺寸规范）**：列表 / 按 ID 取推导值；返回内容区、安全区、栅格、导出倍率与尺寸契约 |
 | `design_fonts` | **字体授权**：可商用 / 可嵌入 / 可再分发标记，各脚本默认字族栈，授权策略 |
 | `design_icons` | **图标库**：按名称/分组/别名检索，返回 `<use>` 引用或独立 `<svg>` |
@@ -289,7 +290,12 @@ Agent 修改画布版式后，画布 UI 经 SSE 即时同步（无需手动刷�
 GOWORK=off go test ./...
 GOWORK=off go vet ./...
 GOWORK=off go generate ./internal/design   # 改了图标后同步 icons.js
+node --test internal/canvas/testdata/geometry.test.mjs   # 前端几何纯函数（可选，需 Node）
 ```
+
+画布前端是 ES Modules（`internal/canvas/static/js/`，入口 `main.js`），无构建步骤：
+浏览器直接加载源码，因此静态资源必须带正确的 `Content-Type`（服务端已显式设置）。
+`geometry.test.mjs` 也由 `go test ./internal/canvas` 代理执行，PATH 中没有 node 时自动跳过。
 
 - `internal/canvas`：Store CRUD/持久化/并发、HTTP API 全路径、截图任务闭环、
   **P0 加固**（备份轮换与降级恢复、写盘失败可见、列表剥 HTML、SSE 推送、

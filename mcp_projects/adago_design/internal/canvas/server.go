@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"net"
 	"net/http"
+	"net/url"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -87,6 +90,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/projects/{id}", s.handleUpdateProject)
 	mux.HandleFunc("DELETE /api/projects/{id}", s.handleDeleteProject)
 	mux.HandleFunc("PUT /api/projects/{id}/canvas", s.handleSetProjectCanvas)
+	mux.HandleFunc("POST /api/artboards/resync", s.handleResyncArtboards)
 	mux.HandleFunc("GET /api/canvas/presets", s.handleCanvasPresets)
 	mux.HandleFunc("GET /api/nodes", s.handleListNodes)
 	mux.HandleFunc("POST /api/nodes", s.handleAddNode)
@@ -113,12 +117,25 @@ func (s *Server) Handler() http.Handler {
 	fileServer := http.FileServer(http.FS(staticRoot))
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
+			setStaticContentType(w, r.URL.Path)
 			fileServer.ServeHTTP(w, r)
 			return
 		}
 		s.serveIndex(w, r, staticRoot)
 	})
 	return s.guard(mux)
+}
+
+// setStaticContentType 显式声明静态脚本/样式的 MIME。
+// ES 模块由浏览器强制校验 Content-Type：Windows 注册表常把 .js 映成 text/plain，
+// 不覆盖会让所有模块加载失败（经典脚本时代只是宽容地不报错）。
+func setStaticContentType(w http.ResponseWriter, path string) {
+	switch {
+	case strings.HasSuffix(path, ".js"), strings.HasSuffix(path, ".mjs"):
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	case strings.HasSuffix(path, ".css"):
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	}
 }
 
 // serveIndex 输出 index.html，并把缺省主题注入 data-theme 占位符。
@@ -140,40 +157,91 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request, staticRoot f
 	_, _ = w.Write([]byte(body))
 }
 
-// guard 统一处理：Origin 校验（写操作）、panic 兜底。
+// guard 统一处理：Host/Origin 校验（防 DNS rebinding 与跨源写）、panic 兜底。
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tw := &trackedWriter{ResponseWriter: w}
 		defer func() {
 			if rec := recover(); rec != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]any{
+				log.Printf("HTTP handler panic: %v\n%s", rec, debug.Stack())
+				if tw.wrote {
+					// 响应已写出（可能是 SSE/大文件）：无法再补 500，断开连接。
+					panic(http.ErrAbortHandler)
+				}
+				writeJSON(tw, http.StatusInternalServerError, map[string]any{
 					"error": Error{Code: "internal", Message: fmt.Sprint(rec)},
 				})
 			}
 		}()
+		// Host 必须是回环地址：挡住 DNS rebinding（恶意域名解析到 127.0.0.1
+		// 后，浏览器仍会带攻击者域名的 Host）。
+		if !loopbackHost(r.Host) {
+			writeJSON(tw, http.StatusForbidden, map[string]any{
+				"error": Error{Code: "bad_host", Message: "only loopback Host is allowed"},
+			})
+			return
+		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			origin := r.Header.Get("Origin")
-			if origin != "" && !sameLoopbackOrigin(origin) {
-				writeJSON(w, http.StatusForbidden, map[string]any{
+			if origin != "" && !sameOrigin(origin, r.Host) {
+				writeJSON(tw, http.StatusForbidden, map[string]any{
 					"error": Error{Code: "bad_origin", Message: "cross-origin writes are not allowed"},
 				})
 				return
 			}
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(tw, r)
 	})
 }
 
-// sameLoopbackOrigin 仅放行 127.0.0.1/localhost 的 http origin；
-// 空 Origin 视为同源/非浏览器直连，放行。
-func sameLoopbackOrigin(origin string) bool {
-	if origin == "" {
-		return true
+// trackedWriter 记录响应是否已开始写出，供 panic 兜底决定能否补错误页。
+// 必须保留 http.Flusher（SSE 依赖）。
+type trackedWriter struct {
+	http.ResponseWriter
+	wrote bool
+}
+
+// trackedWriter 必须保留 Flush：SSE 长连接依赖 http.Flusher。
+var _ http.Flusher = (*trackedWriter)(nil)
+
+func (w *trackedWriter) WriteHeader(code int) {
+	w.wrote = true
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *trackedWriter) Write(b []byte) (int, error) {
+	w.wrote = true
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *trackedWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
 	}
-	host := strings.TrimPrefix(strings.TrimPrefix(origin, "http://"), "https://")
-	if h, _, err := net.SplitHostPort(host); err == nil {
+}
+
+// loopbackHost 判断 Host 头（可带端口）是否是回环地址。
+func loopbackHost(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
 		host = h
 	}
-	return host == "127.0.0.1" || host == "localhost"
+	host = strings.Trim(host, "[]")
+	switch strings.ToLower(host) {
+	case "127.0.0.1", "localhost", "::1":
+		return true
+	}
+	return false
+}
+
+// sameOrigin 要求写操作的 Origin 与本次请求同源：回环 host、http 协议、
+// 端口完全一致。空 Origin 由调用方放行（非浏览器直连）。
+func sameOrigin(origin, host string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" || u.Scheme != "http" {
+		return false
+	}
+	return loopbackHost(u.Host) && loopbackHost(host) && strings.EqualFold(u.Host, host)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

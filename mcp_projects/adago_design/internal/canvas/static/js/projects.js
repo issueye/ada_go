@@ -1,7 +1,17 @@
-/* adago-design 画布 · 项目作用域：全部/单项目切换、项目树渲染、单画布聚焦（solo）、按项目重排。
- * 经典脚本按 index.html 顺序加载，全局作用域共享（与 inspect.js 同一契约）；
- * 各文件顶层语句的执行顺序与拆分前完全一致，请勿调换加载顺序。 */
+/* adago-design 画布 · 项目作用域：全部/单项目切换、项目树渲染、单画布聚焦（solo）、按项目重排。 */
 "use strict";
+
+import { S, $, edgeSvg, relLayer } from "./state.js";
+import { icon } from "./icons-bridge.js";
+import { esc, toast } from "./ui.js";
+import { api } from "./net.js";
+import { applyTransform, centerView, fitView, syncCanvasFromScope } from "./view.js";
+import { scheduleEdges } from "./edges.js";
+import { scheduleLabels, renderProjectRows, closeTreeMenu, isProjectModalOpen } from "./panels.js";
+import { closeCanvasMenus } from "./view.js";
+import { pollNodes, projectsSignature, setProjectsSig } from "./sync.js";
+import { removeNodeEl, selectNode, showEmptyHint, hideEmptyHint } from "./nodes.js";
+import { clearPair } from "../inspect.js";
 // ---------------- 项目（画布作用域） ----------------
 // S.project === "" 表示「全部」：一次看所有项目的稿子，按项目分行并在行首打标签。
 const SCOPE_ALL = "";
@@ -128,7 +138,7 @@ async function enterSolo(nodeID, projectID) {
   if (!n) { toast("这张设计稿已不在当前画布", true); return; }
   // 跨卡片的 A↔B 关系在只剩一张稿时没有意义，先清掉，避免残影画到 (0,0)；
   // 检查器面板也一并收起，否则会留着上一次的对比数据（hover 时检查器会自己再打开）
-  if (typeof clearPair === "function") clearPair();
+  clearPair();
   if (S.selected) { const el = S.els.get(S.selected); if (el) el.classList.remove("selected"); S.selected = null; }
   $("inspector").classList.add("hidden");
   S.solo = nodeID;
@@ -168,7 +178,7 @@ async function loadProjects(preferred) {
     S.projects = [];
     toast("项目列表加载失败: " + e.message, true);
   }
-  projectsSig = projectsSignature(S.projects);
+  setProjectsSig(projectsSignature(S.projects));
   const remembered = preferred !== undefined
     ? preferred
     : (localStorage.getItem("adago.scope") || "all");
@@ -250,8 +260,14 @@ async function arrangeByProject(silent) {
 async function reloadProjects() {
   const data = await api("/api/projects");
   S.projects = data.projects || [];
-  projectsSig = projectsSignature(S.projects);
+  setProjectsSig(projectsSignature(S.projects));
   syncCanvasFromScope();
   renderProjectTree();
   if (isProjectModalOpen()) renderProjectRows();
 }
+
+export {
+  SCOPE_ALL, projectName, isAllScope, totalNodes, renderProjectTree, renderTreeChildren,
+  toggleTreeRow, focusNode, applySoloVisibility, renderSoloBar, enterSolo, exitSolo,
+  resetCanvas, loadProjects, switchProject, ensureGroupLayout, arrangeByProject, reloadProjects,
+};

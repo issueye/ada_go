@@ -169,3 +169,63 @@ jobs:
 
       - name: go build
         run: go build ./...
+
+  # adago_design 同样是独立 Go module（GOWORK=off 构建）：MCP 工具、画布服务、
+  # 设计体系门禁测试都在这里，不能被主 CI 与 browser-use job 覆盖。
+  adago-design:
+    name: adago-design / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      GOWORK: "off"
+      CGO_ENABLED: "0"
+      GOFLAGS: ""
+    defaults:
+      run:
+        working-directory: mcp_projects/adago_design
+    steps:
+      - name: Checkout ada-go
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: mcp_projects/adago_design/go.mod
+          cache-dependency-path: mcp_projects/adago_design/go.sum
+
+      # 格式门禁：与根仓库口径一致，列出文件即失败。
+      - name: gofmt
+        shell: bash
+        run: test -z "$(gofmt -l .)"
+
+      # Windows 的 -race 依赖 cgo（项目无 cgo），与根 CI 的已知限制一致。
+      - name: go test (race, non-Windows)
+        if: runner.os != 'Windows'
+        run: go test -race ./...
+
+      - name: go test (Windows, no -race)
+        if: runner.os == 'Windows'
+        run: go test ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      # staticcheck 用 go run @latest：分析器与 runner 上的 Go 工具链现编同代，
+      # 避开预编译二进制读不了新 export-data 的问题（与根仓 scripts/ci-gate.sh 同口径）。
+      - name: staticcheck
+        shell: bash
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+
+      # 生成物必须随源码提交：icons.js 与 data/*.json 由 go:generate 产出，
+      # 漂移说明有人手改了生成物或忘了提交生成结果。
+      - name: generate drift
+        shell: bash
+        run: |
+          go generate ./internal/design
+          git diff --exit-code -- .
+
+      - name: go build
+        run: go build ./...

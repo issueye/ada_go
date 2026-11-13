@@ -21,7 +21,7 @@ func TestAuditNodeID(t *testing.T) {
 	// 脏节点：外链图片 + 字符图标
 	dirty, err := d.Store.Add(canvas.Node{
 		ProjectID: pid, Title: "脏稿", Kind: canvas.KindNote,
-		HTML: `<html><head><style>body{font-family:"Helvetica Neue"}</style></head><body><img src="http://example.com/a.png"><span>▾</span></body></html>`,
+		HTML:  `<html><head><style>body{font-family:"Helvetica Neue"}</style></head><body><img src="http://example.com/a.png"><span>▾</span></body></html>`,
 		Width: 420,
 	})
 	if err != nil {

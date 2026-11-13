@@ -1,12 +1,27 @@
-/* adago-design 画布 · 弹层辅助（isAskOpen）、添加便签、启动引导（首屏加载、2s 轮询兜底、SSE 订阅）。
- * 经典脚本按 index.html 顺序加载，全局作用域共享（与 inspect.js 同一契约）；
- * 各文件顶层语句的执行顺序与拆分前完全一致，请勿调换加载顺序。 */
+/* adago-design 画布 · 入口模块：弹层胶水、添加便签、启动引导（首屏加载、2s 轮询兜底、SSE 订阅）。
+ *
+ * index.html 只加载这一个模块；其余模块由这里的 import 图求值。
+ * inspect.js 用副作用导入，保证它的 adago:frame-load 监听先于首个 iframe 创建。 */
 "use strict";
+
+import { S, $, tokenColor, tokenPx } from "./state.js";
+import { focusables, closeAsk, submitAsk, uiConfirm, uiAsk, toast, isAskOpen, esc } from "./ui.js";
+import { api } from "./net.js";
+import { emit, EVT_THEME_CHANGE } from "./bus.js";
+import { projectName, exitSolo, loadProjects } from "./projects.js";
+import { isProjectModalOpen, closeProjectModal, closeTreeMenu } from "./panels.js";
+import { removeNodeEl, addNodeEl, selectNode, showEmptyHint } from "./nodes.js";
+import { scheduleEdges } from "./edges.js";
+import {
+  applyTransform, closeCanvasMenus, centerView, fitView, loadCanvasPresets,
+} from "./view.js";
+import { pollNodes } from "./sync.js";
+import { setPanelCollapsed } from "./dock.js";
+import { loadCatalog } from "./catalog.js";
+import { taskLoop } from "./capture.js";
+import { INS } from "../inspect.js";
+
 // ---- 询问/确认弹层：点外关闭、Esc 关闭、Tab 陷阱、焦点归还 ----
-function isAskOpen() {
-  const box = $("ask-modal");
-  return !!box && !box.classList.contains("hidden");
-}
 document.querySelectorAll("[data-ask-close]").forEach((el) => {
   el.addEventListener("click", () => closeAsk(null));
 });
@@ -50,7 +65,7 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   // 检查模式里还留着 A/B 配对时，Esc 先归检查模式（清 B → 清 A），别抢
-  const inspecting = typeof INS !== "undefined" && INS.on && (INS.anchor || INS.target);
+  const inspecting = INS.on && (INS.anchor || INS.target);
   if (S.solo && !inspecting) {
     exitSolo();
     e.preventDefault();
@@ -64,7 +79,7 @@ $("btn-theme").addEventListener("click", () => {
   html.dataset.theme = next;
   try { localStorage.setItem("adago.theme", next); } catch (_) { /* 隐私模式忽略 */ }
   // 标注层/截图都从令牌取色，换主题后要让检查模式重挂一次（inspect.js 监听）
-  window.dispatchEvent(new CustomEvent("adago:theme-change", { detail: { theme: next } }));
+  emit(EVT_THEME_CHANGE, { theme: next });
   toast(next === "dark" ? "已切换到墨纸（深色）" : "已切换到纸面（浅色）");
 });
 $("btn-clear").addEventListener("click", async () => {
@@ -83,7 +98,7 @@ $("btn-clear").addEventListener("click", async () => {
       body: JSON.stringify({ project: S.project }),
     });
     for (const id of [...S.nodes.keys()]) removeNodeEl(id);
-    S.edges = new Map();
+    S.edges.clear();
     scheduleEdges("*");
     toast("画布已清空");
   } catch (e) { toast("清空失败: " + e.message, true); }
@@ -104,11 +119,18 @@ $("btn-add-note").addEventListener("click", async () => {
   const noteInk = tokenColor("--ui-ink", "currentColor");
   const noteLine = tokenColor("--ui-line-strong", "currentColor");
   const noteFont = tokenColor("--ui-font", "sans-serif");
+  // 尺寸/字号同样从令牌读：srcdoc 里不能用 var()，只能内联计算结果
+  const notePad = tokenPx("--ui-space-8", 16);
+  const noteText = tokenPx("--ui-text-md", 13);
+  const noteLh = tokenPx("--ui-lh-relaxed", 1.7);
+  const noteMinH = tokenPx("--ui-note-min-h", 120);
+  const noteRuleW = tokenPx("--ui-focus-w", 2);
   const html = `<!DOCTYPE html><html lang="zh-CN" data-note="1"><head><meta charset="utf-8"><style>
     *{box-sizing:border-box}
     body{margin:0;font-family:${noteFont};
-      background:${noteBg};color:${noteInk};padding:16px;font-size:13px;line-height:1.7;
-      min-height:120px;white-space:pre-wrap;border-left:2px solid ${noteLine}}
+      background:${noteBg};color:${noteInk};padding:${notePad}px;font-size:${noteText}px;
+      line-height:${noteLh};min-height:${noteMinH}px;white-space:pre-wrap;
+      border-left:${noteRuleW}px solid ${noteLine}}
   </style></head>
     <body>${esc(text)}</body></html>`;
   try {

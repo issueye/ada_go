@@ -1,7 +1,12 @@
-/* adago-design 画布 · 侧栏设计体系目录：清单、详情、添加预览卡。
- * 经典脚本按 index.html 顺序加载，全局作用域共享（与 inspect.js 同一契约）；
- * 各文件顶层语句的执行顺序与拆分前完全一致，请勿调换加载顺序。 */
+/* adago-design 画布 · 侧栏设计体系目录：清单、详情、添加预览卡。 */
 "use strict";
+
+import { S, $ } from "./state.js";
+import { icon } from "./icons-bridge.js";
+import { esc, toast } from "./ui.js";
+import { api } from "./net.js";
+import { addNodeEl, selectNode } from "./nodes.js";
+import { reloadProjects } from "./projects.js";
 // ---------------- 侧栏：设计体系目录 ----------------
 async function loadCatalog() {
   try {
@@ -112,3 +117,5 @@ async function addPreview(systemID, components, wholePage) {
     toast("已添加到画布");
   } catch (e) { toast("添加失败: " + e.message, true); }
 }
+
+export { loadCatalog, showSystemDetail, backToList, addPreview };

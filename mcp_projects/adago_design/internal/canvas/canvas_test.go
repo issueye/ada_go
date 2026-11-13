@@ -574,14 +574,57 @@ func TestStaticIndex(t *testing.T) {
 	}
 }
 
-func TestSameLoopbackOrigin(t *testing.T) {
-	cases := map[string]bool{
-		"http://127.0.0.1:8788": true, "http://localhost:8788": true,
-		"https://evil.com": false, "http://127.0.0.1.evil.com": false, "": true,
+// ES 模块由浏览器强制校验 MIME：Windows 注册表可能把 .js 映成 text/plain，
+// 服务端必须显式覆盖，否则整页模块加载失败（且经典脚本时代不会暴露）。
+func TestStaticModuleMIME(t *testing.T) {
+	_, ts := newTestServer(t)
+	cases := map[string]string{
+		"/js/main.js":  "javascript",
+		"/js/state.js": "javascript",
+		"/tokens.css":  "text/css",
 	}
-	for origin, want := range cases {
-		if got := sameLoopbackOrigin(origin); got != want {
-			t.Errorf("sameLoopbackOrigin(%q) = %v, 期望 %v", origin, got, want)
+	for path, want := range cases {
+		res, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("%s status = %d", path, res.StatusCode)
+		}
+		if ct := res.Header.Get("Content-Type"); !strings.Contains(ct, want) {
+			t.Errorf("%s Content-Type = %q，应包含 %q", path, ct, want)
+		}
+	}
+}
+
+func TestLoopbackHostAndSameOrigin(t *testing.T) {
+	hosts := map[string]bool{
+		"127.0.0.1:8788": true, "localhost:8788": true, "[::1]:8788": true,
+		"127.0.0.1": true, "evil.example:8788": false,
+		"127.0.0.1.evil.com:8788": false, "": false,
+	}
+	for host, want := range hosts {
+		if got := loopbackHost(host); got != want {
+			t.Errorf("loopbackHost(%q) = %v, 期望 %v", host, got, want)
+		}
+	}
+
+	origins := []struct {
+		origin, host string
+		want         bool
+	}{
+		{"http://127.0.0.1:8788", "127.0.0.1:8788", true},
+		{"http://localhost:8788", "localhost:8788", true},
+		{"http://LOCALHOST:8788", "localhost:8788", true},   // Host 大小写不敏感
+		{"http://127.0.0.1:8788", "127.0.0.1:9999", false},  // 跨端口
+		{"https://127.0.0.1:8788", "127.0.0.1:8788", false}, // 跨协议
+		{"http://evil.example:8788", "127.0.0.1:8788", false},
+		{"null", "127.0.0.1:8788", false},
+	}
+	for _, c := range origins {
+		if got := sameOrigin(c.origin, c.host); got != c.want {
+			t.Errorf("sameOrigin(%q, %q) = %v, 期望 %v", c.origin, c.host, got, c.want)
 		}
 	}
 }

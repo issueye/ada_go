@@ -43,7 +43,7 @@ func TestScanCSSInjection(t *testing.T) {
 		},
 	}
 	RegisterOrReplace(bad)
-	defer delete(registry, "spec-bad")
+	defer unregisterSystem("spec-bad")
 	css := StyleSheet(bad, ThemeLight) + "\n.x{padding:9px 15px;border-radius:6px;gap:3px}"
 	issues := scanCSS(bad, ThemeLight, css)
 	found15 := false

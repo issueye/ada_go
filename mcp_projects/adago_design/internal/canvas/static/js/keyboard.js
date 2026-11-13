@@ -1,7 +1,10 @@
-/* adago-design 画布 · 全局快捷键：Del/F/0/Esc/缩放/Ctrl+Z·Y（撤销重做走服务端历史）。
- * 经典脚本按 index.html 顺序加载，全局作用域共享（与 inspect.js 同一契约）；
- * 各文件顶层语句的执行顺序与拆分前完全一致，请勿调换加载顺序。 */
+/* adago-design 画布 · 全局快捷键：Del/F/0/Esc/缩放/Ctrl+Z·Y（撤销重做走服务端历史）。 */
 "use strict";
+
+import { S, $ } from "./state.js";
+import { api } from "./net.js";
+import { removeNode } from "./nodes.js";
+import { fitView, centerView, zoomAt } from "./view.js";
 window.addEventListener("keydown", (e) => {
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
   if (e.key === "Delete" || e.key === "Backspace") {

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Color 是一个语义色 Token。
@@ -85,13 +86,22 @@ const (
 )
 
 // registry 是全部已注册体系的集合。
-var registry = map[string]*System{}
+//
+// 内置体系在 init 注册，自定义体系可在运行期通过 design_derive /
+// design_register 增删；MCP 工具与画布 HTTP 目录接口会并发读它，所以
+// 所有访问都必须经 registryMu（读 RLock、写 Lock）。
+var (
+	registryMu sync.RWMutex
+	registry   = map[string]*System{}
+)
 
 // Register 注册一个设计体系（init 中调用）。
 func Register(s *System) {
 	if s.ID == "" {
 		panic("design: system id is empty")
 	}
+	registryMu.Lock()
+	defer registryMu.Unlock()
 	if _, dup := registry[s.ID]; dup {
 		panic(fmt.Sprintf("design: duplicate system id %q", s.ID))
 	}
@@ -100,22 +110,30 @@ func Register(s *System) {
 
 // Systems 返回全部体系（按 ID 排序）。
 func Systems() []*System {
-	ids := make([]string, 0, len(registry))
-	for id := range registry {
-		ids = append(ids, id)
+	registryMu.RLock()
+	out := make([]*System, 0, len(registry))
+	for _, s := range registry {
+		out = append(out, s)
 	}
-	sort.Strings(ids)
-	out := make([]*System, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, registry[id])
-	}
+	registryMu.RUnlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
 
 // GetSystem 按 ID 查找体系。
 func GetSystem(id string) (*System, bool) {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
 	s, ok := registry[id]
 	return s, ok
+}
+
+// unregisterSystem 从注册表移除一个体系（删除路径与测试清理共用）。
+// 是否允许删除（如内置体系保护）由调用方校验。
+func unregisterSystem(id string) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	delete(registry, id)
 }
 
 // Components 返回某体系的组件清单（按 ID 排序）。目录是全局共享的，

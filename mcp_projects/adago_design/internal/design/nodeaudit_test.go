@@ -9,9 +9,9 @@ import (
 
 func TestNodeAuditClean(t *testing.T) {
 	rep := AuditNodeHTML(NodeAuditInput{
-		HTML:   "<!DOCTYPE html><html><head><style>p{color:#333;font-family:Inter,sans-serif}</style></head><body><svg class=\"ds-icon\"><use href=\"#ds-ic-close\"/></svg></body></html>",
-		Width:  393,
-		Height: 852,
+		HTML:     "<!DOCTYPE html><html><head><style>p{color:#333;font-family:Inter,sans-serif}</style></head><body><svg class=\"ds-icon\"><use href=\"#ds-ic-close\"/></svg></body></html>",
+		Width:    393,
+		Height:   852,
 		Artboard: "iphone-15",
 	})
 	if rep.Failed != 0 || rep.Warned != 0 {

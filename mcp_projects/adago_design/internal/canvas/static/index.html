@@ -207,18 +207,8 @@
     </div>
   </div>
 
-  <script src="js/core.js"></script>
-<script src="js/view.js"></script>
-<script src="js/nodes.js"></script>
-<script src="js/keyboard.js"></script>
-<script src="js/edges.js"></script>
-<script src="js/sync.js"></script>
-<script src="js/projects.js"></script>
-<script src="js/panels.js"></script>
-<script src="js/catalog.js"></script>
-<script src="js/capture.js"></script>
-<script src="js/dock.js"></script>
-<script src="js/main.js"></script>
-  <script src="inspect.js"></script>
+  <!-- 唯一的入口模块：其余模块由 main.js 的 import 图按依赖序求值。
+       icons.js 仍为经典脚本（go:generate 产物，需先于工具条注入 <symbol>）。 -->
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>

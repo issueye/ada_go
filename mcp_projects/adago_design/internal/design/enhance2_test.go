@@ -189,7 +189,7 @@ func TestAudit(t *testing.T) {
 		},
 	}
 	RegisterOrReplace(bad)
-	defer delete(registry, "bad-test")
+	defer unregisterSystem("bad-test")
 	res, err = Audit("bad-test", ThemeLight)
 	if err != nil {
 		t.Fatal(err)

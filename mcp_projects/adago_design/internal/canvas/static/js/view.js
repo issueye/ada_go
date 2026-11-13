@@ -1,7 +1,13 @@
-/* adago-design 画布 · 视图变换：平移/缩放/适配/居中、画布控制菜单、比例预设、可视区计算。
- * 经典脚本按 index.html 顺序加载，全局作用域共享（与 inspect.js 同一契约）；
- * 各文件顶层语句的执行顺序与拆分前完全一致，请勿调换加载顺序。 */
+/* adago-design 画布 · 视图变换：平移/缩放/适配/居中、画布控制菜单、比例预设、可视区计算。 */
 "use strict";
+
+import { S, $, world, grid, paperEl, UI } from "./state.js";
+import { icon } from "./icons-bridge.js";
+import { esc, toast, setTip } from "./ui.js";
+import { api } from "./net.js";
+import { isAllScope, totalNodes, projectName, renderProjectTree, switchProject } from "./projects.js";
+import { renderProjectRows, isProjectModalOpen, scheduleLabels, updateLabelScale, closeTreeMenu } from "./panels.js";
+import { scheduleEdges } from "./edges.js";
 // ---------------- 视图变换 ----------------
 function applyTransform() {
   world.style.transform = `translate(${S.tx}px,${S.ty}px) scale(${S.scale})`;
@@ -101,14 +107,6 @@ function renderCanvas() {
     ratioBtn.classList.toggle("is-disabled", !S.project);
     ratioBtn.setAttribute("aria-disabled", S.project ? "false" : "true");
   }
-}
-
-// 更新图标按钮的 tooltip 与无障碍名称。
-function setTip(id, text) {
-  const el = $(id);
-  if (!el) return;
-  el.dataset.tip = text;
-  el.setAttribute("aria-label", text);
 }
 
 // ---- 下拉菜单 ----
@@ -290,3 +288,10 @@ function centerView(fit) {
   scheduleEdges("*");
   scheduleLabels();
 }
+
+export {
+  applyTransform, zoomAt, fitView, currentProject, canvasCaption, syncCanvasFromScope,
+  renderCanvas, renderCanvasMenu, renderRatioMenu, closeCanvasMenus, toggleCanvasMenu,
+  loadCanvasPresets, applyProjectPatch, setCanvasConfig, canvasBounds, leftDockWidth,
+  visibleRect, centerView,
+};

@@ -185,7 +185,11 @@ type Node struct {
 `html_rev` 决定要不要取正文/重载 iframe，按需走 `GET /api/nodes/{id}`；
 首屏与切项目用 `?include=html` 一次拿全。
 
-### 4.2 HTTP API（全部 `127.0.0.1`，POST 校验 Origin 同源）
+### 4.2 HTTP API（全部 `127.0.0.1`，Host 回环 + 写操作 Origin 同源）
+
+所有请求要求 `Host` 是 `127.0.0.1` / `localhost` / `[::1]`（防 DNS rebinding）；
+非 GET/HEAD 请求若带 `Origin`，必须与当前请求同源（回环 host、同端口、http）。
+越界分别返回 403 `bad_host` / `bad_origin`。
 
 | 方法/路径 | 说明 |
 |---|---|

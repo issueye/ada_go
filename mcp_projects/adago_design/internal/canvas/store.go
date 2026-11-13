@@ -164,6 +164,11 @@ type Store struct {
 
 	htmlDirty map[string]bool // 待写盘的节点正文（id -> true）
 
+	// ArtboardSize 由装配层注入（canvas 不引用 design）：按画板 ID 与节点种类
+	// 返回该节点应有的默认宽高；ok=false 表示画板未知。
+	// 见 artboard_resync.go 的显式重同步。
+	ArtboardSize func(artboardID, kind string) (w, h int, ok bool)
+
 	undoStack []undoEntry // 撤销栈（仅内存，见 undo.go）
 	redoStack []undoEntry // 重做栈
 }
@@ -561,7 +566,14 @@ func (s *Store) Update(id string, mut func(*Node)) (Node, error) {
 	cp.UpdatedAt = time.Now()
 	if cp.HTML != n.HTML {
 		cp.HTML = SanitizePreviewHTML(cp.HTML)
-		cp.HTMLRev = cp.UpdatedAt
+		// 时钟可能只有毫秒/百纳秒分辨率（Windows 约 15.6ms），同一 tick 内
+		// CreatedAt 与 UpdatedAt 会相等。HTMLRev 的契约是「严格晚于创建时间」，
+		// 相等时补 1ns，保证 monotonic 比较仍然成立。
+		if cp.UpdatedAt.After(n.CreatedAt) {
+			cp.HTMLRev = cp.UpdatedAt
+		} else {
+			cp.HTMLRev = n.CreatedAt.Add(time.Nanosecond)
+		}
 	} else {
 		cp.HTMLRev = n.HTMLRev
 	}

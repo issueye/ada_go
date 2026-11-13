@@ -1,7 +1,15 @@
-/* adago-design 画布 · 截图：foreignObject 光栅化、任务循环（长轮询领取/回传）。
- * 经典脚本按 index.html 顺序加载，全局作用域共享（与 inspect.js 同一契约）；
- * 各文件顶层语句的执行顺序与拆分前完全一致，请勿调换加载顺序。 */
+/* adago-design 画布 · 截图：foreignObject 光栅化、任务循环（长轮询领取/回传）。 */
 "use strict";
+
+import { S, $, tokenColor } from "./state.js";
+import { toast, uiAsk } from "./ui.js";
+import { api } from "./net.js";
+import {
+  zoomAt, fitView, centerView, toggleCanvasMenu, closeCanvasMenus, setCanvasConfig,
+} from "./view.js";
+import { switchProject, SCOPE_ALL } from "./projects.js";
+import { openProjectModal } from "./panels.js";
+import { backToList } from "./catalog.js";
 // ---------------- 截图任务（foreignObject 光栅化） ----------------
 async function rasterize(html, width, height, scale) {
   const iframe = document.createElement("iframe");
@@ -203,3 +211,5 @@ $("ratio-menu").addEventListener("click", async (e) => {
 });
 $("sb-back").addEventListener("click", backToList);
 $("insp-close").addEventListener("click", () => $("inspector").classList.add("hidden"));
+
+export { rasterize, runCaptureTask, taskLoop };

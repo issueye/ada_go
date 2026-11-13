@@ -1,7 +1,15 @@
-/* adago-design 画布 · 节点：渲染（iframe srcdoc）、选中、删除、拖动（pointer capture + rAF）、位置保存、高度自适应。
- * 经典脚本按 index.html 顺序加载，全局作用域共享（与 inspect.js 同一契约）；
- * 各文件顶层语句的执行顺序与拆分前完全一致，请勿调换加载顺序。 */
+/* adago-design 画布 · 节点：渲染（iframe srcdoc）、选中、删除、拖动（pointer capture + rAF）、位置保存、高度自适应。 */
 "use strict";
+
+import { S, $, world, viewport, grid } from "./state.js";
+import { icon } from "./icons-bridge.js";
+import { esc, toast } from "./ui.js";
+import { api } from "./net.js";
+import { emit, EVT_FRAME_LOAD } from "./bus.js";
+import { isAllScope, projectName, enterSolo, exitSolo, reloadProjects } from "./projects.js";
+import { openProjectModal, scheduleLabels } from "./panels.js";
+import { togglePanel } from "./dock.js";
+import { scheduleEdges } from "./edges.js";
 // ---------------- 节点渲染 ----------------
 // 位置用 transform 而不是 left/top：位移交给合成器，避免每帧 layout
 // 与 iframe 表面的重新光栅化。
@@ -55,7 +63,7 @@ function nodeEl(n) {
 
 function onFrameLoad(id, iframe) {
   autoFitHeight(id, iframe);
-  window.dispatchEvent(new CustomEvent("adago:frame-load", { detail: { id: id, iframe: iframe } }));
+  emit(EVT_FRAME_LOAD, { id: id, iframe: iframe });
 }
 
 // 内容高度自适应：if defined auto_height 且是组件预览，实测 .ds-page 高度回写。
@@ -325,3 +333,9 @@ viewport.addEventListener("dblclick", (e) => {
   if (e.target.closest && e.target.closest(".node")) return;
   exitSolo();
 });
+
+export {
+  applyNodeGeom, nodeEl, onFrameLoad, addNodeEl, updateNodeEl, removeNodeEl,
+  hideEmptyHint, showHint, showEmptyHint, selectNode, removeNode, startNodeDrag,
+  savePosition,
+};

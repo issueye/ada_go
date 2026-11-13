@@ -50,6 +50,9 @@ func projectFail[O any](out O, err error, id string) (*mcp.CallToolResult, O, er
 	case errors.Is(err, canvas.ErrCanvasSizeInvalid):
 		return failWith(out, "bad_request", "画布尺寸非法",
 			fmt.Sprintf("宽高需同时给出，且在 %d..%d 之间", canvas.MinCanvasSide, canvas.MaxCanvasSide))
+	case errors.Is(err, canvas.ErrArtboardResolver):
+		return failWith(out, "artboard_unavailable", "当前进程没有画板解析器",
+			"这是装配层未注入导致的环境问题（正常 serve/mcp 启动不会出现）")
 	}
 	return failWith(out, "internal", err.Error(), "")
 }
@@ -76,6 +79,53 @@ func registerProjectTools(server *mcp.Server, d Deps) {
 		Description: "设置当前画布（项目作用域）的版式：比例预设或自定义宽高，free=true 恢复自由画布。" +
 			"读取当前版式用 project_list；画布只是版式参考，不限制节点拖拽。",
 	}, projectCanvasTool(d))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "canvas_resync_artboards",
+		Description: "按节点自身的 artboard 重新计算宽高（显式触发，可撤销）。" +
+			"画板或画布比例切换**不会**自动迁移已有节点尺寸；需要统一尺寸时显式调用。" +
+			"组件只纠正宽度（高度由画布实测回写），整页稿同时纠正宽高；project 省略时处理全部项目。",
+	}, canvasResyncArtboardsTool(d))
+}
+
+// ---------------- canvas_resync_artboards ----------------
+
+type canvasResyncArtboardsIn struct {
+	Project string `json:"project,omitempty" jsonschema:"项目 ID；省略则处理全部项目（project_list 查询）"`
+}
+
+type canvasResyncArtboardsOut struct {
+	canvas.ResyncResult
+	UndoHint string `json:"undo_hint"`
+}
+
+func canvasResyncArtboardsTool(d Deps) mcp.ToolHandlerFor[canvasResyncArtboardsIn, canvasResyncArtboardsOut] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in canvasResyncArtboardsIn) (*mcp.CallToolResult, canvasResyncArtboardsOut, error) {
+		res, err := d.Store.ResyncArtboards(in.Project)
+		if err != nil {
+			return projectFail[canvasResyncArtboardsOut](canvasResyncArtboardsOut{}, err, in.Project)
+		}
+		out := canvasResyncArtboardsOut{ResyncResult: res, UndoHint: "canvas_undo"}
+		if res.Changed == 0 {
+			msg := fmt.Sprintf("没有需要调整的节点（检查 %d 个，跳过 %d 个）。", res.Total, res.Skipped)
+			if len(res.UnknownArtboards) > 0 {
+				msg += "未知画板：" + strings.Join(res.UnknownArtboards, " / ") + "。"
+			}
+			return textResult(msg), out, nil
+		}
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "已按画板重同步 %d 个节点（检查 %d 个，跳过 %d 个）：\n",
+			res.Changed, res.Total, res.Skipped)
+		for _, c := range res.Nodes {
+			fmt.Fprintf(&sb, "- %s（%s / %s）：%d×%d → %d×%d\n",
+				c.Title, c.ID, c.Artboard, c.FromWidth, c.FromHeight, c.ToWidth, c.ToHeight)
+		}
+		if len(res.UnknownArtboards) > 0 {
+			sb.WriteString("未知画板（已跳过）：" + strings.Join(res.UnknownArtboards, " / ") + "\n")
+		}
+		sb.WriteString("这是一次可撤销的批量调整：canvas_undo 可整体回退。")
+		return textResult(sb.String()), out, nil
+	}
 }
 
 // ---------------- project_create ----------------

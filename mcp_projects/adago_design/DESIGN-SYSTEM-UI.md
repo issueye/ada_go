@@ -130,6 +130,20 @@ success-\*/warn-\*/danger-\*/focus/scrollbar/motion），便于未来并库时�
 | `--ui-toolbar-h` | 44px | 工具条高度（含外距=56 → `--ui-top-safe`） |
 | `--ui-node-head-h` | 32px | 节点标题栏高度（`HEAD_H` 的唯一定义处） |
 
+几何常量（尺寸/模糊/图标档位；`canvas.css` 与 JS 内联样式只引用，不写裸值）：
+
+| 组 | 令牌 | 值 | 用途 |
+|---|---|---|---|
+| 模糊 | `--ui-blur-toolbar` / `--ui-blur-panel` | 10 / 12px | `backdrop-filter` |
+| 图标 | `--ui-icon-12` … `--ui-icon-24` | 12 / 14 / 16 / 20 / 24px | `.ds-icon--*` |
+| 网格 | `--ui-grid-cell` / `--ui-grid-bleed` | 40 / 2px | 画布网点与纸张网格 |
+| 菜单 | `--ui-menu-min-w`、`--ui-tb-menu-*`、`--ui-tip-max-w` | 156 / 268·360·440 / 240px | 更多菜单、工具条下拉、气泡 |
+| 弹层 | `--ui-modal-w` / `--ui-ask-w` / `--ui-toast-max-w` / `--ui-empty-max-w` | 580 / 420 / 560 / 440px | 模态、询问、toast、空态 |
+| 单画布条 | `--ui-solo-max-w` / `--ui-solo-title-max-w` / `--ui-solo-proj-max-w` | 760 / 230 / 160px | 聚焦条 |
+| 控件 | `--ui-control-xl` / `--ui-zoom-min-w` / `--ui-field-min-w` / `--ui-textarea-min-h` | 40 / 44 / 150 / 76px | 面板头、缩放标签、输入框 |
+| 其他 | `--ui-edge-label-stroke` / `--ui-focus-offset` | 4 / 2px | 连线标签描边、焦点环偏移 |
+| iframe 内联 | `--ui-inspect-border-w` / `--ui-inspect-label-max-w` / `--ui-note-min-h` | 1.5 / 260 / 120px | 标注层与便签（srcdoc 启动时内联） |
+
 ### 3.2 颜色令牌与对比度
 
 | 令牌 | 浅色（纸） | 深色（墨纸） | 对比度 |
@@ -356,7 +370,7 @@ GOWORK=off go test ./...    # ok（canvas 3.8s / design 0.4s / mcpserver 18.6s�
 | 项目分组标签由橙改中性 | 观感变化最大的单点；理由是原配色 2.15:1 不可读且是界面第三彩度 |
 | 缺省主题 dark → light | 与 `19-ued.md` 缺省态一致；`-theme dark` 或界面按钮可固定 |
 | `staticcheck` 不可用 | 工具链版本问题，非代码问题（见 10.2） |
-| 间距未全部令牌化 | 只强制颜色/圆角/字号/层级；间距以偶数网格人工守（`--ui-space-*` 覆盖绝大多数）。`canvas.css` 现有 **48** 处 px 字面（原 450），其中 9 处是 `1px` 描边、其余为少数固定布局宽度（菜单最小宽 156、弹层 440/76、网格 40 等） |
+| 间距/尺寸已令牌化 | `TestCanvasCSSGeometryUsesTokens` 强制 `padding/margin/gap/width/height/min-*/max-*/inset/outline-offset/background-size/backdrop-filter` 不得写裸值；`TestUITokenGeometryComplete` 锁住几何令牌清单。`canvas.css` 仅剩 `1px` 发丝线、`translate` 光学微调与 `@media` 断点三类白名单字面量 |
 
 ---
 

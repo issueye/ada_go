@@ -1189,3 +1189,44 @@ staticcheck ./...
 - 浏览器端到端（拆分后实测）：页面加载渲染、SSE 实时出现（1→2）、
   检查模式开关、选中-删除-Ctrl+Z 复活、截图任务闭环（84KB PNG）。
 - 21 组件 × 8 体系渲染 + 无 emoji + 规格阶梯 + 字体授权门禁全过。
+
+---
+
+## 12. 迭代 4：前端质量三件套（2026-11-13）
+
+针对 8.4 遗留清单里的三项：CSS 尺寸未令牌化、经典脚本全局耦合、关系计算不处理旋转与外溢。
+
+### 12.1 落地内容
+
+| # | 问题 | 改动 | 落点 |
+|---|---|---|---|
+| 1 | `canvas.css` 有 ~48 处 px 字面量，门禁只查颜色/字号/圆角/层级 | **几何令牌化**：`tokens.css` 新增 blur/icon 档位/网格/菜单/弹层/控件等 27 个令牌；`canvas.css` 全部改引用；JS 内联样式（便签 srcdoc、iframe 标注层）改为启动时 `tokenPx` 内联。新增 `TestCanvasCSSGeometryUsesTokens`（padding/margin/gap/width/height/min-*/max-*/inset/outline-offset/background-size/backdrop-filter 禁裸值）与 `TestUITokenGeometryComplete` | `static/tokens.css`、`static/canvas.css`、`static/js/main.js`、`static/inspect.js`、`ui_tokens_test.go` |
+| 2 | 13 个经典脚本靠隐式全局 + 加载顺序共享状态，`typeof` 守卫在模块下会静默失效 | **ES Modules 迁移**：拆出 `state/ui/net/bus/geometry/icons-bridge`；其余 12 个文件转 `import/export`，删除全部 `typeof` 守卫；`index.html` 只留一个 `type="module"` 入口；`icons.js` 保持经典脚本（精灵先于工具条注入）。真实模块图 17 个文件 | `static/js/*`、`static/inspect.js`、`static/index.html` |
+| 3 | ES 模块在 Windows 上可能被注册表映射成 `text/plain` 而被浏览器拒绝 | 静态资源显式写 `Content-Type`（js/mjs/css）+ `TestStaticModuleMIME` 回归 | `canvas/server.go` |
+| 4 | 关系计算用 AABB：旋转元素尺寸虚高 √2、框是轴对齐的、滚动出界的元素仍会画到卡片外；iframe 原点用常数 `HEAD_H`，有系统性 ~1px 漂移 | **四边形几何**：`geometry.js` 提供凸四边形距离/相交/包含（Sutherland–Hodgman）；`inspect.js` 按「AABB 中心 + 累积线性变换」重建旋转四边形（skew/裁剪时降级并标注近似）；iframe 原点改为实测 `getBoundingClientRect` 差值；滚出可视区/被裁剪的元素跳过标注；旋转场景只报边界距离与交集面积，不编造 ±1px 对齐 | `static/js/geometry.js`、`static/inspect.js` |
+| 5 | `IMPROVEMENTS §7.2` 承诺过 `relation_test` 但从未落地 | `internal/canvas/testdata/geometry.test.mjs`（8 组用例）+ `geometry_test.go` 代理执行，node 缺席时 skip | `canvas/testdata/`、`canvas/geometry_test.go` |
+| 6 | 画板切换不迁移尺寸，旧节点会与画板契约不一致（`nodeaudit` 会告警） | **显式重同步**：`canvas.ResyncArtboards` + MCP `canvas_resync_artboards` + `POST /api/artboards/resync`。组件只纠正宽度（高度由客户端实测），整页稿取 `BodyHeight`；未知画板逐条上报；有变化时合并为**一条** undo 记录。实现沿用依赖倒置：`Store.ArtboardSize` 由 `app.ArtboardSizeResolver` 注入，canvas 仍不引用 design | `canvas/artboard_resync.go`、`project_http.go`、`app/app.go`、`mcpserver/projects.go` |
+| 7 | 根仓 CI 的 `adago-design` job 没有 staticcheck 与生成物漂移门禁 | job 增加 `go run staticcheck@latest ./...`（现编同代，避开旧预编译二进制问题）与 `go generate + git diff --exit-code` | `.github/workflows/ci.yml` |
+
+### 12.2 验证
+
+- `GOWORK=off go build ./... && go vet ./... && go test ./...` 全绿。
+- `GOWORK=off go run honnef.co/go/tools/cmd/staticcheck@latest ./...` 无告警；
+  `go generate ./internal/design` 后 `git diff` 为空（生成物无漂移）。
+- `node --test internal/canvas/testdata/geometry.test.mjs`：8/8 通过。
+- 画板重同步：Store 单测覆盖组件/整页/便签三种节点、项目范围隔离、未知画板、幂等，
+  以及「一次 undo 整体回退 + redo」；HTTP 与 MCP 契约各有用例。
+- 模块图静态链接（`vm.SourceTextModule`）：17 个模块全部解析，无缺失导出。
+- 浏览器 CDP 端到端：页面零异常/零网络失败；20 个工具条按钮、组标签/纸张/连线/关系层全部就位；
+  造一个 `transform:rotate(45deg)` 的元素后，悬停框带 `rotate(0.785rad)`、尺寸报 `100×100`（而非 AABB 的 141），
+  A↔B 关系层画 2 个多边形 + `83px` 边界距离，面板显示「旋转元素不判定对齐」；主题切换后检查模式与关系层保持。
+
+### 12.3 偏差与遗留
+
+- 旋转支持覆盖「旋转 + 等比/非等比缩放」；祖先 `skew` 或跨滚动容器裁剪时退回 AABB 并在面板标「近似」。
+- `#rel-layer` 仍为 `overflow:visible`（跨卡连线需要），裁剪靠「可视区判定 + 跳过绘制」，不做几何裁切。
+- 画板切换仍**不自动**迁移节点尺寸（保持 8.4 决定）；需要统一尺寸时显式调用
+  `canvas_resync_artboards` 或 `POST /api/artboards/resync`，一次撤销可整体回退。
+- 根仓 CI 的 `adago-design` job 已接入 staticcheck（`go run @latest`，CI 侧编译，规避本机旧二进制）
+  与 generate 漂移门禁；本机仍建议用 `go run` 而非旧版 `staticcheck` 可执行文件。
+- `icons.js` 仍是 `go:generate` 产出的经典脚本（模块化会改变精灵注入时序），通过 `icons-bridge.js` 转发。

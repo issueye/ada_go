@@ -1,7 +1,7 @@
-/* adago-design 画布 · 连线：元素池化 + 脏边增量 + rAF 合帧渲染。
- * 经典脚本按 index.html 顺序加载，全局作用域共享（与 inspect.js 同一契约）；
- * 各文件顶层语句的执行顺序与拆分前完全一致，请勿调换加载顺序。 */
+/* adago-design 画布 · 连线：元素池化 + 脏边增量 + rAF 合帧渲染。 */
 "use strict";
+
+import { S, edgeSvg } from "./state.js";
 // ---------------- 连线（元素池化 + 脏边增量 + rAF 合帧） ----------------
 const edgeEls = new Map();     // edgeId -> {path, label}
 const edgeDirty = new Set();
@@ -82,3 +82,5 @@ function upsertEdge(e) {
     o.label = null;
   }
 }
+
+export { scheduleEdges, clearEdgeEls, flushEdges };

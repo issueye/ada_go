@@ -44,7 +44,7 @@ func init() {
 		}
 		Register(&sys)
 	}
-	if len(registry) == 0 {
+	if len(Systems()) == 0 {
 		log.Println("[design] 警告：未装载任何内置体系")
 	}
 }

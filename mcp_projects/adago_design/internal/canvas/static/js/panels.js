@@ -1,7 +1,14 @@
-/* adago-design 画布 · 分组标签（世界坐标）与项目管理弹层：新建/重命名/删除/切换。
- * 经典脚本按 index.html 顺序加载，全局作用域共享（与 inspect.js 同一契约）；
- * 各文件顶层语句的执行顺序与拆分前完全一致，请勿调换加载顺序。 */
+/* adago-design 画布 · 分组标签（世界坐标）与项目管理弹层：新建/重命名/删除/切换。 */
 "use strict";
+
+import { S, $, world } from "./state.js";
+import { icon } from "./icons-bridge.js";
+import { esc, toast, uiAsk, uiConfirm } from "./ui.js";
+import { api } from "./net.js";
+import { projectName, isAllScope, switchProject, loadProjects, reloadProjects, resetCanvas, SCOPE_ALL } from "./projects.js";
+import { closeCanvasMenus, fitView } from "./view.js";
+import { pollNodes } from "./sync.js";
+import { showEmptyHint } from "./nodes.js";
 // ---- 画布上的分组标签（世界坐标，跟着节点走） ----
 const labelLayer = document.createElement("div");
 labelLayer.id = "group-labels";
@@ -225,3 +232,9 @@ function toggleTreeMenu() {
   if (!menu) return;
   menu.classList.toggle("hidden");
 }
+
+export {
+  scheduleLabels, renderGroupLabels, labelScale, applyLabelTransform, updateLabelScale,
+  isProjectModalOpen, openProjectModal, closeProjectModal, fmtTime, renderProjectRows,
+  onProjectAction, createProjectFromModal, openTreeMenu, closeTreeMenu, toggleTreeMenu,
+};

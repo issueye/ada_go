@@ -21,6 +21,8 @@ func newTestDeps(t *testing.T) Deps {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// 与生产装配一致：显式画板重同步需要画板尺寸解析器。
+	store.ArtboardSize = app.ArtboardSizeResolver
 	return Deps{
 		Store:   store,
 		Tasks:   canvas.NewTaskQueue(),

@@ -64,6 +64,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
+	// 画板尺寸解析注入：canvas 不引用 design，显式重同步（canvas_resync_artboards）
+	// 通过这个函数拿到节点应有的宽高。
+	store.ArtboardSize = ArtboardSizeResolver
 	tasks := canvas.NewTaskQueue()
 	srv := &Server{store: store, tasks: tasks}
 
@@ -110,6 +113,21 @@ func Start(ctx context.Context, cfg *config.Config) (*Server, error) {
 // Stop 优雅关闭 HTTP 服务。
 func (s *Server) Stop(ctx context.Context) error {
 	return s.httpSrv.Shutdown(ctx)
+}
+
+// ArtboardSizeResolver 是 canvas.Store.ArtboardSize 的注入实现（桥接 design 包）。
+//
+// 组件卡片的宽度来自画板，高度由客户端实测回写；整页稿的高度取画板的
+// BodyHeight（与 design.ComposeScreen 的创建口径一致），而不是含状态栏的整高。
+func ArtboardSizeResolver(artboardID, kind string) (int, int, bool) {
+	ab, ok := design.GetArtboard(artboardID)
+	if !ok {
+		return 0, 0, false
+	}
+	if kind == canvas.KindScreen {
+		return ab.Width, ab.Spec().BodyHeight, true
+	}
+	return ab.Width, ab.Height, true
 }
 
 // Catalog 实现 canvas.CatalogSource，桥接 design 包。

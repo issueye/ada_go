@@ -1,7 +1,17 @@
-/* adago-design 画布 · 左侧双浮窗收起、项目树交互（单击定位/双击聚焦/更多菜单）。
- * 经典脚本按 index.html 顺序加载，全局作用域共享（与 inspect.js 同一契约）；
- * 各文件顶层语句的执行顺序与拆分前完全一致，请勿调换加载顺序。 */
+/* adago-design 画布 · 左侧双浮窗收起、项目树交互（单击定位/双击聚焦/更多菜单）。 */
 "use strict";
+
+import { S, $ } from "./state.js";
+import {
+  switchProject, SCOPE_ALL, focusNode, enterSolo, exitSolo, arrangeByProject,
+  reloadProjects, renderProjectTree,
+} from "./projects.js";
+import {
+  openProjectModal, toggleTreeMenu, closeTreeMenu, createProjectFromModal,
+  closeProjectModal,
+} from "./panels.js";
+import { pollNodes } from "./sync.js";
+import { closeCanvasMenus } from "./view.js";
 // ---- 左侧双浮窗：项目 / 设计体系各自独立收起 ----
 // 收起只隐藏 body、保留标题条，因此不需要额外的「展开把手」，也不会出现收起来拉不回来的问题。
 function setPanelCollapsed(which, collapsed) {
@@ -122,3 +132,5 @@ $("proj-name").addEventListener("keydown", (e) => {
 document.querySelectorAll("[data-proj-close]").forEach((el) => {
   el.addEventListener("click", closeProjectModal);
 });
+
+export { setPanelCollapsed, togglePanel };
