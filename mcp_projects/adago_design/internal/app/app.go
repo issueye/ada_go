@@ -31,6 +31,26 @@ func (s *Server) Store() *canvas.Store { return s.store }
 // Tasks 暴露截图任务队列（MCP 工具使用）。
 func (s *Server) Tasks() *canvas.TaskQueue { return s.tasks }
 
+// Option 是 Start 的可选集：目前只有 MCP 端点挂载，保持零值的旧调用方不受影响。
+type Option func(*startOptions)
+
+type startOptions struct {
+	// mcp 返回 /mcp 的处理器；nil 表示不暴露 HTTP MCP。
+	mcp MCPHandlerFactory
+}
+
+// MCPHandlerFactory 由调用方注入 HTTP MCP 端点（挂在 /mcp 上）。
+//
+// 做成注入点而不是让本包直接 import mcpserver：mcpserver 的测试引用本包
+// （取 ArtboardSizeResolver / Catalog），反向依赖会让测试包成环。
+// 入参是本实例的句柄，BaseURL 与 Store/Tasks 都已在 Start 内就绪。
+type MCPHandlerFactory func(*Server) http.Handler
+
+// WithMCP 让 Start 在 <BaseURL>/mcp 上暴露 HTTP MCP 端点（Streamable HTTP）。
+func WithMCP(f MCPHandlerFactory) Option {
+	return func(o *startOptions) { o.mcp = f }
+}
+
 // ErrInstanceExists 表示同数据目录的 adago-design 实例已在运行。
 // 用 errors.As 解包 *InstanceExistsError 可拿到已有实例的访问地址。
 var ErrInstanceExists = errors.New("同数据目录的 adago-design 实例已在运行")
@@ -50,7 +70,11 @@ func (e *InstanceExistsError) Error() string {
 // 绑定端口前先探测 port..port+20 是否已有同数据目录的实例：有则返回
 // *InstanceExistsError（不打开存储、不启动服务），由调用方按模式处置 ——
 // serve 委派浏览器打开已有实例，mcp 快速失败并提示。
-func Start(ctx context.Context, cfg *config.Config) (*Server, error) {
+func Start(ctx context.Context, cfg *config.Config, opts ...Option) (*Server, error) {
+	var so startOptions
+	for _, o := range opts {
+		o(&so)
+	}
 	if url, hit := canvas.ProbeInstance(cfg.Port, cfg.DataDir); hit {
 		return nil, &InstanceExistsError{URL: url}
 	}
@@ -74,7 +98,6 @@ func Start(ctx context.Context, cfg *config.Config) (*Server, error) {
 	canvasSrv.Catalog = Catalog{}
 	canvasSrv.Theme = canvas.NormalizeTheme(cfg.Theme)
 	canvasSrv.DataDir = cfg.DataDir
-	handler := canvasSrv.Handler()
 	var ln net.Listener
 	for port := cfg.Port; port <= cfg.Port+20; port++ {
 		addr := fmt.Sprintf("127.0.0.1:%d", port)
@@ -95,8 +118,11 @@ func Start(ctx context.Context, cfg *config.Config) (*Server, error) {
 	if cfg.Port == 0 {
 		srv.BaseURL = "http://127.0.0.1:" + fmt.Sprint(ln.Addr().(*net.TCPAddr).Port)
 	}
-
-	httpSrv := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	// MCP 端点在这里挂：它要用到已就绪的 BaseURL（截图超时自动开画布页）。
+	if so.mcp != nil {
+		canvasSrv.MCP = so.mcp(srv)
+	}
+	httpSrv := &http.Server{Handler: canvasSrv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	srv.httpSrv = httpSrv
 	go func() {
 		if err := httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {

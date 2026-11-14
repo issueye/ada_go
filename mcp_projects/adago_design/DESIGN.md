@@ -56,6 +56,15 @@
     首次调用画布类工具时按需启动 HTTP 服务；`--open`/`ADAGO_DESIGN_OPEN=1`
     时自动拉起系统默认浏览器。
   - `adago-design.exe serve`：只跑画布 Web 服务（人工查看用）。
+- **HTTP MCP 端点（两种形态都有）**：画布服务的同一个监听端口上挂
+  `POST /mcp`（Streamable HTTP，无状态：每请求一个临时会话，响应
+  `application/json`，不用 SSE、不设 `Mcp-Session-Id`；`GET`/`DELETE` 回 405）。
+  装配点写在 `app.Start(..., app.WithMCP(factory))`：`app` 不 import
+  `mcpserver`（后者的测试引用 `app`，反向依赖会让测试包成环），所以由
+  `main.go` 注入 `mcpserver.NewHTTPHandler(deps)`，再经 `canvas.Server.MCP`
+  字段挂到 mux（按方法逐个注册，避免与 `GET /` 兜底路由冲突）。
+  Agent 因此可以直接连 URL，不必 spawn 子进程，也不与已运行的画布服务抢
+  「同数据目录唯一实例」。
 - 端口：默认 `8788`，被占用则向上递增探测（最多 +20），实际地址通过
   `canvas_url` 工具与 `/api/health` 暴露。
 - **单实例防护**：绑定端口前先探测 `port..port+20` 是否已有**同数据目录**的实例

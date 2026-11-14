@@ -89,10 +89,10 @@ GOWORK=off go build -trimpath -o bin/adago-design.exe .
 ## 运行形态（一个二进制，两种模式）
 
 ```powershell
-# 人工查看：只跑画布服务并自动打开浏览器
-bin\adago-design.exe serve            # http://127.0.0.1:8788/
+# 人工查看：只跑画布服务并自动打开浏览器（同时暴露 HTTP MCP：/mcp）
+bin\adago-design.exe serve            # http://127.0.0.1:8788/  +  http://127.0.0.1:8788/mcp
 
-# Agent 接入：stdio MCP + 内嵌画布服务（不自动开浏览器）
+# Agent 接入：stdio MCP + 内嵌画布服务（不自动开浏览器；同样带 /mcp）
 bin\adago-design.exe mcp
 ```
 
@@ -170,6 +170,43 @@ bin\adago-design.exe mcp
 .\scripts\build-mcp.cmd -Register        # 构建 + 注册 computer-use（原有行为）
 .\scripts\build-mcp.cmd -Register -IncludeAdagoDesignMcp
 ```
+
+## 接入（Streamable HTTP，推荐）
+
+`serve` / `mcp` 两种模式都会在画布服务上暴露 `POST <BaseURL>/mcp`
+（Streamable HTTP，**无状态**：每个请求一个临时会话，响应用
+`application/json` 而不是 SSE）。Agent 直接连 URL，不必 spawn 子进程，也
+不会和已运行的画布服务抢「同数据目录唯一实例」：
+
+```powershell
+# 先起服务（已在跑就跳过）
+bin\adago-design.exe serve -no-open
+
+# 探活 + 握手（Accept 必须同时含 application/json 与 text/event-stream）
+curl.exe -s http://127.0.0.1:8788/mcp ^
+  -H "Content-Type: application/json" ^
+  -H "Accept: application/json, text/event-stream" ^
+  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\"}}"
+```
+
+DSH（`~/.dsh/profiles/desktop/cordis.patch.yml`）：
+
+```yaml
+- insert:
+    - id: mcp-adago-design
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: adago_design
+        transport: streamable-http
+        url: http://127.0.0.1:8788/mcp
+        toolCallTimeoutMs: 180000
+```
+
+工具随后以 `mcp__adago_design__<tool>` 出现在工具目录（需重载该行或重启
+DSH）。ada-go 侧同一端点写成 `"transport": "http", "url": ".../mcp"` 即可。
+
+端点为无状态实现，所以 `GET /mcp`（旧 HTTP+SSE）与 `DELETE /mcp`（结束会话）
+都返回 405；客户端不需要处理 `Mcp-Session-Id`。
 
 ## 检查模式（蓝湖式元素标注 + 双元素关联）
 

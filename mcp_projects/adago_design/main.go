@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -84,12 +85,12 @@ func runServe(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	srv, err := app.Start(ctx, cfg)
+	srv, err := app.Start(ctx, cfg, withHTTPMCP(cfg))
 	if err != nil {
 		// 已有同数据目录实例：为避免双写覆盖，本进程不启动，直接委派浏览器
 		var ie *app.InstanceExistsError
 		if errors.As(err, &ie) {
-			log.Printf("已有实例在运行：%s —— 本次不启动新实例，直接打开该地址", ie.URL)
+			log.Printf("实例已在运行：%s —— 本次不启动新实例，直接打开该地址", ie.URL)
 			if cfg.Open {
 				openbrowser.Open(ie.URL)
 			}
@@ -113,6 +114,24 @@ func hasNoOpen(args []string) bool {
 	return false
 }
 
+// withHTTPMCP 让 serve / mcp 都把工具挂到 <BaseURL>/mcp（Streamable HTTP）。
+//
+// Agent 接入首选这条 HTTP 端点：不需要 spawn 子进程，也不会因为「同数据目录
+// 只能有一个实例」和已运行的画布服务互斥。stdio 模式（mcp）仍保留，两者共用
+// 同一实例内的 Store/TaskQueue。
+func withHTTPMCP(cfg *config.Config) app.Option {
+	return app.WithMCP(func(s *app.Server) http.Handler {
+		log.Printf("MCP(HTTP) 已就绪: %s/mcp", s.BaseURL)
+		return mcpserver.NewHTTPHandler(mcpserver.Deps{
+			Store:    s.Store(),
+			Tasks:    s.Tasks(),
+			BaseURL:  func() string { return s.BaseURL },
+			DataDir:  cfg.DataDir,
+			AutoOpen: true,
+		})
+	})
+}
+
 // runMCP Agent 接入模式：stdio MCP + 内嵌画布服务。
 func runMCP(args []string) error {
 	cfg, err := config.FromFlags("adago-design mcp", args)
@@ -122,7 +141,7 @@ func runMCP(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	srv, err := app.Start(ctx, cfg)
+	srv, err := app.Start(ctx, cfg, withHTTPMCP(cfg))
 	if err != nil {
 		// mcp 模式没有「委派给已有实例」的退路（工具要写数据），只能快速失败：
 		// 消息给出三条出路 —— 关旧实例 / 用已有实例的画布 / 换数据目录

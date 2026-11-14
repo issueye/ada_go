@@ -59,6 +59,9 @@ type Server struct {
 	// DataDir 是本实例的数据目录；健康检查回显它，供多实例探测比对
 	// 「是否撞在同一份数据上」（见 instance.go 的 ProbeInstance）。
 	DataDir string
+	// MCP 可选：非 nil 时挂在 /mcp 上（HTTP MCP 端点由装配层注入，
+	// canvas 包不依赖 mcpserver，避免测试包成环）。
+	MCP http.Handler
 }
 
 // NewServer 构造画布服务。
@@ -112,6 +115,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/catalog/systems", s.handleCatalogSystems)
 	mux.HandleFunc("GET /api/catalog/systems/{id}", s.handleCatalogSystem)
 	mux.HandleFunc("POST /api/catalog/preview", s.handleCatalogPreview)
+	// HTTP MCP（Streamable HTTP）：可选挂载，未注入时 /mcp 落回静态兜底（404）。
+	// 必须按方法逐个注册：不带方法的 "/mcp" 会与下面 "GET /" 的兜底路由冲突
+	// （Go 1.22 mux 认为「方法更窄 + 路径更宽」不可比较）。方法语义交给 SDK，
+	// 它在无状态模式下对 GET/DELETE 回 405。
+	if s.MCP != nil {
+		for _, pattern := range []string{"POST /mcp", "GET /mcp", "DELETE /mcp", "OPTIONS /mcp"} {
+			mux.Handle(pattern, s.MCP)
+		}
+	}
 	// 静态资源
 	staticRoot, _ := fs.Sub(staticFS, "static")
 	fileServer := http.FileServer(http.FS(staticRoot))
