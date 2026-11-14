@@ -56,10 +56,23 @@
     首次调用画布类工具时按需启动 HTTP 服务；`--open`/`ADAGO_DESIGN_OPEN=1`
     时自动拉起系统默认浏览器。
   - `adago-design.exe serve`：只跑画布 Web 服务（人工查看用）。
+- **HTTP MCP 端点（两种形态都有）**：画布服务的同一个监听端口上挂
+  `POST /mcp`（Streamable HTTP，无状态：每请求一个临时会话，响应
+  `application/json`，不用 SSE、不设 `Mcp-Session-Id`；`GET`/`DELETE` 回 405）。
+  装配点写在 `app.Start(..., app.WithMCP(factory))`：`app` 不 import
+  `mcpserver`（后者的测试引用 `app`，反向依赖会让测试包成环），所以由
+  `main.go` 注入 `mcpserver.NewHTTPHandler(deps)`，再经 `canvas.Server.MCP`
+  字段挂到 mux（按方法逐个注册，避免与 `GET /` 兜底路由冲突）。
+  Agent 因此可以直接连 URL，不必 spawn 子进程，也不与已运行的画布服务抢
+  「同数据目录唯一实例」。
 - 端口：默认 `8788`，被占用则向上递增探测（最多 +20），实际地址通过
   `canvas_url` 工具与 `/api/health` 暴露。
+- **单实例防护**：绑定端口前先探测 `port..port+20` 是否已有**同数据目录**的实例
+  （`/api/health` 回显 `server`/`data_dir`）。命中时 `serve` 委派浏览器打开
+  已有实例并退出，`mcp` 快速失败并提示 —— 避免两个进程各自内存态全量覆盖
+  `canvas.json`（后写覆盖先写，静默丢节点）；不同数据目录可共存。
 - 数据目录：`%APPDATA%\adago-design\`（`--data`/`ADAGO_DESIGN_DATA` 覆盖），
-  画布状态持久化为 `canvas.json`（原子写入：tmp+rename）。
+  画布状态持久化为 `canvas.json`（原子写入 + `.bak`/`.bak2` 备份轮换，见 §4.1）。
 
 ## 3. 设计体系数据模型（internal/design）
 
@@ -101,6 +114,10 @@ type Tokens struct {
 每套体系含：`Colors`（语义色，light/dark 双主题，如可用）、`Type`
 （字族+字号阶梯）、`Spacing`、`Radius`、`Shadows`、`Motion`、`Grid`，
 外加 `Components` 组件清单（见 3.2）与 `Guideline` 使用守则。
+
+**数据源（迭代 3-⑤）**：体系的单一真源是 `internal/design/data/<id>.json`
+（8 个文件，`go:embed` 装载，`gen_export` 工具可校验/回写）——
+数据与代码分离，新增/修订体系改 JSON 即可，不变量仍由门禁测试把关。
 
 ### 3.2 组件：一份结构，五份皮肤
 
@@ -155,17 +172,38 @@ type Node struct {
 }
 ```
 
-`Store`：内存 map + 互斥锁；变更即写 `canvas.json`（原子替换，v3 格式
-`{version:3, projects, nodes, edges}`）；启动时载入并完成迁移。
-`projects[].canvas` 是 v3 的可选增量字段：旧文件没有该字段 = 自由画布，无需版本升级。
+`Store`：内存 map + 互斥锁；v4 分文件持久化 —— `canvas.json` 只存索引
+（项目/节点元数据/连线），节点正文落 `nodes/<id>.html`（按脏标记写，
+索引是提交点；正文写失败回退索引内联，整体自洽）；v1/v2/v3 装载时自动迁移。
+`projects[].canvas` 是可选增量字段：旧文件没有该字段 = 自由画布，无需版本升级。
 节点 HTML 由服务端（design 包）生成，画布 UI 不二次加工。
 
-### 4.2 HTTP API（全部 `127.0.0.1`，POST 校验 Origin 同源）
+**持久化策略（P0 加固）**：
+
+- 紧凑序列化（`json.Marshal`，缩进只让文件无谓膨胀 30%+）；
+- 写盘三步：tmp 写入 → 旧主文件轮换进 `.bak`（更旧的进 `.bak2`）→ tmp 就位；
+  任一步失败记入 `Store.lastPersistErr` 并打日志（`/api/health` 的
+  `persist_error` 可见），不再静默吞错；内存态仍是唯一真相，下次变更自动重试；
+- `OpenStore` 在主文件缺失或损坏时依次从 `.bak`/`.bak2` 降级恢复 ——
+  「重命名三连」中断在中间态也不会把画布变成空库；
+- 每次变更推进 `Store.Rev()` 并向订阅者广播（SSE 用），版本推进不依赖写盘成功。
+
+**列表与正文分离（P0 加固）**：`GET /api/nodes` 默认剥掉 `html` 大字段
+（`nodeMeta` 用空指针遮蔽嵌入字段的 `html` 键），只传元数据 + `html_rev`
+（正文最近变更时间，`Store.Update` 只在 HTML 真变时推进）。客户端按
+`html_rev` 决定要不要取正文/重载 iframe，按需走 `GET /api/nodes/{id}`；
+首屏与切项目用 `?include=html` 一次拿全。
+
+### 4.2 HTTP API（全部 `127.0.0.1`，Host 回环 + 写操作 Origin 同源）
+
+所有请求要求 `Host` 是 `127.0.0.1` / `localhost` / `[::1]`（防 DNS rebinding）；
+非 GET/HEAD 请求若带 `Origin`，必须与当前请求同源（回环 host、同端口、http）。
+越界分别返回 403 `bad_host` / `bad_origin`。
 
 | 方法/路径 | 说明 |
 |---|---|
-| `GET /` | 画布单页（embed.FS：index.html / canvas.css / canvas.js） |
-| `GET /api/health` | `{ok, node_count, project_count, time}` |
+| `GET /` | 画布单页（embed.FS：index.html / tokens.css / canvas.css / icons.js / js/*.js（12 个职责模块）/ inspect.js） |
+| `GET /api/health` | `{ok, server, node_count, project_count, data_dir, rev, persist_error?, time}`；`server`/`data_dir`/`rev` 供多实例探测与 SSE 对账 |
 | `GET /api/projects` | 项目列表（含 `node_count` / `frame_count`） |
 | `POST /api/projects` | 建项目 `{name, note?}`；空名 400、同名 409 |
 | `GET /api/projects/{id}` | 单个项目（404 `unknown_project`） |
@@ -173,12 +211,15 @@ type Node struct {
 | `DELETE /api/projects/{id}` | 删除空项目；非空 409 `project_not_empty` |
 | `GET /api/canvas/presets` | 画布比例预设表 + 合法尺寸区间（UI 菜单数据源） |
 | `PUT /api/projects/{id}/canvas` | 设置画布版式 `{ratio}` / `{width,height}` / `{free:true}`；未知比例 400 `unknown_ratio`，尺寸非法 400 `bad_request` |
-| `GET /api/nodes` | 节点列表；`?project=<id>` 过滤（未知项目 404），`?system=` 兼容过滤 |
+| `GET /api/nodes` | 节点列表；`?project=<id>` 过滤（未知项目 404），`?system=` 兼容过滤；**默认剥 html**，`?include=html` 带正文 |
+| `GET /api/nodes/{id}` | 单节点完整数据（含 html 正文）；缺失 404 `not_found` |
 | `POST /api/nodes` | 新建节点，`project` 必填（缺失 400 `project_required`） |
-| `PUT /api/nodes/{id}` | 更新（位置/高度/标题等） |
+| `PUT /api/nodes/{id}` | 更新（位置/高度/标题等）；入参全部指针字段，区分「未传」与「显式置空」 |
 | `DELETE /api/nodes/{id}` | 删除（级联删连线） |
 | `POST /api/nodes/clear` | 清空**指定项目**，`project` 必填 |
 | `POST /api/arrange` | `{group_by:"project"}` 按项目分行重排（全部视图用），返回 `{moved}` |
+| `POST /api/undo` / `POST /api/redo` | 撤销 / 重做最近一次画布内容操作 → `{done, description, undo_depth, redo_depth}`（历史 50 步，仅进程内存） |
+| `GET /api/events` | SSE 变更推送：连接即推当前 `rev`，此后每次变更推 `change` 事件；15s 心跳 |
 | `POST /api/capture` | 创建截图任务（tool 调用）→ `{taskID}` |
 | `GET /api/tasks` | UI 长轮询领取任务（10s 内返回或超时空列表） |
 | `POST /api/tasks/{id}/result` | UI 回传 PNG（base64 dataURL） |
@@ -194,12 +235,25 @@ MCP canvas_screenshot ─► POST /api/capture ─► 任务入队
 ```
 
 预览内容是纯 CSS（无外链图片/字体），`foreignObject` 渲染安全且不失真。
+**内容边界（迭代 2）**：所有入库节点 HTML 在 `Store.Add/Update/loadAll`
+统一注入 CSP（`internal/canvas/sanitize.go`：`default-src 'none';
+style-src 'unsafe-inline'; img-src data:; font-src data:`）—— `canvas_add`
+塞入的外链 `<img>`/样式表会被浏览器阻断，跨域资源不再污染光栅化 canvas
+（改前一张外链图让整张截图失败）；内联样式不受影响。不做字符串手术剥
+`<script>`/改写 `src`：script 本就被 sandbox（无 allow-scripts）挡住，
+外链被 CSP 挡住，正则改写 HTML 易碎。
 8 秒内没有已打开的画布领取任务 → 返回错误并提示先打开画布 URL。
 
 ### 4.4 画布 UI（vanilla JS，无构建步骤）
 
 - 交互：空白处拖拽平移；滚轮/触控板缩放（以光标为中心）；节点头部拖拽移动；
   点击选中 → 右侧检查器；Del 删除；`F` 适配全部节点；`0` 画布居中（见下）。
+  **空格 = 临时平移模式**（设计稿工具的通用手势）：按住空格后光标全画布变抓手，
+  在任意位置（含卡片正文、检查模式的 iframe 上）按住左键拖动都是平移画布，
+  空格 + 滚轮同样缩放；松开空格恢复。实现在 `js/keyboard.js`（按下/松开 + 失焦兜底）
+  → `state.setSpacePan()`（唯一开关，切 `body.space-pan`）→ `js/nodes.js` 在 **pointerdown
+  捕获阶段**接管平移（节点层的选中/拖动收不到事件），`canvas.css` 负责光标，并在空格模式
+  下把 `.node__body iframe` 的 `pointer-events` 关掉（否则卡片正文上拖不动）。
 - **画布控制组**（工具条最左）：
   - 工具条按钮**只显示图标**，名称与当前值走 `data-tip` 伪元素 tooltip（原生 `title`
     延迟约 1s 且样式不可控）；按钮同时写 `aria-label`，键盘聚焦也能看到提示。
@@ -238,7 +292,9 @@ MCP canvas_screenshot ─► POST /api/capture ─► 任务入队
   删除 / 切换四件事，行内展示节点数、分组框数、画布版式、更新时间与 ID。
 - 渲染：每节点一个 `sandbox="allow-same-origin"` 的 iframe（srcdoc），
   按 `Scale` 用 CSS transform 缩放。
-- 同步：本地操作即时生效 + 每 2s 增量合并（按 UpdatedAt）。
+- 同步：本地操作即时生效 + SSE 推送（`GET /api/events`，150ms 合帧后拉一次
+  元数据列表）+ 2s 轮询兜底；列表已剥 HTML，轮询只传元数据 + `html_rev`，
+  正文按需从 `GET /api/nodes/{id}` 取（见 §4.1「列表与正文分离」）。
 
 #### 拖动与渲染性能（对齐问题 4）
 
@@ -279,7 +335,13 @@ MCP canvas_screenshot ─► POST /api/capture ─► 任务入队
   现在函数入口显式拆成 `L/T/R/B`，只有兄弟节点才读 DOMRect。
 - 检查器面板带 `panelGen` 代际号：`ensureCatalog` 是异步的，hover 又高频，
   旧请求回来时若代际已变就丢弃结果，避免面板显示过期元素。
-- 代码在独立的 `static/inspect.js`（`canvas.js` 只管视图、拖动、同步、截图）。
+- 代码按职责拆为 `static/js/` 下的 ES Modules（state/view/nodes/geometry/edges/keyboard/
+  sync/projects/panels/catalog/capture/dock/ui/net/bus/icons-bridge + 入口 main，最大 340 行），
+  检查模式独立在 `static/inspect.js`（全局契约与拆分理由见 IMPROVEMENTS §11）。
+  **模块图门禁**（`internal/canvas/module_graph_test.go`）：具名 import 必须是对面真实导出、
+  `js/**` 每个模块都必须从 `main.js` 可达（`keyboard.js` 这类纯副作用模块要显式 `import "…"`，
+  漏挂就会静默失效），以及「调用了跨模块导出名却没导入」的兜底扫描 —— 这三类错误浏览器只在
+  运行时抛 `ReferenceError`，Go 侧测试与 `go vet` 都看不见（项目树点不开、画布拖不动就是它）。
 
 #### 界面设计系统（画布工具蒙皮）
 
@@ -368,7 +430,7 @@ SDK：`github.com/modelcontextprotocol/go-sdk v1.8.0`（与 mem-go 一致）。
 | `design_fonts` | `script?=latin/hans/mono` | 字体清单（含授权标记）+ 默认栈 + 授权策略 |
 | `design_icons` | `query?`, `group?`, `format?=sprite/inline` | 图标清单（名字/分组/别名/HTML） |
 | `design_systems` | — | 体系清单（id/名称/风格要点/主题/组件数/默认画板） |
-| `design_tokens` | `system`, `theme?=light`, `category?=all/color/type/spacing/radius/shadow/motion` | Token 全量或分类 |
+| `design_tokens` | `system`, `theme?=light`, `category?=all/color/type/spacing/radius/shadow/motion`, `brief?` | Token 全量或分类；`brief`（仅 all）精简视图：关键语义色的值、字阶 size/weight、间距/圆角阶梯，省略阴影/动效/变体 |
 | `design_components` | `system`, `component?`（单个则含 HTML 片段） | 组件清单/详情/用法守则 |
 | `design_search` | `query` | 跨体系命中清单（体系/组件/Token） |
 | `design_preview` | `system`, `components[]`, `title?`, `theme?=light`, `artboard?`, `addToCanvas?=true`, `tags?` | HTML 文档（路径+节选）、节点 ID、画板 ID、画布 URL |
@@ -380,13 +442,14 @@ SDK：`github.com/modelcontextprotocol/go-sdk v1.8.0`（与 mem-go 一致）。
 | `canvas_remove` | `id` | 删除确认 |
 | `canvas_arrange` | `columns?`（默认 sqrt 取整，1-8） | 按「体系分组→网格」自动排版结果 |
 | `canvas_clear` | `confirm=true` | 清空数量（保留内存快照） |
+| `canvas_undo` / `canvas_redo` | — | 撤销 / 重做最近一次画布内容操作（描述 + 剩余深度；无操作返回 `nothing_to_undo|redo`） |
 | `canvas_restore` | — | 恢复最近一次清空的节点 |
 | `canvas_export` | `title?` | 全画布独立 HTML 板文件路径 |
-| `canvas_screenshot` | `nodeID?`（空=全画布）, `scale?=1` | `ImageContent`（PNG） |
+| `canvas_screenshot` | `nodeID?`（空=全画布）, `scale?=1` | `ImageContent`（PNG）；超时且 `AutoOpen` 时自动拉起浏览器重试一次（每进程一次，测试/CI 关闭） |
 | `canvas_url` | — | 画布访问地址与打开方式 |
 | `design_derive` | `primary`(#RRGGBB), `name`, `base_system`, `addToCanvas?=true` | 10 阶品牌色板 + 派生体系（持久化注册）+ 色板节点 |
 | `design_register` | `name`, `tokens_json`, `dark_json?`, `base_system?` | 自定义体系注册（结构兜底 + 持久化） |
-| `design_audit` | `system`, `theme?`, `addToCanvas?=true` | WCAG 对比度/字号/阶梯走查评分 + 报告节点 |
+| `design_audit` | `system`（体系走查）, `theme?`, `addToCanvas?=true`；或 `nodeID`（节点级走查，优先） | 体系级：WCAG 对比度/字号/阶梯走查评分 + 报告节点；节点级：外链资源 / 图标与符号 / 尺寸契约 / 字体授权（`AuditNodeHTML`） |
 | `canvas_connect` | `from`, `to`, `label?` | 节点间贝塞尔连线（SVG，持久化） |
 | `canvas_group` | `title`, `node_ids[]`, `padding?` | 分组框（垫底虚线框，自动包住成员） |
 
@@ -500,12 +563,22 @@ GOWORK=off go build -trimpath -o bin/adago-design.exe .
 - `internal/design`：注册表完备性（8 体系、Token 非空、颜色合法 hex）、
   StyleSheet/Compose 生成物包含关键 token 值、组件 HTML 结构快照断言；
   新增规范层不变量：图标命名/路径/精灵覆盖、画板推导值、字体全体系可商用、
-  **渲染产物无 emoji 与字符图标**。
+  **渲染产物无 emoji 与字符图标**；规格阶梯走查（CSS 字面值须落阶梯——
+  新组件的非阶梯 padding 在此被门禁拦下）；节点级走查（`nodeaudit_test.go`）：
+  外链 fail、emoji fail、画板契约三态、字族商用判定。
 - `internal/canvas`：Store CRUD/持久化/并发、HTTP API 全路径（httptest）、
-  截图任务闭环（模拟 UI 回传）/超时路径。
+  截图任务闭环（模拟 UI 回传）/超时路径；P0 加固（`hardening_test.go`）：
+  备份轮换与降级恢复、写盘失败进 `PersistError()` 与健康检查、
+  `Rev()`/订阅广播、列表剥 HTML 与单节点正文、部分更新指针语义、
+  SSE 事件流、`ProbeInstance` 同数据目录判定；CSP 注入（`sanitize_test.go`）：
+  注入位置（head/html/片段）、幂等、Add/Update/旧快照装载自愈；
+  v4 分文件（`persistfile_test.go`）：round trip、索引零正文、清空删文件、
+  孤儿 GC；操作历史（`undo_test.go`）：增改删/连线/清空可逆、栈语义、HTTP 契约。
 - `internal/mcpserver`：内存 transport 走 `initialize` + `tools/list` +
   `tools/call`（design_tokens、design_preview、canvas_add、canvas_screenshot
-  超时路径），断言结果结构；目录类工具与画板透传单测。
+  超时路径），断言结果结构；目录类工具与画板透传单测；
+  `design_audit` 节点级走查（脏稿 fail 明细 / 净稿满分 / 缺参报错）与
+  `design_tokens` brief/全量双形态（`enhance3_test.go`）。
 - 前端：`go generate` 同步 icons.js；用无头 Chromium 做真实输入事件回归
   （拖动跨越 iframe 区域不丢事件、检查模式 A↔B 跨卡片配对、截图链路出图）。
 - 门禁：`GOWORK=off go test ./... && go vet ./...`。

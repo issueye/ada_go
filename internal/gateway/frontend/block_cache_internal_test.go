@@ -19,20 +19,20 @@ func TestBlockCacheStoreAndKey(t *testing.T) {
 	data := json.RawMessage(`{"a":1}`)
 	key := b.blockCacheKey(entry, r, "demo/card", "b1", data)
 
-	if _, _, ok := b.cachedBlock(key); ok {
+	if _, ok := b.cachedBlock(key); ok {
 		t.Fatal("空缓存不应命中")
 	}
 
 	raw := json.RawMessage(`{"t":"div"}`)
-	b.storeBlock(key, raw, `<div></div>`)
-	gotRaw, gotHTML, ok := b.cachedBlock(key)
-	if !ok || string(gotRaw) != string(raw) || gotHTML != `<div></div>` {
-		t.Fatalf("缓存命中 = %v/%s/%q", ok, gotRaw, gotHTML)
+	b.storeBlock(key, raw)
+	gotRaw, ok := b.cachedBlock(key)
+	if !ok || string(gotRaw) != string(raw) {
+		t.Fatalf("缓存命中 = %v/%s", ok, gotRaw)
 	}
 
 	// 返回值是副本：调用方改写不会污染缓存。
 	gotRaw[0] = 'X'
-	if again, _, _ := b.cachedBlock(key); string(again) != string(raw) {
+	if again, _ := b.cachedBlock(key); string(again) != string(raw) {
 		t.Fatalf("缓存被调用方改写: %s", again)
 	}
 
@@ -55,14 +55,14 @@ func TestBlockCacheLimitResets(t *testing.T) {
 	b := &Bridge{blockCache: map[string]blockCacheEntry{}}
 	raw := json.RawMessage(`{"t":"div"}`)
 	for i := 0; i < blockCacheLimit; i++ {
-		b.storeBlock(fmt.Sprintf("k%d", i), raw, `<div></div>`)
+		b.storeBlock(fmt.Sprintf("k%d", i), raw)
 	}
-	b.storeBlock("fresh", raw, `<div></div>`)
+	b.storeBlock("fresh", raw)
 
-	if _, _, ok := b.cachedBlock("k0"); ok {
+	if _, ok := b.cachedBlock("k0"); ok {
 		t.Fatal("达到上限后应清空旧缓存，而不是继续增长")
 	}
-	if _, _, ok := b.cachedBlock("fresh"); !ok {
+	if _, ok := b.cachedBlock("fresh"); !ok {
 		t.Fatal("清空后新条目应写入")
 	}
 }

@@ -113,6 +113,18 @@ func (s *Server) execute(ctx context.Context, client, name string, raw json.RawM
 		if req.Action == "" {
 			req.Action = "goto"
 		}
+		// domcontentloaded/network_idle used to be accepted but behaved exactly
+		// like load. Reject them instead of silently waiting for the wrong
+		// signal: agents should use wait for=network / wait for=selector.
+		switch req.WaitUntil {
+		case "", "load", "none":
+		default:
+			return nil, &browser.Error{
+				Code:    browser.CodeBadRequest,
+				Message: "unsupported wait_until: " + req.WaitUntil,
+				Hint:    "use wait_until=load or none, then wait for=network / wait for=selector for SPA readiness",
+			}
+		}
 		if req.Action == "goto" && req.URL == "" {
 			return nil, &browser.Error{Code: browser.CodeBadRequest, Message: "url is required for goto"}
 		}

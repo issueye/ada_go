@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -111,12 +112,22 @@ func TestStorePersistFileFormat(t *testing.T) {
 	if err := json.Unmarshal(raw, &file); err != nil {
 		t.Fatalf("canvas.json 不是合法 JSON: %v", err)
 	}
-	if file.Version != 3 || len(file.Projects) != 1 || len(file.Nodes) != 2 || len(file.Edges) != 1 {
+	if file.Version != 4 || len(file.Projects) != 1 || len(file.Nodes) != 2 || len(file.Edges) != 1 {
 		t.Fatalf("持久化内容异常: version=%d projects=%d nodes=%d edges=%d",
 			file.Version, len(file.Projects), len(file.Nodes), len(file.Edges))
 	}
 	if file.Edges[0].Label != "流向" {
 		t.Fatalf("连线标签异常: %+v", file.Edges[0])
+	}
+	// v4 分文件：索引不含正文，正文在 nodes/<id>.html
+	for _, idx := range file.Nodes {
+		if idx.HTML != "" || idx.HTMLFile == "" {
+			t.Fatalf("索引应只引用正文文件: %+v", idx)
+		}
+		rawHTML, err := os.ReadFile(filepath.Join(dir, "nodes", idx.HTMLFile))
+		if err != nil || !strings.Contains(string(rawHTML), "<p>") {
+			t.Fatalf("正文文件应存在且含内容: %v", err)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(dir, "canvas.json.tmp")); !os.IsNotExist(err) {
 		t.Error("临时文件应已被 rename 清理")
@@ -147,13 +158,16 @@ func TestStoreV1Migration(t *testing.T) {
 	if len(s.ListProjects()) != 1 || s.ListProjects()[0].ID != LegacyProjectID {
 		t.Fatalf("迁移后应存在历史项目: %+v", s.ListProjects())
 	}
-	// 迁移后的下一次写入应为 v3
+	// 迁移后的下一次写入应为 v4（正文迁到 nodes/ 分文件）
 	s.AddEdge("n-old-1", "n-old-1", "") // 自环报错，不写入
 	addNode(t, s, LegacyProjectID, newTestNode("new"))
 	raw, _ := os.ReadFile(filepath.Join(dir, "canvas.json"))
 	var file persistedFile
-	if err := json.Unmarshal(raw, &file); err != nil || file.Version != 3 {
-		t.Fatalf("迁移后应写 v3 格式: %v", err)
+	if err := json.Unmarshal(raw, &file); err != nil || file.Version != 4 {
+		t.Fatalf("迁移后应写 v4 格式: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "nodes", "n-old-1.html")); err != nil {
+		t.Fatalf("v1 内联正文应迁移为正文文件: %v", err)
 	}
 }
 
@@ -560,14 +574,57 @@ func TestStaticIndex(t *testing.T) {
 	}
 }
 
-func TestSameLoopbackOrigin(t *testing.T) {
-	cases := map[string]bool{
-		"http://127.0.0.1:8788": true, "http://localhost:8788": true,
-		"https://evil.com": false, "http://127.0.0.1.evil.com": false, "": true,
+// ES 模块由浏览器强制校验 MIME：Windows 注册表可能把 .js 映成 text/plain，
+// 服务端必须显式覆盖，否则整页模块加载失败（且经典脚本时代不会暴露）。
+func TestStaticModuleMIME(t *testing.T) {
+	_, ts := newTestServer(t)
+	cases := map[string]string{
+		"/js/main.js":  "javascript",
+		"/js/state.js": "javascript",
+		"/tokens.css":  "text/css",
 	}
-	for origin, want := range cases {
-		if got := sameLoopbackOrigin(origin); got != want {
-			t.Errorf("sameLoopbackOrigin(%q) = %v, 期望 %v", origin, got, want)
+	for path, want := range cases {
+		res, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("%s status = %d", path, res.StatusCode)
+		}
+		if ct := res.Header.Get("Content-Type"); !strings.Contains(ct, want) {
+			t.Errorf("%s Content-Type = %q，应包含 %q", path, ct, want)
+		}
+	}
+}
+
+func TestLoopbackHostAndSameOrigin(t *testing.T) {
+	hosts := map[string]bool{
+		"127.0.0.1:8788": true, "localhost:8788": true, "[::1]:8788": true,
+		"127.0.0.1": true, "evil.example:8788": false,
+		"127.0.0.1.evil.com:8788": false, "": false,
+	}
+	for host, want := range hosts {
+		if got := loopbackHost(host); got != want {
+			t.Errorf("loopbackHost(%q) = %v, 期望 %v", host, got, want)
+		}
+	}
+
+	origins := []struct {
+		origin, host string
+		want         bool
+	}{
+		{"http://127.0.0.1:8788", "127.0.0.1:8788", true},
+		{"http://localhost:8788", "localhost:8788", true},
+		{"http://LOCALHOST:8788", "localhost:8788", true},   // Host 大小写不敏感
+		{"http://127.0.0.1:8788", "127.0.0.1:9999", false},  // 跨端口
+		{"https://127.0.0.1:8788", "127.0.0.1:8788", false}, // 跨协议
+		{"http://evil.example:8788", "127.0.0.1:8788", false},
+		{"null", "127.0.0.1:8788", false},
+	}
+	for _, c := range origins {
+		if got := sameOrigin(c.origin, c.host); got != c.want {
+			t.Errorf("sameOrigin(%q, %q) = %v, 期望 %v", c.origin, c.host, got, c.want)
 		}
 	}
 }

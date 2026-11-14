@@ -1,36 +1,42 @@
 package web
 
-// 内嵌静态资源读取：宿主渲染器与浏览器必须拿到同一份 ada-render.js；
-// 路径规则与 /static/ 一致，不允许目录穿越。
+// 内嵌静态资源的基线测试：保留的脚本全部满足 CSP
+// （不能出现 eval() / new Function()）。SSR 渲染器所需的静态读取出口
+// （web.StaticAsset）已随 SSR 移除。
 
 import (
+	"io/fs"
 	"regexp"
+	"strings"
 	"testing"
 )
 
-func TestStaticAssetAdaRender(t *testing.T) {
-	data, ok := StaticAsset("ada-render.js")
-	if !ok || len(data) == 0 {
-		t.Fatal("ada-render.js 应可从内嵌静态资源读取")
-	}
-	if _, ok := StaticAsset("../server.go"); ok {
-		t.Fatal("StaticAsset 不应接受目录穿越路径")
-	}
-	if _, ok := StaticAsset("static/ada-render.js"); ok {
-		t.Fatal("StaticAsset 只接受 /static/ 之后的规范名")
-	}
-}
-
-// 岛屿运行时的静态资源必须满足 CSP：不能出现 eval() / new Function()。
-func TestIslandAssetsHonorCSP(t *testing.T) {
+// TestStaticAssetsHonorCSP 扫描内嵌静态资源里的全部脚本：CSP script-src 'self'
+// 不允许 eval/new Function（ada-runtime 与保留的壳脚本都要守住这条）。
+func TestStaticAssetsHonorCSP(t *testing.T) {
 	danger := regexp.MustCompile(`\beval\s*\(|new\s+Function\s*\(`)
-	for _, name := range []string{"ada-render.js", "ada-patch-stream.js", "ada-ui.js", "ada-ui-iso.js", "plugin-islands.js"} {
-		data, ok := StaticAsset(name)
-		if !ok || len(data) == 0 {
-			t.Fatalf("缺少静态资源 %s", name)
+	found := 0
+	err := fs.WalkDir(staticFS, "static", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
 		}
+		if !strings.HasSuffix(p, ".js") && !strings.HasSuffix(p, ".mjs") {
+			return nil
+		}
+		data, readErr := staticFS.ReadFile(p)
+		if readErr != nil {
+			t.Fatalf("读取 %s: %v", p, readErr)
+		}
+		found++
 		if loc := danger.FindIndex(data); loc != nil {
-			t.Fatalf("%s 含 CSP 禁止的 eval/new Function（字节 %d 附近）", name, loc[0])
+			t.Fatalf("%s 含 CSP 禁止的 eval/new Function（字节 %d 附近）", p, loc[0])
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found == 0 {
+		t.Fatal("内嵌静态资源里没有任何脚本，扫描没有覆盖面")
 	}
 }

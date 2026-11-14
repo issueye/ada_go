@@ -6,6 +6,14 @@
   if (window.__browserUse && window.__browserUse.version === VERSION) return;
   const isTopFrame = window === window.top;
 
+  // FRAME_TOKEN is replaced with a per-process secret before the runtime is
+  // injected (internal/browser/runtime.SourceWithToken). It lives in this
+  // closure, so page scripts cannot read it. Every frame carries the same
+  // value; it gates the iframe relay so a hostile top page cannot postMessage
+  // a cmd into a cross-origin child and read that child's DOM (same-origin
+  // policy bypass). The placeholder below only survives in tests.
+  const FRAME_TOKEN = "__BU_FRAME_TOKEN__";
+
   const RELAY_OPS = new Set([
     "snapshot", "read", "click", "type", "press", "select", "scroll",
     "hover", "query", "info", "dialogs", "network", "console", "upload",
@@ -2271,7 +2279,7 @@
     for (let i = 0; i < total; i++) {
       const token = "f" + (++state.frameSeq);
       tokens.push(token);
-      postFrame(window.frames[i], { __buFrame: "ping", token });
+      postFrame(window.frames[i], { __buFrame: "ping", token, auth: FRAME_TOKEN });
     }
     await new Promise((r) => setTimeout(r, FRAME_PING_MS));
     const out = [];
@@ -2317,7 +2325,7 @@
       const fromParent = ev.source === window.parent;
       const fromChild = isOwnFrame(ev.source);
       if (!fromParent && !fromChild) return;
-      if (d.__buFrame === "ping" && fromParent) {
+      if (d.__buFrame === "ping" && fromParent && d.auth === FRAME_TOKEN) {
         try {
           ev.source.postMessage({
             __buFrame: "pong", token: d.token,
@@ -2332,7 +2340,7 @@
         state.framePongs.set(d.token, { url: d.url || "", title: d.title || "", childCount: d.child_count || 0 });
         return;
       }
-      if (d.__buFrame === "subping" && fromParent) {
+      if (d.__buFrame === "subping" && fromParent && d.auth === FRAME_TOKEN) {
         // 父帧要我们收集直接子帧清单;收集完沿原路上传。
         try {
           const frames = await collectChildren();
@@ -2342,7 +2350,7 @@
         }
         return;
       }
-      if (d.__buFrame === "cmd" && fromParent) {
+      if (d.__buFrame === "cmd" && fromParent && d.auth === FRAME_TOKEN) {
         const route = Array.isArray(d.route) ? d.route : [];
         if (route.length > 0) {
           // 不是给本帧的:按索引转发一跳,结果由叶子沿原路上传。
@@ -2356,7 +2364,7 @@
             } catch (e) { /* ignore */ }
             return;
           }
-          postFrame(win, { __buFrame: "cmd", id: d.id, route: route.slice(1), op: d.op, args: d.args || {} });
+          postFrame(win, { __buFrame: "cmd", id: d.id, auth: FRAME_TOKEN, route: route.slice(1), op: d.op, args: d.args || {} });
           return;
         }
         let payload;
@@ -2394,7 +2402,7 @@
       }, FRAME_PING_MS + 1500);
       pendingSub.set(token, { resolve, timer });
       postFrame(window.frames[route[0]], {
-        __buFrame: "subping", token, route: route.slice(1),
+        __buFrame: "subping", token, auth: FRAME_TOKEN, route: route.slice(1),
       });
     });
     state.frameSubPending = pendingSub;
@@ -2434,7 +2442,7 @@
         reject(err("frame_timeout", "frame did not answer"));
       }, 30000);
       state.framePending.set(rid, { resolve, timer });
-      postFrame(win, { __buFrame: "cmd", id: rid, route: route.slice(1), op, args: args || {} });
+      postFrame(win, { __buFrame: "cmd", id: rid, auth: FRAME_TOKEN, route: route.slice(1), op, args: args || {} });
     });
   }
 
@@ -2458,14 +2466,21 @@
     throw err("bad_request", "unknown frames action: " + action);
   }
 
-  async function invoke(payload) {
+  async function invoke(payload, token) {
     try {
       const op = payload && payload.op;
       const args = (payload && payload.args) || {};
-      if (isTopFrame && op === "frames") {
+      // Only calls made through Go's EvalContext carry the frame token. Page
+      // scripts can reach window.__browserUse.invoke; without the token they
+      // must not cross an origin boundary or toggle the input mask.
+      const trusted = typeof token === "string" && token === FRAME_TOKEN;
+      if (op === "frames") {
+        if (!trusted) throw err("forbidden", "frame control is not available to page scripts");
+        if (!isTopFrame) throw err("no_frame", "frames is only available in the top frame");
         return JSON.stringify({ ok: true, ...(await frames(args)) });
       }
       if (isTopFrame && state.activeFrame && RELAY_OPS.has(op)) {
+        if (!trusted) throw err("forbidden", "frame relay is not available to page scripts");
         try {
           return await frameCommand(op, args);
         } catch (e) {
@@ -2486,7 +2501,9 @@
         case "hover": return JSON.stringify({ ok: true, ...(await hover(args.target)) });
         case "query": return JSON.stringify({ ok: true, ...query(args) });
         case "info": return JSON.stringify({ ok: true, url: location.href, title: document.title, readyState: document.readyState, nav: state.navCount, scroll: { x: window.scrollX, y: window.scrollY }, viewport: { w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio || 1 } });
-        case "setInputLock": return JSON.stringify({ ok: true, ...setInputLock(args.on) });
+        case "setInputLock":
+          if (!trusted) throw err("forbidden", "the input mask is controlled by the harness");
+          return JSON.stringify({ ok: true, ...setInputLock(args.on) });
         case "dialogs": return JSON.stringify({ ok: true, ...dialogQuery(args) });
         case "network": return JSON.stringify({ ok: true, ...(await network(args)) });
         case "console": return JSON.stringify({ ok: true, ...(await consoleQuery(args)) });
@@ -2517,12 +2534,10 @@
       version: VERSION,
       invoke,
       snapshot: (args) => snapshot(args || {}),
-      setInputLock,
       dialogs: (args) => dialogQuery(args || {}),
       network: (args) => network(args || {}),
       console: (args) => consoleQuery(args || {}),
       upload: (args) => upload(args || {}),
-      frames: (args) => frames(args || {}),
     }),
   });
 })();

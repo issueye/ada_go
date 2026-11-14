@@ -46,8 +46,8 @@ const thirdPartyBlockManifest = `{
   "trust": "third-party",
   "frontend": {
     "capabilities": [],
-    "slots": [{"slot": "chat.corner", "template": "slot.tsx"}],
-    "pages": [{"slug": "main", "title": "Main", "template": "page.tsx"}],
+    "slots": [{"slot": "chat.corner", "component": "Slot.vue"}],
+    "pages": [{"slug": "main", "title": "Main", "component": "Page.vue"}],
     "styles": ["main.css"],
     "blocks": [{"name": "card", "schema": "schemas/card.json", "template": "blocks/card.tsx"}]
   }
@@ -77,12 +77,12 @@ func TestLoadBlockScriptStripsNonBlockFrontend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewBridge: %v", err)
 	}
-	raw, html, err := renderBlock(bridge, request(t, "/thread/th_1"), "demo-block/card", "b1", json.RawMessage(`{"title":"hi"}`))
+	raw, err := renderBlock(bridge, request(t, "/thread/th_1"), "demo-block/card", "b1", json.RawMessage(`{"title":"hi"}`))
 	if err != nil {
 		t.Fatalf("RenderBlock: %v", err)
 	}
-	if len(raw) == 0 || html == "" {
-		t.Fatalf("渲染结果为空: %s / %q", raw, html)
+	if len(raw) == 0 {
+		t.Fatalf("渲染结果为空: %s", raw)
 	}
 }
 

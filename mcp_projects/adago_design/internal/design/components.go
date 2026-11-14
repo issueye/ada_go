@@ -80,6 +80,18 @@ var componentCatalog = map[string]Component{
 		Description: "操作反馈的短时浮层，居中顶部或底部。",
 		Variants:    []string{"success", "error", "info"},
 		Usage:       []string{"文案一句话，不承载操作", "停留 2-3 秒自动消失"}},
+	"tabs": {ID: "tabs", Name: "标签页", Category: "navigation",
+		Description: "同层内容的平级切换（2-5 个），当前项用主色下划线标记。",
+		Variants:    []string{"active", "with-badge"},
+		Usage:       []string{"超过 5 个改用下拉或抽屉", "下划线跟随当前项，勿与底部标签栏混用"}},
+	"table": {ID: "table", Name: "表格", Category: "data",
+		Description: "结构化数据的多列展示：表头 + 行分隔，数值列右对齐。",
+		Variants:    []string{"bordered"},
+		Usage:       []string{"列头左对齐、数值右对齐并用等宽数字", "移动端避免横向滚动，改用列表卡片"}},
+	"pagination": {ID: "pagination", Name: "分页", Category: "navigation",
+		Description: "长列表的分页控制：上一页 / 页码 / 省略号 / 下一页。",
+		Variants:    []string{"default"},
+		Usage:       []string{"页码超过 7 个时折叠省略号", "总数文案放分页器右侧"}},
 }
 
 // esc 转义 HTML 文本。
@@ -215,6 +227,46 @@ func componentTemplate(compID string) (string, error) {
 <div class="ds-field">
   <div class="ds-row-between"><span class="ds-label">剩余空间</span><span class="ds-progress__label ds-progress__label--danger">5%</span></div>
   <div class="ds-progress"><div class="ds-progress__fill ds-progress__fill--danger" style="width:5%"></div></div>
+</div>`, nil
+	case "tabs":
+		return `
+<div class="ds-tabs">
+  <div class="ds-tabs__item ds-tabs__item--active">全部</div>
+  <div class="ds-tabs__item">待发货<span class="ds-tabs__badge">12</span></div>
+  <div class="ds-tabs__item">已收货</div>
+  <div class="ds-tabs__item">售后</div>
+</div>
+<div class="ds-tabs">
+  <div class="ds-tabs__item">商品</div>
+  <div class="ds-tabs__item ds-tabs__item--active">评价 2.1k</div>
+  <div class="ds-tabs__item">详情</div>
+  <div class="ds-tabs__item">推荐</div>
+</div>`, nil
+	case "table":
+		return `
+<div class="ds-table-wrap">
+  <table class="ds-table">
+    <thead><tr><th>订单号</th><th>商品</th><th class="ds-table__num">金额</th><th>状态</th></tr></thead>
+    <tbody>
+      <tr><td>#202601</td><td>无线键盘</td><td class="ds-table__num">¥199.00</td><td><span class="ds-tag ds-tag--success">已支付</span></td></tr>
+      <tr><td>#202602</td><td>机械键盘</td><td class="ds-table__num">¥599.00</td><td><span class="ds-tag ds-tag--warning">待发货</span></td></tr>
+      <tr><td>#202603</td><td>键帽套装</td><td class="ds-table__num">¥89.00</td><td><span class="ds-tag ds-tag--danger">已退款</span></td></tr>
+    </tbody>
+  </table>
+</div>`, nil
+	case "pagination":
+		return `
+<div class="ds-row-between">
+  <div class="ds-pagination">
+    <button class="ds-page-btn" aria-label="上一页">{{icon:chevron-left:14}}</button>
+    <button class="ds-page-btn ds-page-btn--active">1</button>
+    <button class="ds-page-btn">2</button>
+    <button class="ds-page-btn">3</button>
+    <span class="ds-pagination__ellipsis">…</span>
+    <button class="ds-page-btn">9</button>
+    <button class="ds-page-btn" aria-label="下一页">{{icon:chevron-right:14}}</button>
+  </div>
+  <span class="ds-pagination__total">共 86 条</span>
 </div>`, nil
 	case "navbar":
 		return `

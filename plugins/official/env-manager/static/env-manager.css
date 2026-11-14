@@ -3,11 +3,11 @@
 
 /* ── 页面骨架 ───────────────────────────────────────────────────────── */
 
+/* 页框（宽度/内边距/滚动）由宿主 .ada-page__inner 提供（2026-11-11 统一）。 */
 .em-page {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-width: 1040px;
 }
 
 .em-head {

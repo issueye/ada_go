@@ -1,0 +1,399 @@
+{
+  "id": "volcano",
+  "name": "火山引擎 Arco Design",
+  "vendor": "字节跳动 · 火山引擎",
+  "family": "web",
+  "description": "字节跳动 Arco Design（火山引擎同源）：克制的蓝灰中性色、2/4/8 圆角阶梯、细描边 + 轻阴影，面向 B 端效率场景。",
+  "style": {
+    "summary": "效率优先的 B 端风格：白底细描边、arcoblue 主色、圆角小（2/4/8）、灰阶文本四级分层。",
+    "keywords": [
+      "arcoblue",
+      "中性灰阶",
+      "细描边",
+      "效率",
+      "数据密度"
+    ],
+    "density": "紧凑",
+    "elevation": "描边为主，阴影仅用于浮层（popup），卡片阴影可选"
+  },
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "light": {
+    "colors": {
+      "bg-1": {
+        "value": "#FFFFFF",
+        "usage": "一级表面"
+      },
+      "bg-2": {
+        "value": "#F7F8FA",
+        "usage": "二级表面"
+      },
+      "bg-3": {
+        "value": "#F2F3F5",
+        "usage": "三级表面"
+      },
+      "border": {
+        "value": "#E5E6EB",
+        "usage": "描边"
+      },
+      "border-2": {
+        "value": "#C9CDD4",
+        "usage": "悬停描边"
+      },
+      "cyan": {
+        "value": "#14C9C9",
+        "usage": "装饰（cyan-6）"
+      },
+      "danger": {
+        "value": "#F53F3F",
+        "usage": "危险（red-6）"
+      },
+      "danger-bg": {
+        "value": "#FFECE8",
+        "usage": "危险浅底"
+      },
+      "fill-1": {
+        "value": "#F7F8FA",
+        "usage": "一级填充/页面底"
+      },
+      "fill-2": {
+        "value": "#F2F3F5",
+        "usage": "二级填充"
+      },
+      "fill-3": {
+        "value": "#E5E6EB",
+        "usage": "三级填充/禁用底"
+      },
+      "magenta": {
+        "value": "#F5319D",
+        "usage": "装饰（magenta-6）"
+      },
+      "primary": {
+        "value": "#165DFF",
+        "usage": "品牌/主操作（arcoblue-6）"
+      },
+      "primary-active": {
+        "value": "#0E42D2",
+        "usage": "主色按下（arcoblue-7）"
+      },
+      "primary-bg": {
+        "value": "#E8F3FF",
+        "usage": "主色浅底（arcoblue-1）"
+      },
+      "primary-hover": {
+        "value": "#4080FF",
+        "usage": "主色悬浮（arcoblue-5）"
+      },
+      "purple": {
+        "value": "#722ED1",
+        "usage": "装饰（purple-6）"
+      },
+      "success": {
+        "value": "#00B42A",
+        "usage": "成功（green-6）"
+      },
+      "success-bg": {
+        "value": "#E8FFEA",
+        "usage": "成功浅底"
+      },
+      "text-1": {
+        "value": "#1D2129",
+        "usage": "一级文字"
+      },
+      "text-2": {
+        "value": "#4E5969",
+        "usage": "二级文字"
+      },
+      "text-3": {
+        "value": "#86909C",
+        "usage": "三级文字/占位"
+      },
+      "text-4": {
+        "value": "#C9CDD4",
+        "usage": "禁用"
+      },
+      "warning": {
+        "value": "#FF7D00",
+        "usage": "警告（orange-6）"
+      },
+      "warning-bg": {
+        "value": "#FFF7E8",
+        "usage": "警告浅底"
+      },
+      "yellow": {
+        "value": "#F7BA1E",
+        "usage": "装饰（yellow-6）"
+      }
+    },
+    "type": {
+      "family": "Inter, \"Noto Sans SC\", system-ui, \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+      "levels": {
+        "body": {
+          "size": 14,
+          "weight": 400,
+          "lineHeight": 1.57,
+          "usage": "正文/控件（默认）"
+        },
+        "body-sm": {
+          "size": 13,
+          "weight": 400,
+          "lineHeight": 1.54,
+          "usage": "紧凑正文"
+        },
+        "caption": {
+          "size": 12,
+          "weight": 400,
+          "lineHeight": 1.33,
+          "usage": "辅助说明"
+        },
+        "display": {
+          "size": 32,
+          "weight": 600,
+          "lineHeight": 1.25,
+          "usage": "数字/营销大字"
+        },
+        "title-1": {
+          "size": 24,
+          "weight": 600,
+          "lineHeight": 1.33,
+          "usage": "页面标题"
+        },
+        "title-2": {
+          "size": 20,
+          "weight": 600,
+          "lineHeight": 1.4,
+          "usage": "模块标题"
+        },
+        "title-3": {
+          "size": 16,
+          "weight": 600,
+          "lineHeight": 1.5,
+          "usage": "卡片标题"
+        }
+      }
+    },
+    "spacing": {
+      "lg": 20,
+      "md": 16,
+      "sm": 12,
+      "xl": 24,
+      "xs": 8,
+      "xxl": 32,
+      "xxs": 4,
+      "xxxl": 40
+    },
+    "radius": {
+      "large": 8,
+      "medium": 4,
+      "pill": 100,
+      "small": 2,
+      "xlarge": 16
+    },
+    "shadows": {
+      "card": "0 4px 10px rgba(0,0,0,0.1)",
+      "floating": "0 8px 20px rgba(0,0,0,0.12)",
+      "none": "none",
+      "popup": "0 0 1px rgba(0,0,0,0.3), 0 4px 14px rgba(0,0,0,0.1)"
+    },
+    "motion": {
+      "fast": "100ms cubic-bezier(0.34,0.69,0.1,1)",
+      "slow": "300ms cubic-bezier(0.34,0.69,0.1,1)",
+      "standard": "200ms cubic-bezier(0.34,0.69,0.1,1)"
+    },
+    "grid": 8
+  },
+  "dark": {
+    "colors": {
+      "bg-1": {
+        "value": "#232324",
+        "usage": "一级表面"
+      },
+      "bg-2": {
+        "value": "#2A2A2B",
+        "usage": "二级表面"
+      },
+      "bg-3": {
+        "value": "#313132",
+        "usage": "三级表面"
+      },
+      "border": {
+        "value": "#333335",
+        "usage": "描边"
+      },
+      "border-2": {
+        "value": "#484849",
+        "usage": "悬停描边"
+      },
+      "cyan": {
+        "value": "#14C9C9",
+        "usage": "装饰"
+      },
+      "danger": {
+        "value": "#F53F3F",
+        "usage": "危险"
+      },
+      "danger-bg": {
+        "value": "#2E0F0D",
+        "usage": "危险浅底"
+      },
+      "fill-1": {
+        "value": "#17171A",
+        "usage": "一级填充/页面底"
+      },
+      "fill-2": {
+        "value": "#232324",
+        "usage": "二级填充"
+      },
+      "fill-3": {
+        "value": "#2A2A2B",
+        "usage": "三级填充"
+      },
+      "magenta": {
+        "value": "#F5319D",
+        "usage": "装饰"
+      },
+      "primary": {
+        "value": "#165DFF",
+        "usage": "品牌/主操作"
+      },
+      "primary-active": {
+        "value": "#0E42D2",
+        "usage": "主色按下"
+      },
+      "primary-bg": {
+        "value": "#0A1E3F",
+        "usage": "主色浅底（暗色）"
+      },
+      "primary-hover": {
+        "value": "#4080FF",
+        "usage": "主色悬浮"
+      },
+      "purple": {
+        "value": "#722ED1",
+        "usage": "装饰"
+      },
+      "success": {
+        "value": "#00B42A",
+        "usage": "成功"
+      },
+      "success-bg": {
+        "value": "#0A2913",
+        "usage": "成功浅底"
+      },
+      "text-1": {
+        "value": "#F7F8FA",
+        "usage": "一级文字"
+      },
+      "text-2": {
+        "value": "#C9CDD4",
+        "usage": "二级文字"
+      },
+      "text-3": {
+        "value": "#86909C",
+        "usage": "三级文字/占位"
+      },
+      "text-4": {
+        "value": "#4E5969",
+        "usage": "禁用"
+      },
+      "warning": {
+        "value": "#FF7D00",
+        "usage": "警告"
+      },
+      "warning-bg": {
+        "value": "#2E1E0A",
+        "usage": "警告浅底"
+      },
+      "yellow": {
+        "value": "#F7BA1E",
+        "usage": "装饰"
+      }
+    },
+    "type": {
+      "family": "Inter, \"Noto Sans SC\", system-ui, \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+      "levels": {
+        "body": {
+          "size": 14,
+          "weight": 400,
+          "lineHeight": 1.57,
+          "usage": "正文/控件（默认）"
+        },
+        "body-sm": {
+          "size": 13,
+          "weight": 400,
+          "lineHeight": 1.54,
+          "usage": "紧凑正文"
+        },
+        "caption": {
+          "size": 12,
+          "weight": 400,
+          "lineHeight": 1.33,
+          "usage": "辅助说明"
+        },
+        "display": {
+          "size": 32,
+          "weight": 600,
+          "lineHeight": 1.25,
+          "usage": "数字/营销大字"
+        },
+        "title-1": {
+          "size": 24,
+          "weight": 600,
+          "lineHeight": 1.33,
+          "usage": "页面标题"
+        },
+        "title-2": {
+          "size": 20,
+          "weight": 600,
+          "lineHeight": 1.4,
+          "usage": "模块标题"
+        },
+        "title-3": {
+          "size": 16,
+          "weight": 600,
+          "lineHeight": 1.5,
+          "usage": "卡片标题"
+        }
+      }
+    },
+    "spacing": {
+      "lg": 20,
+      "md": 16,
+      "sm": 12,
+      "xl": 24,
+      "xs": 8,
+      "xxl": 32,
+      "xxs": 4,
+      "xxxl": 40
+    },
+    "radius": {
+      "large": 8,
+      "medium": 4,
+      "pill": 100,
+      "small": 2,
+      "xlarge": 16
+    },
+    "shadows": {
+      "card": "0 4px 10px rgba(0,0,0,0.35)",
+      "floating": "0 8px 20px rgba(0,0,0,0.45)",
+      "none": "none",
+      "popup": "0 0 1px rgba(255,255,255,0.2), 0 4px 14px rgba(0,0,0,0.4)"
+    },
+    "motion": {
+      "fast": "100ms cubic-bezier(0.34,0.69,0.1,1)",
+      "slow": "300ms cubic-bezier(0.34,0.69,0.1,1)",
+      "standard": "200ms cubic-bezier(0.34,0.69,0.1,1)"
+    },
+    "grid": 8
+  },
+  "guideline": [
+    "正文与控件默认 14px；12px 仅用于辅助说明，最小不低于 12px。",
+    "文本四级：text-1 标题、text-2 正文、text-3 辅助、text-4 禁用，不要自造灰阶。",
+    "圆角阶梯 2/4/8：输入与按钮 medium(4)、卡片 large(8)、标签 small(2)。",
+    "操作反馈：悬浮用 primary-hover，按下用 primary-active，浅底提示用 primary-bg。",
+    "状态色成对出现：状态色 + 同名 -bg 浅底（如 danger + danger-bg）。",
+    "浮层用 popup 阴影；静态卡片优先描边，避免大面积投影。"
+  ]
+}

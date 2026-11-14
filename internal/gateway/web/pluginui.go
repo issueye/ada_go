@@ -1,19 +1,19 @@
 package web
 
-// M4 的前端插件接线面（设计 7.2、7.5、7.6）：
+// 插件前端接线面（7.5、7.6）——整页 SSR 移除后的收缩版：
 //
-//   - PluginUI 是 web 与插件渲染宿主之间的唯一接缝：web 不 import plugins/host，
-//     组合根（internal/gateway）用渲染桥实现它并注入 Config.PluginUI；
-//   - 12 个稳定插槽由 PluginUI.Slot 填充（baseData.Slots），单槽失败只影响该槽
-//     （回退到基座占位），绝不影响整页；
-//   - /ext 路由提供插件页面、静态资源与动作桥（POST 走 CSRF，读动作返回 JSON）。
+//   - web 不再向插件宿主要任何 HTML：12 个插槽与插件页面由客户端运行时
+//     经 /frontend-registry 装载（dev-plan §6，S 阶段接线）；
+//   - PluginUI 只是标记接口：组合根注入插件渲染桥，web 用类型断言按能力
+//     取用静态资源（StaticAssetProvider）、动作绑定（ActionResolver）、
+//     插件列表（PluginLister）与 Markdown 动态块（BlockRenderer，见
+//     markdown_block.go）；
+//   - /ext 路由保留静态资源（512KB 限额）与动作桥（POST 走 CSRF，读动作
+//     返回 JSON），两者是冻结契约。
 
 import (
 	"encoding/json"
-	"errors"
-	"html/template"
 	"io/fs"
-	"log"
 	"net/http"
 	"net/url"
 	"path"
@@ -21,61 +21,30 @@ import (
 	"unicode/utf8"
 )
 
-// ErrExtNotFound 由 PluginUI 实现包装，表示「插件/页面不存在」（404），
-// 与「渲染失败」（502）区分开。
-var ErrExtNotFound = errors.New("web: 插件页面不存在")
-
-// PluginUI 是插件 UI 渲染宿主对 web 暴露的最小接口。
-//
-// Slot 返回该插槽的插件 HTML 与贡献者数量；返回错误时 web 用基座占位替代该槽，
-// 页面其余部分照常渲染（7.3 失败隔离）。Page 是 /ext/{id}/{slug} 独立页面。
-type PluginUI interface {
-	Slot(name string, r *http.Request) (template.HTML, int, error)
-	Page(pluginID, slug string, r *http.Request) (template.HTML, error)
-	Styles() []string
-	Scripts() []string
-}
+// PluginUI 是插件前端宿主对 web 暴露的最小标记接口。
+// 具体能力全部走下面的可选扩展接口；nil 表示没有任何插件前端。
+type PluginUI interface{}
 
 // StaticAssetProvider 由渲染宿主可选实现：提供插件包内的静态资源字节。
 type StaticAssetProvider interface {
 	StaticAsset(pluginID, name string) ([]byte, bool)
 }
 
-// FrontendNavLink 是前端插件声明的侧栏导航项。
-type FrontendNavLink struct {
-	Label string
-	Slug  string
-}
-
 // FrontendPluginInfo 是扩展页展示的前端插件摘要。
 type FrontendPluginInfo struct {
-	ID           string
-	Name         string
-	Version      string
-	Description  string
-	NavCount     int
-	PageCount    int
-	SlotCount    int
-	FirstPage    string
-	HasDashboard bool
-	HasAssets    bool
-	Enabled      bool
-	Status       string
-	Errors       []string
-	Nav          []FrontendNavLink
+	ID          string
+	Name        string
+	Version     string
+	Description string
+	HasAssets   bool
+	Enabled     bool
+	Status      string
 }
 
-// PluginLister 由渲染宿主可选实现：列出已装配的前端插件（扩展页/概览用）。
+// PluginLister 由渲染宿主可选实现：列出已装配的前端插件（extensions.json 用）。
 // r 用于按当前工作区解析启用状态（同 id 的插件在不同工作区可以不同）。
 type PluginLister interface {
 	List(r *http.Request) []FrontendPluginInfo
-}
-
-// IslandDetector 由渲染宿主可选实现：报告某个页面是否有需要客户端接管的
-// hydrate 贡献（docs/20 P1-6）。web 据此决定是否加载 ada-render/ada-ui/
-// plugin-islands 等资源；没有实现时保持原有 NeedsUI 行为。
-type IslandDetector interface {
-	HasIslands(page string, r *http.Request) bool
 }
 
 // ActionBinding 是动作桥解析出的一条绑定：binding 名 → 目标后端动作。
@@ -93,132 +62,19 @@ type ActionResolver interface {
 	ActionBinding(pluginID, binding string) (ActionBinding, bool)
 }
 
-// pluginSlots 通过 PluginUI 填充 12 个插槽；单个插槽失败回退为空（基座占位）。
-func (s *Server) pluginSlots(r *http.Request) (slotViews, slotCounts) {
-	var views slotViews
-	var counts slotCounts
-	if s.cfg.PluginUI == nil {
-		return views, counts
-	}
-	fill := func(name string, dst *template.HTML, cnt *int) {
-		body, n, err := s.cfg.PluginUI.Slot(name, r)
-		if err != nil {
-			// 7.3 失败隔离：该槽留空并记录；页面其余部分照常。
-			log.Printf("web: 插槽 %s 渲染失败（回退基座占位）: %v", name, err)
-			return
-		}
-		*dst = body
-		*cnt = n
-	}
-	fill("sidebar.top", &views.SidebarTop, &counts.SidebarTop)
-	fill("sidebar.bottom", &views.SidebarBottom, &counts.SidebarBottom)
-	fill("topbar.right", &views.TopbarRight, &counts.TopbarRight)
-	fill("chat.corner", &views.ChatCorner, &counts.ChatCorner)
-	fill("composer.left", &views.ComposerLeft, &counts.ComposerLeft)
-	fill("composer.right", &views.ComposerRight, &counts.ComposerRight)
-	fill("composer.footer", &views.ComposerFooter, &counts.ComposerFooter)
-	fill("composer.above", &views.ComposerAbove, &counts.ComposerAbove)
-	fill("thread.tray", &views.ThreadTray, &counts.ThreadTray)
-	fill("transcript.after", &views.TranscriptAfter, &counts.TranscriptAfter)
-	fill("extensions.list", &views.ExtensionsList, &counts.ExtensionsList)
-	fill("dashboard.widgets", &views.DashboardWidgets, &counts.DashboardWidgets)
-	return views, counts
-}
-
-// pluginStyles 收集插件样式的 <link> 目标；PluginUI 未注入时为空。
-func (s *Server) pluginStyles() []string {
-	if s.cfg.PluginUI == nil {
-		return nil
-	}
-	return s.cfg.PluginUI.Styles()
-}
-
-// pluginScripts 收集插件脚本的 <script> 目标（需 frontend.script 能力，7.5）。
-func (s *Server) pluginScripts() []string {
-	if s.cfg.PluginUI == nil {
-		return nil
-	}
-	return s.cfg.PluginUI.Scripts()
-}
-
-// pluginNavLinks 收集前端插件声明的侧栏导航（供应商 / Token 用量等）。
-// 只收启用的插件：停用后入口必须一起消失（INV-11）。
-func (s *Server) pluginNavLinks(r *http.Request) []pluginNavLink {
-	lister, ok := s.cfg.PluginUI.(PluginLister)
-	if !ok {
-		return nil
-	}
-	var out []pluginNavLink
-	for _, p := range lister.List(r) {
-		if !p.Enabled {
-			continue
-		}
-		for _, n := range p.Nav {
-			if strings.TrimSpace(n.Label) == "" || strings.TrimSpace(n.Slug) == "" {
-				continue
-			}
-			out = append(out, pluginNavLink{
-				PluginID: p.ID,
-				Label:    n.Label,
-				Href:     "/ext/" + p.ID + "/" + n.Slug,
-			})
-		}
-	}
-	return out
-}
-
 // ---- /ext 路由 -------------------------------------------------------------
 
-// PageMeta 由渲染宿主可选实现：给出页面标题（清单 pages[].title）。
-type PageMeta interface {
-	PageTitle(pluginID, slug string) string
-}
-
-// handleExtPage 渲染插件页面 /ext/{id}/{slug}。
-func (s *Server) handleExtPage(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.PluginUI == nil {
-		http.NotFound(w, r)
-		return
-	}
-	id := r.PathValue("id")
-	slug := r.PathValue("slug")
-	title := slug
-	if pm, ok := s.cfg.PluginUI.(PageMeta); ok {
-		if t := strings.TrimSpace(pm.PageTitle(id, slug)); t != "" {
-			title = t
-		}
-	}
-	content, err := s.cfg.PluginUI.Page(id, slug, r)
-	if err != nil {
-		if errors.Is(err, ErrExtNotFound) {
-			s.renderError(w, r, http.StatusNotFound, "没有这个扩展页面",
-				"插件 "+id+" 没有名为 "+slug+" 的页面，或插件未启用。请从侧栏导航重新进入。",
-				"", "/", "返回")
-			return
-		}
-		s.renderError(w, r, http.StatusBadGateway, "扩展页面暂时不可用",
-			"插件 "+id+" 的页面渲染失败。请稍后重试；若持续出现，请检查插件状态。",
-			err.Error(), "/", "返回")
-		return
-	}
-	// 侧栏固定展示当前工作区的会话；插件页不能因为没传 threads 就变成空列表。
-	threads, _ := s.listThreads(r, 50)
-	data := extPageData{
-		baseData: s.base(r, "ext:"+id, title, threads, "", true),
-		PluginID: id,
-		Slug:     slug,
-		Content:  content,
-	}
-	s.render(w, http.StatusOK, "ext", data)
-}
-
 // extAssetExtensions 是插件静态资源的扩展名 allowlist（7.5：styles/scripts/assets）。
-// 刻意不含 .html/.htm/.svg 之外的文档与可执行扩展：插件静态资源只有样式、脚本、
-// 图标与数据，其余一律 404。
+// 刻意不含 .html/.htm 与其它文档扩展：插件静态资源只有样式、脚本、图标、数据
+// 与 SFC 单文件组件，其余一律 404。
+// .vue 以 text/plain 提供——它是 SFC 装载器 fetch 的**文本**，浏览器不会把它
+// 当作脚本执行（逻辑在同目录 .js ESM，CSP script-src 'self' 约束不变）。
 var extAssetExtensions = map[string]string{
 	".css":   "text/css; charset=utf-8",
 	".js":    "application/javascript; charset=utf-8",
+	".mjs":   "application/javascript; charset=utf-8",
 	".json":  "application/json; charset=utf-8",
+	".vue":   "text/plain; charset=utf-8",
 	".svg":   "image/svg+xml",
 	".txt":   "text/plain; charset=utf-8",
 	".png":   "image/png",
@@ -389,13 +245,4 @@ func (s *Server) invokeExtAction(w http.ResponseWriter, r *http.Request) (json.R
 		return nil, false
 	}
 	return raw, true
-}
-
-// extPageData 是 /ext/{id}/{slug} 的模板数据。
-type extPageData struct {
-	baseData
-	PluginID string
-	Slug     string
-	// Content 是经过 VNode 校验与转义的插件页面 HTML（唯一 template.HTML 出口）。
-	Content template.HTML
 }

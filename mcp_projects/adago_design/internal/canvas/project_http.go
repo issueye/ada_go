@@ -41,6 +41,9 @@ func projectErr(err error, id string) *Error {
 	case errors.Is(err, ErrCanvasSizeInvalid):
 		return APIError("bad_request", "画布尺寸非法",
 			fmt.Sprintf("宽高需同时给出，且在 %d..%d 之间", MinCanvasSide, MaxCanvasSide))
+	case errors.Is(err, ErrArtboardResolver):
+		return APIError("artboard_unavailable", "当前进程没有画板解析器",
+			"这是装配层未注入导致的环境问题（正常 serve/mcp 启动不会出现）")
 	}
 	return APIError("internal", err.Error(), "")
 }
@@ -58,6 +61,8 @@ func statusForProjectErr(err error) int {
 		return http.StatusNotFound
 	case errors.Is(err, ErrProjectDuplicate), errors.Is(err, ErrProjectNotEmpty):
 		return http.StatusConflict
+	case errors.Is(err, ErrArtboardResolver):
+		return http.StatusServiceUnavailable
 	}
 	return http.StatusInternalServerError
 }
@@ -153,4 +158,25 @@ func (s *Server) handleSetProjectCanvas(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"project": p, "canvas": p.Canvas})
+}
+
+// ---------------- 画板尺寸显式重同步 ----------------
+
+type resyncArtboardsIn struct {
+	Project string `json:"project,omitempty"` // 空 = 全部项目
+}
+
+// handleResyncArtboards 按节点自身的 artboard 重算宽高（显式触发，可撤销）。
+// 画板/比例切换本身不会自动迁移尺寸，见 artboard_resync.go 的设计说明。
+func (s *Server) handleResyncArtboards(w http.ResponseWriter, r *http.Request) {
+	var in resyncArtboardsIn
+	if !decodeBody(w, r, &in) {
+		return
+	}
+	res, err := s.store.ResyncArtboards(in.Project)
+	if err != nil {
+		writeErr(w, statusForProjectErr(err), projectErr(err, in.Project))
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }

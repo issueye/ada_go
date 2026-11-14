@@ -1,0 +1,387 @@
+{
+  "id": "apple",
+  "name": "Apple HIG (iOS)",
+  "vendor": "Apple",
+  "family": "mobile",
+  "description": "苹果人机界面指南（iOS 侧）：8pt 栅格、SF 字族、连续曲率圆角、半透明材质与克制的层级阴影。",
+  "style": {
+    "summary": "克制、内容优先；浅灰分组背景 + 大圆角卡片 + 细分隔线，阴影极轻，靠层级与留白组织信息。",
+    "keywords": [
+      "8pt 栅格",
+      "连续圆角",
+      "SF Pro",
+      "毛玻璃",
+      "分组列表"
+    ],
+    "density": "舒适",
+    "elevation": "极少阴影，用背景灰阶与分隔线区分层级"
+  },
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "light": {
+    "colors": {
+      "fill-primary": {
+        "value": "#78788033",
+        "usage": "半透明填充（开关轨道等）"
+      },
+      "label": {
+        "value": "#000000",
+        "usage": "一级文字"
+      },
+      "secondary-label": {
+        "value": "#3C3C4399",
+        "usage": "二级文字（60% 黑）"
+      },
+      "secondary-system-background": {
+        "value": "#F2F2F7",
+        "usage": "分组背景"
+      },
+      "separator": {
+        "value": "#3C3C434A",
+        "usage": "分隔线"
+      },
+      "system-background": {
+        "value": "#FFFFFF",
+        "usage": "页面背景"
+      },
+      "system-blue": {
+        "value": "#007AFF",
+        "usage": "主色/链接"
+      },
+      "system-gray": {
+        "value": "#8E8E93",
+        "usage": "次要图标"
+      },
+      "system-gray5": {
+        "value": "#E5E5EA",
+        "usage": "填充"
+      },
+      "system-green": {
+        "value": "#34C759",
+        "usage": "成功"
+      },
+      "system-indigo": {
+        "value": "#5856D6",
+        "usage": "装饰"
+      },
+      "system-orange": {
+        "value": "#FF9500",
+        "usage": "警告"
+      },
+      "system-pink": {
+        "value": "#FF2D55",
+        "usage": "装饰"
+      },
+      "system-purple": {
+        "value": "#AF52DE",
+        "usage": "装饰"
+      },
+      "system-red": {
+        "value": "#FF3B30",
+        "usage": "危险/删除"
+      },
+      "system-teal": {
+        "value": "#5AC8FA",
+        "usage": "装饰"
+      },
+      "system-yellow": {
+        "value": "#FFCC00",
+        "usage": "强调"
+      },
+      "tertiary-label": {
+        "value": "#3C3C434D",
+        "usage": "占位/禁用"
+      },
+      "tertiary-system-background": {
+        "value": "#FFFFFF",
+        "usage": "组件内背景"
+      }
+    },
+    "type": {
+      "family": "-apple-system, BlinkMacSystemFont, \"SF Pro Text\", Inter, \"Noto Sans SC\", system-ui, sans-serif",
+      "levels": {
+        "body": {
+          "size": 17,
+          "weight": 400,
+          "lineHeight": 1.29,
+          "usage": "正文"
+        },
+        "callout": {
+          "size": 16,
+          "weight": 400,
+          "lineHeight": 1.31,
+          "usage": "辅助正文"
+        },
+        "caption-1": {
+          "size": 12,
+          "weight": 400,
+          "lineHeight": 1.33,
+          "usage": "小注"
+        },
+        "caption-2": {
+          "size": 11,
+          "weight": 500,
+          "lineHeight": 1.18,
+          "usage": "最小标签"
+        },
+        "footnote": {
+          "size": 13,
+          "weight": 400,
+          "lineHeight": 1.38,
+          "usage": "脚注/说明"
+        },
+        "headline": {
+          "size": 17,
+          "weight": 600,
+          "lineHeight": 1.29,
+          "usage": "强调正文/列表标题"
+        },
+        "large-title": {
+          "size": 34,
+          "weight": 700,
+          "lineHeight": 1.21,
+          "usage": "大标题"
+        },
+        "subheadline": {
+          "size": 15,
+          "weight": 400,
+          "lineHeight": 1.33,
+          "usage": "副标题"
+        },
+        "title-1": {
+          "size": 28,
+          "weight": 700,
+          "lineHeight": 1.21,
+          "usage": "一级标题"
+        },
+        "title-2": {
+          "size": 22,
+          "weight": 700,
+          "lineHeight": 1.27,
+          "usage": "二级标题"
+        },
+        "title-3": {
+          "size": 20,
+          "weight": 600,
+          "lineHeight": 1.25,
+          "usage": "三级标题"
+        }
+      }
+    },
+    "spacing": {
+      "lg": 20,
+      "md": 16,
+      "sm": 12,
+      "xl": 24,
+      "xs": 8,
+      "xxl": 32,
+      "xxs": 4
+    },
+    "radius": {
+      "large": 16,
+      "medium": 12,
+      "pill": 100,
+      "small": 8,
+      "xlarge": 20
+    },
+    "shadows": {
+      "card": "0 4px 16px rgba(0,0,0,0.06)",
+      "floating": "0 8px 24px rgba(0,0,0,0.12)",
+      "none": "none"
+    },
+    "motion": {
+      "fast": "200ms cubic-bezier(0.25,0.1,0.25,1)",
+      "spring": "450ms cubic-bezier(0.32,0.72,0,1)",
+      "standard": "300ms cubic-bezier(0.25,0.1,0.25,1)"
+    },
+    "grid": 8
+  },
+  "dark": {
+    "colors": {
+      "fill-primary": {
+        "value": "#7878805C",
+        "usage": "半透明填充"
+      },
+      "label": {
+        "value": "#FFFFFF",
+        "usage": "一级文字"
+      },
+      "secondary-label": {
+        "value": "#EBEBF599",
+        "usage": "二级文字（60% 白）"
+      },
+      "secondary-system-background": {
+        "value": "#1C1C1E",
+        "usage": "分组背景"
+      },
+      "separator": {
+        "value": "#54545899",
+        "usage": "分隔线"
+      },
+      "system-background": {
+        "value": "#000000",
+        "usage": "页面背景"
+      },
+      "system-blue": {
+        "value": "#0A84FF",
+        "usage": "主色/链接"
+      },
+      "system-gray": {
+        "value": "#8E8E93",
+        "usage": "次要图标"
+      },
+      "system-gray5": {
+        "value": "#2C2C2E",
+        "usage": "填充"
+      },
+      "system-green": {
+        "value": "#30D158",
+        "usage": "成功"
+      },
+      "system-indigo": {
+        "value": "#5E5CE6",
+        "usage": "装饰"
+      },
+      "system-orange": {
+        "value": "#FF9F0A",
+        "usage": "警告"
+      },
+      "system-pink": {
+        "value": "#FF375F",
+        "usage": "装饰"
+      },
+      "system-purple": {
+        "value": "#BF5AF2",
+        "usage": "装饰"
+      },
+      "system-red": {
+        "value": "#FF453A",
+        "usage": "危险/删除"
+      },
+      "system-teal": {
+        "value": "#64D2FF",
+        "usage": "装饰"
+      },
+      "system-yellow": {
+        "value": "#FFD60A",
+        "usage": "强调"
+      },
+      "tertiary-label": {
+        "value": "#EBEBF54D",
+        "usage": "占位/禁用"
+      },
+      "tertiary-system-background": {
+        "value": "#2C2C2E",
+        "usage": "组件内背景"
+      }
+    },
+    "type": {
+      "family": "-apple-system, BlinkMacSystemFont, \"SF Pro Text\", Inter, \"Noto Sans SC\", system-ui, sans-serif",
+      "levels": {
+        "body": {
+          "size": 17,
+          "weight": 400,
+          "lineHeight": 1.29,
+          "usage": "正文"
+        },
+        "callout": {
+          "size": 16,
+          "weight": 400,
+          "lineHeight": 1.31,
+          "usage": "辅助正文"
+        },
+        "caption-1": {
+          "size": 12,
+          "weight": 400,
+          "lineHeight": 1.33,
+          "usage": "小注"
+        },
+        "caption-2": {
+          "size": 11,
+          "weight": 500,
+          "lineHeight": 1.18,
+          "usage": "最小标签"
+        },
+        "footnote": {
+          "size": 13,
+          "weight": 400,
+          "lineHeight": 1.38,
+          "usage": "脚注/说明"
+        },
+        "headline": {
+          "size": 17,
+          "weight": 600,
+          "lineHeight": 1.29,
+          "usage": "强调正文/列表标题"
+        },
+        "large-title": {
+          "size": 34,
+          "weight": 700,
+          "lineHeight": 1.21,
+          "usage": "大标题"
+        },
+        "subheadline": {
+          "size": 15,
+          "weight": 400,
+          "lineHeight": 1.33,
+          "usage": "副标题"
+        },
+        "title-1": {
+          "size": 28,
+          "weight": 700,
+          "lineHeight": 1.21,
+          "usage": "一级标题"
+        },
+        "title-2": {
+          "size": 22,
+          "weight": 700,
+          "lineHeight": 1.27,
+          "usage": "二级标题"
+        },
+        "title-3": {
+          "size": 20,
+          "weight": 600,
+          "lineHeight": 1.25,
+          "usage": "三级标题"
+        }
+      }
+    },
+    "spacing": {
+      "lg": 20,
+      "md": 16,
+      "sm": 12,
+      "xl": 24,
+      "xs": 8,
+      "xxl": 32,
+      "xxs": 4
+    },
+    "radius": {
+      "large": 16,
+      "medium": 12,
+      "pill": 100,
+      "small": 8,
+      "xlarge": 20
+    },
+    "shadows": {
+      "card": "0 4px 16px rgba(0,0,0,0.4)",
+      "floating": "0 8px 24px rgba(0,0,0,0.55)",
+      "none": "none"
+    },
+    "motion": {
+      "fast": "200ms cubic-bezier(0.25,0.1,0.25,1)",
+      "spring": "450ms cubic-bezier(0.32,0.72,0,1)",
+      "standard": "300ms cubic-bezier(0.25,0.1,0.25,1)"
+    },
+    "grid": 8
+  },
+  "guideline": [
+    "8pt 栅格：间距取 8 的倍数，紧凑处可用 4。",
+    "正文 17px 起步；标题与正文对比靠字重（600/700）而非颜色。",
+    "圆角使用连续曲率观感，卡片 16、按钮 12、胶囊按钮用 pill。",
+    "层级靠 secondary-system-background 的浅灰分组 + 1px separator，不堆阴影。",
+    "主操作用 system-blue 填充胶囊按钮；破坏性操作固定 system-red。",
+    "深浅主题色值成对维护，语义名不随主题变化。"
+  ]
+}

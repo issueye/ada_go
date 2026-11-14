@@ -5,10 +5,23 @@
   "description": "插件目录内 plugin.json 的 JSON Schema。行为约定：运行期宿主对未知字段忽略并记录（apiVersion 次版本向前兼容），但本 Schema 是 adag verify/CI 与装配期校验的契约冻结源——对已声明字段的类型、枚举、信任规则任何一项校验失败即装配失败（整个插件回滚，其他插件不受影响，§6.5）。因此本 Schema 对所有对象使用 additionalProperties: false，拼错的字段名在门禁期直接暴露，而不是被静默吞掉。官方插件与第三方插件走完全相同的一份清单契约（§6.1/§6.8）。",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "name", "version", "apiVersion"],
+  "required": [
+    "id",
+    "name",
+    "version",
+    "apiVersion"
+  ],
   "anyOf": [
-    { "required": ["backend"] },
-    { "required": ["frontend"] }
+    {
+      "required": [
+        "backend"
+      ]
+    },
+    {
+      "required": [
+        "frontend"
+      ]
+    }
   ],
   "properties": {
     "id": {
@@ -44,7 +57,11 @@
     },
     "trust": {
       "type": "string",
-      "enum": ["builtin", "verified", "third-party"],
+      "enum": [
+        "builtin",
+        "verified",
+        "third-party"
+      ],
       "default": "third-party",
       "description": "信任分级（§6.9）。builtin：预编译 bundle 嵌入二进制，只能启用/禁用，可用控制面钩子与全部能力；verified：Ed25519 签名有效（必须带 sig），可用 exec/net.sse/ui.ask/frontend.script 与控制面之外的受信能力；third-party（默认）：受限，禁止 exec、net.sse、ui.ask、subagent.invoke、frontend.script 与控制面动作等级（replace/abort）。违反信任规则即装配失败。",
       "x-consumer": "coreapp: 装配期能力授予与钩子动作等级门禁（本 Schema 各 x-trust-rule 条件段的依据）；loader: 签名校验分支；gateway/web: 前端脚本加载判定"
@@ -71,7 +88,25 @@
         "capabilities": {
           "type": "array",
           "items": {
-            "enum": ["fs.read", "fs.write", "net.fetch", "net.sse", "exec", "process", "state", "global.config", "events.read", "ui.ask", "subagent.invoke", "model.admin", "plugin.admin", "tool.discovery", "turn.invoke", "dispatch.send", "process.supervise"]
+            "enum": [
+              "fs.read",
+              "fs.write",
+              "net.fetch",
+              "net.sse",
+              "exec",
+              "process",
+              "state",
+              "global.config",
+              "events.read",
+              "ui.ask",
+              "subagent.invoke",
+              "model.admin",
+              "plugin.admin",
+              "tool.discovery",
+              "turn.invoke",
+              "dispatch.send",
+              "process.supervise"
+            ]
           },
           "uniqueItems": true,
           "description": "能力词汇（§6.2）。2026-11-10 决策后它只做清单声明校验：名字必须在本枚举内、不能重复、不能被低于最低信任的信任级别声明；它不再决定宿主「装什么」——ctx.* 桥与 node:* 模块一律装上，链接期也不再因缺能力报 ERR_ACCESS_DENIED（§6.12）。信任规则（违反即装配失败，见根 allOf 的 x-trust-rule）：ui.ask/net.sse/exec/process/global.config 仅 builtin|verified；subagent.invoke/model.admin/plugin.admin/tool.discovery/turn.invoke/dispatch.send/process.supervise 仅 builtin。",
@@ -81,8 +116,15 @@
           "type": "array",
           "items": {
             "allOf": [
-              { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$" },
-              { "not": { "pattern": "^[Aa][Dd][Aa][Gg]_" } }
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+              },
+              {
+                "not": {
+                  "pattern": "^[Aa][Dd][Aa][Gg]_"
+                }
+              }
             ]
           },
           "uniqueItems": true,
@@ -91,14 +133,19 @@
         },
         "roles": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "uniqueItems": true,
           "description": "插件角色声明；审批策略（tool-policy）已整体移除，v1 不再定义任何角色：声明任意角色即装配失败（§6.2）。字段保留只为清单兼容。",
           "x-consumer": "manifest: 未知角色即装配失败（当前合法集合为空）；adag verify: 角色枚举核对"
         },
         "secrets": {
           "type": "array",
-          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{1,63}$" },
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+          },
           "uniqueItems": true,
           "description": "按名申请的密钥名列表（kebab/下划线小写名）。ctx.secret(name) 只对清单列出的名字返回值，其余返回 null；密钥只存在于 Core 内存与配置（环境变量或 secrets.toml 0600），不进提示词、工具结果、日志、前端 props 与子进程环境（§6.3/§9.4）。",
           "x-consumer": "coreapp: 装配期按名授予 ctx.secret 并脱敏审计；adag verify: 密钥名与 backend.env 的保留名交集核对"
@@ -110,61 +157,106 @@
           "x-consumer": "engine: 钩子派发前比对——未声明点位直接拒绝；声明等级为运行时上限，超出信任授予在装配期失败",
           "properties": {
             "session.start": {
-              "enum": ["observe", "note"],
+              "enum": [
+                "observe",
+                "note"
+              ],
               "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
             },
             "session.end": {
-              "enum": ["observe", "note"],
+              "enum": [
+                "observe",
+                "note"
+              ],
               "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
             },
             "thread.created": {
-              "enum": ["observe", "note"],
+              "enum": [
+                "observe",
+                "note"
+              ],
               "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
             },
             "user.message": {
-              "enum": ["observe", "note"],
+              "enum": [
+                "observe",
+                "note"
+              ],
               "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
             },
             "turn.before": {
-              "enum": ["observe", "note", "abort"],
+              "enum": [
+                "observe",
+                "note",
+                "abort"
+              ],
               "description": "abort 仅 builtin（x-trust-rule T2）。",
               "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
             },
             "turn.after": {
-              "enum": ["observe", "note"],
+              "enum": [
+                "observe",
+                "note"
+              ],
               "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
             },
             "model.beforeRequest": {
-              "enum": ["observe", "note", "replace", "abort"],
+              "enum": [
+                "observe",
+                "note",
+                "replace",
+                "abort"
+              ],
               "description": "replace/abort 仅 builtin（x-trust-rule T2）。",
               "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
             },
             "model.afterResponse": {
-              "enum": ["observe", "note"],
+              "enum": [
+                "observe",
+                "note"
+              ],
               "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
             },
             "tool.afterCall": {
-              "enum": ["observe", "note"],
+              "enum": [
+                "observe",
+                "note"
+              ],
               "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
             },
             "compaction.before": {
-              "enum": ["observe", "note"],
+              "enum": [
+                "observe",
+                "note"
+              ],
               "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
             },
             "compaction.after": {
-              "enum": ["observe", "note"],
+              "enum": [
+                "observe",
+                "note"
+              ],
               "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
             },
             "interaction.requested": {
-              "enum": ["observe", "note"],
+              "enum": [
+                "observe",
+                "note"
+              ],
               "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
             },
             "plugin.loaded": {
-              "enum": ["observe", "note"],
+              "enum": [
+                "observe",
+                "note"
+              ],
               "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
             },
             "error": {
-              "enum": ["observe", "note"],
+              "enum": [
+                "observe",
+                "note"
+              ],
               "x-consumer": "engine: 该点位声明的最高动作等级；未声明点位调用直接拒绝，超出允许集合或信任授予装配失败（§6.6）"
             }
           }
@@ -200,7 +292,12 @@
       "properties": {
         "capabilities": {
           "type": "array",
-          "items": { "enum": ["backend.read", "frontend.script"] },
+          "items": {
+            "enum": [
+              "backend.read",
+              "frontend.script"
+            ]
+          },
           "uniqueItems": true,
           "description": "前端能力声明（§6.2）：只做清单校验，不再按信任级别裁剪贡献面。backend.read：声明后 SSR 渲染时预取只读动作结果注入 props.data.backend；frontend.script：声明后允许加载 scripts 静态 JS，仍受 CSP script-src self 约束（third-party 声明即装配失败，x-trust-rule T3；§6.9/§7.5）。",
           "x-consumer": "gateway/render: 决定是否预取只读动作；gateway/web: 决定是否加载 scripts（受信任级别与 CSP script-src 'self' 双重约束）"
@@ -215,30 +312,34 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["slot", "template"],
+            "required": [
+              "slot",
+              "component"
+            ],
             "properties": {
               "slot": {
                 "type": "string",
-                "enum": ["sidebar.top", "sidebar.bottom", "topbar.right", "chat.corner", "composer.left", "composer.right", "composer.footer", "composer.above", "thread.tray", "transcript.after", "extensions.list", "dashboard.widgets"],
+                "enum": [
+                  "sidebar.top",
+                  "sidebar.bottom",
+                  "topbar.right",
+                  "chat.corner",
+                  "composer.left",
+                  "composer.right",
+                  "composer.footer",
+                  "composer.above",
+                  "thread.tray",
+                  "transcript.after",
+                  "extensions.list",
+                  "dashboard.widgets"
+                ],
                 "description": "12 个稳定插槽之一（§7.2）；未知插槽名即装配失败。插槽是不可轻易增加的兼容承诺。",
                 "x-consumer": "gateway/web: 插槽注册表按 slot 分组，order 排序后由基座宿主在固定位置渲染"
               },
-              "template": {
-                "$ref": "#/$defs/templatePath",
-                "description": "TSX 模板（相对插件目录），导出 export function Slot(props)。模板不可编译即装配失败（§6.5 校验项）。",
-                "x-consumer": "gateway/render: 装配期编译该模板并注册 Slot 导出函数，渲染期执行取得 VNode"
-              },
-              "hydrate": {
-                "type": "boolean",
-                "default": false,
-                "description": "是否用 frontend.client 在浏览器 hydrate 该插槽贡献。缺省 false，保持现有 SSR-only 行为；声明 true 时插件必须同时声明 client、frontend.script 能力与 builtin/verified 信任。",
-                "x-consumer": "gateway/web: 给该插槽贡献注入 islands 标记并按需加载 client bundle；gateway/frontend: 校验 client 资源存在"
-              },
-              "clientOnly": {
-                "type": "boolean",
-                "default": false,
-                "description": "纯客户端挂载：服务端不执行该插槽模板，只输出带 islands 标记的空壳，由 frontend.client 在浏览器 mount。没有 SSR 回退——插件停用或脚本加载失败时该插槽保持空白。必须与 hydrate=true 同时声明。",
-                "x-consumer": "gateway/frontend: 跳过模板渲染只发空壳与首帧 props；gateway/web: 在空壳上标 data-ada-client-only，plugin-islands.js 据此改用普通 mount"
+              "component": {
+                "$ref": "#/$defs/assetPath",
+                "description": "SFC 单文件组件（assets 目录内 .vue 相对路径），由浏览器运行时装载（无 SSR，无构建步骤）。装载失败时该贡献位置标记 data-ada-error。",
+                "x-consumer": "gateway/frontend: 装配期校验资源存在并算内容指纹；浏览器 host.mjs: loadSFC 运行时编译"
               },
               "order": {
                 "$ref": "#/$defs/orderValue",
@@ -254,7 +355,10 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["slug", "template"],
+            "required": [
+              "slug",
+              "component"
+            ],
             "properties": {
               "slug": {
                 "type": "string",
@@ -262,22 +366,16 @@
                 "description": "页面路径段：/ext/{id}/{slug}（§7.5）。",
                 "x-consumer": "gateway/web: 注册 /ext/<插件id>/<slug> 路由并 SSR 该页"
               },
-              "template": {
-                "$ref": "#/$defs/templatePath",
-                "description": "页面 TSX 模板，导出 export function Page(props)。",
-                "x-consumer": "gateway/render: 编译该模板并在请求时执行 Page(props) 取得 VNode"
-              },
-              "hydrate": {
-                "type": "boolean",
-                "default": false,
-                "description": "是否用 frontend.client 在浏览器 hydrate 该页面。缺省 false，保持现有 SSR-only 行为；声明 true 时插件必须同时声明 client、frontend.script 能力与 builtin/verified 信任。",
-                "x-consumer": "gateway/web: 给 /ext 页面注入 islands 标记并按需加载 client bundle；gateway/frontend: 校验 client 资源存在"
-              },
               "title": {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 120,
                 "x-consumer": "gateway/web: 渲染页面 <title> 与浏览器标签标题"
+              },
+              "component": {
+                "$ref": "#/$defs/assetPath",
+                "description": "SFC 单文件组件（assets 目录内 .vue 相对路径），由浏览器运行时装载（无 SSR，无构建步骤）。装载失败时该贡献位置标记 data-ada-error。",
+                "x-consumer": "gateway/frontend: 装配期校验资源存在并算内容指纹；浏览器 host.mjs: loadSFC 运行时编译"
               }
             }
           },
@@ -289,7 +387,11 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["name", "schema", "template"],
+            "required": [
+              "name",
+              "schema",
+              "template"
+            ],
             "properties": {
               "name": {
                 "type": "string",
@@ -321,7 +423,10 @@
               },
               "profile": {
                 "type": "string",
-                "enum": ["display", "interactive"],
+                "enum": [
+                  "display",
+                  "interactive"
+                ],
                 "default": "display",
                 "description": "display 只允许展示型标签/组件；interactive 仅 builtin/verified 且产品显式开启。",
                 "x-consumer": "gateway/frontend: block VNode profile 校验；plugins: 信任级别门禁"
@@ -343,7 +448,10 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["label", "slug"],
+            "required": [
+              "label",
+              "slug"
+            ],
             "properties": {
               "label": {
                 "type": "string",
@@ -378,18 +486,14 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["widget", "template"],
+            "required": [
+              "component"
+            ],
             "properties": {
-              "widget": {
-                "type": "string",
-                "pattern": "^[a-z][a-z0-9_-]{1,63}$",
-                "description": "概览卡片标识（插件内唯一，§7.5「dashboard：概览页卡片」）。",
-                "x-consumer": "gateway/web: 概览页（/d/{slug}）卡片区的唯一键与 data-* 锚点"
-              },
-              "template": {
-                "$ref": "#/$defs/templatePath",
-                "description": "卡片 TSX 模板。",
-                "x-consumer": "gateway/render: 编译并在概览页请求时执行该模板取得 VNode"
+              "component": {
+                "$ref": "#/$defs/assetPath",
+                "description": "SFC 单文件组件（assets 目录内 .vue 相对路径），由浏览器运行时装载（无 SSR，无构建步骤）。装载失败时该贡献位置标记 data-ada-error。",
+                "x-consumer": "gateway/frontend: 装配期校验资源存在并算内容指纹；浏览器 host.mjs: loadSFC 运行时编译"
               },
               "order": {
                 "$ref": "#/$defs/orderValue",
@@ -402,11 +506,17 @@
         },
         "actions": {
           "type": "object",
-          "propertyNames": { "pattern": "^[a-z][a-z0-9_]{1,63}$" },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{1,63}$"
+          },
           "additionalProperties": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["action", "read", "backend"],
+            "required": [
+              "action",
+              "read",
+              "backend"
+            ],
             "properties": {
               "action": {
                 "$ref": "#/$defs/actionName",
@@ -444,14 +554,18 @@
         },
         "styles": {
           "type": "array",
-          "items": { "$ref": "#/$defs/assetPath" },
+          "items": {
+            "$ref": "#/$defs/assetPath"
+          },
           "uniqueItems": true,
           "description": "插件 CSS 外部文件列表（允许外部文件；CSP style-src 'self'，不使用内联样式，§9.3）。链接顺序排在基座层（app.css → tokens.css → components/layout/widgets/shell/pages.css）之后；业务 CSS 只引用 --ph-* 令牌、不写死色值（§7.7.2）。",
           "x-consumer": "gateway/web: 在页面链接基座样式层之后注入 <link>（带内容哈希、可缓存）"
         },
         "scripts": {
           "type": "array",
-          "items": { "$ref": "#/$defs/assetPath" },
+          "items": {
+            "$ref": "#/$defs/assetPath"
+          },
           "uniqueItems": true,
           "description": "插件 JS 文件列表。默认不加载：需要 frontend.script 能力且 trust 为 builtin/verified（third-party 声明即装配失败，x-trust-rule T3）；同源运行仍是风险点，v1 建议优先 HTMX/表单（§7.5）。受 CSP script-src 'self' 限制、不使用内联脚本（§9.3）。",
           "x-consumer": "gateway/web: 按能力+信任决定 <script> 加载；CSP 与 no-store 响应头由基座统一施加"
@@ -474,7 +588,9 @@
     {
       "x-trust-rule": "T1：trust=verified 必须携带 sig（Ed25519 覆盖清单+文件哈希）。缺失即装配失败。",
       "if": {
-        "required": ["trust"],
+        "required": [
+          "trust"
+        ],
         "properties": {
           "trust": {
             "x-consumer": "coreapp: 信任规则 T1 条件（读取 trust 判定是否需要 sig）",
@@ -482,12 +598,18 @@
           }
         }
       },
-      "then": { "required": ["sig"] }
+      "then": {
+        "required": [
+          "sig"
+        ]
+      }
     },
     {
       "x-trust-rule": "T2：abort/replace 动作等级仅 builtin 信任插件（§6.6：replace 仅 model.beforeRequest、abort 仅 turn.before/model.beforeRequest）。third-party/verified 在对应点位声明 replace/abort 即装配失败。",
       "if": {
-        "required": ["trust"],
+        "required": [
+          "trust"
+        ],
         "properties": {
           "trust": {
             "x-consumer": "coreapp: 信任规则 T2 条件（识别 builtin 分支；trust 缺省视为 third-party，走 else 收敛）",
@@ -506,11 +628,17 @@
                 "properties": {
                   "turn.before": {
                     "x-consumer": "engine: 信任规则 T2（非 builtin 在 turn.before 至多 observe/note，不能 abort）",
-                    "enum": ["observe", "note"]
+                    "enum": [
+                      "observe",
+                      "note"
+                    ]
                   },
                   "model.beforeRequest": {
                     "x-consumer": "engine: 信任规则 T2（非 builtin 在 model.beforeRequest 至多 observe/note，不能 replace/abort）",
-                    "enum": ["observe", "note"]
+                    "enum": [
+                      "observe",
+                      "note"
+                    ]
                   }
                 }
               }
@@ -522,11 +650,16 @@
     {
       "x-trust-rule": "T3：third-party（含省略 trust 走默认值）禁止 exec、process、net.sse、ui.ask、subagent.invoke（§6.2/§6.9「默认禁止 exec」）与前端 frontend.script / frontend.client / hydrate（§6.9「禁止前端脚本」、§7.5「需要 frontend.script 能力且信任级别为 builtin/verified」、docs/20）。声明即装配失败。",
       "if": {
-        "required": ["trust"],
+        "required": [
+          "trust"
+        ],
         "properties": {
           "trust": {
             "x-consumer": "coreapp: 信任规则 T3 条件（识别 builtin/verified 分支；trust 缺省视为 third-party，走 else 收敛）",
-            "enum": ["builtin", "verified"]
+            "enum": [
+              "builtin",
+              "verified"
+            ]
           }
         }
       },
@@ -538,7 +671,15 @@
             "properties": {
               "capabilities": {
                 "x-consumer": "coreapp/plugins: 信任规则 T3（third-party 声明 fs.read/fs.write/net.fetch/state/events.read 之外的能力即装配失败）",
-                "items": { "enum": ["fs.read", "fs.write", "net.fetch", "state", "events.read"] }
+                "items": {
+                  "enum": [
+                    "fs.read",
+                    "fs.write",
+                    "net.fetch",
+                    "state",
+                    "events.read"
+                  ]
+                }
               }
             }
           },
@@ -547,7 +688,11 @@
             "properties": {
               "capabilities": {
                 "x-consumer": "gateway/web: 信任规则 T3（third-party 禁止 frontend.script，脚本不加载，声明即装配失败）",
-                "items": { "enum": ["backend.read"] }
+                "items": {
+                  "enum": [
+                    "backend.read"
+                  ]
+                }
               }
             }
           }
@@ -557,7 +702,9 @@
     {
       "x-trust-rule": "T4：subagent.invoke / model.admin / plugin.admin / tool.discovery / turn.invoke / dispatch.send / process.supervise 仅 builtin（分别供 tools-subagent、供应商管理页、全局插件安装桥、发现式工具宿主桥、ctx.turn 轮次触发桥、ctx.dispatch 内部发送桥、ctx.processes 进程监督桥，§6.2）。verified 声明这些能力位即装配失败；exec/process/net.sse/ui.ask 对 builtin|verified 开放（见 T3 的反面）。",
       "if": {
-        "required": ["trust"],
+        "required": [
+          "trust"
+        ],
         "properties": {
           "trust": {
             "x-consumer": "coreapp: 信任规则 T4 条件（识别 builtin 分支；trust 缺省视为 third-party，走 else 收敛）",
@@ -573,7 +720,20 @@
             "properties": {
               "capabilities": {
                 "x-consumer": "stdlib: 信任规则 T4（非 builtin 不安装 subagent.invoke / model.admin / plugin.admin / tool.discovery / turn.invoke / dispatch.send / process.supervise；global.config 对 verified 开放，声明即装配失败）",
-                "items": { "enum": ["fs.read", "fs.write", "net.fetch", "net.sse", "exec", "process", "state", "global.config", "events.read", "ui.ask"] }
+                "items": {
+                  "enum": [
+                    "fs.read",
+                    "fs.write",
+                    "net.fetch",
+                    "net.sse",
+                    "exec",
+                    "process",
+                    "state",
+                    "global.config",
+                    "events.read",
+                    "ui.ask"
+                  ]
+                }
               }
             }
           }
@@ -615,9 +775,21 @@
     "safeUrl": {
       "type": "string",
       "allOf": [
-        { "not": { "pattern": "^[Jj]ava[Ss]c[Rr]i[Pp][Tt]:" } },
-        { "not": { "pattern": "^[Dd]ata:" } },
-        { "not": { "pattern": "^[Vv][Bb][Ss][Cc][Rr][Ii][Pp][Tt]:" } }
+        {
+          "not": {
+            "pattern": "^[Jj]ava[Ss]c[Rr]i[Pp][Tt]:"
+          }
+        },
+        {
+          "not": {
+            "pattern": "^[Dd]ata:"
+          }
+        },
+        {
+          "not": {
+            "pattern": "^[Vv][Bb][Ss][Cc][Rr][Ii][Pp][Tt]:"
+          }
+        }
       ],
       "description": "URL 值：Schema 层先挡字面 javascript:/data:/vbscript:；宿主 Go 侧再实现归一化检查（去前导空白/控制字符/实体解码后不区分大小写检查协议，与 §9.3 链接只允许 http/https/mailto/相对路径一致）。"
     }

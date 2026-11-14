@@ -207,7 +207,8 @@
     </div>
   </div>
 
-  <script src="canvas.js"></script>
-  <script src="inspect.js"></script>
+  <!-- 唯一的入口模块：其余模块由 main.js 的 import 图按依赖序求值。
+       icons.js 仍为经典脚本（go:generate 产物，需先于工具条注入 <symbol>）。 -->
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>

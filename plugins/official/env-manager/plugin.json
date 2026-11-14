@@ -18,20 +18,11 @@
       "frontend.script",
       "backend.read"
     ],
-    "client": "client.js",
     "nav": [
-      {
-        "label": "环境变量",
-        "slug": "settings"
-      }
+      { "slug": "settings", "label": "环境变量", "icon": "i-wrench" }
     ],
     "pages": [
-      {
-        "slug": "settings",
-        "title": "环境变量",
-        "template": "env-page.tsx",
-        "hydrate": true
-      }
+      { "slug": "settings", "component": "EnvSettings.vue", "title": "环境变量" }
     ],
     "actions": {
       "page_settings": {

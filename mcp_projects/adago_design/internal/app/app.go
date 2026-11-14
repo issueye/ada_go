@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -30,8 +31,53 @@ func (s *Server) Store() *canvas.Store { return s.store }
 // Tasks 暴露截图任务队列（MCP 工具使用）。
 func (s *Server) Tasks() *canvas.TaskQueue { return s.tasks }
 
+// Option 是 Start 的可选集：目前只有 MCP 端点挂载，保持零值的旧调用方不受影响。
+type Option func(*startOptions)
+
+type startOptions struct {
+	// mcp 返回 /mcp 的处理器；nil 表示不暴露 HTTP MCP。
+	mcp MCPHandlerFactory
+}
+
+// MCPHandlerFactory 由调用方注入 HTTP MCP 端点（挂在 /mcp 上）。
+//
+// 做成注入点而不是让本包直接 import mcpserver：mcpserver 的测试引用本包
+// （取 ArtboardSizeResolver / Catalog），反向依赖会让测试包成环。
+// 入参是本实例的句柄，BaseURL 与 Store/Tasks 都已在 Start 内就绪。
+type MCPHandlerFactory func(*Server) http.Handler
+
+// WithMCP 让 Start 在 <BaseURL>/mcp 上暴露 HTTP MCP 端点（Streamable HTTP）。
+func WithMCP(f MCPHandlerFactory) Option {
+	return func(o *startOptions) { o.mcp = f }
+}
+
+// ErrInstanceExists 表示同数据目录的 adago-design 实例已在运行。
+// 用 errors.As 解包 *InstanceExistsError 可拿到已有实例的访问地址。
+var ErrInstanceExists = errors.New("同数据目录的 adago-design 实例已在运行")
+
+// InstanceExistsError 携带已运行实例的画布地址，供 serve 模式直接委派打开。
+type InstanceExistsError struct {
+	URL string
+}
+
+func (e *InstanceExistsError) Error() string {
+	return ErrInstanceExists.Error() + "：" + e.URL +
+		"（两个实例同时写同一份 canvas.json 会互相覆盖）"
+}
+
 // Start 启动画布 HTTP 服务；port=0 自动探测。
-func Start(ctx context.Context, cfg *config.Config) (*Server, error) {
+//
+// 绑定端口前先探测 port..port+20 是否已有同数据目录的实例：有则返回
+// *InstanceExistsError（不打开存储、不启动服务），由调用方按模式处置 ——
+// serve 委派浏览器打开已有实例，mcp 快速失败并提示。
+func Start(ctx context.Context, cfg *config.Config, opts ...Option) (*Server, error) {
+	var so startOptions
+	for _, o := range opts {
+		o(&so)
+	}
+	if url, hit := canvas.ProbeInstance(cfg.Port, cfg.DataDir); hit {
+		return nil, &InstanceExistsError{URL: url}
+	}
 	// 自定义体系（品牌派生等）在打开存储前注册
 	if n, err := design.LoadCustomSystems(cfg.DataDir); err != nil {
 		log.Printf("自定义体系加载失败: %v", err)
@@ -42,13 +88,16 @@ func Start(ctx context.Context, cfg *config.Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
+	// 画板尺寸解析注入：canvas 不引用 design，显式重同步（canvas_resync_artboards）
+	// 通过这个函数拿到节点应有的宽高。
+	store.ArtboardSize = ArtboardSizeResolver
 	tasks := canvas.NewTaskQueue()
 	srv := &Server{store: store, tasks: tasks}
 
 	canvasSrv := canvas.NewServer(store, tasks, "")
 	canvasSrv.Catalog = Catalog{}
 	canvasSrv.Theme = canvas.NormalizeTheme(cfg.Theme)
-	handler := canvasSrv.Handler()
+	canvasSrv.DataDir = cfg.DataDir
 	var ln net.Listener
 	for port := cfg.Port; port <= cfg.Port+20; port++ {
 		addr := fmt.Sprintf("127.0.0.1:%d", port)
@@ -69,8 +118,11 @@ func Start(ctx context.Context, cfg *config.Config) (*Server, error) {
 	if cfg.Port == 0 {
 		srv.BaseURL = "http://127.0.0.1:" + fmt.Sprint(ln.Addr().(*net.TCPAddr).Port)
 	}
-
-	httpSrv := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	// MCP 端点在这里挂：它要用到已就绪的 BaseURL（截图超时自动开画布页）。
+	if so.mcp != nil {
+		canvasSrv.MCP = so.mcp(srv)
+	}
+	httpSrv := &http.Server{Handler: canvasSrv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	srv.httpSrv = httpSrv
 	go func() {
 		if err := httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
@@ -87,6 +139,21 @@ func Start(ctx context.Context, cfg *config.Config) (*Server, error) {
 // Stop 优雅关闭 HTTP 服务。
 func (s *Server) Stop(ctx context.Context) error {
 	return s.httpSrv.Shutdown(ctx)
+}
+
+// ArtboardSizeResolver 是 canvas.Store.ArtboardSize 的注入实现（桥接 design 包）。
+//
+// 组件卡片的宽度来自画板，高度由客户端实测回写；整页稿的高度取画板的
+// BodyHeight（与 design.ComposeScreen 的创建口径一致），而不是含状态栏的整高。
+func ArtboardSizeResolver(artboardID, kind string) (int, int, bool) {
+	ab, ok := design.GetArtboard(artboardID)
+	if !ok {
+		return 0, 0, false
+	}
+	if kind == canvas.KindScreen {
+		return ab.Width, ab.Spec().BodyHeight, true
+	}
+	return ab.Width, ab.Height, true
 }
 
 // Catalog 实现 canvas.CatalogSource，桥接 design 包。

@@ -166,4 +166,3 @@ func flagBool(args []string, name string) bool {
 	}
 	return false
 }
-

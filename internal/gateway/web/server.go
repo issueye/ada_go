@@ -68,10 +68,10 @@ const maxFormBytes = 1 << 20
 // 自动落临时文件。整包上限由安全中间件的 MaxBodyBytes（48MB）兜底。
 const maxMultipartMemory = 8 << 20
 
-// Config 是 SSR 宿主的装配参数。所有外部依赖都从组合根注入，
+// Config 是 Web 宿主的装配参数。所有外部依赖都从组合根注入，
 // 本包不直接 import supervisor、security、sse 等并行开发中的包。
 type Config struct {
-	// Supervisor 按工作区提供 Core 客户端；SSR 只通过 Core JSON-RPC 取数据。
+	// Supervisor 按工作区提供 Core 客户端；只通过 Core JSON-RPC 取数据。
 	Supervisor contracts.Supervisor
 	// Workspace 是单工作区默认值（兼容旧调用）；Workspaces 为空时使用它。
 	Workspace string
@@ -85,28 +85,35 @@ type Config struct {
 	// WorkspacesChanged 在 FilePicker 新增工作区后回调，参数是完整列表。
 	// 回调在内部工作区锁内执行，必须快速返回，且不能回头调用 Server。
 	WorkspacesChanged func([]string)
-	// ProductName 是产品名（如 ada-go Headless），进顶栏 chip 与页面标题。
+	// ProductName 是产品名（如 ada-go Headless），进 bootstrap 投影与页面标题。
 	ProductName string
-	// BrandName 是品牌名（如 ada-go），进侧栏品牌位与页面标题；默认 ada-go。
+	// BrandName 是品牌名（如 ada-go），进 bootstrap 投影与页面标题；默认 ada-go。
 	BrandName string
 	// Locale 是 <html lang> 的取值，默认 zh-CN。
 	Locale string
-	// Identity 是顶栏展示的当前身份（可选）。
+	// Identity 是当前身份（可选），进 bootstrap 投影。
 	Identity string
 	// Events 是外部注入的 SSE handler（避免本包 import internal/gateway/sse）。
 	Events http.Handler
+	// WorkspaceEvents 是工作区级 SSE handler（/events/workspace：evt.plugin.changed
+	// 等；插件启停的浏览器感知面）。nil 时该端点 501。
+	WorkspaceEvents http.Handler
+	// Registry 是前端贡献注册表数据源（/frontend-registry；nil 时返回空表）。
+	Registry RegistrySource
 	// Protect 是外部安全中间件（Host/Origin/CSRF/认证等）；为空时直接暴露路由。
 	Protect func(http.Handler) http.Handler
 	// CSRF 为每次请求返回 token，模板写入隐藏字段；校验由外部中间件负责。
 	CSRF func(*http.Request) string
 	// LoginPath 是登录页路径，默认 /login。
 	LoginPath string
-	// PluginUI 是 M4 的前端插件渲染宿主（7.5）；nil 时全部插槽保持基座占位、
-	// /ext 路由 404。组合根用渲染桥实现它，web 不依赖插件宿主的具体实现。
+	// PluginUI 是插件前端宿主（nil 时 /ext 静态资源与动作桥 404、无动态块）。
+	// 整页 SSR 移除后它不再产出任何 HTML：插件贡献由客户端运行时经
+	// /frontend-registry 装载；宿主只经扩展接口提供静态资源、动作绑定、
+	// 插件列表与 Markdown 动态块（见 pluginui.go / markdown_block.go）。
 	PluginUI PluginUI
 }
 
-// Server 是 SSR 前端宿主。它自身不持有 Core 连接或后台协程。
+// Server 是 Web 宿主。它自身不持有 Core 连接或后台协程。
 type Server struct {
 	cfg     Config
 	tmpl    *template.Template
@@ -118,7 +125,6 @@ type Server struct {
 	workspaces  []string
 
 	// dispatch 是唯一的消息发送路径（建线程 + turn.start/steer）。
-	// 页面处理器不再自己拼「先 thread.create 再 turn.start」。
 	dispatch *dispatch.Dispatcher
 }
 
@@ -144,35 +150,8 @@ func New(cfg Config) (*Server, error) {
 		cfg.Workspace = cfg.Workspaces[0]
 	}
 	tmpl, err := template.New("web").Funcs(template.FuncMap{
-		// slot 只接受基座生成的 template.HTML（见 RenderSlot 注释）。
-		"slot": RenderSlot,
 		// icon 输出一个内联 SVG（与 a_da 组件库同源）。
 		"icon": func(key string, size int) template.HTML { return iconHTML(key, size) },
-		// markdown 渲染助手正文（goldmark + bluemonday 清洗）。
-		"markdown": renderMarkdown,
-		// statusTone 把工具状态映射为徽标色调。
-		"statusTone": func(status string) string {
-			switch status {
-			case "ok":
-				return "success"
-			case "error":
-				return "danger"
-			case "denied", "timeout", "interrupted":
-				return "warn"
-			default:
-				return "neutral"
-			}
-		},
-		// toolIcon 给工具行挑一个能一眼认出来的图标：文件、目录、终端、git、计划……
-		// 认不出来的工具退回扳手，而不是所有工具都画成终端。
-		"toolIcon": toolIcon,
-		// lineCount 统计文本行数（工具输出的“共 N 行”）。
-		"lineCount": func(s string) int {
-			if s == "" {
-				return 0
-			}
-			return strings.Count(s, "\n") + 1
-		},
 		// asset 输出带内容指纹的静态资源地址（改 CSS/JS 后缓存自动失效）。
 		"asset": assetURL,
 	}).ParseFS(templateFS, "templates/*.html.tmpl")
@@ -180,7 +159,7 @@ func New(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("web: 解析内嵌模板失败: %w", err)
 	}
 	s := &Server{cfg: cfg, tmpl: tmpl, workspaces: append([]string(nil), cfg.Workspaces...)}
-	// 消息发送只有一条路径：页面处理器与（后续的）插件投递都走同一个 Dispatcher。
+	// 消息发送只有一条路径：表单处理器与插件投递都走同一个 Dispatcher。
 	disp, err := dispatch.New(dispatch.Config{Supervisor: cfg.Supervisor, Workspaces: serverWorkspaces{s: s}})
 	if err != nil {
 		return nil, fmt.Errorf("web: 装配调度层失败: %w", err)
@@ -202,23 +181,26 @@ func (s *Server) Dispatch() *dispatch.Dispatcher { return s.dispatch }
 // Close 目前无需释放资源；SSE handler 的所有权在外部。
 func (s *Server) Close() error { return nil }
 
-// routes 注册主流程路由（页面名与 a_da 对齐：/ 与 /threads/{id} 是对话页，
-// /overview 是概览，/workspaces 是工作区，/extensions 是扩展）。
+// routes 注册主流程路由。
+//
+// 页面路径全部收敛为 history fallback：GET 返回 SPA shell（handleShell），
+// 数据由客户端按路径取 JSON 端点；POST 表单端点保持 303 PRG。
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", s.handleChatHome)
-	mux.HandleFunc("GET /threads", s.handleChatHome)
-	mux.HandleFunc("POST /threads", s.handleCreateThread)
-	mux.HandleFunc("GET /overview", s.handleOverview)
-	mux.HandleFunc("GET /partials/dashboard", s.handleOverviewPartial)
+	// JSON 数据端点（SPA 取数面，dev-plan R3）。
+	mux.HandleFunc("GET /frontend-registry", s.handleFrontendRegistry)
 	mux.HandleFunc("GET /partials/dashboard.json", s.handleOverviewJSON)
 	mux.HandleFunc("GET /partials/extensions.json", s.handleExtensionsJSON)
+	mux.HandleFunc("GET /partials/threads.json", s.handleThreadsJSON)
+	mux.HandleFunc("GET /partials/model.json", s.handleModelJSON)
 	mux.HandleFunc("GET /partials/transcript/{id}", s.handleTranscriptJSON)
-	mux.HandleFunc("GET /partials/slot/{name}", s.handleSlotPartial)
-	mux.HandleFunc("GET /partials/workspace-threads", s.handleWorkspaceThreadsPartial)
-	// 会话遥测投影：run / context / usage 三块只读数据，供插件岛运行中轮询。
 	mux.HandleFunc("GET /threads/{id}/state", s.handleThreadState)
-	mux.HandleFunc("GET /threads/{id}", s.handleThread)
+	mux.HandleFunc("POST /markdown.ast", s.handleMarkdownAST)
+	mux.HandleFunc("GET /api/workspaces", s.handleWorkspacesAPI)
+	mux.HandleFunc("GET /api/fs/list", s.handleFSList)
+	mux.HandleFunc("GET /extensions/{id}/file", s.handlePluginFile)
+	// 表单端点（POST → 303 PRG；登录/错误页是无 JS 安全页）。
+	mux.HandleFunc("POST /threads", s.handleCreateThread)
 	mux.HandleFunc("POST /threads/{id}/send", s.handleTurn)
 	mux.HandleFunc("POST /threads/{id}/resend", s.handleTurnResend)
 	mux.HandleFunc("POST /threads/{id}/abort", s.handleCancel)
@@ -228,42 +210,40 @@ func (s *Server) routes() http.Handler {
 	// 兼容旧动作路径（M2 的 /turn、/cancel）。
 	mux.HandleFunc("POST /threads/{id}/turn", s.handleTurn)
 	mux.HandleFunc("POST /threads/{id}/cancel", s.handleCancel)
-	// 兼容旧路径（M2 的 /thread/{id}/turn|cancel）。
-	mux.HandleFunc("GET /thread/{id}", s.handleThread)
 	mux.HandleFunc("POST /thread/{id}/turn", s.handleTurn)
 	mux.HandleFunc("POST /thread/{id}/cancel", s.handleCancel)
 	mux.HandleFunc("POST /thread/{id}/interaction/{requestId}", s.handleInteraction)
-	mux.HandleFunc("GET /events/{id}", s.handleEvents)
-	mux.HandleFunc("POST /markdown", s.handleMarkdown)
-	mux.HandleFunc("POST /markdown.ast", s.handleMarkdownAST)
 	mux.HandleFunc("POST /model/select", s.handleModelSelect)
-	mux.HandleFunc("GET /workspaces", s.handleWorkspaces)
-	mux.HandleFunc("GET /workspace", s.handleWorkspaceGet)
 	mux.HandleFunc("POST /workspaces/select", s.handleWorkspaceSelect)
 	mux.HandleFunc("POST /workspace", s.handleWorkspaceSelect)
 	mux.HandleFunc("POST /api/workspace/select", s.handleWorkspaceOpen)
-	mux.HandleFunc("GET /api/workspaces", s.handleWorkspacesAPI)
-	mux.HandleFunc("GET /api/fs/list", s.handleFSList)
-	mux.HandleFunc("GET /extensions", s.handleExtensions)
-	mux.HandleFunc("GET /extensions/{id}", s.handlePluginDetail)
-	mux.HandleFunc("GET /extensions/{id}/file", s.handlePluginFile)
+	mux.HandleFunc("POST /workspaces/mkdir", s.handleWorkspaceMkdir)
 	mux.HandleFunc("POST /extensions/reload", s.handleExtensionsReload)
 	mux.HandleFunc("POST /extensions/{id}/enable", s.handlePluginEnable)
 	mux.HandleFunc("POST /extensions/{id}/disable", s.handlePluginDisable)
 	mux.HandleFunc("POST /agent-plugins/reload", s.handleAgentPluginsReload)
+	// 实时与基础设施。
+	mux.HandleFunc("GET /events/{id}", s.handleEvents)
+	mux.HandleFunc("GET /events/workspace", func(w http.ResponseWriter, r *http.Request) {
+		if s.cfg.WorkspaceEvents == nil {
+			http.Error(w, "工作区事件流未装配", http.StatusNotImplemented)
+			return
+		}
+		s.cfg.WorkspaceEvents.ServeHTTP(w, r)
+	})
 	mux.HandleFunc("GET /static/", s.handleStatic)
-	// M4 插件页面、静态资源与动作桥（7.5、7.6）；PluginUI 缺席时 404。
+	// 插件静态资源、动作桥与 route 桥（7.5、7.6）；PluginUI 缺席时 404。
 	mux.HandleFunc("GET /ext/{id}/static/{name...}", s.handleExtStatic)
 	mux.HandleFunc("GET /ext/{id}/action/{name}", s.handleExtActionRead)
 	mux.HandleFunc("POST /ext/{id}/action/{name}", s.handleExtActionWrite)
-	// 插件动态 HTTP API（route）：前端插件/浏览器脚本调用。
 	mux.HandleFunc("/ext/{id}/api/{path...}", s.handleExtAPI)
-	mux.HandleFunc("GET /ext/{id}/{slug}", s.handleExtPage)
 	mux.HandleFunc("GET /login", s.handleLoginPage)
 	mux.HandleFunc("POST /login", s.handleLoginSubmit)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
-	// 未匹配的路径：渲染带外壳的 404（放最后；更具体的模式优先匹配）。
-	mux.HandleFunc("/{path...}", s.handleNotFound)
+	// history fallback：页面路径（/、/threads/{id}、/overview、/workspaces、
+	// /extensions、/ext/{id}/… …）的 GET 一律返回 shell；其余方法 404 错误页。
+	// 放最后；上面更具体的模式优先匹配。
+	mux.HandleFunc("/{path...}", s.handleFallback)
 	return mux
 }
 
@@ -273,12 +253,6 @@ const WorkspaceCookieName = "adag_workspace"
 
 // WorkspaceCookieMaxAge 是工作区选择 cookie 的有效期（30 天，单位秒）。
 const WorkspaceCookieMaxAge = 30 * 24 * 60 * 60
-
-// JSClientCookieName 标记「这个浏览器已经在跑脚本」（sidebar-boot.js 首屏种下）。
-// 它只用来二选一：有 JS 走实时增量，没有 JS 才退到 meta refresh 轮询。
-// 有 JS 时不能再发 meta refresh——Chromium 里删掉 meta 并不会取消已经排队的
-// 刷新，运行中的页面会变成每 2 秒整页重载一次。
-const JSClientCookieName = "adag_js"
 
 // acquire 按当前请求的工作区取一次 Core 客户端，返回成对的释放函数。
 func (s *Server) acquire(ctx context.Context, r *http.Request) (contracts.CoreClient, func(), error) {
@@ -317,127 +291,50 @@ func (s *Server) callWorkspace(r *http.Request, workspace, method string, params
 	return c.Call(r.Context(), method, params)
 }
 
-// base 填充页面外壳；threads 用于侧栏会话树（可为空）。
-func (s *Server) base(r *http.Request, page, title string, threads []threadSummaryDTO, activeThreadID string, connected bool) baseData {
+// base 填充 shell/login/error 共用的最小外壳，并生成 bootstrap JSON 投影。
+func (s *Server) base(r *http.Request, title string) baseData {
 	workspace, index := s.resolveWorkspace(r)
-	// 插件插槽、样式与脚本由 PluginUI 填充；单槽失败回退基座占位（pluginui.go）。
-	slots, counts := s.pluginSlots(r)
-	name := filepath.Base(workspace)
-	if name == "" || name == "." || name == string(filepath.Separator) {
-		name = workspace
-	}
-	gateway := "http://" + r.Host
-	conn := connected
+	name := workspaceName(workspace)
 	csrf := s.csrf(r)
-	pluginNav := s.pluginNavLinks(r)
-	needsUI := false
-	if detector, ok := s.cfg.PluginUI.(IslandDetector); ok {
-		needsUI = detector.HasIslands(page, r)
-	}
+	gateway := "http://" + r.Host
 	badge := productBadge(s.cfg.BrandName, s.cfg.ProductName)
-	sidebar := renderSidebar(sidebarData{
-		Active:             page,
-		Gateway:            gateway,
-		Groups:             s.sidebarGroups(workspace, threads),
-		ActiveThreadID:     activeThreadID,
-		SidebarTop:         slots.SidebarTop,
-		SidebarTopCount:    counts.SidebarTop,
-		SidebarBottom:      slots.SidebarBottom,
-		SidebarBottomCount: counts.SidebarBottom,
-		// 搜索框跟随「有会话可搜」而不是只跟随聊天页：概览/插件页的侧栏
-		// 同样列着会话，没有搜索会让同一份侧栏在页面之间功能不一致。
-		Search:       page == "chat" || len(threads) > 0,
-		Connected:    &conn,
-		ProductName:  s.cfg.ProductName,
-		BrandName:    s.cfg.BrandName,
-		ProductBadge: badge,
-		CSRF:         csrf,
-		CurrentPath:  r.URL.Path,
-		PluginNav:    pluginNav,
-	})
+	boot := bootstrapData{
+		Route:          r.URL.Path,
+		Locale:         s.cfg.Locale,
+		Title:          title,
+		ProductName:    s.cfg.ProductName,
+		BrandName:      s.cfg.BrandName,
+		ProductBadge:   badge,
+		Identity:       s.cfg.Identity,
+		LoginPath:      s.cfg.LoginPath,
+		CSRF:           csrf,
+		Workspace:      workspace,
+		WorkspaceName:  name,
+		WorkspaceIndex: index,
+		Workspaces:     s.workspaceOptions(),
+		Gateway:        gateway,
+	}
+	raw, err := json.Marshal(boot)
+	if err != nil {
+		// bootstrap 不可省略（客户端首屏依赖）：退化成最小可用投影。
+		raw = []byte(`{"route":"/","productName":"ada-go","brandName":"ada-go","loginPath":"/login"}`)
+	}
 	return baseData{
-		Title:               title,
-		Page:                page,
-		ProductName:         s.cfg.ProductName,
-		BrandName:           s.cfg.BrandName,
-		ProductBadge:        badge,
-		Flash:               flashFromQuery(r),
-		Locale:              s.cfg.Locale,
-		Identity:            s.cfg.Identity,
-		LoginPath:           s.cfg.LoginPath,
-		CSRF:                csrf,
-		Workspace:           workspace,
-		WorkspaceName:       name,
-		WorkspaceIndex:      index,
-		Workspaces:          s.workspaceOptions(),
-		ShowWorkspacePicker: len(s.workspaceList()) > 1,
-		Gateway:             gateway,
-		ActiveThreadID:      activeThreadID,
-		Connected:           connected,
-		NeedsUI:             needsUI,
-		PluginNav:           pluginNav,
-		Sidebar:             sidebar,
-		Icons:               iconSprite(),
-		ConfirmDialog:       confirmDialogHTML(),
-		Slots:               slots,
-		SlotCounts:          counts,
-		PluginStyles:        s.pluginStyles(),
-		PluginScripts:       s.pluginScripts(),
+		Title:         title,
+		ProductName:   s.cfg.ProductName,
+		BrandName:     s.cfg.BrandName,
+		ProductBadge:  badge,
+		Locale:        s.cfg.Locale,
+		Identity:      s.cfg.Identity,
+		LoginPath:     s.cfg.LoginPath,
+		CSRF:          csrf,
+		Workspace:     workspace,
+		WorkspaceName: name,
+		Workspaces:    boot.Workspaces,
+		Gateway:       gateway,
+		Flash:         flashFromQuery(r),
+		BootstrapJSON: template.JS(raw),
 	}
-}
-
-// sidebarGroups 把全部工作区铺成侧栏分组：当前工作区带上已查到的会话，
-// 其它工作区只给组头（会话由 app.js 展开时经 /partials/workspace-threads
-// 懒加载——跨工作区查询要各自拉起 Core，不能每页全量做）。
-func (s *Server) sidebarGroups(workspace string, threads []threadSummaryDTO) []sidebarGroup {
-	list := s.workspaceList()
-	if len(list) == 0 {
-		list = []string{workspace}
-	}
-	groups := make([]sidebarGroup, 0, len(list)+1)
-	active := -1
-	for i, ws := range list {
-		g := sidebarGroup{Key: ws, Path: ws, Name: workspaceName(ws), Index: i}
-		if strings.TrimSpace(workspace) != "" && samePath(ws, workspace) {
-			g.Active = true
-			active = len(groups)
-		}
-		groups = append(groups, g)
-	}
-	if active < 0 && strings.TrimSpace(workspace) != "" {
-		// 单工作区兼容：当前工作区不在列表里时补一组，侧栏始终能看到它。
-		groups = append(groups, sidebarGroup{
-			Key: workspace, Path: workspace, Name: workspaceName(workspace),
-			Index: len(groups), Active: true,
-		})
-		active = len(groups) - 1
-	}
-	if active >= 0 {
-		g := &groups[active]
-		g.Threads = make([]sidebarThread, 0, len(threads))
-		for _, t := range threads {
-			g.Threads = append(g.Threads, sidebarThread{
-				ID:        t.ID,
-				Title:     t.Title,
-				UpdatedMS: parseTimeMS(t.UpdatedAt),
-				Running:   t.Running,
-			})
-			if t.Running {
-				g.Running = true
-			}
-		}
-		g.Count = len(g.Threads)
-	}
-	return groups
-}
-
-// workspaceName 是工作区在侧栏/选择器里的显示名：目录名，根目录退回完整路径。
-func workspaceName(path string) string {
-	name := filepath.Base(path)
-	if name == "" || name == "." || name == string(filepath.Separator) {
-		return path
-	}
-	return name
 }
 
 // normalizeWorkspaceList 合并单/多工作区配置并去重，保持配置顺序。
@@ -465,8 +362,7 @@ func normalizeWorkspaceList(single string, many []string) []string {
 }
 
 // resolveWorkspace 返回当前请求的工作区及索引。
-// 优先级：?ws=<index>（侧栏点进别的工作区的会话/「在此新建」）→ cookie →
-// WorkspaceFor。query 显式指定用于跨工作区导航，一次请求内即生效。
+// 优先级：?ws=<index>（跨工作区导航）→ cookie → WorkspaceFor。
 func (s *Server) resolveWorkspace(r *http.Request) (string, int) {
 	list := s.workspaceList()
 	if len(list) == 0 {
@@ -500,14 +396,6 @@ func (s *Server) workspaceFromQuery(r *http.Request) (string, int, bool) {
 		return "", 0, false
 	}
 	return list[index], index, true
-}
-
-// pinWorkspaceQuery 把 ?ws=<index> 写进工作区 cookie：从侧栏点进别的工作区的
-// 会话后，页面里的表单（发消息 / 删除 / 中止）继续落在同一个工作区。
-func (s *Server) pinWorkspaceQuery(w http.ResponseWriter, r *http.Request) {
-	if _, index, ok := s.workspaceFromQuery(r); ok {
-		s.setWorkspaceCookie(w, index)
-	}
 }
 
 // WorkspaceForRequest 返回与页面渲染一致的工作区路径（含 FilePicker 动态登记）。
@@ -611,13 +499,18 @@ func (s *Server) workspaceOptions() []workspaceOption {
 	list := s.workspaceList()
 	options := make([]workspaceOption, 0, len(list))
 	for i, workspace := range list {
-		name := filepath.Base(workspace)
-		if name == "" || name == "." || name == string(filepath.Separator) {
-			name = workspace
-		}
-		options = append(options, workspaceOption{Index: i, Name: name, Path: workspace})
+		options = append(options, workspaceOption{Index: i, Name: workspaceName(workspace), Path: workspace})
 	}
 	return options
+}
+
+// workspaceName 是工作区在选择器/bootstrap 里的显示名：目录名，根目录退回完整路径。
+func workspaceName(path string) string {
+	name := filepath.Base(path)
+	if name == "" || name == "." || name == string(filepath.Separator) {
+		return path
+	}
+	return name
 }
 
 func (s *Server) csrf(r *http.Request) string {
@@ -627,7 +520,7 @@ func (s *Server) csrf(r *http.Request) string {
 	return s.cfg.CSRF(r)
 }
 
-// render 输出 HTML 页面；动态页面一律 no-store（09 §9.3）。
+// render 输出 HTML 页面（只剩 shell/login/error 三个模板）；动态页面一律 no-store（09 §9.3）。
 func (s *Server) render(w http.ResponseWriter, status int, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
@@ -701,20 +594,4 @@ func parseTimeMS(raw string) int64 {
 		return n
 	}
 	return 0
-}
-
-// parseLimit 解析分页 limit，并夹在 thread.list 的 1–200 范围内。
-func parseLimit(raw string, def int) int {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return def
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n < 1 {
-		return def
-	}
-	if n > 200 {
-		return 200
-	}
-	return n
 }

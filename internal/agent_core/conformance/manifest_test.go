@@ -43,7 +43,7 @@ func TestManifestFixtures(t *testing.T) {
 		}
 		slot := m.Frontend.Slots[0]
 		mustEqual(t, "插槽名", "chat.corner", slot.Slot)
-		mustEqual(t, "模板", "slot.tsx", slot.Template)
+		mustEqual(t, "组件", "SlotCard.vue", slot.Component)
 		if !pluginapi.IsSlotName(slot.Slot) {
 			t.Errorf("chat.corner 不在 12 个插槽白名单里")
 		}

@@ -11,12 +11,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"adagodesign/internal/canvas"
 	"adagodesign/internal/design"
+	"adagodesign/internal/openbrowser"
 )
 
 // ServerVersion 是 MCP 服务器版本。
@@ -30,6 +32,9 @@ type Deps struct {
 	Tasks   *canvas.TaskQueue
 	BaseURL func() string
 	DataDir string
+	// AutoOpen 允许截图超时自动拉起浏览器打开画布并重试一次。
+	// 生产模式（main.go）开启；测试与 CI 保持 false，避免 go test 弹窗。
+	AutoOpen bool
 }
 
 // NewServer 创建配置好全部设计工具的 MCP 服务器。
@@ -43,7 +48,7 @@ func NewServer(d Deps) *mcp.Server {
 				"需要限制整块画布的比例时用 project_canvas（16:9 / 9:16 / 4:3 / 自定义宽高）→ " +
 				"③ design_systems / design_tokens / design_components / design_search 查阅规范 → " +
 				"④ design_preview（组件组合，需带 artboard）或 design_screen（login/settings/feed/profile 整页）摆上画布 → " +
-				"⑤ design_audit 走查（含字体授权、图标一致性、尺寸规范）→ canvas_arrange 排版 → " +
+				"⑤ design_audit 走查（体系级：字体授权、图标一致性、尺寸规范；传 node_id 可走查单个已生成节点的外链/图标/尺寸契约）→ canvas_arrange 排版 → " +
 				"canvas_screenshot 回看 → canvas_export 导出独立 HTML。" +
 				"硬规则：设计稿必须归属于已存在的项目 —— 任何新增设计稿的工具（design_preview / design_screen / " +
 				"canvas_add / design_audit / design_derive / design_compare）都必须传 project；没有项目就先 project_create，" +
@@ -103,6 +108,16 @@ func registerTools(server *mcp.Server, d Deps) {
 		Name:        "canvas_clear",
 		Description: "清空画布全部节点（需 confirm=true）。",
 	}, clearTool(d))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "canvas_undo",
+		Description: "撤销最近一次画布内容操作（新增/更新/删除节点、清空项目、连线增删）。项目增删改不进历史；历史最多 50 步且仅存于进程内存。",
+	}, undoTool(d))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "canvas_redo",
+		Description: "重做最近一次被撤销的画布内容操作（与 canvas_undo 配对）。",
+	}, redoTool(d))
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "canvas_screenshot",
@@ -250,6 +265,7 @@ type tokensIn struct {
 	System   string `json:"system" jsonschema:"设计体系 ID（design_systems 返回的 id，如 element）"`
 	Theme    string `json:"theme,omitempty" jsonschema:"主题: light|dark，默认 light"`
 	Category string `json:"category,omitempty" jsonschema:"分类过滤: all|color|type|spacing|radius|shadow|motion，默认 all"`
+	Brief    bool   `json:"brief,omitempty" jsonschema:"精简输出（仅 category=all 生效）：关键语义色的值（不带说明）、字阶尺寸/字重、间距与圆角阶梯，省略阴影/动效/变体色 —— 适合先概览再按类目取全量"`
 }
 
 type tokensOut struct {
@@ -257,6 +273,50 @@ type tokensOut struct {
 	Theme   string         `json:"theme"`
 	Grid    int            `json:"grid"`
 	Content map[string]any `json:"content"`
+}
+
+// briefColorExact 是精简输出保留的语义色正名（各体系命名的最大公约数）；
+// 另按前缀保留 text-1..3 / text-primary / text-secondary / bg-1..2 一类常用分层。
+var briefColorExact = map[string]bool{
+	"primary": true, "on-primary": true, "secondary": true,
+	"bg": true, "surface": true, "border": true, "ink": true,
+	"success": true, "warning": true, "danger": true, "info": true,
+}
+
+func briefColorKeep(key string) bool {
+	if briefColorExact[key] {
+		return true
+	}
+	switch {
+	case key == "bg-1" || key == "bg-2",
+		key == "text-primary" || key == "text-secondary" || key == "text-muted" ||
+			key == "text-1" || key == "text-2" || key == "text-3":
+		return true
+	}
+	return false
+}
+
+// briefTokens 是 design_tokens 的精简视图：概览够用、体量小一个数量级。
+// 语义色只留值（去掉 usage 说明与 hover/active/container 变体），
+// 字阶只留 size/weight（去 lineHeight/letterSpacing/usage），阴影与动效整个省略。
+func briefTokens(tok design.Tokens) map[string]any {
+	colors := map[string]string{}
+	for k, c := range tok.Colors {
+		if briefColorKeep(k) {
+			colors[k] = c.Value
+		}
+	}
+	levels := map[string]map[string]int{}
+	for name, spec := range tok.Type.Levels {
+		levels[name] = map[string]int{"size": spec.Size, "weight": spec.Weight}
+	}
+	return map[string]any{
+		"colors":  colors,
+		"type":    map[string]any{"family": tok.Type.Family, "levels": levels},
+		"spacing": tok.Spacing,
+		"radius":  tok.Radius,
+		"grid":    tok.Grid,
+	}
 }
 
 func tokensTool() mcp.ToolHandlerFor[tokensIn, tokensOut] {
@@ -284,6 +344,10 @@ func tokensTool() mcp.ToolHandlerFor[tokensIn, tokensOut] {
 		content := map[string]any{}
 		switch category {
 		case "all":
+			if in.Brief {
+				content = briefTokens(tokens)
+				break
+			}
 			content["colors"] = tokens.Colors
 			content["type"] = tokens.Type
 			content["spacing"] = tokens.Spacing
@@ -666,6 +730,39 @@ func clearTool(d Deps) mcp.ToolHandlerFor[canvasClearIn, struct{}] {
 	}
 }
 
+// ---------------- canvas_undo / canvas_redo ----------------
+
+type historyOut struct {
+	OK          bool   `json:"ok"`
+	Description string `json:"description,omitempty"` // 被撤销/重做的操作描述
+	UndoDepth   int    `json:"undo_depth"`            // 剩余可撤销步数
+	RedoDepth   int    `json:"redo_depth"`            // 剩余可重做步数
+}
+
+func undoTool(d Deps) mcp.ToolHandlerFor[struct{}, historyOut] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, historyOut, error) {
+		desc, ok := d.Store.Undo()
+		u, r := d.Store.HistoryDepth()
+		out := historyOut{OK: ok, Description: desc, UndoDepth: u, RedoDepth: r}
+		if !ok {
+			return failWith[historyOut](out, "nothing_to_undo", "没有可撤销的操作", "只有画布内容操作（节点/连线）进历史，项目增删改不在内")
+		}
+		return textResult("已撤销：" + desc), out, nil
+	}
+}
+
+func redoTool(d Deps) mcp.ToolHandlerFor[struct{}, historyOut] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, historyOut, error) {
+		desc, ok := d.Store.Redo()
+		u, r := d.Store.HistoryDepth()
+		out := historyOut{OK: ok, Description: desc, UndoDepth: u, RedoDepth: r}
+		if !ok {
+			return failWith[historyOut](out, "nothing_to_redo", "没有可重做的操作", "")
+		}
+		return textResult("已重做：" + desc), out, nil
+	}
+}
+
 // ---------------- canvas_screenshot ----------------
 
 type screenshotIn struct {
@@ -678,6 +775,23 @@ type screenshotOut struct {
 	NodeID string `json:"node_id,omitempty"`
 	Width  int    `json:"width,omitempty"`
 	Height int    `json:"height,omitempty"`
+}
+
+var (
+	autoOpenMu    sync.Mutex
+	autoOpenedURL string
+)
+
+// openCanvasPageOnce 每进程至多自动拉起一次画布页（避免每次截图超时都弹窗），
+// 返回给用户的提示文本。
+func openCanvasPageOnce(baseURL string) string {
+	autoOpenMu.Lock()
+	defer autoOpenMu.Unlock()
+	if autoOpenedURL == "" {
+		openbrowser.Open(baseURL)
+		autoOpenedURL = baseURL
+	}
+	return "已自动打开画布 " + baseURL + "；若浏览器未弹出，请手动打开后重试"
 }
 
 func screenshotTool(d Deps) mcp.ToolHandlerFor[screenshotIn, screenshotOut] {
@@ -702,6 +816,15 @@ func screenshotTool(d Deps) mcp.ToolHandlerFor[screenshotIn, screenshotOut] {
 		}
 		task := d.Tasks.Create(in.NodeID, scale)
 		res := d.Tasks.Wait(ctx, task.ID)
+		if res == nil && d.AutoOpen {
+			// 画布页没开（Agent 无人值守的常见形态）：自动拉起浏览器再等一轮。
+			// 每进程至多自动开一次 —— 画布真没开时连环弹窗只会更糟。
+			hint := openCanvasPageOnce(d.BaseURL())
+			res = d.Tasks.Wait(ctx, task.ID)
+			if res == nil {
+				return fail[screenshotOut]("capture_timeout", "画布页面未在时限内回传截图（已重试）", hint)
+			}
+		}
 		if res == nil {
 			return fail[screenshotOut]("capture_timeout", "画布页面未在时限内回传截图",
 				"请先在浏览器打开画布 "+d.BaseURL()+"，再重试")
@@ -1216,9 +1339,10 @@ func registerTool(d Deps) mcp.ToolHandlerFor[registerIn, registerOut] {
 
 type auditIn struct {
 	Project     string `json:"project,omitempty" jsonschema:"生成走查报告时必填"`
-	System      string `json:"system" jsonschema:"体系 ID"`
+	System      string `json:"system,omitempty" jsonschema:"体系 ID（体系走查用；node_id 存在时可省）"`
 	Theme       string `json:"theme,omitempty" jsonschema:"light|dark，默认 light"`
-	AddToCanvas *bool  `json:"add_to_canvas,omitempty" jsonschema:"是否生成走查报告节点摆上画布，默认 true"`
+	NodeID      string `json:"node_id,omitempty" jsonschema:"节点级走查：画布节点 ID（优先于 system；走查该节点正文的外链/图标/尺寸契约/字体）"`
+	AddToCanvas *bool  `json:"add_to_canvas,omitempty" jsonschema:"是否生成走查报告节点摆上画布（仅体系走查），默认 true"`
 }
 
 type auditOut struct {
@@ -1234,6 +1358,40 @@ type auditOut struct {
 
 func auditTool(d Deps) mcp.ToolHandlerFor[auditIn, auditOut] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in auditIn) (*mcp.CallToolResult, auditOut, error) {
+		// 节点级走查：对画布上已生成节点做内容级检查（外链/图标/尺寸契约/字体）。
+		// 与体系走查互补 —— 体系走查管皮肤，节点走查管「我刚摆的这张稿」。
+		if in.NodeID != "" {
+			n, err := d.Store.Get(in.NodeID)
+			if err == canvas.ErrNotFound {
+				return failWith[auditOut](auditOut{System: in.System, NodeID: in.NodeID},
+					"not_found", "节点 "+in.NodeID+" 不存在", "用 canvas_list 查看现有节点")
+			}
+			if err != nil {
+				return failWith[auditOut](auditOut{NodeID: in.NodeID}, "internal", err.Error(), "")
+			}
+			rep := design.AuditNodeHTML(design.NodeAuditInput{
+				HTML: n.HTML, Width: n.Width, Height: n.Height, Artboard: n.Artboard,
+			})
+			out := auditOut{System: n.System, NodeID: n.ID, Score: rep.Score,
+				Passed: rep.Passed, Warned: rep.Warned, Failed: rep.Failed, Checks: rep.Checks}
+			title := n.Title
+			if title == "" {
+				title = n.ID
+			}
+			text := fmt.Sprintf("节点「%s」（%s）走查：%d 分（通过 %d / 警告 %d / 失败 %d）",
+				title, n.ID, rep.Score, rep.Passed, rep.Warned, rep.Failed)
+			for _, c := range rep.Checks {
+				if c.Status != "pass" {
+					text += fmt.Sprintf("\n[%s] %s: %s", auditStatusText(c.Status), c.Name, c.Detail)
+				}
+			}
+			return textResult(text), out, nil
+		}
+
+		if strings.TrimSpace(in.System) == "" {
+			return failWith[auditOut](auditOut{}, "bad_request",
+				"node_id 与 system 至少传一个", "体系走查传 system；画布节点走查传 node_id")
+		}
 		res, err := design.Audit(in.System, design.ThemeKey(design.SanitizeID(in.Theme)))
 		if err != nil {
 			return failWith[auditOut](auditOut{System: in.System}, "audit_failed", err.Error(),

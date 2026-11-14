@@ -92,7 +92,10 @@ type runInfo struct {
 	errorDetail string
 	startedAt   time.Time
 	endedAt     time.Time
-	cancel      context.CancelFunc
+	// usage 是本轮累计用量（来自 evt.usage 增量）。输入框下方的
+	// 「tok/s」需要它：输出 token 数 ÷ 已运行秒数。
+	usage  domain.Usage
+	cancel context.CancelFunc
 }
 
 // New 创建并注册方法实现；未注册的方法继续走 coreproto 的失败关闭桩。
@@ -1573,6 +1576,36 @@ func (s *Server) noteRunError(evt domain.Event) {
 	cur.errorDetail = body.Message
 }
 
+// noteRunUsage 把轮次内发过的 evt.usage 增量收敛到 runInfo。
+//
+// 引擎的 evt.usage 载荷是**本轮累计快照**（usageAcc.snapshot 每次发总量），
+// 不是两次之间的差值：这里直接覆盖而不是累加，重复投递不会把数字放大。
+// 输入框下方的 tok/s 与缓存命中率都读它（thread.get 的 run.usage）。
+func (s *Server) noteRunUsage(evt domain.Event) {
+	if evt.Kind != domain.EvtUsage || evt.ThreadID == "" || len(evt.Payload) == 0 {
+		return
+	}
+	var body struct {
+		RunID string       `json:"runId"`
+		Usage domain.Usage `json:"usage"`
+	}
+	if err := json.Unmarshal(evt.Payload, &body); err != nil {
+		return
+	}
+	// 只有状态为 running 的轮次需要实时用量：终态之后的补发不再计入，
+	// 否则会把「上一轮的迟到事件」盖到新轮次上。
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur := s.runs[evt.ThreadID]
+	if cur == nil || cur.status != "running" {
+		return
+	}
+	if body.RunID != "" && cur.runID != body.RunID {
+		return
+	}
+	cur.usage = body.Usage
+}
+
 func (s *Server) runStateLocked(threadID string) map[string]any {
 	cur := s.runs[threadID]
 	if cur == nil {
@@ -1606,6 +1639,16 @@ func runStateJSON(r *runInfo) map[string]any {
 	}
 	if !r.endedAt.IsZero() {
 		out["endedAt"] = r.endedAt.Format(time.RFC3339Nano)
+	}
+	// usage 是本轮累计（不是增量快照）：客户端用 outputTokens / 已运行秒数
+	// 算 tok/s，用 inputTokens+cacheTokens 算缓存命中率。
+	if r.usage != (domain.Usage{}) {
+		out["usage"] = map[string]any{
+			"inputTokens":  r.usage.InputTokens,
+			"outputTokens": r.usage.OutputTokens,
+			"cacheTokens":  r.usage.CacheTokens,
+			"costMicros":   r.usage.CostMicros,
+		}
 	}
 	return out
 }

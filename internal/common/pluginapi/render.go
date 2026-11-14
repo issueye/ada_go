@@ -1,15 +1,18 @@
 package pluginapi
 
-// 本文件是 M4 的 TSX → VNode 渲染器（设计 7.3、7.5、9.5）：
+// 本文件是 Markdown 动态块的 TSX → VNode 渲染器（设计 7.3、9.5）：
 //
 //	esbuild transform（--jsx=transform --jsx-factory=jsx --jsx-fragment=Fragment）
 //	→ moejs 一次性 Runtime（预置全局 jsx / Fragment 与虚拟模块 ssr:components）
 //	→ 调模板默认导出函数(props)
-//	→ VNode JSON（形态与 spec/vnode.schema.json 对齐，由 gateway/frontend 校验与渲染）
+//	→ VNode JSON（形态与 spec/vnode.schema.json 对齐，由 gateway/frontend 校验）
+//
+// 页面/插槽/岛屿渲染已随整页 SSR 移除（dev-plan R1）；这里只保留 block 链路
+// （RenderBlockTemplate + esbuild 编译缓存），Markdown 动态块是它的唯一消费者。
 //
 // 边界（7.5「Render Runtime 不安装 Node 兼容层」）：
 //   - 渲染 Runtime 不装能力（无 fs/fetch/child_process/stdio），只有一个虚拟模块
-//     ssr:components（宿主组件桥，真正的 DOM 在 Go 渲染器里实现）；
+//     ssr:components（宿主组件桥，真正的 DOM 在客户端实现）；
 //   - 模板是单文件 ESM：transform 不打包，相对 import 在链接期失败（6.10 的同款约束）；
 //   - 每次渲染一个新 Runtime：失败即丢弃，不跨请求复用脚本值（6.4 的 JSON 边界）；
 //   - 超时用 Runtime.Interrupt 投递（脚本不可 catch，INV-8），失败必须返回错误。
@@ -31,19 +34,18 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 )
 
-// 渲染预算（7.3：插槽 100ms、页面 300ms；数值与 internal/gateway/frontend 的
-// SlotTimeoutMS/PageTimeoutMS 一致，由装配方显式传入覆盖，这里的默认只兜底）。
-//
-// 渲染 Runtime 与插件 Runtime 共用同一份内存与装配预算（7.5、09 §9.5）：这些常量
-// 不能从插件宿主传进来（那会让 common 反向依赖 agent_core），因此在这里声明同值常量。
+// 渲染预算。渲染 Runtime 与插件 Runtime 共用同一份内存与装配预算（7.5、09 §9.5）：
+// 这些常量不能从插件宿主传进来（那会让 common 反向依赖 agent_core），因此在这里
+// 声明同值常量。
 const (
 	// MemoryLimit 是渲染 Runtime 的脚本堆上限（64MB，与插件 Runtime 同一份上限）。
 	MemoryLimit = 64 << 20
 	// DefaultCallTimeout 是建 Runtime / 编译链的装配预算（5s）。
 	DefaultCallTimeout = 5 * time.Second
 
-	DefaultRenderSlotTimeout = 100 * time.Millisecond
-	DefaultRenderPageTimeout = 300 * time.Millisecond
+	// DefaultBlockRenderTimeout 是 Markdown 动态块的渲染预算缺省值（与
+	// web.MarkdownBlockRenderTimeoutMS 同源，装配方显式传入覆盖）。
+	DefaultBlockRenderTimeout = 300 * time.Millisecond
 	// maxRenderVNodeBytes 是模板返回值（VNode JSON）的上限（7.3 x-limits maxOutputBytes）。
 	maxRenderVNodeBytes = 256 << 10
 	// maxRenderCacheEntries 是编译缓存条目上限：超出后整体清空（模板集合很小）。
@@ -132,15 +134,10 @@ func quoteJS(s string) string {
 // Renderer 把 TSX 模板渲染成 VNode JSON。并发安全：编译缓存有锁，
 // Runtime 每次渲染新建、不跨 goroutine。
 type Renderer struct {
-	mu         sync.Mutex
-	cache      map[string]string // 源内容 SHA-256 → transform 后的 ESM
-	compMod    string            // ssr:components 模块源码
-	engineSrc  string            // ada-render.js 源码（同构渲染模式）
-	isoSrc     string            // ada-ui-iso.js 源码（可服务端执行的组件子集）
-	slotTime   time.Duration
-	pageTime   time.Duration
-	blockTime  time.Duration
-	islandTime time.Duration
+	mu        sync.Mutex
+	cache     map[string]string // 源内容 SHA-256 → transform 后的 ESM
+	compMod   string            // ssr:components 模块源码
+	blockTime time.Duration
 }
 
 // RendererOption 定制 Renderer。
@@ -152,21 +149,8 @@ func WithComponentsModule(src string) RendererOption {
 	return func(r *Renderer) { r.compMod = src }
 }
 
-// WithRenderBudgets 覆盖插槽/页面渲染预算（装配方从 frontend 常量传入）。
-func WithRenderBudgets(slot, page time.Duration) RendererOption {
-	return func(r *Renderer) {
-		if slot > 0 {
-			r.slotTime = slot
-		}
-		if page > 0 {
-			r.pageTime = page
-		}
-	}
-}
-
-// WithBlockRenderBudget 覆盖 Markdown 动态块的渲染预算（缺省同页面档）。
-// 独立成项，保证 spec/markdown-block.schema.json 的 renderTimeoutMs 对应
-// 真正生效的值，而不是随 PageTimeoutMS 漂移。
+// WithBlockRenderBudget 覆盖 Markdown 动态块的渲染预算。独立成项，保证
+// spec/markdown-block.schema.json 的 renderTimeoutMs 对应真正生效的值。
 func WithBlockRenderBudget(d time.Duration) RendererOption {
 	return func(r *Renderer) {
 		if d > 0 {
@@ -175,60 +159,17 @@ func WithBlockRenderBudget(d time.Duration) RendererOption {
 	}
 }
 
-// WithRenderEngineSource 提供 ada-render.js 源码，启用同构渲染模式。
-// 宿主不复制引擎：由装配方从 web 内嵌静态资源取出同一份文件传入。
-func WithRenderEngineSource(src string) RendererOption {
-	return func(r *Renderer) {
-		if len(src) > 0 {
-			r.engineSrc = src
-		}
-	}
-}
-
-// WithIslandRenderBudget 覆盖同构岛屿渲染预算（缺省同页面档）。
-func WithIslandRenderBudget(d time.Duration) RendererOption {
-	return func(r *Renderer) {
-		if d > 0 {
-			r.islandTime = d
-		}
-	}
-}
-
-// WithIsoComponentsSource 提供 ada-ui-iso.js 源码，启用 `ada:ui` 同构组件模块。
-// 引擎与组件层使用同一份文件：服务端 moejs 与浏览器都执行 render(h) 定义。
-func WithIsoComponentsSource(src string) RendererOption {
-	return func(r *Renderer) {
-		if len(src) > 0 {
-			r.isoSrc = src
-		}
-	}
-}
-
 // NewRenderer 构造渲染器。
 func NewRenderer(opts ...RendererOption) *Renderer {
 	r := &Renderer{
-		cache:      map[string]string{},
-		compMod:    renderPrelude,
-		slotTime:   DefaultRenderSlotTimeout,
-		pageTime:   DefaultRenderPageTimeout,
-		blockTime:  DefaultRenderPageTimeout,
-		islandTime: DefaultRenderPageTimeout,
+		cache:     map[string]string{},
+		compMod:   renderPrelude,
+		blockTime: DefaultBlockRenderTimeout,
 	}
 	for _, opt := range opts {
 		opt(r)
 	}
 	return r
-}
-
-// RenderTemplate 渲染一个插槽模板（默认导出函数；预算 = 插槽档）。
-// 返回值是 VNode JSON（可能是字面量 null，表示该插槽留空）。
-func (r *Renderer) RenderTemplate(src string, props json.RawMessage) (json.RawMessage, error) {
-	return r.render(src, props, r.slotTime)
-}
-
-// RenderPage 渲染一个页面模板（预算 = 页面档）。
-func (r *Renderer) RenderPage(src string, props json.RawMessage) (json.RawMessage, error) {
-	return r.render(src, props, r.pageTime)
 }
 
 // RenderBlockTemplate 渲染一个 Markdown 动态块模板（预算 = 块档）。
@@ -237,242 +178,9 @@ func (r *Renderer) RenderBlockTemplate(src string, props json.RawMessage) (json.
 	return r.render(src, props, r.blockTime)
 }
 
-// RenderIsland 渲染一个同构岛屿（docs/20 P1-3）：
-//   - 插件默认导出是 defineComponent/组件定义；
-//   - 宿主用同一份 ada-render.js 的 renderToJSON 展开成 VNode；
-//   - 事件处理函数由 cleanProps 自动剥离，返回值仍走 Go 校验。
-//
-// 需要装配方通过 WithRenderEngineSource 提供引擎源码；没有配置时 fail-closed。
-func (r *Renderer) RenderIsland(src string, props json.RawMessage) (json.RawMessage, error) {
-	vnode, _, err := r.RenderIslandWithStores(src, props)
-	return vnode, err
-}
-
-// RenderIslandWithStores 与 RenderIsland 相同，并返回本次渲染用到的
-// defineStore 快照（JSON object）；Bridge 会把它并入 data-ada-props.stores，
-// 客户端挂载前用 hydrateStores 恢复。
-func (r *Renderer) RenderIslandWithStores(src string, props json.RawMessage) (json.RawMessage, json.RawMessage, error) {
-	if len(r.engineSrc) == 0 {
-		return nil, nil, errors.New("pluginapi: 未配置 ada-render 引擎源，同构渲染不可用")
-	}
-	return r.renderIsland(src, props, r.islandTime)
-}
-
-func (r *Renderer) renderIsland(src string, props json.RawMessage, budget time.Duration) (json.RawMessage, json.RawMessage, error) {
-	if len(src) == 0 {
-		return nil, nil, errors.New("pluginapi: 同构渲染模板源码为空")
-	}
-	js, err := r.compileIsland(src)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	rt := moejs.NewRuntime(moejs.Options{
-		MemoryLimit: MemoryLimit,
-		Locale:      "en-US",
-	})
-	defer rt.ClearInterrupt()
-
-	setup := time.AfterFunc(DefaultCallTimeout, func() { rt.Interrupt(errRenderTimeout) })
-	linked, err := r.linkIsland(js)
-	if err == nil {
-		err = rt.Load(linked)
-	}
-	setup.Stop()
-	if err != nil {
-		return nil, nil, r.renderError("同构模块加载", err)
-	}
-	fn, ok := rt.Export("default")
-	if !ok || !engine.IsCallable(fn) {
-		return nil, nil, errors.New("pluginapi: 同构模板缺少 `export default` 组件定义")
-	}
-
-	started := time.Now()
-	watchdog := time.AfterFunc(budget, func() { rt.Interrupt(errRenderTimeout) })
-	defer watchdog.Stop()
-
-	arg := moejs.Undefined()
-	if len(props) > 0 {
-		v, perr := rt.ParseJSON(props)
-		if perr != nil {
-			return nil, nil, fmt.Errorf("pluginapi: 同构 props 不是合法 JSON: %w", perr)
-		}
-		arg = v
-	}
-	res, err := rt.CallFunction(fn, moejs.Undefined(), arg)
-	if err != nil {
-		if isRenderTimeout(err) {
-			return nil, nil, fmt.Errorf("pluginapi: 同构渲染超出预算 %v（实际墙钟 %v）", budget, time.Since(started))
-		}
-		return nil, nil, r.renderError("同构模板执行", err)
-	}
-	if res.IsObject() {
-		r0 := rt.Realm()
-		if then, terr := r0.GetMethod(res, r0.KeyFromGoString("then")); terr == nil && engine.IsCallable(then) {
-			return nil, nil, errors.New("pluginapi: 同构渲染返回了 Promise（渲染必须同步）")
-		}
-	}
-	raw, err := rt.AppendJSON(nil, res)
-	if err != nil {
-		return nil, nil, fmt.Errorf("pluginapi: 同构渲染结果不可 JSON 序列化: %w", err)
-	}
-	if len(raw) > maxRenderVNodeBytes {
-		return nil, nil, fmt.Errorf("pluginapi: 同构渲染结果 %d 字节，超过 VNode 输出上限 %d", len(raw), maxRenderVNodeBytes)
-	}
-
-	stores := json.RawMessage("{}")
-	if storeFn, ok := rt.Export("__adaStores"); ok && engine.IsCallable(storeFn) {
-		storeRes, serr := rt.CallFunction(storeFn, moejs.Undefined())
-		if serr != nil {
-			return nil, nil, r.renderError("store 快照", serr)
-		}
-		storeRaw, serr := rt.AppendJSON(nil, storeRes)
-		if serr != nil {
-			return nil, nil, fmt.Errorf("pluginapi: store 快照不可 JSON 序列化: %w", serr)
-		}
-		stores = json.RawMessage(storeRaw)
-	}
-	return json.RawMessage(raw), stores, nil
-}
-
-// linkIsland 链接 ada-render + 插件模块 + 一个只做 renderToJSON 的入口。
-func (r *Renderer) linkIsland(pluginJS string) (*moejs.Module, error) {
-	engine, err := moejs.Compile("ada:render", r.engineModuleSource())
-	if err != nil {
-		return nil, fmt.Errorf("pluginapi: ada-render 模块编译失败: %w", err)
-	}
-	plugin, err := moejs.Compile("adag:entry", pluginJS)
-	if err != nil {
-		return nil, fmt.Errorf("pluginapi: 同构插件模块编译失败: %w", err)
-	}
-	const wrapper = `import def from "adag:entry";
-import { renderToJSON, collectStoreSnapshots } from "ada:render";
-export default function (props) { return renderToJSON(def, props); }
-export function __adaStores() { return collectStoreSnapshots(); }
-`
-	entry, err := moejs.Compile("adag:island", wrapper)
-	if err != nil {
-		return nil, fmt.Errorf("pluginapi: 同构入口编译失败: %w", err)
-	}
-	modules := map[string]*moejs.Module{
-		"ada:render": engine,
-		"adag:entry": plugin,
-	}
-	if len(r.isoSrc) > 0 {
-		iso, ierr := moejs.Compile("ada:ui", r.isoModuleSource())
-		if ierr != nil {
-			return nil, fmt.Errorf("pluginapi: ada-ui-iso 模块编译失败: %w", ierr)
-		}
-		modules["ada:ui"] = iso
-	}
-	resolver := moejs.Resolver(func(_ moejs.Referrer, spec string) (*moejs.Module, error) {
-		if m, ok := modules[spec]; ok {
-			return m, nil
-		}
-		return nil, fmt.Errorf("pluginapi: 同构模板 import %q 不可用：只允许 ada:render 与 ada:ui（原生标签可自由使用）", spec)
-	})
-	linked, lerr := moejs.Link(entry, resolver)
-	if lerr != nil {
-		return nil, fmt.Errorf("pluginapi: 同构模块链接失败: %w", lerr)
-	}
-	return linked, nil
-}
-
-// engineModuleSource 把 UMD 引擎包成 ESM：先加载引擎（设置 globalThis.AdaRender），
-// 再导出宿主需要的原语。
-func (r *Renderer) engineModuleSource() string {
-	return r.engineSrc + `
-const __R = globalThis.AdaRender;
-if (!__R) throw new Error("ada-render 未加载");
-export const h = __R.h;
-export const host = __R.host;
-export const text = __R.text;
-export const defineComponent = __R.defineComponent;
-export const createApp = __R.createApp;
-export const reactive = __R.reactive;
-export const ref = __R.ref;
-export const computed = __R.computed;
-export const watch = __R.watch;
-export const watchEffect = __R.watchEffect;
-export const provide = __R.provide;
-export const inject = __R.inject;
-export const defineStore = __R.defineStore;
-export const collectStoreSnapshots = __R.collectStoreSnapshots;
-export const hydrateStores = __R.hydrateStores;
-export const nextTick = __R.nextTick;
-export const renderToJSON = __R.renderToJSON;
-`
-}
-
-// isoModuleSource 把 UMD 组件层包成 ESM；先 import ada:render 保证引擎已执行。
-func (r *Renderer) isoModuleSource() string {
-	return `import "ada:render";
-` + r.isoSrc + `
-const __UI = globalThis.AdaUIIso;
-if (!__UI) throw new Error("ada-ui-iso 未加载");
-export const Badge = __UI.components.Badge;
-export const Card = __UI.components.Card;
-export const Button = __UI.components.Button;
-export const Input = __UI.components.Input;
-export const TextField = __UI.components.TextField;
-export const Textarea = __UI.components.Textarea;
-export const Empty = __UI.components.Empty;
-export const Icon = __UI.components.Icon;
-export const TodoList = __UI.components.TodoList;
-export const Notice = __UI.components.Notice;
-export const Table = __UI.components.Table;
-export const DataTable = __UI.components.DataTable;
-export const Select = __UI.components.Select;
-export const Tabs = __UI.components.Tabs;
-export const Modal = __UI.components.Modal;
-`
-}
-
-// compileIsland 与 compile 分开缓存：同构模式用 h 工厂，旧模板用 jsx 工厂，
-// 同一个源文件在两套工厂下产物不同，不能共用缓存键。
-func (r *Renderer) compileIsland(src string) (string, error) {
-	sum := sha256.Sum256([]byte(src))
-	key := "island:" + hex.EncodeToString(sum[:])
-	r.mu.Lock()
-	if js, ok := r.cache[key]; ok {
-		r.mu.Unlock()
-		return js, nil
-	}
-	r.mu.Unlock()
-
-	result := api.Transform(src, api.TransformOptions{
-		Loader:           api.LoaderTSX,
-		JSX:              api.JSXTransform,
-		JSXFactory:       "h",
-		JSXFragment:      "Fragment",
-		Format:           api.FormatESModule,
-		Target:           api.ES2022,
-		Sourcefile:       "island.tsx",
-		MinifyWhitespace: true,
-	})
-	if len(result.Errors) > 0 {
-		e := result.Errors[0]
-		if e.Location != nil {
-			return "", fmt.Errorf("pluginapi: 同构 TSX 编译失败: %s（%s:%d）", e.Text, e.Location.File, e.Location.Line)
-		}
-		return "", fmt.Errorf("pluginapi: 同构 TSX 编译失败: %s", e.Text)
-	}
-	if len(result.Code) == 0 {
-		return "", errors.New("pluginapi: 同构 TSX 编译没有产物")
-	}
-	js := string(result.Code)
-	r.mu.Lock()
-	if len(r.cache) >= maxRenderCacheEntries {
-		r.cache = map[string]string{}
-	}
-	r.cache[key] = js
-	r.mu.Unlock()
-	return js, nil
-}
-
 // render 的一次完整执行：transform → Runtime → eval → 调用 → JSON。
 //
-// 预算只管「模板函数这次调用」（7.3 的插槽/页面档）；模块编译与加载是宿主装配
+// 预算只管「模板函数这次调用」（7.3 的块档）；模块编译与加载是宿主装配
 // 步骤，另有独立的装配预算（DefaultCallTimeout），避免把进程首次建 Runtime 的
 // 固定成本算进插件预算。两者都用 Runtime.Interrupt 投递，脚本不可 catch（INV-8）。
 func (r *Renderer) render(src string, props json.RawMessage, budget time.Duration) (json.RawMessage, error) {
@@ -507,7 +215,7 @@ func (r *Renderer) render(src string, props json.RawMessage, budget time.Duratio
 		return nil, errors.New("pluginapi: 渲染模板缺少 `export default function (props) {}`（7.3）")
 	}
 
-	// 调用段：这次模板函数的执行按插槽/页面预算计。
+	// 调用段：这次模板函数的执行按块预算计。
 	started := time.Now()
 	watchdog := time.AfterFunc(budget, func() { rt.Interrupt(errRenderTimeout) })
 	defer watchdog.Stop()

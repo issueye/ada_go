@@ -213,9 +213,7 @@ func TestVNodeValidator(t *testing.T) {
 		mustCount(t, "报告里的限值 maxNodes", frontend.MaxNodes, r.Limits["maxNodes"])
 		mustCount(t, "报告里的限值 maxStringBytes", frontend.MaxStringBytes, r.Limits["maxStringBytes"])
 		mustCount(t, "报告里的限值 maxOutputBytes", frontend.MaxOutputBytes, r.Limits["maxOutputBytes"])
-		if r.Limits["slotTimeoutMs"] != 100 || r.Limits["pageTimeoutMs"] != 300 {
-			t.Errorf("渲染超时限值漂移: %+v", r.Limits)
-		}
+		// 插槽/页面渲染超时已随 SSR 移除（块预算在 web.MarkdownBlockRenderTimeoutMS）。
 		// Go 白名单必须与 spec/vnode.schema.json 的 enum 逐字一致（7.3：Schema 是结构层真源）。
 		assertMatchesSchema(t, "spec/vnode.schema.json",
 			[]string{"$defs", "element", "properties", "t", "enum"}, frontend.AllowedTags)

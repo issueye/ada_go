@@ -10,9 +10,14 @@
  *     仍消费旧键），首次读到旧键时迁移成 mode。
  *
  * 面板交互走事件委托（与 theme.js 的 data-theme-toggle 同一模式）：
- *   [data-theme-panel-toggle] 开关面板、[data-theme-mode] 三态、
- *   [data-theme-pick] 选色板。侧栏 rail 的快切按钮仍是 data-theme-toggle，
- *   由 theme.js 切类写旧键，本文件的委托注册在其后，读取切类结果回写 mode。
+ *   [data-theme-mode] 三态、[data-theme-pick] 选色板——本文件只负责
+ *   「应用 + 持久化 + 选中态镜像」。侧栏 rail 的快切按钮仍是
+ *   data-theme-toggle，由 theme.js 切类写旧键，本文件的委托注册在其后，
+ *   读取切类结果回写 mode。
+ *
+ * 🔴 面板的开合、点外关闭与 Esc 归 SPA 组件（Sidebar.vue 的 themeOpen）：
+ *   SPA 之后面板是运行时渲染的（本文件阻塞加载时它还不存在），且渲染器会按
+ *   计划节点重新落 hidden 属性——在这里改 DOM 只会被下一次重渲染覆盖。
  *
  * 规则见 docs/14-ui-runtime.md §19.2.2 / §19.5.1（弹层四要素）。
  */
@@ -64,8 +69,6 @@
   var palette = read(PALETTE_KEY);
   if (PALETTES.indexOf(palette) < 0) palette = 'black-swan';
 
-  var panel = null;
-
   function applyClasses(isDark) {
     root.classList.toggle('dark', isDark);
     root.classList.toggle('light', !isDark);
@@ -86,11 +89,8 @@
       pick.classList.toggle('is-selected', picked);
       pick.setAttribute('aria-checked', picked ? 'true' : 'false');
     }
-    var trigger = document.querySelector('[data-theme-panel-toggle]');
-    if (trigger) {
-      var open = panel && panel.classList.contains('is-open');
-      trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
-    }
+    // 触发器/面板的 aria-expanded 由组件（Sidebar.vue 的 themeOpen）维护，
+    // 这里不再插手，避免两套写入在重渲染时打架。
   }
 
   // 应用模式：system 时移除旧键（theme.js 下次启动自然跟随系统），
@@ -127,32 +127,13 @@
     else if (mq.addListener) mq.addListener(onSchemeChange);
   }
 
-  function panelOpen() {
-    return !!(panel && panel.classList.contains('is-open'));
-  }
-
-  function setPanel(open) {
-    if (!panel) return;
-    panel.classList.toggle('is-open', open);
-    if (open) {
-      panel.removeAttribute('hidden');
-    } else {
-      panel.setAttribute('hidden', '');
-    }
-    syncUI();
-    if (open) {
-      var current = panel.querySelector('.is-selected') || panel.querySelector('button');
-      if (current) current.focus();
-    }
-  }
-
-  function modalOpen() {
-    return !!(window.AdaComponents && typeof AdaComponents.modalOpen === 'function' && AdaComponents.modalOpen());
-  }
-
   applyPalette();
   applyMode();
 
+  // 面板的开合归 Sidebar.vue 的 themeOpen（组件状态）所有：SPA 重渲染会按
+  // 计划节点重新落层属性，若这里再直接改 hidden，两者会在每次重渲染时互相
+  // 覆盖（选色板后弹层自己关上就是这么来的）。本文件只负责「应用 + 持久化
+  // + 选中态镜像」，开合、点外关闭、Esc 都在组件侧。
   document.addEventListener('click', function (event) {
     var target = event.target;
     if (!target || !target.closest) return;
@@ -180,43 +161,19 @@
       return;
     }
 
-    if (target.closest('[data-theme-panel-toggle]')) {
-      setPanel(!panelOpen());
-      return;
-    }
-
     // rail 快切（theme.js 的委托先跑，类已切好）：回写 mode 保持两键一致。
     if (target.closest('[data-theme-toggle]')) {
       mode = root.classList.contains('dark') ? 'dark' : 'light';
       write(MODE_KEY, mode);
       syncUI();
-      /* 不 return：继续走到下面的点外关闭，收起已打开的面板 */
-    }
-
-    if (panelOpen() && !target.closest('[data-theme-panel]')) {
-      setPanel(false);
     }
   });
 
-  document.addEventListener('keydown', function (event) {
-    if (!event || event.key !== 'Escape') return;
-    // modal 优先：模态打开时让路（19-ued §19.5.1）。
-    if (modalOpen()) return;
-    if (panelOpen()) {
-      if (event.preventDefault) event.preventDefault();
-      setPanel(false);
-      var trigger = document.querySelector('[data-theme-panel-toggle]');
-      if (trigger) trigger.focus();
-    }
-  });
-
+  // Esc 由 Sidebar.vue 处理（它知道面板是否开着，也要把焦点还回触发器）。
+  // 这里只在启动/系统主题变化时同步一次选中态。
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function () {
-      panel = document.querySelector('[data-theme-panel]');
-      syncUI();
-    });
+    document.addEventListener('DOMContentLoaded', syncUI);
   } else {
-    panel = document.querySelector('[data-theme-panel]');
     syncUI();
   }
 })();

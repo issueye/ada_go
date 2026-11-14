@@ -19,7 +19,11 @@
 
 组件（一份 HTML 结构 × 每体系一份皮肤 CSS）：button / input / select / switch /
 checkbox / radio / slider / card / tag / badge / avatar / alert / progress /
-navbar / tabbar / list / dialog / toast。
+navbar / tabbar / list / dialog / toast / tabs / table / pagination。
+
+体系数据的单一真源是 [`internal/design/data/*.json`](internal/design/data)
+（8 套内置体系，`gen_export` 可校验/回写）；新增或修订体系改 JSON 即可，
+颜色合法、字体可商用、组件可渲染等不变量仍由门禁测试把关。
 
 ## 项目 → 规范 → 预览（设计稿必须归属项目）
 
@@ -33,8 +37,9 @@ project_create（或 project_list 选已有）
               └─► 画布只显示该项目；canvas_export 也只导该项目
 ```
 
-> 升级说明：`canvas.json` 从 v2 升到 v3。旧数据（没有 `project_id` 的节点）在首次加载时
-> 自动归入固定项目 `p-default`「默认项目（历史数据）」，不会丢稿，也不会给新稿开后门。
+> 升级说明：`canvas.json` v2→v3 引入项目归属；v3→v4（当前）把节点正文拆到
+> `nodes/<id>.html` 分文件、索引只存元数据。旧数据在首次加载时自动迁移
+> （无主节点归入固定项目 `p-default`「默认项目（历史数据）」），不会丢稿。
 
 ## 三层规范（先定尺寸 → 定体系 → 出预览）
 
@@ -84,16 +89,27 @@ GOWORK=off go build -trimpath -o bin/adago-design.exe .
 ## 运行形态（一个二进制，两种模式）
 
 ```powershell
-# 人工查看：只跑画布服务并自动打开浏览器
-bin\adago-design.exe serve            # http://127.0.0.1:8788/
+# 人工查看：只跑画布服务并自动打开浏览器（同时暴露 HTTP MCP：/mcp）
+bin\adago-design.exe serve            # http://127.0.0.1:8788/  +  http://127.0.0.1:8788/mcp
 
-# Agent 接入：stdio MCP + 内嵌画布服务（不自动开浏览器）
+# Agent 接入：stdio MCP + 内嵌画布服务（不自动开浏览器；同样带 /mcp）
 bin\adago-design.exe mcp
 ```
 
 公共参数：`-port 8788`（被占用自动 +1 探测）、`-data <目录>`（默认
 `%APPDATA%\adago-design`，可被 `ADAGO_DESIGN_DATA` 覆盖）、`-open`、
 `-theme dark|light`。
+
+**单实例防护**：绑定端口前先探测 `port..port+20` 是否已有**同数据目录**的
+实例（`/api/health` 回显 `server`/`data_dir`/`rev` 供比对）。命中时：
+`serve` 模式直接委派浏览器打开已有实例并退出（exit 0）；`mcp` 模式快速失败，
+提示关闭旧实例或换 `-data` —— 两个实例同时写同一份 `canvas.json` 会互相覆盖。
+不同数据目录的实例互不冲突，各占各的端口共存。
+
+**持久化加固**：`canvas.json` 紧凑序列化；写盘走「tmp → 旧文件轮换进
+`.bak`/`.bak2` → 就位」三步，任一步失败记入 `lastPersistErr` 并打日志
+（`/api/health` 的 `persist_error` 字段可见），不再静默丢错误；
+主文件缺失或损坏时启动自动从备份降级恢复。
 
 ## MCP 工具
 
@@ -103,27 +119,29 @@ bin\adago-design.exe mcp
 | `project_list` | 列出项目与各自的设计稿数量；不确定 `project` 填什么时先调它 |
 | `project_remove` | 删除**空**项目（`confirm=true`）；项目下仍有设计稿会被拒绝 |
 | `project_canvas` | **画布版式**：按比例预设或自定义宽高设置当前画布，`free=true` 恢复自由画布；读取用 `project_list` |
+| `canvas_resync_artboards` | **按画板显式重算宽高**（可撤销，面板一次回退）：画板/比例切换不会自动迁移已有节点；组件只纠正宽度，整页稿同时纠正宽高 |
 | `design_artboard` | **画板（尺寸规范）**：列表 / 按 ID 取推导值；返回内容区、安全区、栅格、导出倍率与尺寸契约 |
 | `design_fonts` | **字体授权**：可商用 / 可嵌入 / 可再分发标记，各脚本默认字族栈，授权策略 |
 | `design_icons` | **图标库**：按名称/分组/别名检索，返回 `<use>` 引用或独立 `<svg>` |
 | `design_systems` | 列出全部设计体系（含默认画板） |
-| `design_tokens` | 查询 Token（system/theme/category：color/type/spacing/radius/shadow/motion） |
+| `design_tokens` | 查询 Token（system/theme/category：color/type/spacing/radius/shadow/motion）；`brief=true` 精简输出：关键语义色的值、字阶尺寸/字重、间距与圆角阶梯，省略阴影/动效/变体色 |
 | `design_components` | 组件清单；指定 component 返回详情与 HTML 片段 |
 | `design_search` | 跨体系搜索体系/组件/Token |
 | `design_derive` | 从品牌主色派生自定义体系（10 阶色板 + 语义色，结构继承基底），持久化注册 |
 | `design_register` | 注册自定义体系（Token JSON，结构缺省从基底兜底） |
-| `design_audit` | 设计走查：WCAG 对比度/字号/阶梯/状态色 + 字体授权 + 图标一致性 + 尺寸规范，评分 + 报告节点 |
+| `design_audit` | 设计走查：体系级（WCAG 对比度/字号/阶梯/状态色 + 字体授权 + 图标一致性 + 尺寸规范，评分 + 报告节点）；传 `node_id` 改为**节点级走查**（外链资源 / 图标与符号 / 尺寸契约 / 字体授权，走查已生成节点的正文） |
 | `design_preview` | 用某体系把组件渲染成真实预览页（`artboard` 决定宽高、`project` 决定归属），默认自动摆上画布 |
 | `design_screen` | 按模板（login/settings/feed/profile）生成整页真实预览，高度取画板 body 高 |
 | `design_compare` | 两体系 Token 对比（结构化 diff）；可选生成并排对比板节点 |
 | `canvas_add` | 添加任意 HTML 预览卡片（可带 `artboard` 取画板尺寸） |
 | `canvas_list` / `canvas_move` / `canvas_remove` / `canvas_clear` | 画布节点管理 |
+| `canvas_undo` / `canvas_redo` | 撤销 / 重做最近一次画布内容操作（节点增改删、清空、连线；50 步，仅进程内存） |
 | `canvas_arrange` | 节点自动网格排版（体系分组优先） |
 | `canvas_restore` | 恢复最近一次清空（内存快照） |
 | `canvas_export` | 导出整块画布为独立 HTML 文件 |
 | `canvas_connect` | 节点间连线（带标签的贝塞尔曲线，持久化） |
 | `canvas_group` | 分组框（自动包住成员节点，垫底虚线框） |
-| `canvas_screenshot` | 截图画布或单个节点，返回 PNG（需画布已在浏览器打开） |
+| `canvas_screenshot` | 截图画布或单个节点，返回 PNG（需画布已在浏览器打开；超时且允许时自动拉起浏览器并重试一次，每进程至多自动开一次） |
 | `canvas_url` | 获取画布访问地址 |
 
 错误以 `isError` 结果返回并携带稳定错误码：`project_required` / `unknown_project` /
@@ -153,6 +171,43 @@ bin\adago-design.exe mcp
 .\scripts\build-mcp.cmd -Register -IncludeAdagoDesignMcp
 ```
 
+## 接入（Streamable HTTP，推荐）
+
+`serve` / `mcp` 两种模式都会在画布服务上暴露 `POST <BaseURL>/mcp`
+（Streamable HTTP，**无状态**：每个请求一个临时会话，响应用
+`application/json` 而不是 SSE）。Agent 直接连 URL，不必 spawn 子进程，也
+不会和已运行的画布服务抢「同数据目录唯一实例」：
+
+```powershell
+# 先起服务（已在跑就跳过）
+bin\adago-design.exe serve -no-open
+
+# 探活 + 握手（Accept 必须同时含 application/json 与 text/event-stream）
+curl.exe -s http://127.0.0.1:8788/mcp ^
+  -H "Content-Type: application/json" ^
+  -H "Accept: application/json, text/event-stream" ^
+  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\"}}"
+```
+
+DSH（`~/.dsh/profiles/desktop/cordis.patch.yml`）：
+
+```yaml
+- insert:
+    - id: mcp-adago-design
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: adago_design
+        transport: streamable-http
+        url: http://127.0.0.1:8788/mcp
+        toolCallTimeoutMs: 180000
+```
+
+工具随后以 `mcp__adago_design__<tool>` 出现在工具目录（需重载该行或重启
+DSH）。ada-go 侧同一端点写成 `"transport": "http", "url": ".../mcp"` 即可。
+
+端点为无状态实现，所以 `GET /mcp`（旧 HTTP+SSE）与 `DELETE /mcp`（结束会话）
+都返回 405；客户端不需要处理 `Mcp-Session-Id`。
+
 ## 检查模式（蓝湖式元素标注 + 双元素关联）
 
 工具条「检查」开启元素检查模式（`body.mode-inspect` 会把预览 iframe 的
@@ -181,12 +236,25 @@ bin\adago-design.exe mcp
 代际号：hover 高频切换 + `ensureCatalog` 异步，旧请求回来时若代际已变就丢弃，
 避免「鼠标停在 C、面板还显示 B」。
 
+## 同步机制（SSE 推送 + 轻量轮询兜底）
+
+- 画布页连接 `GET /api/events`（SSE）：任何变更 150ms 合帧后立刻拉一次节点列表；
+  节点列表默认**剥掉 html 大字段**（只传元数据 + `html_rev`），Agent 写入的
+  变更即时出现在其它打开的画布页里，空闲流量从「N 节点 × 10KB / 2s」降到 KB 级
+- 新节点 / `html_rev` 变化的节点才按需 `GET /api/nodes/{id}` 取正文；
+  首屏与切项目用 `?include=html` 一次拿全；2s 轮询保留作 SSE 断线兜底
+- Agent 修改画布版式后，画布 UI 即时同步（不再有约 30s 的轮询滞后）
+
 ## 交互性能
 
 - 节点位置走 `transform: translate3d`（`left/top` 恒为 0），位移交给合成器，
   避免每帧 layout 与 iframe 表面重新光栅化
 - 拖动用 `pointerdown` + `setPointerCapture` + rAF 合帧；指针离开窗口也不丢
-- 预览 iframe 默认 `pointer-events:none`，卡片整块可拖可选中
+- 画布平移两种入口：**空白处拖动**（一直可用）与 **按住空格后任意位置拖动**
+  （卡片正文、iframe 上都行）；空格 + 滚轮同样缩放。空格模式在
+  `pointerdown` 捕获阶段接管，卡片不会被误选/误拖，光标变成抓手
+- 预览 iframe 默认 `pointer-events:none`，卡片整块可拖可选中；空格模式下
+  即便在检查模式（iframe 反向放开了事件）也会临时关掉，保证拖动不断线
 - 连线渲染按「脏边增量」更新（元素池化，只改 `d` 属性），空画布零开销
 - 拖动期间关闭面板 `backdrop-filter`，松开后用服务端回包同步 `updated_at`
   （避免轮询误判为远端修改而重载 iframe）
@@ -211,6 +279,9 @@ bin\adago-design.exe mcp
 › 📁 运营活动页          0
 ```
 
+- **展开**：点项目行左侧的 `›` 展开/收起该项目的设计稿子项（子项懒加载，收起再展开
+  走缓存）；`Space` / `→` 展开、`←` 收起、`Enter` 切到该项目。**点行本身**仍是「只看该项目」，
+  两个动作互不抢占 —— 之前 `›` 点不开是漏了 `toggleTreeRow` 的导入（现在是机器门禁）。
 - **全部视图**：一次看所有项目的稿子，按项目分行排布，每行左侧一个橙色标签
   （`项目名 + 数量`，点它只看该项目）。标签做反向缩放，画布缩到 20% 也看得清。
 - **单项目视图**：点项目行即过滤到该项目，标签隐藏；再点「全部」回来。
@@ -241,15 +312,21 @@ bin\adago-design.exe mcp
 
 画布纸张（`#canvas-paper`）只作版式参考：**不裁剪、不拦截事件**，节点仍可拖到边界外
 当草稿区。单画布聚焦（双击卡片/项目树子项）时纸张自动隐藏，居中改为对准该节点。
-Agent 修改画布版式后，画布 UI 约 30s 内低频率刷新同步（无需手动刷新页面）。
+Agent 修改画布版式后，画布 UI 经 SSE 即时同步（无需手动刷新页面）。
 
 ## 截图原理（无 CDP）
 
 `canvas_screenshot` 创建截图任务 → 已打开的画布页面长轮询领取 → 把目标
 预览 HTML 放进离屏 iframe → `SVG foreignObject` 序列化 → `<canvas>` 光栅化
-→ PNG 回传给 MCP。8 秒内没有页面响应则返回 `capture_timeout`，提示先打开
-画布地址。预览内容是纯 CSS（无外链资源、图标为内联 `<symbol>` 精灵），
-渲染安全不失真。
+→ PNG 回传给 MCP。8 秒内没有页面响应则返回 `capture_timeout`；生产模式
+（`mcp` 子命令）会在超时后自动拉起浏览器打开画布并重试一次
+（每进程至多自动开一次，测试/CI 可关）。
+预览内容是纯 CSS（无外链资源、图标为内联 `<symbol>` 精灵），渲染安全不失真；
+所有入库节点 HTML 统一注入 CSP
+（`default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:`，
+见 `internal/canvas/sanitize.go`）—— Agent 经 `canvas_add` 塞入的外链资源会被
+浏览器阻断，不再污染 `foreignObject` 光栅化（改前一张外链图会让整张截图失败），
+内联样式不受影响，设计预览渲染不变。
 
 ## 测试与门禁
 
@@ -257,13 +334,32 @@ Agent 修改画布版式后，画布 UI 约 30s 内低频率刷新同步（无�
 GOWORK=off go test ./...
 GOWORK=off go vet ./...
 GOWORK=off go generate ./internal/design   # 改了图标后同步 icons.js
+node --test internal/canvas/testdata/geometry.test.mjs   # 前端几何纯函数（可选，需 Node）
 ```
 
-- `internal/design`：8 体系 Token 完备性、全部组件可渲染、图标库不变量、
-  字体授权（全部体系可商用）、画板推导值、**渲染产物无 emoji/字符图标**。
-- `internal/canvas`：Store CRUD/持久化/并发、HTTP API 全路径、截图任务闭环。
+画布前端是 ES Modules（`internal/canvas/static/js/`，入口 `main.js`），无构建步骤：
+浏览器直接加载源码，因此静态资源必须带正确的 `Content-Type`（服务端已显式设置）。
+`geometry.test.mjs` 也由 `go test ./internal/canvas` 代理执行，PATH 中没有 node 时自动跳过。
+
+**模块图门禁**（`module_graph_test.go`，纯正则、无需 Node）把三类「浏览器才报错」的
+问题变成红测：① 具名 import 必须是对面真实导出；② `js/**` 每个模块都必须从 `main.js`
+可达（`keyboard.js` 这类只有副作用的模块要显式 `import "…"`，漏挂会静默失效）；
+③ 调用了跨模块导出名却没导入的兜底扫描（典型症状：项目树的 `›` 点不开、画布拖不动 /
+滚轮不缩放，控制台 `ReferenceError`，而 Go 测试与 `go vet` 全绿）。
+同一个文件里还有空格临时平移模式的契约检查（state 开关 / keyboard 按下松开 /
+nodes 捕获阶段接管 / CSS 光标规则）。
+
+- `internal/canvas`：Store CRUD/持久化/并发、HTTP API 全路径、截图任务闭环、
+  **P0 加固**（备份轮换与降级恢复、写盘失败可见、列表剥 HTML、SSE 推送、
+  部分更新指针语义、多实例探测，见 `hardening_test.go`）、
+  **CSP 注入**（注入位置/幂等/旧快照自愈，见 `sanitize_test.go`）。
+- `internal/design`：8 体系 Token 完备性（数据源 `data/*.json`）、全部组件可渲染
+  （21 个，含 tabs/table/pagination）、图标库不变量、字体授权（全部体系可商用）、
+  画板推导值、**渲染产物无 emoji/字符图标**、规格阶梯走查（CSS 字面值须落阶梯）、
+  **节点级走查**（外链/符号/尺寸契约/字体授权，见 `nodeaudit_test.go`）。
 - `internal/mcpserver`：内存 MCP 会话走 `tools/list` + `tools/call` 契约，
-  含 `design_icons` / `design_fonts` / `design_artboard` 与画板透传。
+  含 `design_icons` / `design_fonts` / `design_artboard` 与画板透传、
+  `design_audit` 节点级走查与 `design_tokens` brief（`enhance3_test.go`）。
 
 设计细节见 [DESIGN.md](DESIGN.md)；六项历史问题的分析与改造记录见
 [IMPROVEMENTS.md](IMPROVEMENTS.md)。

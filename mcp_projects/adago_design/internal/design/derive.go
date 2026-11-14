@@ -47,7 +47,8 @@ func Derive(in DeriveInput) (*System, error) {
 		infoHue = bh // 品牌本身就是蓝系，info 跟随
 	}
 
-	id := customID(name, primary)
+	// 同名同主色重复派生时让 ID 递增，而不是静默覆盖已有自定义体系。
+	id := claimID(name, primary)
 	sys := &System{
 		ID:          id,
 		Name:        name,
@@ -201,7 +202,9 @@ func contrastOn(brand string, dark bool) string {
 	return hslToHex(0, 0, 0.12)
 }
 
-// customID 从名称生成稳定 ID；与内置冲突时加后缀。
+// customID 从名称生成稳定 ID（纯函数，不查注册表）。
+// 中文等非 ASCII 字符会被跳过：有品牌主色时用 brand-<hex> 兜底，
+// 否则用 custom；冲突去重交给 claimID。
 func customID(name, primary string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(name) {
@@ -215,13 +218,35 @@ func customID(name, primary string) string {
 		}
 	}
 	id := strings.Trim(b.String(), "-")
-	if id == "" {
-		id = "brand-" + strings.ToLower(strings.TrimPrefix(strings.ToUpper(primary), "#"))
+	if id != "" {
+		return id
 	}
-	if _, taken := GetSystem(id); taken {
-		id += "-x"
+	if primary == "" {
+		return "custom"
 	}
-	return id
+	return "brand-" + strings.ToLower(strings.TrimPrefix(strings.ToUpper(primary), "#"))
+}
+
+// claimIDLocked 在持有 registryMu 写锁时挑选一个未被占用的 ID。
+func claimIDLocked(name, primary string) string {
+	base := customID(name, primary)
+	if _, taken := registry[base]; !taken {
+		return base
+	}
+	for i := 2; ; i++ {
+		id := fmt.Sprintf("%s-%d", base, i)
+		if _, taken := registry[id]; !taken {
+			return id
+		}
+	}
+}
+
+// claimID 在写锁内挑一个未占用的 ID。返回后到真正注册之间仍可能被
+// 并发抢占；同 ID 的并发注册视为「同一逻辑体系」，后写者覆盖前者。
+func claimID(name, primary string) string {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	return claimIDLocked(name, primary)
 }
 
 // ---------------------------------------------------------------------------
@@ -230,6 +255,8 @@ func customID(name, primary string) string {
 
 // RegisterOrReplace 注册或覆盖一个体系（自定义体系用；内置 Register 仍禁重复）。
 func RegisterOrReplace(s *System) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
 	registry[s.ID] = s
 }
 
@@ -296,7 +323,7 @@ func RemoveCustomSystem(id, dir string) error {
 	if sys.Vendor != "自定义 · 品牌派生" {
 		return fmt.Errorf("system %q is builtin and cannot be removed", id)
 	}
-	delete(registry, id)
+	unregisterSystem(id)
 	if dir != "" {
 		p := filepath.Join(dir, "custom-systems", id+".json")
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
@@ -350,17 +377,9 @@ func ValidateCustom(s *System) error {
 }
 
 // ClaimCustomID 为注册体系生成不冲突的 ID（基于名称 slug，冲突自动加序号）。
-func ClaimCustomID(name, dir string) string {
-	base := customID(name, "")
-	if _, taken := GetSystem(base); !taken {
-		return base
-	}
-	for i := 2; ; i++ {
-		id := fmt.Sprintf("%s-%d", base, i)
-		if _, taken := GetSystem(id); !taken {
-			return id
-		}
-	}
+// dir 预留给「跨数据目录查重」；当前只查进程内注册表。
+func ClaimCustomID(name, _ string) string {
+	return claimID(name, "")
 }
 
 // DeriveBoardHTML 渲染派生体系的品牌色板看板（画布节点用）。

@@ -1,0 +1,339 @@
+{
+  "id": "xiaomi",
+  "name": "小米 MIUI / HyperOS",
+  "vendor": "小米",
+  "family": "mobile",
+  "description": "小米移动端设计语言：MiSans 字族、小米橙主色、24px 级大圆角、暖白背景 + 极轻阴影的「轻」质感。",
+  "style": {
+    "summary": "轻、快、圆润：暖白底大圆角卡片，轻阴影分层，橙色只做点睛，蓝绿灰做功能色。",
+    "keywords": [
+      "MiSans",
+      "小米橙",
+      "大圆角",
+      "轻阴影",
+      "暖白"
+    ],
+    "density": "舒适",
+    "elevation": "轻阴影（6% 黑）为主，配合浅灰描边"
+  },
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "light": {
+    "colors": {
+      "accent-blue": {
+        "value": "#3482FF",
+        "usage": "信息/链接蓝（HyperOS）"
+      },
+      "bg": {
+        "value": "#F7F7F7",
+        "usage": "页面背景（暖白）"
+      },
+      "border": {
+        "value": "#EEEEEE",
+        "usage": "描边/分隔"
+      },
+      "danger": {
+        "value": "#F53F3F",
+        "usage": "危险"
+      },
+      "danger-bg": {
+        "value": "#FFECE8",
+        "usage": "危险浅底"
+      },
+      "fill": {
+        "value": "#F5F5F5",
+        "usage": "填充底"
+      },
+      "primary": {
+        "value": "#FF6900",
+        "usage": "小米橙/主操作"
+      },
+      "primary-active": {
+        "value": "#E05E00",
+        "usage": "主色按下"
+      },
+      "primary-bg": {
+        "value": "#FFF1E6",
+        "usage": "主色浅底"
+      },
+      "primary-hover": {
+        "value": "#FF8226",
+        "usage": "主色悬浮"
+      },
+      "success": {
+        "value": "#23B34A",
+        "usage": "成功"
+      },
+      "success-bg": {
+        "value": "#E8F8EC",
+        "usage": "成功浅底"
+      },
+      "surface": {
+        "value": "#FFFFFF",
+        "usage": "卡片表面"
+      },
+      "text-1": {
+        "value": "#111111",
+        "usage": "一级文字"
+      },
+      "text-2": {
+        "value": "#666666",
+        "usage": "二级文字"
+      },
+      "text-3": {
+        "value": "#999999",
+        "usage": "三级文字/占位"
+      },
+      "text-disabled": {
+        "value": "#CCCCCC",
+        "usage": "禁用"
+      },
+      "warning": {
+        "value": "#FF9F0A",
+        "usage": "警告"
+      },
+      "warning-bg": {
+        "value": "#FFF6E6",
+        "usage": "警告浅底"
+      }
+    },
+    "type": {
+      "family": "\"MiSans\", \"HarmonyOS Sans SC\", Inter, \"Noto Sans SC\", system-ui, \"PingFang SC\", sans-serif",
+      "levels": {
+        "body": {
+          "size": 16,
+          "weight": 400,
+          "lineHeight": 1.5,
+          "usage": "正文"
+        },
+        "body-sm": {
+          "size": 14,
+          "weight": 400,
+          "lineHeight": 1.43,
+          "usage": "紧凑正文"
+        },
+        "caption": {
+          "size": 12,
+          "weight": 400,
+          "lineHeight": 1.33,
+          "usage": "辅助说明"
+        },
+        "display": {
+          "size": 36,
+          "weight": 700,
+          "lineHeight": 1.17,
+          "usage": "数字/大标题"
+        },
+        "title-1": {
+          "size": 26,
+          "weight": 600,
+          "lineHeight": 1.31,
+          "usage": "页面标题"
+        },
+        "title-2": {
+          "size": 21,
+          "weight": 600,
+          "lineHeight": 1.38,
+          "usage": "模块标题"
+        },
+        "title-3": {
+          "size": 17,
+          "weight": 600,
+          "lineHeight": 1.41,
+          "usage": "卡片标题"
+        }
+      }
+    },
+    "spacing": {
+      "lg": 20,
+      "md": 16,
+      "sm": 12,
+      "xl": 24,
+      "xs": 8,
+      "xxl": 32,
+      "xxs": 4
+    },
+    "radius": {
+      "large": 18,
+      "medium": 14,
+      "pill": 100,
+      "small": 10,
+      "xlarge": 24
+    },
+    "shadows": {
+      "card": "0 4px 20px rgba(0,0,0,0.06)",
+      "floating": "0 10px 30px rgba(0,0,0,0.12)",
+      "none": "none"
+    },
+    "motion": {
+      "fast": "150ms cubic-bezier(0.4,0,0.2,1)",
+      "spring": "400ms cubic-bezier(0.34,1.4,0.64,1)",
+      "standard": "250ms cubic-bezier(0.4,0,0.2,1)"
+    },
+    "grid": 8
+  },
+  "dark": {
+    "colors": {
+      "accent-blue": {
+        "value": "#5C9DFF",
+        "usage": "信息/链接蓝"
+      },
+      "bg": {
+        "value": "#111111",
+        "usage": "页面背景"
+      },
+      "border": {
+        "value": "#2A2A2A",
+        "usage": "描边/分隔"
+      },
+      "danger": {
+        "value": "#FF6B6B",
+        "usage": "危险"
+      },
+      "danger-bg": {
+        "value": "#3A1515",
+        "usage": "危险浅底"
+      },
+      "fill": {
+        "value": "#1E1E1E",
+        "usage": "填充底"
+      },
+      "primary": {
+        "value": "#FF8226",
+        "usage": "小米橙（暗色提亮）"
+      },
+      "primary-active": {
+        "value": "#E05E00",
+        "usage": "主色按下"
+      },
+      "primary-bg": {
+        "value": "#3A2413",
+        "usage": "主色浅底"
+      },
+      "primary-hover": {
+        "value": "#FF9C52",
+        "usage": "主色悬浮"
+      },
+      "success": {
+        "value": "#3DCB63",
+        "usage": "成功"
+      },
+      "success-bg": {
+        "value": "#122B18",
+        "usage": "成功浅底"
+      },
+      "surface": {
+        "value": "#1C1C1C",
+        "usage": "卡片表面"
+      },
+      "text-1": {
+        "value": "#F2F2F2",
+        "usage": "一级文字"
+      },
+      "text-2": {
+        "value": "#B3B3B3",
+        "usage": "二级文字"
+      },
+      "text-3": {
+        "value": "#808080",
+        "usage": "三级文字/占位"
+      },
+      "text-disabled": {
+        "value": "#4D4D4D",
+        "usage": "禁用"
+      },
+      "warning": {
+        "value": "#FFB84D",
+        "usage": "警告"
+      },
+      "warning-bg": {
+        "value": "#3A2A0F",
+        "usage": "警告浅底"
+      }
+    },
+    "type": {
+      "family": "\"MiSans\", \"HarmonyOS Sans SC\", Inter, \"Noto Sans SC\", system-ui, \"PingFang SC\", sans-serif",
+      "levels": {
+        "body": {
+          "size": 16,
+          "weight": 400,
+          "lineHeight": 1.5,
+          "usage": "正文"
+        },
+        "body-sm": {
+          "size": 14,
+          "weight": 400,
+          "lineHeight": 1.43,
+          "usage": "紧凑正文"
+        },
+        "caption": {
+          "size": 12,
+          "weight": 400,
+          "lineHeight": 1.33,
+          "usage": "辅助说明"
+        },
+        "display": {
+          "size": 36,
+          "weight": 700,
+          "lineHeight": 1.17,
+          "usage": "数字/大标题"
+        },
+        "title-1": {
+          "size": 26,
+          "weight": 600,
+          "lineHeight": 1.31,
+          "usage": "页面标题"
+        },
+        "title-2": {
+          "size": 21,
+          "weight": 600,
+          "lineHeight": 1.38,
+          "usage": "模块标题"
+        },
+        "title-3": {
+          "size": 17,
+          "weight": 600,
+          "lineHeight": 1.41,
+          "usage": "卡片标题"
+        }
+      }
+    },
+    "spacing": {
+      "lg": 20,
+      "md": 16,
+      "sm": 12,
+      "xl": 24,
+      "xs": 8,
+      "xxl": 32,
+      "xxs": 4
+    },
+    "radius": {
+      "large": 18,
+      "medium": 14,
+      "pill": 100,
+      "small": 10,
+      "xlarge": 24
+    },
+    "shadows": {
+      "card": "0 4px 20px rgba(0,0,0,0.4)",
+      "floating": "0 10px 30px rgba(0,0,0,0.55)",
+      "none": "none"
+    },
+    "motion": {
+      "fast": "150ms cubic-bezier(0.4,0,0.2,1)",
+      "spring": "400ms cubic-bezier(0.34,1.4,0.64,1)",
+      "standard": "250ms cubic-bezier(0.4,0,0.2,1)"
+    },
+    "grid": 8
+  },
+  "guideline": [
+    "MiSans 是体系身份的一部分，Web 预览退级到 PingFang/雅黑需保持字重节奏（600 标题 / 400 正文）。",
+    "卡片圆角 18-24：越大的表面用越大的圆角；小控件（开关、标签）用 10-14。",
+    "小米橙是点睛色：主按钮、关键数据、进度；不要给整个界面刷橙。",
+    "信息/链接用 accent-blue，与品牌橙严格分工。",
+    "阴影克制（6% 黑），主要靠 surface 与 bg 的明度差分层。",
+    "移动端正文 16px，紧凑场景 14px，最小 12px。"
+  ]
+}

@@ -4,7 +4,6 @@ package web
 
 import (
 	"encoding/json"
-	"html/template"
 	"net/http"
 	"strings"
 	"testing"
@@ -13,16 +12,9 @@ import (
 
 type budgetPlugUI struct{ calls int }
 
-func (p *budgetPlugUI) Slot(string, *http.Request) (template.HTML, int, error) { return "", 0, nil }
-func (p *budgetPlugUI) Page(string, string, *http.Request) (template.HTML, error) {
-	return "", ErrExtNotFound
-}
-func (p *budgetPlugUI) Styles() []string  { return nil }
-func (p *budgetPlugUI) Scripts() []string { return nil }
-func (p *budgetPlugUI) RenderBlock(r *http.Request, rendererID, blockID string, version int, data json.RawMessage) (json.RawMessage, template.HTML, error) {
+func (p *budgetPlugUI) RenderBlock(r *http.Request, rendererID, blockID string, version int, data json.RawMessage) (json.RawMessage, error) {
 	p.calls++
-	return json.RawMessage(`{"t":"div","p":{"class":"adag-ui-block"},"c":[{"t":"#text","v":"block hi"}]}`),
-		template.HTML(`<div class="adag-ui-block">block hi</div>`), nil
+	return json.RawMessage(`{"t":"div","p":{"class":"adag-ui-block"},"c":[{"t":"#text","v":"block hi"}]}`), nil
 }
 
 // TestBlockBudgetTake 钉住请求级预算：块数上限、墙钟截止与 nil（不限）。
@@ -49,17 +41,17 @@ func TestBlockBudgetTake(t *testing.T) {
 }
 
 // TestBlockBudgetExhaustedFallsBack 钉住预算耗尽的降级方向：
-// 不再执行渲染器，按普通代码块输出（内容仍可见）。
+// 不再执行渲染器，AST 里按普通代码块输出（内容仍可见）。
 func TestBlockBudgetExhaustedFallsBack(t *testing.T) {
 	ui := &budgetPlugUI{}
 	srv := &Server{cfg: Config{PluginUI: ui}}
 	text := "```adag-ui\n{\"renderer\":\"demo/card\",\"data\":{}}\n```"
-	html := srv.renderMarkdownWithBlocks(nil, text, &blockBudget{remaining: 0, deadline: time.Now().Add(time.Minute)})
-	if strings.Contains(string(html), "block hi") {
-		t.Fatalf("预算耗尽后不应调用渲染器: %s", html)
+	raw := srv.markdownNodesJSONWithBlocks(nil, text, &blockBudget{remaining: 0, deadline: time.Now().Add(time.Minute)})
+	if strings.Contains(string(raw), "block hi") {
+		t.Fatalf("预算耗尽后不应调用渲染器: %s", raw)
 	}
-	if !strings.Contains(string(html), "language-adag-ui") {
-		t.Fatalf("预算耗尽应退回普通代码块: %s", html)
+	if !strings.Contains(string(raw), "language-adag-ui") {
+		t.Fatalf("预算耗尽应退回普通代码块: %s", raw)
 	}
 	if ui.calls != 0 {
 		t.Fatalf("渲染器调用了 %d 次，期望 0", ui.calls)

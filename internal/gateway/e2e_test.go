@@ -347,7 +347,7 @@ func TestGatewayE2E(t *testing.T) {
 	}
 	t.Logf("/healthz OK（免鉴权）")
 
-	// 2. 首页：Bearer token，渲染会话列表（这一步会触发 Core spawn）。
+	// 2. 首页：Bearer token，返回 SPA shell（会话列表由客户端取 JSON）。
 	pageStart := time.Now()
 	resp, body = doRequest(t, client, newRequest(t, http.MethodGet, endpoint+"/", hs.Token, nil))
 	firstPageMS := time.Since(pageStart).Milliseconds()
@@ -357,10 +357,10 @@ func TestGatewayE2E(t *testing.T) {
 	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/html") {
 		t.Fatalf("首页 Content-Type = %q，期望 text/html", ct)
 	}
-	if !strings.Contains(body, `class="ada-brand"`) || !strings.Contains(body, "ada-go") {
-		t.Fatalf("首页未包含品牌标识；正文片段: %.800s", body)
+	if !strings.Contains(body, `id="app"`) || !strings.Contains(body, `id="ada-bootstrap"`) || !strings.Contains(body, "ada-go") {
+		t.Fatalf("首页未包含 SPA shell 标识；正文片段: %.800s", body)
 	}
-	t.Logf("首页 OK（含品牌，%.0f ms）", float64(firstPageMS))
+	t.Logf("首页 OK（shell + bootstrap，%.0f ms）", float64(firstPageMS))
 
 	// 3. 建会话：表单 title，期望 303 到 /thread/{id}。
 	resp, body = doRequest(t, client, newRequest(t, http.MethodPost, endpoint+"/threads", hs.Token,
@@ -382,19 +382,21 @@ func TestGatewayE2E(t *testing.T) {
 		t.Fatalf("POST %s/turn 状态 = %d，期望 303；正文: %.800s", threadPath, resp.StatusCode, body)
 	}
 
-	// 5. 轮询会话页，直到出现 fake 回显或 10s 超时。
+	// 5. 轮询对话流 JSON，直到出现 fake 回显或 10s 超时。
+	// （页面是 SPA shell，回显由客户端经 /partials/transcript/{id} 渲染。）
 	turnStart := time.Now()
 	deadline := turnStart.Add(10 * time.Second)
 	var lastStatus int
 	var lastBody string
 	for {
-		resp, body = doRequest(t, client, newRequest(t, http.MethodGet, endpoint+threadPath, hs.Token, nil))
+		resp, body = doRequest(t, client, newRequest(t, http.MethodGet,
+			endpoint+"/partials/transcript"+strings.TrimPrefix(threadPath, "/threads"), hs.Token, nil))
 		lastStatus, lastBody = resp.StatusCode, body
 		if resp.StatusCode == http.StatusOK && strings.Contains(body, "fake: hello e2e") {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("10s 内未在会话页看到回显（最后状态 %d）；正文片段: %.1200s\nstderr: %s",
+			t.Fatalf("10s 内未在对话流 JSON 看到回显（最后状态 %d）；正文片段: %.1200s\nstderr: %s",
 				lastStatus, lastBody, gw.stderr.String())
 		}
 		time.Sleep(250 * time.Millisecond)

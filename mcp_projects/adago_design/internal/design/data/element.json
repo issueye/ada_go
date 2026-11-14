@@ -1,0 +1,368 @@
+{
+  "id": "element",
+  "name": "Element Plus",
+  "vendor": "Element / 饿了么前端",
+  "family": "web",
+  "description": "Element Plus（Vue3 组件库）：--el-* 语义变量、4px 圆角、清晰描边输入控件、蓝灰功能色的中后台风格。",
+  "style": {
+    "summary": "经典中后台：白底、#DCDFE6 描边、4px 圆角、#409EFF 主色，文本四级灰、状态色带浅底。",
+    "keywords": [
+      "--el-* 变量",
+      "4px 圆角",
+      "描边控件",
+      "中后台"
+    ],
+    "density": "紧凑",
+    "elevation": "卡片轻阴影（.12 黑）+ 描边并用"
+  },
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "light": {
+    "colors": {
+      "bg": {
+        "value": "#FFFFFF",
+        "usage": "页面背景"
+      },
+      "border": {
+        "value": "#DCDFE6",
+        "usage": "默认描边"
+      },
+      "border-light": {
+        "value": "#E4E7ED",
+        "usage": "浅描边"
+      },
+      "border-lighter": {
+        "value": "#EBEEF5",
+        "usage": "更浅描边"
+      },
+      "danger": {
+        "value": "#F56C6C",
+        "usage": "危险（--el-color-danger）"
+      },
+      "danger-bg": {
+        "value": "#FEF0F0",
+        "usage": "危险浅底"
+      },
+      "fill": {
+        "value": "#F0F2F5",
+        "usage": "页面填充（--el-fill-color）"
+      },
+      "fill-light": {
+        "value": "#F5F7FA",
+        "usage": "浅填充"
+      },
+      "info": {
+        "value": "#909399",
+        "usage": "信息（--el-color-info）"
+      },
+      "info-bg": {
+        "value": "#F4F4F5",
+        "usage": "信息浅底"
+      },
+      "primary": {
+        "value": "#409EFF",
+        "usage": "主色（--el-color-primary）"
+      },
+      "primary-bg": {
+        "value": "#ECF5FF",
+        "usage": "主色浅底（light-9）"
+      },
+      "primary-dark": {
+        "value": "#337ECC",
+        "usage": "主色暗（dark-2）"
+      },
+      "primary-light": {
+        "value": "#79BBFF",
+        "usage": "主色亮（light-3）"
+      },
+      "success": {
+        "value": "#67C23A",
+        "usage": "成功（--el-color-success）"
+      },
+      "success-bg": {
+        "value": "#F0F9EB",
+        "usage": "成功浅底"
+      },
+      "surface": {
+        "value": "#FFFFFF",
+        "usage": "卡片表面"
+      },
+      "text-disabled": {
+        "value": "#C0C4CC",
+        "usage": "禁用文字"
+      },
+      "text-placeholder": {
+        "value": "#A8ABB2",
+        "usage": "占位文字"
+      },
+      "text-primary": {
+        "value": "#303133",
+        "usage": "一级文字"
+      },
+      "text-regular": {
+        "value": "#606266",
+        "usage": "常规文字"
+      },
+      "text-secondary": {
+        "value": "#909399",
+        "usage": "次要文字"
+      },
+      "warning": {
+        "value": "#E6A23C",
+        "usage": "警告（--el-color-warning）"
+      },
+      "warning-bg": {
+        "value": "#FDF6EC",
+        "usage": "警告浅底"
+      }
+    },
+    "type": {
+      "family": "Inter, \"Noto Sans SC\", system-ui, \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+      "levels": {
+        "body": {
+          "size": 14,
+          "weight": 400,
+          "lineHeight": 1.5,
+          "usage": "正文/控件默认（--el-font-size-base）"
+        },
+        "extra-small": {
+          "size": 12,
+          "weight": 400,
+          "lineHeight": 1.33,
+          "usage": "辅助说明（--el-font-size-extra-small）"
+        },
+        "large": {
+          "size": 20,
+          "weight": 500,
+          "lineHeight": 1.4,
+          "usage": "大标题（--el-font-size-extra-large 同级）"
+        },
+        "medium": {
+          "size": 18,
+          "weight": 500,
+          "lineHeight": 1.44,
+          "usage": "中标题"
+        },
+        "small": {
+          "size": 13,
+          "weight": 400,
+          "lineHeight": 1.54,
+          "usage": "次要文本"
+        },
+        "title": {
+          "size": 16,
+          "weight": 500,
+          "lineHeight": 1.5,
+          "usage": "卡片/区块标题"
+        }
+      }
+    },
+    "spacing": {
+      "lg": 20,
+      "md": 16,
+      "sm": 12,
+      "xl": 24,
+      "xs": 8,
+      "xxl": 28,
+      "xxs": 4
+    },
+    "radius": {
+      "circle": 100,
+      "large": 8,
+      "medium": 4,
+      "round": 20,
+      "small": 2
+    },
+    "shadows": {
+      "card": "0 2px 4px rgba(0,0,0,0.12), 0 0 6px rgba(0,0,0,0.04)",
+      "dark": "0 2px 4px rgba(0,0,0,0.12), 0 0 6px rgba(0,0,0,0.12)",
+      "floating": "0 2px 12px rgba(0,0,0,0.12)",
+      "none": "none"
+    },
+    "motion": {
+      "fast": "150ms cubic-bezier(0.645,0.045,0.355,1)",
+      "slow": "420ms cubic-bezier(0.165,0.84,0.44,1)",
+      "standard": "300ms cubic-bezier(0.645,0.045,0.355,1)"
+    },
+    "grid": 8
+  },
+  "dark": {
+    "colors": {
+      "bg": {
+        "value": "#141414",
+        "usage": "页面背景"
+      },
+      "border": {
+        "value": "#4C4D4F",
+        "usage": "默认描边"
+      },
+      "border-light": {
+        "value": "#414243",
+        "usage": "浅描边"
+      },
+      "border-lighter": {
+        "value": "#363637",
+        "usage": "更浅描边"
+      },
+      "danger": {
+        "value": "#F56C6C",
+        "usage": "危险"
+      },
+      "danger-bg": {
+        "value": "#2C1D1D",
+        "usage": "危险浅底"
+      },
+      "fill": {
+        "value": "#303030",
+        "usage": "页面填充"
+      },
+      "fill-light": {
+        "value": "#262727",
+        "usage": "浅填充"
+      },
+      "info": {
+        "value": "#909399",
+        "usage": "信息"
+      },
+      "info-bg": {
+        "value": "#1E1E1F",
+        "usage": "信息浅底"
+      },
+      "primary": {
+        "value": "#409EFF",
+        "usage": "主色"
+      },
+      "primary-bg": {
+        "value": "#18222C",
+        "usage": "主色浅底"
+      },
+      "primary-dark": {
+        "value": "#337ECC",
+        "usage": "主色暗"
+      },
+      "primary-light": {
+        "value": "#79BBFF",
+        "usage": "主色亮"
+      },
+      "success": {
+        "value": "#67C23A",
+        "usage": "成功"
+      },
+      "success-bg": {
+        "value": "#1B2A16",
+        "usage": "成功浅底"
+      },
+      "surface": {
+        "value": "#1D1E1F",
+        "usage": "卡片表面"
+      },
+      "text-disabled": {
+        "value": "#6C6E72",
+        "usage": "禁用文字"
+      },
+      "text-placeholder": {
+        "value": "#8D9095",
+        "usage": "占位文字"
+      },
+      "text-primary": {
+        "value": "#E5EAF3",
+        "usage": "一级文字"
+      },
+      "text-regular": {
+        "value": "#CFD3DC",
+        "usage": "常规文字"
+      },
+      "text-secondary": {
+        "value": "#A3A6AD",
+        "usage": "次要文字"
+      },
+      "warning": {
+        "value": "#E6A23C",
+        "usage": "警告"
+      },
+      "warning-bg": {
+        "value": "#2E2415",
+        "usage": "警告浅底"
+      }
+    },
+    "type": {
+      "family": "Inter, \"Noto Sans SC\", system-ui, \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+      "levels": {
+        "body": {
+          "size": 14,
+          "weight": 400,
+          "lineHeight": 1.5,
+          "usage": "正文/控件默认（--el-font-size-base）"
+        },
+        "extra-small": {
+          "size": 12,
+          "weight": 400,
+          "lineHeight": 1.33,
+          "usage": "辅助说明（--el-font-size-extra-small）"
+        },
+        "large": {
+          "size": 20,
+          "weight": 500,
+          "lineHeight": 1.4,
+          "usage": "大标题（--el-font-size-extra-large 同级）"
+        },
+        "medium": {
+          "size": 18,
+          "weight": 500,
+          "lineHeight": 1.44,
+          "usage": "中标题"
+        },
+        "small": {
+          "size": 13,
+          "weight": 400,
+          "lineHeight": 1.54,
+          "usage": "次要文本"
+        },
+        "title": {
+          "size": 16,
+          "weight": 500,
+          "lineHeight": 1.5,
+          "usage": "卡片/区块标题"
+        }
+      }
+    },
+    "spacing": {
+      "lg": 20,
+      "md": 16,
+      "sm": 12,
+      "xl": 24,
+      "xs": 8,
+      "xxl": 28,
+      "xxs": 4
+    },
+    "radius": {
+      "circle": 100,
+      "large": 8,
+      "medium": 4,
+      "round": 20,
+      "small": 2
+    },
+    "shadows": {
+      "card": "0 2px 4px rgba(0,0,0,0.4), 0 0 6px rgba(0,0,0,0.3)",
+      "dark": "0 2px 4px rgba(0,0,0,0.5), 0 0 6px rgba(0,0,0,0.4)",
+      "floating": "0 2px 12px rgba(0,0,0,0.5)",
+      "none": "none"
+    },
+    "motion": {
+      "fast": "150ms cubic-bezier(0.645,0.045,0.355,1)",
+      "slow": "420ms cubic-bezier(0.165,0.84,0.44,1)",
+      "standard": "300ms cubic-bezier(0.645,0.045,0.355,1)"
+    },
+    "grid": 8
+  },
+  "guideline": [
+    "正文与控件默认 14px（--el-font-size-base），辅助 12px，标题 16-20px。",
+    "文本四级：text-primary / regular / secondary / placeholder，不要混用灰阶。",
+    "描边三档：border（控件）、border-light（卡片内分隔）、border-lighter（弱分隔）。",
+    "主色阶：hover 用 primary-light，active 用 primary-dark，浅底提示用 primary-bg。",
+    "表单控件是描边风格（非填充），focus 时描边变主色。",
+    "卡片 = 4px 圆角 + border-light 描边 + card 阴影；圆角最大到 8，按钮可用 round。"
+  ]
+}

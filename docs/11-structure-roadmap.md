@@ -38,7 +38,7 @@ ada-go/
       tool-discovery/       find_tool/exec_tool（系统插件；宿主桥 tool.discovery）
       persona-coding/ provider-admin/ token-usage/
       env-manager/ cron-manager/ composer-telemetry/ plugin-helper/
-      mcp-client/ browser-use/ ui-charts/ ui-hello-tsx/
+      mcp-client/ browser-use/ ui-charts/ ui-hello/
     hello-tsx/ task-plan/ ask-user/   第三方示例（安装时编译）
   products/
     coding.agent.json

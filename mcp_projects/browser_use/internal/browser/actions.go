@@ -381,12 +381,13 @@ func (t *Tab) ensureRuntime(ctx context.Context) error {
 	if t.runtimeReady.Load() {
 		return nil
 	}
+	src := t.runtimeSource()
 	for i := 0; i < 3; i++ {
 		if v, err := t.Page.EvalContext(ctx, "typeof window.__browserUse"); err == nil && v == "object" {
 			t.runtimeReady.Store(true)
 			return nil
 		}
-		if _, err := t.Page.EvalContext(ctx, runtime.Source()); err == nil {
+		if _, err := t.Page.EvalContext(ctx, src); err == nil {
 			if v, err := t.Page.EvalContext(ctx, "typeof window.__browserUse"); err == nil && v == "object" {
 				t.runtimeReady.Store(true)
 				return nil
@@ -399,6 +400,15 @@ func (t *Tab) ensureRuntime(ctx context.Context) error {
 		}
 	}
 	return &Error{Code: CodeUnsupported, Message: "page runtime is not installed", Hint: "reload the page"}
+}
+
+// runtimeSource re-evaluates the exact preload source this tab was created
+// with, so a restored page still shares the process frame token.
+func (t *Tab) runtimeSource() string {
+	if t.frameToken == "" {
+		return runtime.Source()
+	}
+	return runtime.SourceWithToken(t.frameToken)
 }
 
 func (t *Tab) invoke(ctx context.Context, op string, args any) (json.RawMessage, error) {
@@ -414,7 +424,14 @@ func (t *Tab) invoke(ctx context.Context, op string, args any) (json.RawMessage,
 	if err != nil {
 		return nil, &Error{Code: CodeInternal, Message: err.Error()}
 	}
-	code := "window.__browserUse.invoke(" + string(payload) + ")"
+	token, err := json.Marshal(t.frameToken)
+	if err != nil {
+		return nil, &Error{Code: CodeInternal, Message: err.Error()}
+	}
+	// The token is the runtime's per-process secret; it lets Go drive iframe
+	// relay and the input mask, while page scripts calling the same invoke
+	// without it are rejected.
+	code := "window.__browserUse.invoke(" + string(payload) + "," + string(token) + ")"
 	raw, err := t.evalString(ctx, code)
 	if err != nil {
 		if ctx.Err() != nil {

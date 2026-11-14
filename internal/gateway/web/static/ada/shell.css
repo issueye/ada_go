@@ -1,0 +1,601 @@
+/* shell.css —— SPA shell 的**增量**样式。
+   只放 a_da（ui/*.css + app.css）没有定义的 SPA 专属类，通用布局类
+   （.ada-shell/.ada-sidebar/.ada-main/.ada-topbar/.ada-composer/.ada-row…）
+   一律不在本文件重复定义——2026-11-11 走查发现的「左侧空白」正是
+   早期版本在这里重写了 .ada-shell 为 grid，覆盖掉 ui/shell.css 的 flex 外壳。
+   只使用 a_da 令牌（--ph-* / --ada-*），禁硬编码色值（verify ui 纪律）。 */
+
+/* ada-host：编译器没有 <template> 包装元素（保留标签），需要多兄弟节点的
+   v-for/v-if 分组时用它包一层；display:contents 让布局与无包装一致。 */
+.ada-host {
+	display: contents;
+}
+
+/* ── 插件页面框（2026-11-11）：所有 /ext/:id/:slug 页面的统一外壳 ──────────
+   .ada-main 是 flex 列，页面必须自己吃掉剩余高度并在内部滚动，否则插件内容
+   一长就把整页顶出视口（走查：cron 页没有内部滚动条，只能整窗滚动）。
+   .ada-page 负责「占满剩余高度」，.ada-page__scroll 负责滚动，
+   .ada-page__inner 负责内容框（宽度、内边距、纵向节奏）。
+   基座页面用 .ada-scroll + .ada-wrap--page，两者视觉一致：1040 / 28 / 18。 */
+.ada-page {
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	min-height: 0;
+	overflow: hidden;
+}
+
+.ada-page__scroll {
+	flex: 1 1 auto;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	scrollbar-gutter: stable;
+}
+
+.ada-page__inner {
+	display: flex;
+	flex-direction: column;
+	gap: var(--ada-space-4, 14px);
+	width: 100%;
+	max-width: 1040px;
+	margin-inline: auto;
+	padding: 18px 28px 32px;
+	box-sizing: border-box;
+}
+
+/* 插件页面头的统一形态：标题 + 提示 + 右侧动作；各插件只决定放什么。 */
+.ada-page__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	flex-wrap: wrap;
+}
+
+.ada-page__titles {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	min-width: 0;
+}
+
+.ada-page__title {
+	margin: 0;
+	color: var(--ph-ink);
+	font-size: var(--ada-text-xl);
+	font-weight: 600;
+	letter-spacing: -0.01em;
+}
+
+.ada-page__actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+/* ── 插件页面视觉归一（2026-11-11）────────────────────────────────────────
+   8 个官方插件各自的 .xx-head / .xx-title / .xx-page 是从 SSR 时代继承下来的，
+   尺寸与间距互有出入（标题 18/20px、页头 gap 12/16px、卡片圆角与内边距不一）。
+   宿主在这里按「一套页面语言」统一**结构层**的取值：标题级差、页头节距、
+   卡片圆角与内边距、按钮高度与输入高度。各插件的颜色与内部布局不动。
+   选择器限定在 [data-plugin-page] 之下，只作用于插件页面，不影响基座页面。 */
+[data-plugin-page] h1 {
+	margin: 0;
+	color: var(--ph-ink);
+	font-size: var(--ada-text-xl);
+	font-weight: 600;
+	letter-spacing: -0.01em;
+	line-height: 1.35;
+}
+
+/* 页头：标题与动作同一行，窄屏换行后动作靠右。 */
+[data-plugin-page] :is(.cm-head, .pm-head, .tu-head, .em-head, .mc-head) {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--ada-space-3, 12px);
+	flex-wrap: wrap;
+	padding-bottom: var(--ada-space-1, 4px);
+	border-bottom: 1px solid var(--ph-line);
+}
+
+/* 页头动作：统一成 a_da 的按钮高度与节距（各插件的 .xx-btn 只保留配色）。 */
+[data-plugin-page] :is(.cm-actions, .pm-head__actions, .tu-actions, .em-actions, .mc-actions) {
+	display: flex;
+	align-items: center;
+	gap: var(--ada-space-2, 8px);
+	flex-wrap: wrap;
+}
+
+[data-plugin-page] :is(.cm-btn, .pm-head__actions > button, .tu-btn, .em-btn, .mc-btn) {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	height: 30px;
+	padding: 0 12px;
+	border-radius: var(--ada-radius-sm);
+	font-size: var(--ada-text-sm);
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+/* 卡片：同一套圆角与内边距（各插件只决定卡片内部怎么排）。 */
+[data-plugin-page] :is(.cm-card, .pm-card, .tu-card, .em-card, .mc-card) {
+	border: 1px solid var(--ph-line);
+	border-radius: var(--ada-radius-md);
+	background: var(--ph-surface);
+	box-shadow: none;
+	overflow: hidden;
+}
+
+/* 文本控件：原生 input/select 与各插件的 .xx-input 统一高度与描边。 */
+[data-plugin-page] :is(input[type="text"], input[type="search"], select, textarea, .cm-input, .pm-input, .tu-input, .em-input, .mc-input) {
+	height: 32px;
+	padding: 0 10px;
+	border: 1px solid var(--ph-line);
+	border-radius: var(--ada-radius-sm);
+	background: var(--ph-canvas);
+	color: var(--ph-ink);
+	font: inherit;
+	font-size: var(--ada-text-sm);
+	outline: none;
+}
+
+[data-plugin-page] textarea {
+	height: auto;
+	min-height: 84px;
+	padding: 8px 10px;
+	resize: vertical;
+}
+
+[data-plugin-page] :is(input[type="text"], input[type="search"], select, .cm-input, .pm-input, .tu-input, .em-input, .mc-input):focus {
+	border-color: var(--ada-focus-border);
+	box-shadow: var(--ada-focus-ring);
+}
+
+/* ── 侧栏工作区列表（2026-11-11 调整）────────────────────────────────────
+   所有工作区在同一条可滚动列表里逐组折叠（不再分「当前 / 其它」两块各自滚动，
+   也没有分区标题）。a_da 的 .ada-ws__summary 是给 <summary> 写的，这里换成
+   <button>（点击切换展开、不再依赖 details 的原生开合），保留同一套观感。 */
+.ada-ws-list {
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	gap: 1px;
+	min-height: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	scrollbar-width: thin;
+}
+
+.ada-ws-head__btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border: 0;
+	border-radius: var(--ada-radius-sm);
+	background: transparent;
+	color: var(--ph-faint);
+	cursor: pointer;
+	transition: background var(--ada-transition), color var(--ada-transition);
+}
+
+.ada-ws-head__btn:hover {
+	background: var(--ph-line);
+	color: var(--ph-ink);
+}
+
+/* 组头：整行可点（展开/折叠 + 切换当前工作区）。 */
+.ada-ws__summary {
+	width: 100%;
+	border: 0;
+	background: transparent;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+/* ── 主区横滚兜底（2026-11-12）────────────────────────────────────────────
+   .ada-scroll 只声明了 overflow-y: auto，浏览器按「一个轴 auto 就把另一个轴
+   也变成 auto」的规则给了横滚；而页头提示（.ov-tip/.ex-tip 的 ::after 气泡）
+   是 absolute + width: max-content 的伪元素，会把容器的 scrollWidth 撑到
+   1200+，于是所有基座页面底部都常驻一条横向滚动条。内容自身的横向滚动
+   （代码块、表格）都在各自的容器里，这里关掉主区的横滚即可。 */
+.ada-scroll {
+	overflow-x: hidden;
+}
+
+/* ── 侧栏宽度：让 --ada-sidebar-width 在宽屏真正生效（2026-11-12）─────────
+   ui/shell.css 的基线与 ui/pages.css 的响应式档（≤1100px→236px）都在
+   .ada-sidebar 这一级；拖拽写进根变量的宽度会被后面的媒体查询整条覆盖，
+   表现为「拖动没有效果」。这里用更高特异性 + 更晚加载接管宽屏宽度：
+     宽屏展开 → 变量（默认 264，≤1100 由 sidebar-width.js 落 236）
+     宽屏折叠 → 仍是 56px 窄轨（同特异性、写在后面，压过上面那条）
+     窄屏抽屉 → 不进这段，宽度继续由 pages.css 固定 264
+   .ada-side 的内层列同理跟着侧栏走（pages.css 的 236px 只用来定默认值）。 */
+@media (min-width: 761px) {
+	.ada-shell .ada-sidebar {
+		width: var(--ada-sidebar-width, 264px);
+	}
+	.ada-shell .ada-side {
+		width: 100%;
+	}
+	.ada-shell.is-sidebar-collapsed .ada-sidebar {
+		width: 56px;
+	}
+}
+
+/* 组头：整行可点（展开/折叠 + 切换当前工作区）。 */
+.ada-ws__summary {
+	width: 100%;
+	border: 0;
+	background: transparent;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.ada-ws__summary > .ada-icon--chevron {
+	transition: transform var(--ada-transition);
+}
+
+.ada-ws__summary > .ada-icon--chevron.is-open {
+	transform: rotate(90deg);
+}
+
+/* 当前工作区：组头做一点加重，其余保持中性——用户一眼能看出「我在哪个项目」。 */
+.ada-ws.is-current .ada-ws__name {
+	color: var(--ph-ink);
+	font-weight: 600;
+}
+
+.ada-ws.is-current .ada-ws__count {
+	background: var(--ph-brand-soft);
+	color: var(--ph-brand-ink);
+}
+
+/* ── 输入框（2026-11-12 按新版设计重排）────────────────────────────────
+   a_da 的 .ada-composer__* 是 SSR 时代的形态：工具行堆在输入框下方、模型 chip
+   在左侧、运行状态是浮层。新版把结构收敛为：
+     卡片内 = 缩略图 + 文本域 + 工具行（左：＋ 与工作区；右：模型 chip 与发送）
+     卡片上方 = 运行状态（流内，不浮层）
+     卡片下方 = 指标行（tok/s · 缓存命中 · 上下文，来自 composer.footer 插槽）
+   这里只改**位置与尺寸**；颜色仍全部来自设计令牌。 */
+.ada-composer {
+	padding: 8px 24px 4px;
+}
+
+/* 运行状态从浮层回到流内：紧贴输入卡上方，左缘与卡片对齐。 */
+.ada-composer .ada-run-status-dock {
+	position: static;
+	max-width: 860px;
+	margin: 0 auto 6px;
+	padding: 0;
+	pointer-events: none;
+}
+
+.ada-composer .ada-run-status {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 10px;
+	border: 1px solid color-mix(in srgb, var(--ph-brand) 22%, var(--ph-line));
+	border-radius: var(--ada-radius-pill);
+	background: var(--ph-brand-soft);
+	color: var(--ph-brand-ink);
+	font-size: var(--ada-text-xs);
+	line-height: 1.4;
+	pointer-events: auto;
+}
+
+.ada-composer .ada-run-status__mark {
+	color: var(--ph-brand);
+}
+
+.ada-composer .ada-run-status__mark .ada-icon {
+	width: 13px;
+	height: 13px;
+}
+
+/* 悬浮区（composer.above）同样回到流内：插槽为空时不占位。 */
+.ada-composer .ada-float-dock {
+	position: static;
+	max-width: 860px;
+	margin: 0 auto 6px;
+	padding: 0;
+	justify-content: flex-start;
+	flex-wrap: wrap;
+}
+
+.ada-composer .ada-float-dock:empty {
+	display: none;
+}
+
+/* 工具行：左组是「＋ / 工作区」，右组是「模型 chip / 发送」。 */
+.ada-composer__bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 4px 10px 10px;
+}
+
+/* 图片附件：新版是一枚圆形「＋」（与右侧圆形发送键同高），不再是方框图标。 */
+.ada-composer__attach {
+	display: inline-grid;
+	place-items: center;
+	width: 32px;
+	height: 32px;
+	border: 1px solid var(--ph-line);
+	border-radius: var(--ada-radius-pill);
+	background: var(--ph-surface);
+	color: var(--ph-muted);
+	cursor: pointer;
+	transition: background var(--ada-transition), border-color var(--ada-transition),
+		color var(--ada-transition);
+}
+
+.ada-composer__attach:hover {
+	border-color: var(--ph-line-strong);
+	background: var(--ph-subtle);
+	color: var(--ph-ink);
+}
+
+/* 工作区 chip：图标 + 名称 + 下拉箭头，无边框，悬停才有底色。 */
+.ada-composer .ada-tool--workspace {
+	height: 32px;
+	padding: 0 10px;
+	border-radius: var(--ada-radius-pill);
+	color: var(--ph-muted);
+	font-size: var(--ada-text-sm);
+}
+
+/* 模型 chip：「名称 档位 ⌄」，靠右与发送键相邻。 */
+.ada-composer .ada-model-picker__trigger {
+	height: 32px;
+	padding: 0 12px;
+	border: 1px solid var(--ph-line);
+	border-radius: var(--ada-radius-pill);
+	background: var(--ph-surface);
+	color: var(--ph-ink);
+	font-size: var(--ada-text-sm);
+	font-weight: 500;
+	white-space: nowrap;
+}
+
+.ada-composer .ada-model-picker__trigger:hover {
+	border-color: var(--ph-line-strong);
+	background: var(--ph-subtle);
+}
+
+.ada-composer .ada-model-picker__label {
+	flex: 0 1 auto;
+	min-width: 0;
+	color: inherit;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* 发送键：34 → 32，与左侧圆形「＋」同一尺寸（新版输入框的对称感）。 */
+.ada-composer .ada-send {
+	width: 32px;
+	height: 32px;
+}
+
+/* 模型 chip 右侧的「模型设置」文字链接（由插件贡献 composer.right）：
+   与 chip 同一行、同一字号，弱化到文字按钮，不抢发送键。
+   （基座不认识是哪个插件贡献的——这里只给样式类名。） */
+.ada-composer__link {
+	display: inline-flex;
+	align-items: center;
+	height: 32px;
+	padding: 0 6px;
+	border-radius: var(--ada-radius-pill);
+	color: var(--ph-muted);
+	font-size: var(--ada-text-sm);
+	text-decoration: none;
+	white-space: nowrap;
+	transition: background var(--ada-transition), color var(--ada-transition);
+}
+
+.ada-composer__link:hover {
+	background: var(--ph-subtle);
+	color: var(--ph-ink);
+}
+
+/* 卡片下方的指标行：居中三项，弱化到辅助信息层级。 */
+.ada-composer #composer-aux {
+	max-width: 860px;
+	margin: 2px auto 6px;
+	padding: 0 2px;
+}
+
+.ada-composer .ada-aux {
+	justify-content: center;
+	gap: 6px 16px;
+	margin: 0;
+	padding: 0;
+	font-size: var(--ada-text-xs);
+}
+
+/* 单个指标：图标 + 数值，胶囊无边框（悬停不抢注意力）。 */
+.ada-composer .ada-aux__metric {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 6px;
+	border-radius: var(--ada-radius-pill);
+	color: var(--ph-faint);
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+	transition: background var(--ada-transition), color var(--ada-transition);
+}
+
+.ada-composer .ada-aux__metric .ada-icon {
+	color: var(--ph-faint);
+}
+
+.ada-composer .ada-aux__metric:hover {
+	color: var(--ph-muted);
+}
+
+/* 插槽容器：基座按 12 插槽位置摆放贡献，不参与 a_da 布局语义。 */
+.ada-slot {
+	display: flex;
+	flex-direction: column;
+	gap: var(--ada-space-2, 8px);
+}
+
+.ada-slot-error {
+	padding: var(--ada-space-2, 8px);
+	border: 1px solid var(--ph-border-danger, currentColor);
+	border-radius: var(--ada-radius, 6px);
+	color: var(--ph-text-danger, inherit);
+}
+
+/* 确认对话框（基座组件；a_da 无同名类） */
+.ada-confirm-mask {
+	position: fixed;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--ph-overlay, rgb(0 0 0 / 40%));
+	z-index: 100;
+}
+
+.ada-confirm {
+	background: var(--ph-surface-primary, canvas);
+	border-radius: var(--ada-radius, 6px);
+	padding: var(--ada-space-4, 16px);
+	min-inline-size: 280px;
+	display: flex;
+	flex-direction: column;
+	gap: var(--ada-space-3, 12px);
+}
+
+.ada-confirm-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--ada-space-2, 8px);
+}
+
+/* 工具行/提示行的小标签（行容器本身用 a_da 的 .ada-*） */
+.row-tool {
+	color: var(--ph-text-secondary, inherit);
+}
+
+.row-notice.level-error {
+	color: var(--ph-text-danger, var(--ph-text-primary, inherit));
+}
+
+.ada-think summary {
+	color: var(--ph-text-secondary, inherit);
+}
+
+.ada-image {
+	color: var(--ph-text-secondary, inherit);
+}
+
+/* JSON 兜底视图（无 a_da 同名类） */
+.ada-json-view {
+	overflow: auto;
+	font-size: var(--ada-text-xs, 12px);
+	color: var(--ph-text-secondary, inherit);
+}
+
+/* ── Toast（复用 HEAD 的 .ada-flash + [data-flash] 观感）────────────────
+   队列化后由 stack 负责定位；单条 toast 回到流式布局，不再各自 fixed 重叠。 */
+.ada-toast-stack {
+	position: fixed;
+	left: 50%;
+	bottom: var(--ada-space-6, 24px);
+	z-index: 90;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--ada-space-2, 8px);
+	max-width: min(460px, calc(100vw - 40px));
+	transform: translateX(-50%);
+	pointer-events: none;
+}
+
+.ada-toast-stack .ada-flash.alert[data-flash] {
+	position: static;
+	left: auto;
+	bottom: auto;
+	width: max-content;
+	max-width: 100%;
+	transform: none;
+	animation: none;
+	pointer-events: auto;
+}
+
+/* ── 图片查看浮层（大图用 background-image，白名单仍无 <img>）──────────
+   遮罩与关闭按钮沿用 ui/components.css 的 .ada-image-viewer / __close，
+   这里补大图容器、多图切换按钮与计数。 */
+.ada-image-viewer__canvas {
+	width: min(92vw, 1400px);
+	height: min(86vh, 900px);
+	max-width: 100%;
+	max-height: 100%;
+	border-radius: var(--ada-radius-lg, 10px);
+	background-color: transparent;
+	background-position: center;
+	background-repeat: no-repeat;
+	background-size: contain;
+	box-shadow: var(--ph-shadow);
+}
+
+.ada-image-viewer__nav {
+	position: fixed;
+	top: 50%;
+	display: grid;
+	width: 36px;
+	height: 36px;
+	place-items: center;
+	border: 1px solid var(--ph-line-strong);
+	border-radius: 50%;
+	background: var(--ph-elevated);
+	color: var(--ph-ink);
+	opacity: 0.82;
+	transform: translateY(-50%);
+	cursor: pointer;
+}
+
+.ada-image-viewer__nav:hover {
+	opacity: 1;
+}
+
+.ada-image-viewer__nav--prev {
+	left: var(--ada-space-4, 16px);
+}
+
+.ada-image-viewer__nav--next {
+	right: var(--ada-space-4, 16px);
+}
+
+.ada-image-viewer__count {
+	position: fixed;
+	left: 50%;
+	bottom: var(--ada-space-4, 16px);
+	padding: 2px var(--ada-space-2, 8px);
+	border-radius: var(--ada-radius-sm, 4px);
+	background: var(--ph-elevated);
+	color: var(--ph-muted);
+	font-size: var(--ada-text-xs, 12px);
+	transform: translateX(-50%);
+}
+
+/* 助手消息里的内联图片：与正文段落留出一点间距。 */
+.ada-msg__image--inline {
+	margin-block: var(--ada-space-1, 4px);
+}

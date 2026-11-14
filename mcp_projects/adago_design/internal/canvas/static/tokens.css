@@ -111,6 +111,39 @@
   --ui-node-head-h: 32px;
   --ui-node-radius: var(--ui-radius-2xl);
 
+  /* ---------- 几何常量（尺寸/模糊/图标档位；canvas.css 只引用，不写裸 px） ---------- */
+  --ui-blur-toolbar: 10px;
+  --ui-blur-panel: 12px;
+  --ui-icon-12: 12px;
+  --ui-icon-14: 14px;
+  --ui-icon-16: 16px;
+  --ui-icon-20: 20px;
+  --ui-icon-24: 24px;
+  --ui-grid-cell: 40px;       /* 画布网点间距 / 纸张网格 */
+  --ui-grid-bleed: 2px;       /* 网格层外扩，遮住视口边缘 */
+  --ui-menu-min-w: 156px;
+  --ui-tb-menu-min-w: 268px;
+  --ui-tb-menu-max-w: 360px;
+  --ui-tb-menu-max-h: 440px;
+  --ui-tip-max-w: 240px;
+  --ui-modal-w: 580px;
+  --ui-ask-w: 420px;
+  --ui-toast-max-w: 560px;
+  --ui-empty-max-w: 440px;
+  --ui-solo-max-w: 760px;
+  --ui-solo-title-max-w: 230px;
+  --ui-solo-proj-max-w: 160px;
+  --ui-control-xl: 40px;
+  --ui-zoom-min-w: 44px;
+  --ui-field-min-w: 150px;
+  --ui-textarea-min-h: 76px;
+  --ui-edge-label-stroke: 4px;
+  --ui-focus-offset: 2px;
+  /* iframe 内标注层（srcdoc 拿不到父页面变量，启动时内联） */
+  --ui-inspect-border-w: 1.5px;
+  --ui-inspect-label-max-w: 260px;
+  --ui-note-min-h: 120px;
+
   /* ---------- 层级 ---------- */
   --ui-z-paper: 0;
   --ui-z-edge: 1;

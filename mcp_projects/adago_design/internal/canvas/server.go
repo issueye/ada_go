@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"net"
 	"net/http"
+	"net/url"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -53,6 +56,12 @@ type Server struct {
 	// Theme 是界面缺省主题（light|dark），来自 -theme；用户手动切换的
 	// localStorage 覆盖在页面 bootstrap 里完成（见 static/index.html）。
 	Theme string
+	// DataDir 是本实例的数据目录；健康检查回显它，供多实例探测比对
+	// 「是否撞在同一份数据上」（见 instance.go 的 ProbeInstance）。
+	DataDir string
+	// MCP 可选：非 nil 时挂在 /mcp 上（HTTP MCP 端点由装配层注入，
+	// canvas 包不依赖 mcpserver，避免测试包成环）。
+	MCP http.Handler
 }
 
 // NewServer 构造画布服务。
@@ -84,13 +93,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/projects/{id}", s.handleUpdateProject)
 	mux.HandleFunc("DELETE /api/projects/{id}", s.handleDeleteProject)
 	mux.HandleFunc("PUT /api/projects/{id}/canvas", s.handleSetProjectCanvas)
+	mux.HandleFunc("POST /api/artboards/resync", s.handleResyncArtboards)
 	mux.HandleFunc("GET /api/canvas/presets", s.handleCanvasPresets)
 	mux.HandleFunc("GET /api/nodes", s.handleListNodes)
 	mux.HandleFunc("POST /api/nodes", s.handleAddNode)
+	mux.HandleFunc("GET /api/nodes/{id}", s.handleGetNode)
 	mux.HandleFunc("PUT /api/nodes/{id}", s.handleUpdateNode)
 	mux.HandleFunc("DELETE /api/nodes/{id}", s.handleDeleteNode)
 	mux.HandleFunc("POST /api/nodes/clear", s.handleClearNodes)
 	mux.HandleFunc("POST /api/arrange", s.handleArrange)
+	mux.HandleFunc("POST /api/undo", s.handleUndo)
+	mux.HandleFunc("POST /api/redo", s.handleRedo)
+	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("POST /api/capture", s.handleCaptureCreate)
 	mux.HandleFunc("GET /api/tasks", s.handleTaskClaim)
 	mux.HandleFunc("POST /api/tasks/{id}/result", s.handleTaskResult)
@@ -101,17 +115,39 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/catalog/systems", s.handleCatalogSystems)
 	mux.HandleFunc("GET /api/catalog/systems/{id}", s.handleCatalogSystem)
 	mux.HandleFunc("POST /api/catalog/preview", s.handleCatalogPreview)
+	// HTTP MCP（Streamable HTTP）：可选挂载，未注入时 /mcp 落回静态兜底（404）。
+	// 必须按方法逐个注册：不带方法的 "/mcp" 会与下面 "GET /" 的兜底路由冲突
+	// （Go 1.22 mux 认为「方法更窄 + 路径更宽」不可比较）。方法语义交给 SDK，
+	// 它在无状态模式下对 GET/DELETE 回 405。
+	if s.MCP != nil {
+		for _, pattern := range []string{"POST /mcp", "GET /mcp", "DELETE /mcp", "OPTIONS /mcp"} {
+			mux.Handle(pattern, s.MCP)
+		}
+	}
 	// 静态资源
 	staticRoot, _ := fs.Sub(staticFS, "static")
 	fileServer := http.FileServer(http.FS(staticRoot))
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
+			setStaticContentType(w, r.URL.Path)
 			fileServer.ServeHTTP(w, r)
 			return
 		}
 		s.serveIndex(w, r, staticRoot)
 	})
 	return s.guard(mux)
+}
+
+// setStaticContentType 显式声明静态脚本/样式的 MIME。
+// ES 模块由浏览器强制校验 Content-Type：Windows 注册表常把 .js 映成 text/plain，
+// 不覆盖会让所有模块加载失败（经典脚本时代只是宽容地不报错）。
+func setStaticContentType(w http.ResponseWriter, path string) {
+	switch {
+	case strings.HasSuffix(path, ".js"), strings.HasSuffix(path, ".mjs"):
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	case strings.HasSuffix(path, ".css"):
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	}
 }
 
 // serveIndex 输出 index.html，并把缺省主题注入 data-theme 占位符。
@@ -133,40 +169,91 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request, staticRoot f
 	_, _ = w.Write([]byte(body))
 }
 
-// guard 统一处理：Origin 校验（写操作）、panic 兜底。
+// guard 统一处理：Host/Origin 校验（防 DNS rebinding 与跨源写）、panic 兜底。
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tw := &trackedWriter{ResponseWriter: w}
 		defer func() {
 			if rec := recover(); rec != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]any{
+				log.Printf("HTTP handler panic: %v\n%s", rec, debug.Stack())
+				if tw.wrote {
+					// 响应已写出（可能是 SSE/大文件）：无法再补 500，断开连接。
+					panic(http.ErrAbortHandler)
+				}
+				writeJSON(tw, http.StatusInternalServerError, map[string]any{
 					"error": Error{Code: "internal", Message: fmt.Sprint(rec)},
 				})
 			}
 		}()
+		// Host 必须是回环地址：挡住 DNS rebinding（恶意域名解析到 127.0.0.1
+		// 后，浏览器仍会带攻击者域名的 Host）。
+		if !loopbackHost(r.Host) {
+			writeJSON(tw, http.StatusForbidden, map[string]any{
+				"error": Error{Code: "bad_host", Message: "only loopback Host is allowed"},
+			})
+			return
+		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			origin := r.Header.Get("Origin")
-			if origin != "" && !sameLoopbackOrigin(origin) {
-				writeJSON(w, http.StatusForbidden, map[string]any{
+			if origin != "" && !sameOrigin(origin, r.Host) {
+				writeJSON(tw, http.StatusForbidden, map[string]any{
 					"error": Error{Code: "bad_origin", Message: "cross-origin writes are not allowed"},
 				})
 				return
 			}
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(tw, r)
 	})
 }
 
-// sameLoopbackOrigin 仅放行 127.0.0.1/localhost 的 http origin；
-// 空 Origin 视为同源/非浏览器直连，放行。
-func sameLoopbackOrigin(origin string) bool {
-	if origin == "" {
-		return true
+// trackedWriter 记录响应是否已开始写出，供 panic 兜底决定能否补错误页。
+// 必须保留 http.Flusher（SSE 依赖）。
+type trackedWriter struct {
+	http.ResponseWriter
+	wrote bool
+}
+
+// trackedWriter 必须保留 Flush：SSE 长连接依赖 http.Flusher。
+var _ http.Flusher = (*trackedWriter)(nil)
+
+func (w *trackedWriter) WriteHeader(code int) {
+	w.wrote = true
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *trackedWriter) Write(b []byte) (int, error) {
+	w.wrote = true
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *trackedWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
 	}
-	host := strings.TrimPrefix(strings.TrimPrefix(origin, "http://"), "https://")
-	if h, _, err := net.SplitHostPort(host); err == nil {
+}
+
+// loopbackHost 判断 Host 头（可带端口）是否是回环地址。
+func loopbackHost(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
 		host = h
 	}
-	return host == "127.0.0.1" || host == "localhost"
+	host = strings.Trim(host, "[]")
+	switch strings.ToLower(host) {
+	case "127.0.0.1", "localhost", "::1":
+		return true
+	}
+	return false
+}
+
+// sameOrigin 要求写操作的 Origin 与本次请求同源：回环 host、http 协议、
+// 端口完全一致。空 Origin 由调用方放行（非浏览器直连）。
+func sameOrigin(origin, host string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" || u.Scheme != "http" {
+		return false
+	}
+	return loopbackHost(u.Host) && loopbackHost(host) && strings.EqualFold(u.Host, host)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -201,13 +288,28 @@ func decodeBody[T any](w http.ResponseWriter, r *http.Request, dst *T) bool {
 // ---------------- handlers ----------------
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "node_count": len(s.store.List()),
+	m := map[string]any{
+		"ok":            true,
+		"server":        "adago-design",
+		"node_count":    len(s.store.List()),
 		"project_count": len(s.store.ListProjects()),
+		"data_dir":      s.DataDir,
+		"rev":           s.store.Rev(),
 		"time":          time.Now().Format(time.RFC3339),
-	})
+	}
+	if perr := s.store.PersistError(); perr != nil {
+		m["persist_error"] = perr.Error()
+	}
+	writeJSON(w, http.StatusOK, m)
 }
 
+// handleListNodes 返回节点列表。
+//
+// 默认**剥掉 html 大字段**（每张预览文档约 10KB+）：列表轮询只该传元数据，
+// 2s 轮询 × N 节点 × 每个标签页全量拉 HTML 是纯浪费。客户端需要正文时走
+// GET /api/nodes/{id} 按单节点取，或用 ?include=html 一次性拿全量（首屏/切项目）。
+// nodeMeta 用空指针把 html 键从 JSON 里整个去掉，而不是置空字符串 ——
+// 区分「没有正文信息」与「正文为空」。
 func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	project := strings.TrimSpace(r.URL.Query().Get("project"))
 	if project != "" {
@@ -226,7 +328,83 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		}
 		nodes = filtered
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes})
+	if r.URL.Query().Get("include") == "html" {
+		writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes})
+		return
+	}
+	metas := make([]nodeMeta, 0, len(nodes))
+	for i := range nodes {
+		metas = append(metas, nodeMeta{Node: nodes[i]})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"nodes": metas})
+}
+
+// nodeMeta 是节点列表视图：用空指针字段遮蔽嵌入 Node 的 html，
+// 让 "html" 键从 JSON 输出里彻底消失（omitempty 对 nil 指针生效）。
+type nodeMeta struct {
+	Node
+	HTML *struct{} `json:"html,omitempty"`
+}
+
+// handleGetNode 返回单个节点的完整数据（含 html 正文）。
+// 列表默认剥 HTML 后，这是画布 UI 与脚本按需取正文的入口。
+func (s *Server) handleGetNode(w http.ResponseWriter, r *http.Request) {
+	n, err := s.store.Get(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, &Error{Code: "not_found", Message: "节点不存在"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"node": n})
+}
+
+// handleUndo / handleRedo 撤销与重做最近一次画布内容操作（迭代 3-②）。
+// 历史在 Store 内存栈里，进程级共享：任意入口（UI 快捷键 / MCP 工具 /
+// HTTP）撤销后，SSE 会把刷新推给所有打开的画布页。
+func (s *Server) handleUndo(w http.ResponseWriter, _ *http.Request) {
+	desc, ok := s.store.Undo()
+	u, r := s.store.HistoryDepth()
+	writeJSON(w, http.StatusOK, map[string]any{"done": ok, "description": desc, "undo_depth": u, "redo_depth": r})
+}
+
+func (s *Server) handleRedo(w http.ResponseWriter, _ *http.Request) {
+	desc, ok := s.store.Redo()
+	u, r := s.store.HistoryDepth()
+	writeJSON(w, http.StatusOK, map[string]any{"done": ok, "description": desc, "undo_depth": u, "redo_depth": r})
+}
+
+// handleEvents 以 SSE 推送存储变更（GET /api/events）。
+// 连接建立先发一条当前版本号；此后每次存储变更推一条 change 事件，
+// 15s 一条注释心跳保活。客户端收到事件就拉一次节点列表（列表已剥 HTML，代价很小），
+// 轮询保留作降级兜底。
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	fl, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, &Error{Code: "internal", Message: "streaming unsupported"})
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = io.WriteString(w, "retry: 2000\n\n")
+	events, cancel := s.store.Subscribe()
+	defer cancel()
+	writeRev := func() {
+		fmt.Fprintf(w, "event: change\ndata: {\"rev\":%d}\n\n", s.store.Rev())
+		fl.Flush()
+	}
+	writeRev()
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-events:
+			writeRev()
+		case <-heartbeat.C:
+			fmt.Fprint(w, ": ping\n\n")
+			fl.Flush()
+		}
+	}
 }
 
 type addNodeIn struct {
@@ -287,33 +465,49 @@ func (s *Server) handleAddNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"node": created})
 }
 
+// updateNodeIn 是节点部分更新的入参：全部用指针表达「未传 / 传了」，
+// PUT 语义下可以区分「没给字段」与「显式置空」（旧实现用零值判断，
+// 导致标题等字段永远清不掉、空 HTML 无法表达）。
+type updateNodeIn struct {
+	Title      *string  `json:"title"`
+	System     *string  `json:"system"`
+	Artboard   *string  `json:"artboard"`
+	HTML       *string  `json:"html"`
+	Width      *int     `json:"width"`
+	Height     *int     `json:"height"`
+	AutoHeight *bool    `json:"auto_height"`
+	X          *float64 `json:"x"`
+	Y          *float64 `json:"y"`
+	Tags       []string `json:"tags"`
+}
+
 func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var in addNodeIn
+	var in updateNodeIn
 	if !decodeBody(w, r, &in) {
 		return
 	}
 	updated, err := s.store.Update(id, func(n *Node) {
-		if in.Title != "" {
-			n.Title = in.Title
+		if in.Title != nil {
+			n.Title = *in.Title
 		}
-		if in.HTML != "" {
-			n.HTML = in.HTML
+		if in.HTML != nil {
+			n.HTML = *in.HTML
 		}
-		if in.System != "" {
-			n.System = in.System
+		if in.System != nil {
+			n.System = *in.System
 		}
-		if in.Artboard != "" {
-			n.Artboard = in.Artboard
+		if in.Artboard != nil {
+			n.Artboard = *in.Artboard
 		}
 		if in.AutoHeight != nil {
 			n.AutoHeight = *in.AutoHeight
 		}
-		if in.Width > 0 {
-			n.Width = in.Width
+		if in.Width != nil && *in.Width > 0 {
+			n.Width = *in.Width
 		}
-		if in.Height > 0 {
-			n.Height = in.Height
+		if in.Height != nil && *in.Height > 0 {
+			n.Height = *in.Height
 		}
 		if in.X != nil {
 			n.X = *in.X

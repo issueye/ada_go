@@ -23,6 +23,10 @@ type CaptureResult struct {
 	Error     string `json:"error,omitempty"`
 }
 
+// captureTaskTTL 是任务的最长存活时间：超过后无论是否回填结果都会被 GC。
+// 截图 Wait 只等 8s，5 分钟前的任务不会再有调用方在等。
+const captureTaskTTL = 5 * time.Minute
+
 // TaskQueue 管理截图任务：tool 侧创建/等待，UI 侧领取/回填。
 type TaskQueue struct {
 	mu      sync.Mutex
@@ -72,9 +76,11 @@ func (q *TaskQueue) Claim(ctx context.Context) *CaptureTask {
 		if n := len(q.pending); n > 0 {
 			id := q.pending[0]
 			q.pending = q.pending[1:]
-			t := q.tasks[id]
-			q.mu.Unlock()
-			return t
+			if t := q.tasks[id]; t != nil {
+				q.mu.Unlock()
+				return t
+			}
+			continue // 任务已被 GC：跳过这条陈旧 pending 记录
 		}
 		ch := make(chan struct{}, 1)
 		q.waiters["claim"] = append(q.waiters["claim"], ch)
@@ -82,8 +88,10 @@ func (q *TaskQueue) Claim(ctx context.Context) *CaptureTask {
 		select {
 		case <-ch:
 		case <-ctx.Done():
+			q.removeWaiter("claim", ch)
 			return nil
 		case <-time.After(10 * time.Second):
+			q.removeWaiter("claim", ch)
 			return nil
 		}
 		q.mu.Lock()
@@ -120,28 +128,64 @@ func (q *TaskQueue) Wait(ctx context.Context, id string) *CaptureResult {
 		q.mu.Unlock()
 		remain := time.Until(deadline)
 		if remain <= 0 {
+			q.removeWaiter(id, ch)
 			return nil
 		}
 		select {
 		case <-ch:
 		case <-ctx.Done():
+			q.removeWaiter(id, ch)
 			return nil
 		case <-time.After(remain):
+			q.removeWaiter(id, ch)
 			return nil
 		}
 		q.mu.Lock()
 	}
 }
 
-// GC 清理 5 分钟前的完成任务，防泄漏。
+// GC 清理超过 captureTaskTTL 的任务（无论是否回填结果），防长驻泄漏。
+// 被清理任务若仍有等待者，一并唤醒，让 Wait 立即返回 nil；pending 队列
+// 里的陈旧 ID 同步剔除。
 func (q *TaskQueue) GC() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	cutoff := time.Now().Add(-captureTaskTTL)
+	removed := map[string]bool{}
 	for id, t := range q.tasks {
-		if _, done := q.results[id]; done && time.Since(t.CreatedAt) > 5*time.Minute {
-			delete(q.tasks, id)
-			delete(q.results, id)
+		if t.CreatedAt.After(cutoff) {
+			continue
 		}
+		delete(q.tasks, id)
+		delete(q.results, id)
+		removed[id] = true
+		q.wakeLocked(id)
+	}
+	if len(removed) == 0 {
+		return
+	}
+	kept := q.pending[:0]
+	for _, id := range q.pending {
+		if !removed[id] {
+			kept = append(kept, id)
+		}
+	}
+	q.pending = kept
+}
+
+// removeWaiter 从等待表中摘除指定 channel（调用方不持锁）。
+func (q *TaskQueue) removeWaiter(key string, ch chan struct{}) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	list := q.waiters[key]
+	for i, c := range list {
+		if c == ch {
+			q.waiters[key] = append(list[:i], list[i+1:]...)
+			break
+		}
+	}
+	if len(q.waiters[key]) == 0 {
+		delete(q.waiters, key)
 	}
 }
 

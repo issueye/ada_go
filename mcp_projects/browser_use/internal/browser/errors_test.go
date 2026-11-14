@@ -24,7 +24,7 @@ func TestRuntimeErrorCodesAreKnown(t *testing.T) {
 		CodeUnsupported: true, CodeInternal: true, CodeTooManyActions: true,
 		CodeNotEditable: true, CodeNotSelect: true, CodeNoFileInput: true,
 		CodeNoFrame: true, CodeFrameTimeout: true, CodeFrameError: true,
-		CodeRuntimeError: true,
+		CodeRuntimeError: true, CodeForbidden: true,
 		CodeScriptSyntax: true, CodeScriptError: true, CodeScriptTimeout: true,
 		CodeScriptMemory: true, CodeScriptOutput: true, CodeScriptResult: true,
 		CodeScriptSource: true, CodeScriptActions: true, CodeScriptBusy: true,

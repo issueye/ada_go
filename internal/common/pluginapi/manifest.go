@@ -72,26 +72,19 @@ type BlockContribution struct {
 	Version int `json:"version,omitempty"`
 }
 
-// SlotContribution 把一个 TSX 模板挂到某个稳定插槽。
+// SlotContribution 把一个 SFC 组件挂到某个稳定插槽。
+// Component 是 assets 目录内的 .vue 相对路径，由浏览器运行时装载（无 SSR）。
 type SlotContribution struct {
-	Slot     string `json:"slot"`
-	Template string `json:"template"`
-	Order    int    `json:"order"`
-	// Hydrate 为 true 时，该插槽贡献在浏览器用 frontend.client hydrate。
-	Hydrate bool `json:"hydrate,omitempty"`
-	// ClientOnly 为 true 时服务端不渲染模板内容，只输出带岛屿标记的空壳，
-	// 由浏览器用 frontend.client 纯客户端 mount（没有 SSR 回退：插件未启用
-	// 或脚本加载失败时该插槽保持空白）。必须同时声明 hydrate 与 frontend.client。
-	ClientOnly bool `json:"clientOnly,omitempty"`
+	Slot      string `json:"slot"`
+	Component string `json:"component"`
+	Order     int    `json:"order"`
 }
 
-// PageContribution 是 /ext/{id}/{slug} 独立页面。
+// PageContribution 是 /ext/{id}/{slug} 独立页面（SPA 客户端路由）。
 type PageContribution struct {
-	Slug     string `json:"slug"`
-	Template string `json:"template"`
-	Title    string `json:"title"`
-	// Hydrate 为 true 时，该页面在浏览器用 frontend.client hydrate。
-	Hydrate bool `json:"hydrate,omitempty"`
+	Slug      string `json:"slug"`
+	Component string `json:"component"`
+	Title     string `json:"title"`
 }
 
 // NavContribution 是侧栏导航项。
@@ -102,11 +95,10 @@ type NavContribution struct {
 	Order int    `json:"order"`
 }
 
-// DashboardContribution 是概览页卡片。
+// DashboardContribution 是概览页卡片（SFC 组件）。
 type DashboardContribution struct {
-	Widget   string `json:"widget"`
-	Template string `json:"template"`
-	Order    int    `json:"order"`
+	Component string `json:"component"`
+	Order     int    `json:"order"`
 }
 
 // ActionBinding 把界面 binding 名绑到某个插件的后端动作（6.2：跨插件只传 JSON 结果）。
@@ -271,18 +263,12 @@ func (m *Manifest) validateFrontend() error {
 		if !IsSlotName(s.Slot) {
 			return fmt.Errorf("pluginapi: %s 声明未知插槽 %q", m.ID, s.Slot)
 		}
-		if strings.TrimSpace(s.Template) == "" {
-			return fmt.Errorf("pluginapi: %s 在插槽 %s 上没有 template", m.ID, s.Slot)
+		if !validEntryPath(s.Component) || !strings.HasSuffix(s.Component, ".vue") {
+			return fmt.Errorf("pluginapi: %s 的插槽 %s component %q 必须是 assets 内的 .vue 相对路径", m.ID, s.Slot, s.Component)
 		}
-		if s.Hydrate && client == "" {
-			return fmt.Errorf("pluginapi: %s 的插槽 %s 声明了 hydrate 但没有 frontend.client", m.ID, s.Slot)
-		}
-		if s.ClientOnly && !s.Hydrate {
-			return fmt.Errorf("pluginapi: %s 的插槽 %s 声明了 clientOnly 但没有 hydrate（纯客户端挂载必须先声明 hydrate）", m.ID, s.Slot)
-		}
-		key := s.Slot + "\x00" + s.Template
+		key := s.Slot + "\x00" + s.Component
 		if seenSlot[key] {
-			return fmt.Errorf("pluginapi: %s 在插槽 %s 上重复贡献 %q", m.ID, s.Slot, s.Template)
+			return fmt.Errorf("pluginapi: %s 在插槽 %s 上重复贡献 %q", m.ID, s.Slot, s.Component)
 		}
 		seenSlot[key] = true
 	}
@@ -309,11 +295,16 @@ func (m *Manifest) validateFrontend() error {
 		return fmt.Errorf("pluginapi: %s 声明了 %d 个动作，超过上限 %d（7.5）", m.ID, len(f.Actions), MaxBackendActions)
 	}
 	for _, p := range f.Pages {
-		if strings.TrimSpace(p.Slug) == "" || strings.TrimSpace(p.Template) == "" {
-			return fmt.Errorf("pluginapi: %s 的页面贡献缺少 slug 或 template", m.ID)
+		if strings.TrimSpace(p.Slug) == "" {
+			return fmt.Errorf("pluginapi: %s 的页面贡献缺少 slug", m.ID)
 		}
-		if p.Hydrate && client == "" {
-			return fmt.Errorf("pluginapi: %s 的页面 %s 声明了 hydrate 但没有 frontend.client", m.ID, p.Slug)
+		if !validEntryPath(p.Component) || !strings.HasSuffix(p.Component, ".vue") {
+			return fmt.Errorf("pluginapi: %s 的页面 %s component %q 必须是 assets 内的 .vue 相对路径", m.ID, p.Slug, p.Component)
+		}
+	}
+	for _, d := range f.Dashboard {
+		if !validEntryPath(d.Component) || !strings.HasSuffix(d.Component, ".vue") {
+			return fmt.Errorf("pluginapi: %s 的概览卡片 component %q 必须是 assets 内的 .vue 相对路径", m.ID, d.Component)
 		}
 	}
 	seenBlock := make(map[string]bool, len(f.Blocks))

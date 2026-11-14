@@ -1,20 +1,18 @@
 package web
 
-// 本文件是 a_da 组件库（crates/agent-web/src/ui）的 Go 移植：
-//   - 图标 sprite（唯一来源）；
-//   - 侧栏（品牌 / 新会话 / 工作区列表 / 搜索 / 会话树 / 系统导航 / 窄轨）；
-//   - 行渲染与面板所需的少量 HTML 片段；
-//   - Markdown 渲染（助手正文）。
+// 本文件是 a_da 组件库（crates/agent-web/src/ui）的 Go 移植中仍被使用的部分：
+//   - 图标（iconHTML 供模板 FuncMap 与 flashHTML 使用）；
+//   - Markdown 渲染（goldmark + bluemonday 清洗，markdown_vnode.go 的唯一输入）；
+//   - 提示条 flashHTML（login/error 页与 PRG 回执）；
+//   - relativeTime（dashboard.json 的相对时间标签）。
 //
 // 所有动态文本都必须经过 html 包转义；只有本文件生成的 template.HTML 能进模板。
-// 类名、DOM 层级与 a_da 保持同形，CSS 基线（static/ui/*.css）直接复用。
 
 import (
 	"fmt"
 	"html"
 	"html/template"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -26,26 +24,9 @@ import (
 	xhtmlatom "golang.org/x/net/html/atom"
 )
 
-// ---- 转义与类名 ----
+// ---- 转义 ----
 
 func esc(s string) string { return html.EscapeString(s) }
-
-func classList(parts ...string) string {
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return strings.Join(out, " ")
-}
-
-func attr(name, value string) string {
-	if value == "" {
-		return ""
-	}
-	return fmt.Sprintf(` %s="%s"`, name, esc(value))
-}
 
 // ---- 图标 ----
 
@@ -113,39 +94,6 @@ var iconDefs = []iconDef{
 	{"i-wave", `<path d="M2 12h2M7 7v10M12 3v18M17 7v10M22 12h-2"/>`},
 }
 
-// toolIcon 给工具折叠行挑图标：文件、目录、终端、git、计划各自可辨，
-// 认不出来的退回扳手。工具名来自插件（第三方也会有），所以按关键字归类，
-// 顺序即优先级（"skill_search" 要落在 skill，而不是 search）。
-func toolIcon(name string) string {
-	n := strings.ToLower(strings.TrimSpace(name))
-	switch {
-	case n == "":
-		return "i-wrench"
-	case strings.Contains(n, "git"):
-		return "i-git-branch"
-	case strings.Contains(n, "skill"):
-		return "i-sparkles"
-	case strings.Contains(n, "plan"), strings.Contains(n, "todo"), strings.Contains(n, "task"):
-		return "i-list"
-	case strings.Contains(n, "ask"), strings.Contains(n, "question"):
-		return "i-bot"
-	case strings.Contains(n, "search"), strings.Contains(n, "grep"), strings.Contains(n, "find"):
-		return "i-search"
-	case strings.Contains(n, "list"), strings.Contains(n, "glob"), strings.Contains(n, "dir"):
-		return "i-folder"
-	case strings.Contains(n, "write"), strings.Contains(n, "edit"), strings.Contains(n, "patch"):
-		return "i-edit"
-	case strings.Contains(n, "read"), strings.Contains(n, "file"), strings.Contains(n, "cat"):
-		return "i-file"
-	case strings.Contains(n, "run"), strings.Contains(n, "shell"), strings.Contains(n, "exec"),
-		strings.Contains(n, "command"), strings.Contains(n, "bash"), strings.Contains(n, "terminal"):
-		return "i-terminal"
-	case strings.Contains(n, "fetch"), strings.Contains(n, "http"), strings.Contains(n, "web"):
-		return "i-cloud"
-	}
-	return "i-wrench"
-}
-
 func iconHTML(key string, size int) template.HTML {
 	for _, def := range iconDefs {
 		if def.key == key {
@@ -156,17 +104,6 @@ func iconHTML(key string, size int) template.HTML {
 		}
 	}
 	return ""
-}
-
-// iconSprite 是模板侧唯一图标通道：`<use href="#i-xxx">`。
-func iconSprite() template.HTML {
-	var b strings.Builder
-	b.WriteString(`<svg class="ada-sprite" aria-hidden="true" focusable="false" width="0" height="0">`)
-	for _, def := range iconDefs {
-		fmt.Fprintf(&b, `<symbol id="%s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">%s</symbol>`, def.key, def.body)
-	}
-	b.WriteString(`</svg>`)
-	return template.HTML(b.String())
 }
 
 // ---- Markdown ----
@@ -189,6 +126,7 @@ var markdownPolicy = func() *bluemonday.Policy {
 
 // renderMarkdown 把模型正文渲染为 HTML（goldmark + bluemonday 清洗）。
 // 任何解析错误都退回到纯文本段落，绝不把未清洗的 HTML 放出去。
+// 这是 markdown_vnode.go（HTML → VNode JSON）的唯一上游：浏览器只拿结构化数据。
 func renderMarkdown(text string) template.HTML {
 	if strings.TrimSpace(text) == "" {
 		return ""
@@ -262,422 +200,7 @@ func isExternalHref(href string) bool {
 	return false
 }
 
-// ---- 侧栏 ----
-
-type sidebarThread struct {
-	ID        string
-	Title     string
-	Running   bool
-	UpdatedMS int64
-}
-
-type sidebarGroup struct {
-	Key     string
-	Path    string
-	Name    string
-	Index   int // 在网关工作区列表中的下标；会话链接用 ?ws=<index> 显式切工作区
-	Threads []sidebarThread
-	Count   int
-	Running bool
-	Active  bool
-}
-
-type sidebarData struct {
-	Active             string // chat | overview | extensions | ext:<id>
-	Gateway            string
-	Groups             []sidebarGroup
-	ActiveThreadID     string
-	SidebarTop         template.HTML
-	SidebarTopCount    int
-	SidebarBottom      template.HTML
-	SidebarBottomCount int
-	Search             bool
-	Connected          *bool
-	ProductName        string
-	BrandName          string
-	ProductBadge       string
-	// CSRF 进侧栏表单的隐藏字段（双提交校验；桌面壳的 Origin 可能是 null）。
-	CSRF string
-	// CurrentPath 是当前页面路径：删除会话后回到这里（删的是当前会话则回首页）。
-	CurrentPath string
-	// PluginNav 是前端插件贡献的侧栏导航。
-	PluginNav []pluginNavLink
-}
-
-// 主题色板表（docs/14-ui-runtime.md §19.2.2）：id 与显示名驱动侧栏主题面板的色卡。
-// 三色预览不放 Go 侧——CSP style-src 'self' 禁内联 style，色值在 ui/themes.css
-// 的 .ada-swatch--<id> 类里；改名/增删色板必须两边同步（见 themes.css 头注释）。
-type themePalette struct {
-	ID    string
-	Label string
-}
-
-var themePalettes = []themePalette{
-	{"black-swan", "黑天鹅"},
-	{"moss", "苔绿"},
-	{"ocean", "深海"},
-	{"dusk", "暮色"},
-}
-
-var themeModes = []struct {
-	ID    string
-	Label string
-	Icon  string
-}{
-	{"light", "亮色", "i-sun"},
-	{"dark", "暗色", "i-moon"},
-	{"system", "跟随系统", "i-monitor"},
-}
-
-// renderThemePanel 输出侧栏底部的主题面板（默认 hidden，themes.js 开合）。
-// 弹层四要素（19-ued §19.5.1）：点外与 Esc 关闭、开合同步 aria-expanded 在
-// themes.js 的委托里；色卡/三态用 role=radio + aria-checked 表达选中态。
-func renderThemePanel() template.HTML {
-	var b strings.Builder
-	b.WriteString(`<div class="ada-theme-pop" id="ada-theme-panel" data-theme-panel aria-label="主题设置" hidden>`)
-	b.WriteString(`<div class="ada-theme-pop__group" role="radiogroup" aria-label="明暗模式">`)
-	for _, m := range themeModes {
-		fmt.Fprintf(&b,
-			`<button type="button" class="ada-theme-pop__item" role="radio" aria-checked="false" data-theme-mode="%s" title="%s">%s<span>%s</span></button>`,
-			m.ID, m.Label, iconHTML(m.Icon, 14), m.Label,
-		)
-	}
-	b.WriteString(`</div><div class="ada-theme-pop__group" role="radiogroup" aria-label="主题色板">`)
-	for _, p := range themePalettes {
-		fmt.Fprintf(&b,
-			`<button type="button" class="ada-theme-pop__item" role="radio" aria-checked="false" data-theme-pick="%s" title="%s"><span class="ada-swatch ada-swatch--%s" aria-hidden="true"><i></i></span><span>%s</span></button>`,
-			p.ID, p.Label, p.ID, p.Label,
-		)
-	}
-	b.WriteString(`</div></div>`)
-	return template.HTML(b.String())
-}
-
-// renderSidebar 复刻 a_da 的侧栏 DOM（展开态 + 56px 窄轨）。
-func renderSidebar(d sidebarData) template.HTML {
-	var rail strings.Builder
-	rail.WriteString(`<div class="ada-rail">`)
-	// 术语收敛（19-ued §19.2.3）：thread 统一「会话」，不再用「对话」。
-	railTitle := "返回会话"
-	rail.WriteString(fmt.Sprintf(
-		`<a class="ada-rail__mark" href="/" title="%s" aria-label="%s"><img class="ada-rail__logo" src="%s" alt="" width="24" height="24" decoding="async"></a>`,
-		railTitle, railTitle, assetURL("logo.png"),
-	))
-	rail.WriteString(`<a class="ada-rail__btn ada-rail__btn--primary" href="/" data-new-task-link title="新建任务" aria-label="新建任务">`)
-	rail.WriteString(string(iconHTML("i-plus", 14)))
-	rail.WriteString(`</a>`)
-	if d.Search {
-		rail.WriteString(`<button class="ada-rail__btn" type="button" data-rail-search title="搜索会话（Ctrl K）" aria-label="搜索会话">`)
-		rail.WriteString(string(iconHTML("i-search", 18)))
-		rail.WriteString(`</button>`)
-	}
-	head := d.headGroup()
-	if len(head.Threads) > 0 {
-		rail.WriteString(`<span class="ada-rail__sep"></span>`)
-		for i, t := range head.Threads {
-			if i >= 8 {
-				break
-			}
-			initial := "·"
-			if trimmed := strings.TrimSpace(t.Title); trimmed != "" {
-				initial = string([]rune(trimmed)[0])
-			}
-			active := d.ActiveThreadID != "" && t.ID == d.ActiveThreadID
-			rail.WriteString(fmt.Sprintf(
-				`<a class="%s" href="/threads/%s"%s>%s</a>`,
-				classList("ada-rail__thumb", boolClass(active, "is-active")),
-				esc(t.ID), attr("title", t.Title), esc(initial),
-			))
-		}
-	}
-	rail.WriteString(`<span class="ada-rail__spacer"></span>`)
-	rail.WriteString(railLink(d.Active, "extensions", "i-plug", "插件", "/extensions"))
-	rail.WriteString(railLink(d.Active, "overview", "i-chart", "概览", "/overview"))
-	rail.WriteString(`<button class="ada-rail__btn" type="button" data-theme-toggle title="切换深浅色" aria-label="切换深浅色">`)
-	rail.WriteString(string(iconHTML("i-moon", 14)))
-	rail.WriteString(`</button></div>`)
-
-	var b strings.Builder
-	b.WriteString(`<aside class="ada-sidebar" id="chat-sidebar" aria-label="侧栏"><div class="ada-side">`)
-	// 品牌位：始终显示 logo + 品牌名 + 产品徽标；二级页链接回对话。
-	brandLabel := "返回会话"
-	badge := ""
-	if d.ProductBadge != "" {
-		badge = fmt.Sprintf(`<span class="ada-brand__badge">%s</span>`, esc(d.ProductBadge))
-	}
-	b.WriteString(fmt.Sprintf(
-		`<a href="/" class="ada-brand" aria-label="%s" title="%s"><span class="ada-brand__mark ada-brand__mark--logo"><img class="ada-brand__logo" src="%s" alt="" width="28" height="28" decoding="async"></span><span class="ada-brand__name">%s</span>%s</a>`,
-		brandLabel, brandLabel, assetURL("logo.png"), esc(d.BrandName), badge,
-	))
-	b.WriteString(string(RenderSlot("sidebar.top", d.SidebarTop, d.SidebarTopCount, "")))
-	// 新建任务
-	b.WriteString(`<a class="ada-new ada-btn ada-btn--secondary ada-btn--sm" href="/" data-new-task-link title="新建任务（Ctrl N）">`)
-	b.WriteString(string(iconHTML("i-plus", 14)))
-	b.WriteString(`<span>新建任务</span><kbd class="ada-new__kbd">Ctrl N</kbd></a>`)
-	// 工作区列表直接铺在侧栏：每个工作区一组会话，切换不再跳单独的管理页。
-	// 右侧「+」打开工作区目录（有 JS 走 FilePicker，无 JS 退回 /workspaces 目录页）。
-	b.WriteString(`<div class="ada-ws-head"><span class="ada-ws-head__label">工作区</span>`)
-	b.WriteString(fmt.Sprintf(
-		`<a class="ada-ws-head__add" href="/workspaces" data-open-workspace data-current-workspace="%s" title="打开工作区…" aria-label="打开工作区…">%s</a>`,
-		esc(head.Path), iconHTML("i-plus", 14),
-	))
-	b.WriteString(`</div>`)
-	if d.Search {
-		b.WriteString(fmt.Sprintf(
-			`<div class="ada-search">%s<input id="chat-thread-search" class="ada-search__input" type="search" placeholder="搜索会话…" autocomplete="off" aria-label="搜索会话"><kbd class="ada-search__kbd">Ctrl K</kbd><span class="ada-search__count" hidden></span></div>`,
-			iconHTML("i-search", 14),
-		))
-	}
-	// 会话树
-	threadListClass := "ada-thread-list"
-	if len(d.Groups) > 1 {
-		// 有其它工作区时拆成上下两块：当前工作区固定，其它工作区单独滚动。
-		threadListClass += " ada-thread-list--split"
-	}
-	b.WriteString(fmt.Sprintf(`<div class="%s" id="thread-list">`, threadListClass))
-	b.WriteString(renderThreadTree(d.Groups, d.ActiveThreadID, d.CSRF, d.CurrentPath))
-	b.WriteString(`</div>`)
-	// 系统导航
-	b.WriteString(`<nav class="ada-nav ada-nav--util" aria-label="系统">`)
-	if len(d.PluginNav) > 0 {
-		// 分组标签不能叫「插件」：下面紧跟的条目里就有一个「插件」（/extensions
-		// 管理页），同名分组 + 同名条目让人分不清哪一行才是插件清单入口。
-		b.WriteString(`<div class="ada-nav__label"><span>插件页面</span></div>`)
-		// 插件页多时用滚动条展示全部条目（固定高度内滚动），不再截断成「还有 N 个…」。
-		b.WriteString(`<div class="ada-nav__scroll" role="group" aria-label="插件页面" tabindex="0">`)
-		for _, link := range d.PluginNav {
-			active := d.Active == "ext:"+link.PluginID
-			current := ""
-			if active {
-				current = ` aria-current="page"`
-			}
-			b.WriteString(fmt.Sprintf(
-				`<a class="%s" href="%s"%s%s>%s<span class="ada-nav__text">%s</span></a>`,
-				classList("ada-nav__item", boolClass(active, "is-active")),
-				esc(link.Href), current, attr("title", link.Label), iconHTML("i-plug", 14), esc(link.Label),
-			))
-		}
-		b.WriteString(`</div>`)
-	}
-	b.WriteString(navItem(d.Active, "extensions", "i-plug", "插件", "/extensions"))
-	b.WriteString(navItem(d.Active, "overview", "i-chart", "概览", "/overview"))
-	b.WriteString(`</nav>`)
-	b.WriteString(string(RenderSlot("sidebar.bottom", d.SidebarBottom, d.SidebarBottomCount, "")))
-	// 底部：主题 + 网关地址
-	dot, status := "", ""
-	if d.Connected != nil {
-		if *d.Connected {
-			dot, status = `<span class="ada-gateway__dot is-on"></span>`, "已连接"
-		} else {
-			dot, status = `<span class="ada-gateway__dot is-off"></span>`, "未连接"
-		}
-	}
-	title := d.Gateway
-	if status != "" {
-		title = status + " · " + d.Gateway
-	}
-	// 底部：主题面板 + 网关地址。主题按钮升级为面板触发器（19-ued §19.2.2）：
-	// 面板内含明暗三态与色板选择；rail 上的 data-theme-toggle 仍是快速明暗翻转。
-	b.WriteString(fmt.Sprintf(
-		`<div class="ada-sidebar__foot"><div class="ada-theme-wrap"><button class="ada-icon-btn ada-theme" type="button" data-theme-panel-toggle aria-haspopup="true" aria-expanded="false" aria-controls="ada-theme-panel" title="主题设置" aria-label="主题设置"><span class="ada-theme__moon">%s</span><span class="ada-theme__sun">%s</span></button>%s</div><span class="ada-gateway"%s>%s<span class="ada-gateway__addr">%s</span></span></div>`,
-		iconHTML("i-moon", 14), iconHTML("i-sun", 14), renderThemePanel(), attr("title", title), dot, esc(displayAddress(d.Gateway)),
-	))
-	b.WriteString(`</div>`)
-	// 右侧拖拽条：宽屏展开态可左右调整侧栏宽度（JS 接管；窄屏抽屉/窄轨下隐藏）。
-	b.WriteString(`<div class="ada-sidebar__resizer" data-sidebar-resizer role="separator" aria-orientation="vertical" aria-label="调整侧栏宽度" aria-valuemin="200" aria-valuemax="420" aria-valuenow="264" title="拖动调整侧栏宽度（双击恢复默认）" tabindex="0"></div>`)
-	b.WriteString(rail.String())
-	b.WriteString(`</aside>`)
-	return template.HTML(b.String())
-}
-
-func (d sidebarData) headGroup() sidebarGroup {
-	for _, g := range d.Groups {
-		if g.Active {
-			return g
-		}
-	}
-	if len(d.Groups) > 0 {
-		return d.Groups[0]
-	}
-	return sidebarGroup{}
-}
-
-func boolClass(v bool, cls string) string {
-	if v {
-		return cls
-	}
-	return ""
-}
-
-// csrfInput 输出双提交校验用的隐藏字段；空 token 时输出空串（Protect 未配置）。
-func csrfInput(token string) string {
-	if token == "" {
-		return ""
-	}
-	return `<input type="hidden" name="csrf_token" value="` + esc(token) + `">`
-}
-
-func navItem(active, key, icon, label, href string) string {
-	cls := classList("ada-nav__item", boolClass(active == key, "is-active"))
-	current := ""
-	if active == key {
-		current = ` aria-current="page"`
-	}
-	return fmt.Sprintf(`<a class="%s" href="%s"%s>%s<span class="ada-nav__text">%s</span></a>`,
-		cls, esc(href), current, iconHTML(icon, 14), esc(label))
-}
-
-func railLink(active, key, icon, label, href string) string {
-	cls := classList("ada-rail__btn", boolClass(active == key, "is-active"))
-	return fmt.Sprintf(`<a class="%s" href="%s"%s>%s</a>`, cls, esc(href), attr("title", label), iconHTML(icon, 18))
-}
-
-// renderThreadTree 渲染侧栏的工作区/会话树：当前工作区默认展开并直接列出会话；
-// 其它工作区各是一个折叠的 <details>，展开时由 app.js 调
-// GET /partials/workspace-threads 懒加载会话（跨工作区查询会各自拉起 Core，
-// 不适合在每次页面渲染时全量做）。
-func renderThreadTree(groups []sidebarGroup, activeThreadID, csrf, currentPath string) string {
-	if len(groups) == 0 {
-		return `<p class="ada-list-empty">还没有会话</p>`
-	}
-	active := 0
-	for i := range groups {
-		if groups[i].Active {
-			active = i
-			break
-		}
-	}
-	var b strings.Builder
-	b.WriteString(`<div class="ada-ws-scroll ada-ws-scroll--active" data-ws-active>`)
-	b.WriteString(renderWorkspaceGroup(groups[active], activeThreadID, csrf, currentPath))
-	b.WriteString(`</div>`)
-	others := make([]sidebarGroup, 0, len(groups)-1)
-	for i, g := range groups {
-		if i != active {
-			others = append(others, g)
-		}
-	}
-	if len(others) > 0 {
-		// 其它工作区是独立滚动块：滚轮只在这里滚，当前工作区不会跟着滚出视口。
-		b.WriteString(`<div class="ada-ws-scroll ada-ws-scroll--others" data-ws-others>`)
-		b.WriteString(fmt.Sprintf(
-			`<p class="ada-ws__section" data-ws-section><span class="ada-ws__section-label">其它工作区</span><span class="ada-ws__section-count">%d</span></p>`,
-			len(others),
-		))
-		b.WriteString(`<div class="ada-ws-scroll--workArea">`)
-		for _, g := range others {
-			b.WriteString(renderWorkspaceGroup(g, activeThreadID, csrf, currentPath))
-		}
-		b.WriteString(`</div>`)
-		b.WriteString(`</div>`)
-	}
-	return b.String()
-}
-
-// renderWorkspaceGroup 渲染一个工作区组：当前组默认展开、会话已由服务端渲染；
-// 其它组默认折叠、会话由 app.js 在展开时懒加载。
-func renderWorkspaceGroup(g sidebarGroup, activeThreadID, csrf, currentPath string) string {
-	var rows strings.Builder
-	open := ""
-	count := fmt.Sprintf(`<span class="ada-ws__count">%d</span>`, g.Count)
-	if g.Active {
-		open = " open"
-		if len(g.Threads) == 0 {
-			rows.WriteString(`<p class="ada-ws__empty">还没有会话</p>`)
-		} else {
-			for _, t := range g.Threads {
-				rows.WriteString(renderThreadRow(t, activeThreadID, csrf, currentPath, ""))
-			}
-		}
-	} else {
-		count = `<span class="ada-ws__count" data-ws-count hidden></span>`
-		rows.WriteString(`<p class="ada-ws__empty" data-ws-loading>展开以加载会话…</p>`)
-	}
-	running := ""
-	if g.Running {
-		running = `<span class="ada-ws__running" title="该工作区有会话正在运行"><span class="ada-dot ada-dot--warn"></span></span>`
-	}
-	var actions string
-	if g.Active {
-		actions = fmt.Sprintf(
-			`<div class="ada-ws__actions"><a class="ada-ws__action" href="/?ws=%d" title="在此工作区新建任务" aria-label="在此工作区新建任务">%s</a></div>`,
-			g.Index, iconHTML("i-plus", 14),
-		)
-	} else {
-		actions = fmt.Sprintf(
-			`<div class="ada-ws__actions"><form method="post" action="/workspaces/select"><input type="hidden" name="path" value="%s">%s<button class="ada-ws__action" type="submit" title="切换到此工作区" aria-label="切换到此工作区">%s</button></form></div>`,
-			esc(g.Path), csrfInput(csrf), iconHTML("i-check", 14),
-		)
-	}
-	return fmt.Sprintf(
-		`<div class="ada-ws" data-ws-key="%s" data-ws-path="%s" data-ws-index="%d"><details class="ada-ws__details" id="%s"%s><summary class="ada-ws__summary"%s>%s%s<span class="ada-ws__name">%s</span>%s%s</summary><div class="ada-ws__threads" data-ws-threads>%s</div></details>%s</div>`,
-		esc(g.Key), esc(g.Path), g.Index, wsDOMID(g.Key), open, attr("title", g.Path),
-		iconHTML("i-chevron", 12), iconHTML("i-folder", 14), esc(g.Name), running, count, rows.String(), actions,
-	)
-}
-
-// renderWorkspaceThreadRows 渲染一个工作区的会话行（侧栏懒加载片段用）。
-// wsIndex >= 0 时行链接带 ?ws=<index>：点击后网关把工作区 cookie 切到该工作区。
-func renderWorkspaceThreadRows(threads []threadSummaryDTO, wsIndex int, csrf, currentPath string) string {
-	if len(threads) == 0 {
-		return `<p class="ada-ws__empty">还没有会话</p>`
-	}
-	query := ""
-	if wsIndex >= 0 {
-		query = "?ws=" + strconv.Itoa(wsIndex)
-	}
-	var b strings.Builder
-	for _, t := range threads {
-		b.WriteString(renderThreadRow(sidebarThread{
-			ID:        t.ID,
-			Title:     t.Title,
-			UpdatedMS: parseTimeMS(t.UpdatedAt),
-			Running:   t.Running,
-		}, "", csrf, currentPath, query))
-	}
-	return b.String()
-}
-
-func renderThreadRow(t sidebarThread, activeThreadID, csrf, currentPath, wsQuery string) string {
-	active := activeThreadID != "" && t.ID == activeThreadID
-	dot := ""
-	running := "0"
-	if t.Running {
-		dot = `<span class="ada-thread__dot" title="运行中" aria-label="运行中"></span>`
-		running = "1"
-	}
-	elapsed := relativeTime(t.UpdatedMS)
-	timeHTML := ""
-	if elapsed != "" {
-		timeHTML = fmt.Sprintf(`<span class="ada-thread__time"%s>%s</span>`, attr("title", "最后活动："+elapsed), elapsed)
-	}
-	// 运行中的会话不提供删除：避免删掉仍在一轮里的线程。其余会话在悬停/聚焦时
-	// 显示垃圾桶按钮，提交前由 app.js 的 data-confirm 弹窗确认。
-	actions := ""
-	if !t.Running {
-		actions = fmt.Sprintf(
-			`<div class="ada-thread__actions"><form method="post" action="/threads/%s/delete%s" data-confirm="删除会话「%s」？删除后无法恢复。"><input type="hidden" name="next" value="%s">%s<button class="ada-thread__action" type="submit" title="删除会话" aria-label="删除会话">%s</button></form></div>`,
-			esc(t.ID), wsQuery, esc(t.Title), esc(currentPath), csrfInput(csrf), iconHTML("i-trash", 14),
-		)
-	}
-	return fmt.Sprintf(
-		`<div class="%s" data-thread-row="%s"%s><a class="ada-thread__link" href="/threads/%s%s"%s><span class="ada-thread__title">%s</span><span class="ada-thread__meta">%s%s</span></a>%s</div>`,
-		classList("ada-thread", boolClass(active, "is-active")),
-		esc(t.ID), attr("data-thread-running", running),
-		esc(t.ID), wsQuery, attr("title", t.Title), esc(t.Title), dot, timeHTML, actions,
-	)
-}
-
-// wsDOMID 把工作区路径映射成稳定的 DOM id（FNV-1a），避免路径里的分隔符/空格
-// 进 id 属性；同一工作区在多次渲染里得到同一个 id。
-func wsDOMID(key string) string {
-	var hash uint32 = 0x811c9dc5
-	for _, b := range []byte(key) {
-		hash ^= uint32(b)
-		hash *= 0x01000193
-	}
-	return fmt.Sprintf("ws-%08x", hash)
-}
+// ---- 相对时间 ----
 
 func relativeTime(atMS int64) string {
 	if atMS == 0 {
@@ -704,29 +227,6 @@ func relativeTime(atMS int64) string {
 	default:
 		return fmt.Sprintf("%d 年前", secs/31536000)
 	}
-}
-
-func displayAddress(gateway string) string {
-	trimmed := strings.TrimSpace(gateway)
-	for _, scheme := range []string{"http://", "https://", "ws://", "wss://", "pipe://", "unix://"} {
-		if strings.HasPrefix(trimmed, scheme) {
-			return strings.TrimSuffix(strings.TrimPrefix(trimmed, scheme), "/")
-		}
-	}
-	return trimmed
-}
-
-// ---- 共享确认弹窗 ----
-
-func confirmDialogHTML() template.HTML {
-	return template.HTML(`<ada-modal class="ada-modal" data-modal="confirm" data-confirm-dialog hidden>
-  <div class="ada-modal__backdrop" data-modal-close data-confirm-cancel></div>
-  <div class="ada-modal__panel" role="dialog" aria-modal="true" aria-labelledby="ada-confirm-title">
-    <h2 class="ada-modal__title" id="ada-confirm-title">确认操作</h2>
-    <p class="ada-modal__message" data-confirm-message>确认执行这个操作？</p>
-    <div class="ada-modal__actions"><button class="ada-btn ada-btn--secondary ada-btn--sm" type="button" data-modal-close data-confirm-cancel>取消</button><button class="ada-btn ada-btn--primary ada-btn--sm" type="button" data-confirm-ok data-modal-autofocus>确认</button></div>
-  </div>
-</ada-modal>`)
 }
 
 // ---- 提示条 ----

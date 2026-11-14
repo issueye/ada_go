@@ -7,15 +7,29 @@
   "trust": "builtin",
   "backend": {
     "entry": "index.ts",
-    "capabilities": ["fs.read", "fs.write", "state"]
+    "capabilities": [
+      "fs.read",
+      "fs.write",
+      "state"
+    ]
   },
   "frontend": {
-    "capabilities": ["backend.read"],
-    "slots": [{ "slot": "chat.corner", "template": "slot.tsx", "order": 10 }],
-    "styles": ["todo.css"],
+    "capabilities": [
+      "backend.read"
+    ],
+    "slots": [
+      { "slot": "chat.corner", "component": "PlanCard.vue", "order": 10 }
+    ],
+    "styles": [
+      "todo.css"
+    ],
     "assets": "static",
     "actions": {
-      "slot_chat_corner": { "action": "plan", "read": true, "backend": "tools-plan" }
+      "slot_chat_corner": {
+        "action": "plan",
+        "read": true,
+        "backend": "tools-plan"
+      }
     }
   }
 }

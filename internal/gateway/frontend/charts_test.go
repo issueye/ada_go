@@ -64,7 +64,7 @@ func TestOfficialChartBlocks(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		raw, html, err := renderBlock(b, request(t, "/thread/th_1"), tc.renderer, "b1", json.RawMessage(tc.data))
+		raw, err := renderBlock(b, request(t, "/thread/th_1"), tc.renderer, "b1", json.RawMessage(tc.data))
 		if err != nil {
 			t.Fatalf("%s: %v", tc.renderer, err)
 		}
@@ -72,8 +72,8 @@ func TestOfficialChartBlocks(t *testing.T) {
 			t.Fatalf("%s: 空 VNode", tc.renderer)
 		}
 		for _, want := range tc.want {
-			if !strings.Contains(string(html), want) {
-				t.Fatalf("%s: HTML 缺少 %q\n%s", tc.renderer, want, html)
+			if !strings.Contains(string(raw), want) {
+				t.Fatalf("%s: VNode 缺少 %q\n%s", tc.renderer, want, raw)
 			}
 		}
 	}
@@ -93,7 +93,7 @@ func TestOfficialChartBlocksRejectBadData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewBridge: %v", err)
 	}
-	if _, _, err := renderBlock(b, request(t, "/thread/th_1"), "ui-charts/bar", "b1",
+	if _, err := renderBlock(b, request(t, "/thread/th_1"), "ui-charts/bar", "b1",
 		json.RawMessage(`{"title":"t","items":[{"label":"a","value":1}],"bogus":true}`)); err == nil {
 		t.Fatal("未知字段应被 Schema 拒绝")
 	}
@@ -123,12 +123,12 @@ func TestOfficialChartBlocksEmpty(t *testing.T) {
 		{"ui-charts/spark", `{"title":"t","values":[]}`},
 	}
 	for _, tc := range cases {
-		raw, html, err := renderBlock(b, request(t, "/thread/th_1"), tc.renderer, "b1", json.RawMessage(tc.data))
+		raw, err := renderBlock(b, request(t, "/thread/th_1"), tc.renderer, "b1", json.RawMessage(tc.data))
 		if err != nil {
 			t.Fatalf("%s %s: 空数据不应失败: %v", tc.renderer, tc.data, err)
 		}
-		if strings.TrimSpace(string(raw)) != "null" || html != "" {
-			t.Fatalf("%s %s: 应渲染为空块，得到 %q / %q", tc.renderer, tc.data, raw, html)
+		if strings.TrimSpace(string(raw)) != "null" {
+			t.Fatalf("%s %s: 应渲染为空块，得到 %q", tc.renderer, tc.data, raw)
 		}
 	}
 	if len(events) != 0 {

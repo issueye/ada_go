@@ -49,6 +49,10 @@ type Tab struct {
 	closing      atomic.Bool
 	actionBusy   atomic.Bool
 
+	// frameToken mirrors Manager.frameToken: the secret embedded in this tab's
+	// injected runtime, passed with every invoke call (see tab.invoke).
+	frameToken string
+
 	leaseUntil  time.Time
 	leaseClient string
 }
