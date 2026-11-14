@@ -928,7 +928,7 @@ details:not([open]) > :not(summary) {
   font-family: inherit;
   font-size: var(--ada-text-base);
   line-height: 1.65;
-  padding: 14px 16px 8px;
+  padding: 8px;
   overflow-y: auto;
   /* 滚到底不把整页一起带走 */
   overscroll-behavior: contain;

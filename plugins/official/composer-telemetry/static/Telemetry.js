@@ -129,7 +129,50 @@ export const setup = () => {
 		return s === "running" || s === "finishing";
 	});
 	const contextInfo = computed(() => contextView(context.value));
+
+	// speedLabel —— 生成速度（tok/s，2026-11-12 按新版输入框设计）：
+	// 本轮累计输出 token ÷ 已运行秒数。数据来自 thread.get 的 run.usage
+	// （Core 把 evt.usage 的累计快照收敛进 runInfo）；终态后冻结成整轮平均
+	// 速度（用 endedAt - startedAt 而不是当前时刻，避免数字随时间漂）。
+	const nowTick = ref(Date.now());
+	let tickTimer = 0;
+	const speedLabel = computed(() => {
+		const r = run.value;
+		if (!r) return "";
+		const u = r.usage;
+		const ended = Date.parse(String(r.endedAt || ""));
+		const started = Date.parse(String(r.startedAt || ""));
+		if (!u || Number.isNaN(started)) return "";
+		const end = Number.isNaN(ended) ? nowTick.value : ended;
+		const secs = (end - started) / 1000;
+		if (secs < 1) return "";
+		const out = num(u.outputTokens);
+		if (out <= 0) return "";
+		const perSec = out / secs;
+		// 小数位按量级收：>10 取整，否则保留 1 位（与 token 数展示同一口径）。
+		return (perSec >= 10 ? String(Math.round(perSec)) : trimZero(perSec.toFixed(1))) + " tok/s";
+	});
+	const speedTitle = computed(() => {
+		const r = run.value;
+		const u = r && r.usage ? r.usage : null;
+		if (!u) return "生成速度";
+		const out = num(u.outputTokens);
+		const started = Date.parse(String(r.startedAt || ""));
+		const ended = Date.parse(String(r.endedAt || ""));
+		const end = Number.isNaN(ended) ? nowTick.value : ended;
+		const secs = Number.isNaN(started) ? 0 : Math.max(0, Math.round((end - started) / 1000));
+		return "本轮已生成 " + compactTokenCount(out) + " token，用时 " + secs + " 秒";
+	});
+
+	// cacheLabel —— 缓存命中率：优先读本轮 run.usage（实时），
+	// 没有实时用量时退回插件 route 的线程聚合（历史会话也看得到）。
 	const cacheLabel = computed(() => {
+		const r = run.value;
+		const u = r && r.usage ? r.usage : null;
+		if (u) {
+			const hit = percentOf(num(u.cacheTokens), num(u.inputTokens) + num(u.cacheTokens));
+			return hit > 0 ? hit + "%" : "—";
+		}
 		const thread = usage.value && usage.value.thread ? usage.value.thread : null;
 		if (!thread) return "";
 		const input = num(thread.inputTokens);
@@ -140,8 +183,17 @@ export const setup = () => {
 	onMounted(() => {
 		// 先取一次：首屏空壳紧接着就有值；轮询只在运行中继续。
 		if (threadId) refresh();
+		// 运行中每秒推进 nowTick：tok/s 的分母是「已运行秒数」，
+		// 只靠 2s 轮询会让数字顿挫。
+		tickTimer = setInterval(() => { nowTick.value = Date.now(); }, 1000);
 	});
-	onUnmounted(stop);
+	onUnmounted(() => {
+		stop();
+		if (tickTimer) {
+			clearInterval(tickTimer);
+			tickTimer = 0;
+		}
+	});
 
-	return { ready, workspaceName, runLabel, runActive, contextInfo, cacheLabel };
+	return { ready, workspaceName, runLabel, runActive, contextInfo, cacheLabel, speedLabel, speedTitle };
 };

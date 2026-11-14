@@ -41,7 +41,7 @@ export const setup = (props) => {
 	const hasOlder = ref(false);
 	const olderCursor = ref("");
 	const loadFailed = ref(null);
-	const run = reactive({ status: "", terminal: "", label: "空闲", active: false, startedAt: "", errorCode: 0, errorLabel: "", errorDetail: "" });
+	const run = reactive({ status: "", terminal: "", label: "空闲", active: false, startedAt: "", endedAt: "", errorCode: 0, errorLabel: "", errorDetail: "", usage: null });
 	const interactions = ref([]);
 	const statusText = ref("");
 	const statusLevel = ref("info");
@@ -75,6 +75,16 @@ export const setup = (props) => {
 	const models = ref([]);
 	const currentModelLabel = ref("选择模型");
 	const modelOpen = ref(false);
+	// 当前模型的推理档位（选模型时从 backend 读回；没有档位的模型为空）。
+	const currentModelLevel = ref("");
+	// modelChipLabel 是输入框右下角那枚模型 chip 的文案：「模型名」或
+	// 「模型名 · 档位」。新版输入框把「模型 + 推理档位」合成一枚 chip，
+	// 档位不再单开浮层以外的地方展示。
+	const modelChipLabel = computed(() => {
+		const name = String(currentModelLabel.value || "选择模型");
+		const level = String(currentModelLevel.value || "");
+		return level === "" ? name : name + " " + level;
+	});
 
 	// 推理等级子菜单：HEAD（app.js showCascade/hideCascade）是 body 级 fixed 浮层，
 	// 定位到触发选项右侧（空间不足向左/向上翻转、视口内夹取）。这里沿用同一形态：
@@ -158,10 +168,14 @@ export const setup = (props) => {
 		run.label = v.label;
 		run.active = v.active;
 		run.startedAt = v.startedAt ?? "";
+		// endedAt 是终态时刻：tok/s 在终态后要用它冻结成整轮平均速度。
+		run.endedAt = String(raw?.endedAt ?? "");
 		run.errorCode = raw?.errorCode ?? 0;
 		run.errorLabel = v.errorLabel ?? "";
 		const detail = String(raw?.errorDetail ?? "").trim().slice(0, 600);
 		run.errorDetail = detail;
+		// 本轮累计用量（thread.get 的 run.usage）：tok/s 与缓存命中率的数据源。
+		run.usage = raw?.usage ?? null;
 		if (run.errorLabel === "" && run.terminal === "error") run.errorLabel = "本轮执行失败；请检查供应商配置后重试。";
 	}
 
@@ -850,6 +864,7 @@ export const setup = (props) => {
 			const data = await fetch(`/partials/model.json${q}`);
 			models.value = (data.models ?? []).map((m) => ({ ...m, thinkingLevels: m.thinkingLevels ?? [] }));
 			currentModelLabel.value = data.currentLabel ?? "选择模型";
+			currentModelLevel.value = String(data.currentLevel ?? "");
 		} catch {
 			models.value = [];
 		}
@@ -1026,6 +1041,7 @@ export const setup = (props) => {
 			});
 			models.value = next;
 			currentModelLabel.value = m.shortLabel;
+			currentModelLevel.value = String(level ?? "");
 			showStatus("模型已切换", "info");
 		} catch (err) {
 			showStatus(`切换模型失败：${err?.message ?? err}`, "error");
@@ -1203,7 +1219,7 @@ export const setup = (props) => {
 		rows, hasOlder, loadFailed, run, statusText, statusLevel, statusRetry, live, liveActive,
 		draft, thumbs, dragging, sending, workspaces, wsSelected, wsLabel, workspacePath,
 		imageInputID, filePickerReady, outbox,
-		models, currentModelLabel, modelOpen, chooseModel,
+		models, currentModelLabel, modelChipLabel, modelOpen, chooseModel,
 		editText,
 		trayInteractions, trayValues, wizardAnswers, wizardStep, wizardPrev, wizardNext, respond,
 		send, sendNewTask, noop, onPaste, onDragEnter, onDragLeave, onDrop,

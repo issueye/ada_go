@@ -108,7 +108,7 @@
         <div v-else class="ada-host">
           <div class="ada-newtask">
             <div class="ada-newtask__inner">
-              <span class="ada-newtask__mark"><span class="ada-newtask__logo ada-logo-mask" :style="logoStyle" role="img" aria-label="logo"></span></span>
+              <span class="ada-newtask__mark"><span class="ada-newtask__logo ada-logo-bg" :style="logoStyle" role="img" aria-label="logo"></span></span>
               <h2 class="ada-newtask__greeting">{{ greeting }}</h2>
               <p class="ada-newtask__desc">描述你要完成的任务，agent 会在选定的工作区里开始工作。</p>
               <form class="ada-newtask__form" @submit.prevent="send">
@@ -122,17 +122,20 @@
                   <textarea class="ada-composer__input" name="text" rows="2" maxlength="65536" :placeholder="'向 ' + productName + ' 提问，或描述一个任务…'" aria-label="任务描述" v-model="draft" @paste="onPaste" @dragenter="onDragEnter" @dragover.prevent="noop" @dragleave="onDragLeave" @drop.prevent="onDrop"></textarea>
                   <div class="ada-composer__bar">
                     <div class="ada-composer__group ada-composer__group--left">
-                      <label class="ada-composer__attach" :for="imageInputID" title="添加图片" aria-label="添加图片"><ui-icon name="i-image" :size="14" /></label>
+                      <label class="ada-composer__attach" :for="imageInputID" title="添加图片" aria-label="添加图片"><ui-icon name="i-plus" :size="16" /></label>
                       <button v-if="filePickerReady" class="ada-tool ada-tool--workspace" type="button" :title="'选择工作区：' + workspacePath" @click="openWorkspacePicker">
-                        <ui-icon name="i-folder" :size="14" /><span class="ada-tool__label">{{ wsLabel }}</span><ui-icon name="i-chevron-down" :size="12" />
+                        <ui-icon name="i-git-branch" :size="14" /><span class="ada-tool__label">{{ wsLabel }}</span><ui-icon name="i-chevron-down" :size="12" />
                       </button>
                       <select class="ada-input ada-newtask__ws-native" aria-label="工作区" v-model="wsSelected">
                         <option v-for="w in workspaces" :key="w.path" :value="w.path">{{ w.name }} — {{ w.path }}</option>
                       </select>
+                      <ui-slot name="composer.left" :thread-id="threadId" />
+                    </div>
+                    <div class="ada-composer__group ada-composer__group--right">
+                      <ui-slot name="composer.right" :thread-id="threadId" />
                       <div v-if="models.length > 0" class="ada-select ada-model-picker">
-                        <button class="ada-select__trigger ada-model-picker__trigger" type="button" :aria-expanded="modelOpen ? 'true' : 'false'" title="选择当前模型" @click="modelOpen = !modelOpen">
-                          <span class="ada-model-picker__icon"><ui-icon name="i-sparkles" :size="14" /></span>
-                          <span class="ada-select__label ada-model-picker__label">{{ currentModelLabel }}</span>
+                        <button class="ada-select__trigger ada-model-picker__trigger" type="button" :aria-expanded="modelOpen ? 'true' : 'false'" title="选择当前模型与推理档位" @click="modelOpen = !modelOpen">
+                          <span class="ada-select__label ada-model-picker__label">{{ modelChipLabel }}</span>
                           <span class="ada-select__caret"><ui-icon name="i-chevron-down" :size="12" /></span>
                         </button>
                         <div class="ada-select__menu ada-model-picker__menu" :hidden="!modelOpen">
@@ -146,11 +149,7 @@
                           </div>
                         </div>
                       </div>
-                      <ui-slot name="composer.left" :thread-id="threadId" />
-                    </div>
-                    <div class="ada-composer__group ada-composer__group--right">
-                      <ui-slot name="composer.right" :thread-id="threadId" />
-                      <button class="ada-send" type="submit" aria-label="开始任务" title="开始任务"><ui-icon name="i-send" :size="14" /></button>
+                      <button class="ada-send" type="submit" aria-label="开始任务" title="开始任务"><ui-icon name="i-send" :size="16" /></button>
                     </div>
                   </div>
                 </div>
@@ -164,17 +163,6 @@
       <button v-if="threadId !== ''" class="ada-scroll-bottom" id="scroll-bottom" type="button" :hidden="!showScrollBottom" title="回到最新" @click="jumpToBottom">
         <ui-icon name="i-chevron-down" :size="13" /><span>回到最新</span>
       </button>
-    </div>
-
-    <div v-if="threadId !== ''" class="ada-float-dock" id="composer-above" aria-label="插件悬浮区"><ui-slot name="composer.above" :thread-id="threadId" /></div>
-    <div v-if="threadId !== ''" class="ada-run-status-dock" id="run-status">
-      <span v-if="runDockVisible" class="ada-run-status" :data-run-state="run.status" :data-run-started-at="run.startedAt" role="status" aria-live="polite" :aria-label="runStatusText">
-        <span class="ada-run-status__mark" aria-hidden="true"><span class="ada-run-eq"><span class="ada-run-eq__bar"></span><span class="ada-run-eq__bar"></span><span class="ada-run-eq__bar"></span><span class="ada-run-eq__bar"></span></span></span>
-        <span class="ada-run-status__text" aria-hidden="true">
-          <span>{{ runStatusText }}</span><span class="ada-run-status__sep">，</span><span>用时 <span>{{ elapsedText }}</span></span>
-          <span class="ada-run-status__dots"><span>.</span><span>.</span><span>.</span></span>
-        </span>
-      </span>
     </div>
 
     <div v-if="threadId !== ''" class="ada-trays" id="ada-trays" role="region" aria-live="polite" aria-label="待处理事项">
@@ -227,6 +215,18 @@
     </div>
 
     <form v-if="threadId !== ''" class="ada-composer" :class="dragging ? 'is-drop-target' : ''" @submit.prevent="send">
+      <!-- 运行状态：输入卡**上方**的一行状态（2026-11-11 按新版输入框设计从浮层
+           移入流内）。空闲时整行不渲染，不占位。 -->
+      <div v-if="runDockVisible" class="ada-run-status-dock" id="run-status">
+        <span class="ada-run-status" :data-run-state="run.status" :data-run-started-at="run.startedAt" role="status" aria-live="polite" :aria-label="runStatusText">
+          <span class="ada-run-status__mark" aria-hidden="true"><ui-icon name="i-clock" :size="14" /></span>
+          <span class="ada-run-status__text" aria-hidden="true">
+            <span>{{ runStatusText }}</span><span class="ada-run-status__sep">，</span><span>用时 <span>{{ elapsedText }}</span></span>
+            <span class="ada-run-status__dots"><span>.</span><span>.</span><span>.</span></span>
+          </span>
+        </span>
+      </div>
+      <div class="ada-float-dock" id="composer-above" aria-label="插件悬浮区"><ui-slot name="composer.above" :thread-id="threadId" /></div>
       <div class="ada-outbox" :hidden="outbox.length === 0" role="region" aria-live="polite" aria-label="待发送消息">
         <div class="ada-outbox__head"><span>待发送 · {{ outbox.length }}</span></div>
         <div v-for="item in outbox" :key="item.id" class="ada-outbox__item">
@@ -248,18 +248,14 @@
         <textarea class="ada-composer__input" name="text" rows="2" maxlength="65536" :placeholder="'向 ' + productName + ' 提问，或指派一个任务…'" aria-label="消息输入框" v-model="draft" @paste="onPaste" @dragenter="onDragEnter" @dragover.prevent="noop" @dragleave="onDragLeave" @drop.prevent="onDrop"></textarea>
         <div class="ada-composer__bar">
           <div class="ada-composer__group ada-composer__group--left">
-            <label class="ada-composer__attach" :for="imageInputID" title="添加图片" aria-label="添加图片"><ui-icon name="i-image" :size="14" /></label>
-            <details class="ada-plus">
-              <summary class="ada-plus__button" title="更多操作" aria-label="更多操作"><ui-icon name="i-plus" :size="14" /></summary>
-              <div class="ada-plus__panel">
-                <a class="ada-plus__item" href="/threads" @click.prevent="goNewTask"><ui-icon name="i-plus" :size="14" /><span>新建任务</span></a>
-              </div>
-            </details>
+            <label class="ada-composer__attach" :for="imageInputID" title="添加图片" aria-label="添加图片"><ui-icon name="i-plus" :size="16" /></label>
             <span class="ada-tool ada-tool--workspace" :title="workspacePath"><ui-icon name="i-git-branch" :size="14" /><span class="ada-tool__label">{{ wsLabel }}</span></span>
+            <ui-slot name="composer.left" :thread-id="threadId" />
+          </div>
+          <div class="ada-composer__group ada-composer__group--right">
             <div v-if="models.length > 0" class="ada-select ada-model-picker">
-              <button class="ada-select__trigger ada-model-picker__trigger" type="button" :aria-expanded="modelOpen ? 'true' : 'false'" title="选择当前模型" @click="modelOpen = !modelOpen">
-                <span class="ada-model-picker__icon"><ui-icon name="i-sparkles" :size="14" /></span>
-                <span class="ada-select__label ada-model-picker__label">{{ currentModelLabel }}</span>
+              <button class="ada-select__trigger ada-model-picker__trigger" type="button" :aria-expanded="modelOpen ? 'true' : 'false'" title="选择当前模型与推理档位" @click="modelOpen = !modelOpen">
+                <span class="ada-select__label ada-model-picker__label">{{ modelChipLabel }}</span>
                 <span class="ada-select__caret"><ui-icon name="i-chevron-down" :size="12" /></span>
               </button>
               <div class="ada-select__menu ada-model-picker__menu" :hidden="!modelOpen">
@@ -273,11 +269,8 @@
                 </div>
               </div>
             </div>
-            <ui-slot name="composer.left" :thread-id="threadId" />
-          </div>
-          <div class="ada-composer__group ada-composer__group--right">
             <ui-slot name="composer.right" :thread-id="threadId" />
-            <button class="ada-send" type="submit" :aria-label="run.active ? '加入待发送队列' : '发送'" :title="run.active ? '加入待发送队列，可编辑或立即发送' : '发送（Enter）'"><ui-icon name="i-send" :size="14" /></button>
+            <button class="ada-send" type="submit" :aria-label="run.active ? '加入待发送队列' : '发送'" :title="run.active ? '加入待发送队列，可编辑或立即发送' : '发送（Enter）'"><ui-icon name="i-send" :size="16" /></button>
           </div>
         </div>
       </div>
@@ -321,19 +314,17 @@
 	clip: rect(0 0 0 0);
 	white-space: nowrap;
 }
-.ada-newtask__logo.ada-logo-mask {
+/* 新建任务页的品牌位：logo.png 自带暖米白底与圆角，直接铺图（不能走 CSS mask：
+   mask 取 alpha 通道，这张图的圆角方块内部 alpha 恒 255，遮出来是一块纯色方块）。 */
+.ada-newtask__logo.ada-logo-bg {
 	display: inline-block;
 	width: 40px;
 	height: 40px;
-	background-color: currentcolor;
-	-webkit-mask-image: url("/static/logo.png");
-	mask-image: url("/static/logo.png");
-	-webkit-mask-size: contain;
-	mask-size: contain;
-	-webkit-mask-repeat: no-repeat;
-	mask-repeat: no-repeat;
-	-webkit-mask-position: center;
-	mask-position: center;
+	background-color: transparent;
+	background-repeat: no-repeat;
+	background-position: center;
+	background-size: contain;
+	border-radius: var(--ada-radius-md, 10px);
 }
 /* 运行状态标记：四根竖柱逐柱错峰起伏（HEAD chat.html.tmpl 的 4 个 SVG rect，
    高度比 6/14/10/4、居中、0/120/240/360ms 错峰）。白名单不收 svg，这里用

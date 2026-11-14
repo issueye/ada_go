@@ -223,6 +223,9 @@ func (s *Server) broadcast(evt domain.Event) {
 	// 轮次内发过的错误要收敛回 runInfo：终态页与 turn.get 需要用真正的
 	// 错误码/详情解释失败原因（见 noteRunError）。
 	s.noteRunError(evt)
+	// 同理，evt.usage 的累计用量收敛回 runInfo，供输入框下方的 tok/s 与
+	// 缓存命中率使用（见 noteRunUsage）。
+	s.noteRunUsage(evt)
 	note, err := notificationFor(evt)
 	if err != nil {
 		return

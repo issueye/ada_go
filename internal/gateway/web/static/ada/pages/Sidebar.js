@@ -1,7 +1,14 @@
-// Sidebar.js —— 侧栏：会话树（当前工作区展开 + 其它工作区懒加载）、搜索过滤、
-// 主题面板（themes.js 事件委托接管 data-theme-* 的行为）、导航与网关状态。
+// Sidebar.js —— 侧栏：工作区列表（全部工作区同一滚动区，逐组折叠 + 懒加载会话）、
+// 搜索过滤、主题面板（themes.js 事件委托接管 data-theme-* 的行为）、导航与网关状态。
+//
+// 结构语义（2026-11-11 调整）：侧栏不再分「当前工作区 / 其它工作区」两块各自滚动，
+// 也没有「其它工作区」分区标题。所有工作区是同一条列表里的可折叠组：
+//   - 当前工作区默认展开（会话在 load() 里就拉回来）；
+//   - 其余工作区默认折叠，首次展开时才按 ?path= 拉会话（懒加载）；
+//   - 点组头即切换当前工作区（同时按新工作区重新加载当前组）。
 import { ref, reactive, computed, onMounted, onUnmounted, inject } from "/static/ada/ada-runtime.mjs";
 import { shellState } from "./state.js";
+import { bindSidebarWidth } from "./sidebar-width.js";
 import { relativeTime, parseTimeMS, threadPath } from "./format.js";
 
 export const setup = () => {
@@ -71,25 +78,105 @@ export const setup = () => {
 	const gatewayTitle = "已连接 · " + String(bootstrap.gateway ?? "");
 	const logoStyle = { backgroundImage: "url(/static/logo.png)" };
 
-	const otherCount = computed(() => Math.max(0, groups.length - 1));
 	const sidebarClass = computed(() => (shellState.sidebarOpen ? "is-open" : ""));
 
+	// ── 侧栏宽度拖拽 ─────────────────────────────────────────────────────
+	// 实现放在 sidebar-width.js（纯 DOM/存储，独立可测）：宽度写进
+	// --ada-sidebar-width（sidebar-boot.js 在首帧前预置同一个变量），拖动只改
+	// 变量、松手才落 localStorage；窄屏抽屉与折叠窄轨不参与。
+	let resizerCleanup = null;
+
+	// 拖拽条的指针/键盘/双击绑定：元素由模板渲染，只能在挂载后按属性查询。
+	// 返回一个清理函数（卸载时解绑 window 上的拖动监听，避免重挂载后重复处理指针）。
+	function bindSidebarResizer() {
+		const handle = document.querySelector("[data-sidebar-resizer]");
+		if (handle === null) return null;
+		return bindSidebarWidth(handle, {
+			isDisabled: () => shellState.isNarrow || shellState.collapsed,
+		});
+	}
+
+	// ── 主题面板开合 ─────────────────────────────────────────────────────
+	// 开合是组件状态（模板 :hidden 绑定 themeOpen）；themes.js 只负责应用主题
+	// 与持久化（它不再直接改 DOM，否则重渲染会把展开态盖回去）。
+	const themeOpen = ref(false);
+	function toggleThemePanel() {
+		themeOpen.value = !themeOpen.value;
+		if (!themeOpen.value) return;
+		// 展开态先落 DOM 再聚焦：选中项在 panel 里，下一轮 flush 后才存在。
+		window.setTimeout(() => {
+			const panel = document.getElementById("ada-theme-panel");
+			if (panel === null) return;
+			const target = panel.querySelector(".is-selected") || panel.querySelector("button");
+			if (target !== null && typeof target.focus === "function") {
+				try { target.focus(); } catch { /* 焦点失败不影响展开 */ }
+			}
+		}, 0);
+	}
+	function closeThemePanel(returnFocus) {
+		if (!themeOpen.value) return;
+		themeOpen.value = false;
+		if (returnFocus !== true) return;
+		const trigger = document.querySelector("[data-theme-panel-toggle]");
+		if (trigger !== null && typeof trigger.focus === "function") {
+			try { trigger.focus(); } catch { /* 触发器可能已随重渲染消失 */ }
+		}
+	}
+	// 点面板外关闭（触发器本身由 toggleThemePanel 处理，这里跳过它）。
+	function onDocClickTheme(event) {
+		if (!themeOpen.value) return;
+		const target = event.target;
+		if (target && typeof target.closest === "function") {
+			if (target.closest(".ada-theme-wrap") !== null) return;
+		}
+		closeThemePanel(false);
+	}
+
+	// 全部工作区都来自 bootstrap（服务端已按工作区列表投影）；当前工作区的会话
+	// 在 load() 里随当前组一起拉回，其余工作区按需。
+	const workspaces = Array.isArray(bootstrap.workspaces) ? bootstrap.workspaces : [];
+
+	// group: { path, name, index, current, open, loaded, threads }
+	function makeGroup(ws, index, current) {
+		return {
+			path: String(ws.path ?? ""),
+			name: String(ws.name ?? ws.path ?? ""),
+			index,
+			current,
+			open: current,   // 当前工作区默认展开
+			loaded: false,
+			threads: [],
+		};
+	}
+
 	async function load() {
+		// 先铺骨架（全部工作区都可见，当前区标记出来），再补当前区的会话。
+		const currentPath = String(bootstrap.workspace ?? "");
+		const skeleton = workspaces
+			.filter((w) => w.path)
+			.map((w, i) => makeGroup(w, i, w.path === currentPath));
+		if (skeleton.length === 0) {
+			skeleton.push(makeGroup({ path: currentPath, name: bootstrap.workspaceName || currentPath }, 0, true));
+		}
+		groups.splice(0, groups.length, ...skeleton);
+		const idx = groups.findIndex((g) => g.current);
+		if (idx < 0) return;
+		await loadGroup(groups[idx]);
+	}
+
+	// loadGroup 拉某个工作区的会话并把分组就地替换（数组元素整体换新：
+	// 原地改对象属性依赖 effect 的收集时机，异步回来后界面可能不刷新）。
+	async function loadGroup(g) {
+		const idx = groups.findIndex((x) => x.path === g.path);
+		if (idx < 0) return;
 		try {
-			const data = await fetch("/partials/threads.json?limit=50");
+			const q = g.current ? "" : "?path=" + encodeURIComponent(g.path);
+			// 注入的 fetch 是 makeFetcher 封装：JSON 响应已经解析成对象，不能再 .json()。
+			const data = await fetch("/partials/threads.json" + (q ? q + "&limit=50" : "?limit=50"));
+			groups.splice(idx, 1, { ...g, loaded: true, threads: sortThreads(data?.threads ?? []) });
 			failed.value = null;
-			const current = {
-				path: data.workspace,
-				name: data.workspaceName,
-				index: (bootstrap.workspaces ?? []).findIndex((w) => w.path === data.workspace),
-				loaded: true,
-				threads: sortThreads(data.threads ?? []),
-			};
-			const rest = (bootstrap.workspaces ?? [])
-				.filter((w) => w.path && w.path !== data.workspace)
-				.map((w, i) => ({ path: w.path, name: w.name, index: (bootstrap.workspaces ?? []).indexOf(w), loaded: false, threads: [] }));
-			groups.splice(0, groups.length, current, ...rest);
 		} catch (err) {
+			groups.splice(idx, 1, { ...g, loaded: false });
 			failed.value = err?.message ?? String(err);
 		}
 	}
@@ -98,26 +185,28 @@ export const setup = () => {
 		return [...list].sort((a, b) => parseTimeMS(b.updatedAt) - parseTimeMS(a.updatedAt));
 	}
 
-	async function onToggle(event, g) {
-		const details = event.target;
-		if (!details?.open || g.loaded) return;
-		// 不可变替换分组：数组元素整体换新（索引写入必然触发 v-for 重渲染），
-		// 不在原地改对象属性——原地改依赖 effect 的收集时机，异步完成后界面
-		// 可能不刷新（2026-11-11 走查：展开后仍停在「展开以加载会话…」）。
-		const replaceGroup = (patch) => {
-			const idx = groups.findIndex((x) => x.path === g.path);
-			if (idx < 0) return;
-			groups.splice(idx, 1, { path: g.path, name: g.name, index: g.index, loaded: true, threads: g.threads, ...patch });
-		};
-		replaceGroup({ loaded: true, threads: g.threads });
-		try {
-			// 注入的 fetch 是 makeFetcher 封装：JSON 响应已经解析成对象，
-			// 不能再调 .json()（2026-11-11 走查：其它工作区展开不加载的根因）。
-			const data = await fetch("/partials/threads.json?path=" + encodeURIComponent(g.path) + "&limit=50");
-			replaceGroup({ loaded: true, threads: sortThreads((data && data.threads) || []) });
-		} catch (err) {
-			replaceGroup({ loaded: false });
-			failed.value = err?.message ?? String(err);
+	// toggleGroup：折叠/展开该组；展开即懒加载（并把它切成当前工作区）。
+	async function toggleGroup(g) {
+		const idx = groups.findIndex((x) => x.path === g.path);
+		if (idx < 0) return;
+		groups.splice(idx, 1, { ...g, open: !g.open });
+		if (!g.open) return;
+		// 展开一个非当前工作区 = 切换过去（服务端 cookie 决定后续请求的解析工作区）。
+		if (!g.current) await switchWorkspace(g.path);
+		if (!g.loaded) await loadGroup({ ...g, open: true });
+	}
+
+	const allOpen = computed(() => groups.every((g) => g.open));
+	async function toggleAll() {
+		const open = !allOpen.value;
+		const snapshot = groups.map((g) => ({ ...g }));
+		groups.splice(0, groups.length, ...snapshot.map((g) => ({ ...g, open })));
+		if (!open) return;
+		// 展开全部：顺手把还没加载的非当前工作区拉回来。
+		for (const g of snapshot) {
+			if (g.open) continue;
+			const next = groups.find((x) => x.path === g.path);
+			if (next && !next.loaded) await loadGroup(next);
 		}
 	}
 
@@ -131,8 +220,11 @@ export const setup = () => {
 		if (!q) return true;
 		return String(t.title ?? "").toLowerCase().includes(q);
 	}
-	function visibleThreads(g) {
-		return g.threads;
+	// hitThreads 是模板里 v-for 的源：搜索时直接过滤，不做「渲染后 hidden」。
+	function hitThreads(g) {
+		const list = g.threads ?? [];
+		if (needle.value.trim() === "") return list;
+		return list.filter(threadHit);
 	}
 	const searchLabel = computed(() => {
 		const q = needle.value.trim();
@@ -140,6 +232,15 @@ export const setup = () => {
 		const rows = groups.flatMap((g) => g.threads).filter(threadHit);
 		return rows.length > 0 ? `${rows.length} / ${groups.reduce((n, g) => n + g.threads.length, 0)}` : "未找到";
 	});
+
+	function focusSearch() {
+		shellState.sidebarOpen = true;
+		const input = document.getElementById("chat-thread-search");
+		if (input) {
+			input.focus();
+			try { input.select(); } catch { /* 非文本输入不支持 select */ }
+		}
+	}
 
 	function timeLabel(t) {
 		return relativeTime(parseTimeMS(t.updatedAt));
@@ -150,9 +251,8 @@ export const setup = () => {
 		router.navigate(threadPath(id));
 	};
 	async function openThreadIn(t, g) {
-		// 其它工作区的会话：先切工作区 cookie（服务端 fetch 都按 cookie 解析），
-		// 再进会话页——HEAD 的 ?ws= 链接语义在 SPA 下等价实现。
-		if (g.index >= 0 && g.path !== workspace) await switchWorkspace(g.path);
+		// 非当前工作区：先切工作区 cookie（服务端 fetch 都按 cookie 解析），再进会话页。
+		if (!g.current && g.path !== workspace) await switchWorkspace(g.path);
 		openThread(t.id);
 	}
 	async function switchWorkspace(path) {
@@ -163,7 +263,7 @@ export const setup = () => {
 		});
 	}
 
-	async function removeThread(t, g) {
+	async function removeThread(t) {
 		const ok = await confirm(`删除会话「${t.title || t.id}」？删除后无法恢复。`);
 		if (!ok) return;
 		try {
@@ -185,7 +285,12 @@ export const setup = () => {
 	}
 
 	// 插件导航（registry.nav 排序后）；SSE 的 evt.plugin.changed 会自动重拉注册表。
-	const pluginNav = computed(() => registry.nav().map((n) => ({ path: n.path, label: n.label ?? n.path })));
+	// icon 来自清单 frontend.nav[].icon（省略时用通用插件图标）。
+	const pluginNav = computed(() => registry.nav().map((n) => ({
+		path: n.path,
+		label: n.label ?? n.path,
+		icon: n.icon ?? "",
+	})));
 	function isActive(path) {
 		if (path === "/") return shellState.routePath === "/" || shellState.routePath === "";
 		return shellState.routePath === path || shellState.routePath.startsWith(path + "/");
@@ -198,7 +303,10 @@ export const setup = () => {
 	const goRoot = () => go("/");
 
 	// 窄轨缩略列表：当前工作区最近 8 条（HEAD rail 语义）。
-	const railThreads = computed(() => (groups.length > 0 ? groups[0].threads.slice(0, 8) : []));
+	const railThreads = computed(() => {
+		const current = groups.find((g) => g.current);
+		return current ? current.threads.slice(0, 8) : [];
+	});
 	const railInitial = (t) => {
 		const trimmed = String(t.title ?? "").trim();
 		return trimmed !== "" ? [...trimmed][0] : "·";
@@ -210,12 +318,7 @@ export const setup = () => {
 		const el = document.activeElement;
 		if (el && (el.tagName === "TEXTAREA" || el.isContentEditable)) return;
 		event.preventDefault();
-		shellState.sidebarOpen = true;
-		const input = document.getElementById("chat-thread-search");
-		if (input) {
-			input.focus();
-			input.select();
-		}
+		focusSearch();
 	}
 	// Ctrl/Cmd+N 新建任务（HEAD bindNewTaskShortcut）。
 	function onNewTaskKey(event) {
@@ -225,9 +328,14 @@ export const setup = () => {
 		event.preventDefault();
 		go("/threads");
 	}
-	// Esc 关抽屉。
+	// Esc 关抽屉 / 关主题面板（面板优先：它是浮层，Esc 应先收浮层）。
 	function onEscKey(event) {
 		if (event.key !== "Escape") return;
+		if (themeOpen.value) {
+			event.preventDefault();
+			closeThemePanel(true);
+			return;
+		}
 		if (shellState.sidebarOpen) shellState.closeSidebar();
 	}
 
@@ -237,20 +345,26 @@ export const setup = () => {
 		document.addEventListener("keydown", onNewTaskKey);
 		document.addEventListener("keydown", onEscKey);
 		document.addEventListener("click", mirrorThemeClick);
+		document.addEventListener("click", onDocClickTheme);
+		resizerCleanup = bindSidebarResizer();
 	});
 	onUnmounted(() => {
 		document.removeEventListener("keydown", onKeydown);
 		document.removeEventListener("keydown", onNewTaskKey);
 		document.removeEventListener("keydown", onEscKey);
 		document.removeEventListener("click", mirrorThemeClick);
+		document.removeEventListener("click", onDocClickTheme);
+		if (typeof resizerCleanup === "function") resizerCleanup();
+		resizerCleanup = null;
 	});
 
 	return {
-		groups, needle, failed, activeThreadID, otherCount, sidebarClass,
-		mode, palette, themeModes, themePalettes,
+		groups, needle, failed, activeThreadID, sidebarClass,
+		mode, palette, themeModes, themePalettes, themeOpen, toggleThemePanel,
 		brandName, productBadge, workspace, gatewayAddr, gatewayTitle, logoStyle, wsDOMID,
 		pluginNav, railThreads, railInitial,
-		isActive, go, goRoot, load, onToggle, groupRunning, threadHit, visibleThreads, searchLabel,
+		isActive, go, goRoot, load, toggleGroup, toggleAll, allOpen,
+		groupRunning, threadHit, hitThreads, searchLabel, focusSearch,
 		timeLabel, threadURL, openThread, openThreadIn, switchWorkspace, removeThread, openMenu,
 	};
 };

@@ -64,6 +64,17 @@ type runStateDTO struct {
 	EndedAt     string `json:"endedAt"`
 	ErrorCode   int    `json:"errorCode"`
 	ErrorDetail string `json:"errorDetail"`
+	// Usage 是本轮累计用量（Core 的 runInfo.usage）。输入框下方的
+	// tok/s 与缓存命中率读它；为空表示本轮还没有用量事件。
+	Usage *runUsageDTO `json:"usage,omitempty"`
+}
+
+// runUsageDTO 是 run.usage 的投影（字段与 domain.Usage / proto.Usage 同名）。
+type runUsageDTO struct {
+	InputTokens  int64 `json:"inputTokens"`
+	OutputTokens int64 `json:"outputTokens"`
+	CacheTokens  int64 `json:"cacheTokens"`
+	CostMicros   int64 `json:"costMicros"`
 }
 
 type interactionDTO struct {

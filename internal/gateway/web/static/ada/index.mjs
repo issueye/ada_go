@@ -559,24 +559,38 @@ const WorkspacesPage = page("/static/ada/pages/Workspaces.vue");
 const Sidebar = page("/static/ada/pages/Sidebar.vue");
 
 // 插件页面（/ext/:id/:slug）：注册表查找 → PluginScope 装载 SFC。
+//
+// 外层统一框（.ada-page）：占满 .ada-main 剩余高度并在内部滚动，插件内容再长也
+// 不会把整页顶出视口；内容框（.ada-page__inner）给所有插件页同一套宽度与内边距，
+// 插件自己的 .xx-page 只负责内部布局，不再各自声明外边距。
 const PluginPageRoute = defineComponent({
 	name: "PluginPageRoute",
 	props: ["params"],
 	setup(props) {
-		shellState.title = "插件页面";
 		shellState.topbar.clear();
 		const entry = computed(() => registry.page(props.params?.id, props.params?.slug));
+		// 顶栏标题跟随插件页面的 title（与基座页面一致），不再固定成「插件页面」。
+		// 注册表异步装载：用 watch 同步标题，不在 render 里写状态（避免渲染期副作用）。
+		watch(entry, (e) => {
+			shellState.title = e === null ? "插件页面" : String(e.title ?? e.slug ?? "插件页面");
+		}, { immediate: true });
 		return { entry, params: props.params };
 	},
 	render(s) {
-		if (s.entry === null) return h("div", { class: "ada-page" }, h(UiEmpty, { text: "插件页面不存在" }));
-		return h("div", { class: "ada-page" }, [
-			h(PluginScope, {
-				pluginId: s.entry.pluginId,
-				load: () => loadSFC(s.entry.component),
-				extraProps: { pluginId: s.entry.pluginId },
-			}),
+		const scroll = h("div", { class: "ada-page__scroll", "data-plugin-page": `${s.entry.pluginId}:${s.entry.slug}` }, [
+			h("div", { class: "ada-page__inner" }, [
+				h(PluginScope, {
+					pluginId: s.entry.pluginId,
+					load: () => loadSFC(s.entry.component),
+					extraProps: { pluginId: s.entry.pluginId },
+				}),
+			]),
 		]);
+		if (s.entry === null) {
+			return h("div", { class: "ada-page" }, h("div", { class: "ada-page__scroll" },
+				h("div", { class: "ada-page__inner" }, h(UiEmpty, { text: "插件页面不存在" }))));
+		}
+		return h("div", { class: "ada-page" }, scroll);
 	},
 });
 
@@ -593,7 +607,23 @@ const ShellApp = defineComponent({
 	name: "ShellApp",
 	setup() {
 		const router = inject("router");
-		onUnmounted(() => { shellState.topbar.actions.splice(0); });
+		// 断点镜像：matchMedia 自身不参与响应式，change 时把宽/窄写回 shellState，
+		// 菜单按钮的文案与「折叠 / 抽屉」行为才跟着视口切换。
+		const mq = typeof window !== "undefined" && typeof window.matchMedia === "function"
+			? window.matchMedia("(max-width: 760px)")
+			: null;
+		const onBreakpoint = () => shellState.applyBreakpoint();
+		onMounted(() => {
+			if (mq === null) return;
+			if (typeof mq.addEventListener === "function") mq.addEventListener("change", onBreakpoint);
+			else if (typeof mq.addListener === "function") mq.addListener(onBreakpoint);
+		});
+		onUnmounted(() => {
+			shellState.topbar.actions.splice(0);
+			if (mq === null) return;
+			if (typeof mq.removeEventListener === "function") mq.removeEventListener("change", onBreakpoint);
+			else if (typeof mq.removeListener === "function") mq.removeListener(onBreakpoint);
+		});
 		return { route: router.current, state: shellState };
 	},
 	render(s) {
@@ -633,17 +663,33 @@ const ShellApp = defineComponent({
 				}, h(UiIcon, { name: a.icon ?? "i-refresh", size: a.size ?? 14 })),
 		);
 
-		return h("div", { class: "ada-shell" }, [
+		// 侧栏的两种形态各自一个类：折叠窄轨（宽屏）挂在 .ada-shell 上，
+		// 抽屉（窄屏）挂在 .ada-sidebar 上（由 Sidebar.vue 绑定）。
+		const shellClass = [
+			"ada-shell",
+			s.state.collapsed && !s.state.isNarrow ? "is-sidebar-collapsed" : "",
+		];
+		const backdropClass = s.state.sidebarOpen ? "ada-backdrop is-open" : "ada-backdrop";
+		// 菜单按钮在两种形态下做不同的事，文案必须跟着实际状态走
+		//（读屏用户听到「打开侧栏」却把侧栏收起来是最糟的一种）。
+		const menuLabel = s.state.isNarrow
+			? (s.state.sidebarOpen ? "关闭侧栏" : "打开侧栏")
+			: (s.state.collapsed ? "展开侧栏" : "收起侧栏");
+
+		return h("div", { class: shellClass }, [
 			h(Sidebar, {}),
-			h("div", { class: "ada-backdrop", id: "chat-backdrop", "aria-hidden": "true", "on:click": () => { shellState.sidebarOpen = false; } }),
+			h("div", { class: backdropClass, id: "chat-backdrop", "aria-hidden": "true", "on:click": () => { shellState.closeSidebar(); } }),
 			h("main", { id: "main", class: "ada-main" }, [
 				h("div", { class: "ada-topbar" }, [
 					h("button", {
 						class: "ada-icon-btn ada-menu-toggle",
 						type: "button",
-						"on:click": () => { shellState.toggleSidebar(); },
-						"aria-label": "打开侧栏",
-						title: "打开侧栏",
+						"on:click": () => { shellState.toggleAppearance(); },
+						"aria-label": menuLabel,
+						"aria-expanded": s.state.isNarrow
+							? (s.state.sidebarOpen ? "true" : "false")
+							: (s.state.collapsed ? "false" : "true"),
+						title: menuLabel,
 					}, h(UiIcon, { name: "i-menu", size: 16 })),
 					h("div", { class: "ada-topbar__title" }, [
 						h("h1", { title: s.state.title }, s.state.title),
