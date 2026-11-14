@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:bdb9f1792876329a) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:c455818cf3d6dc60) by plugins/official/build.mjs — do not edit
 // browser-use —— 官方插件：把 browser-use 桌面浏览器接入为模型可调用的工具。
 //
 // 传输方式（本插件不新开端口、不实现协议）：
