@@ -19,7 +19,7 @@
       "backend.read"
     ],
     "nav": [
-      { "slug": "settings", "label": "环境变量" }
+      { "slug": "settings", "label": "环境变量", "icon": "i-wrench" }
     ],
     "pages": [
       { "slug": "settings", "component": "EnvSettings.vue", "title": "环境变量" }

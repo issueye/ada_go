@@ -1,11 +1,11 @@
 /* Token 用量（token-usage 插件）：颜色/尺寸只引用 --ph-* / --ada-* 令牌。
    页面用 tu-* 类；概览页的 dashboard 片段沿用 tu-widget__*。 */
 
+/* 页框（宽度/内边距/滚动）由宿主 .ada-page__inner 提供（2026-11-11 统一）。 */
 .tu-page {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  max-width: 1040px;
 }
 
 .tu-head {

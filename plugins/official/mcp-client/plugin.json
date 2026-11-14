@@ -33,7 +33,7 @@
       "backend.read"
     ],
     "nav": [
-      { "slug": "servers", "label": "MCP 服务端" }
+      { "slug": "servers", "label": "MCP 服务端", "icon": "i-plug" }
     ],
     "pages": [
       { "slug": "servers", "component": "McpServers.vue", "title": "MCP 服务端" }

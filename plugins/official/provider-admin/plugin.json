@@ -20,10 +20,10 @@
       "backend.read"
     ],
     "slots": [
-      { "slot": "composer.left", "component": "ProviderChip.vue", "order": 10 }
+      { "slot": "composer.right", "component": "ProviderChip.vue", "order": 10 }
     ],
     "nav": [
-      { "slug": "providers", "label": "供应商" }
+      { "slug": "providers", "label": "供应商", "icon": "i-server" }
     ],
     "pages": [
       { "slug": "providers", "component": "Providers.vue", "title": "供应商" }

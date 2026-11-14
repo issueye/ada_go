@@ -20,7 +20,7 @@
       "frontend.script"
     ],
     "nav": [
-      { "slug": "cron", "label": "定时任务" }
+      { "slug": "cron", "label": "定时任务", "icon": "i-clock" }
     ],
     "pages": [
       { "slug": "cron", "component": "CronPage.vue", "title": "定时任务" }

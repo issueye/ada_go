@@ -17,7 +17,7 @@
       "frontend.script"
     ],
     "nav": [
-      { "slug": "usage", "label": "Token 用量" }
+      { "slug": "usage", "label": "Token 用量", "icon": "i-chart" }
     ],
     "pages": [
       { "slug": "usage", "component": "UsagePage.vue", "title": "Token 用量" }

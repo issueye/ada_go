@@ -14,7 +14,7 @@
       { "slug": "hello", "component": "HelloPage.vue", "title": "Hello SFC" }
     ],
     "nav": [
-      { "slug": "hello", "label": "Hello", "order": 90 }
+      { "slug": "hello", "label": "Hello", "order": 90, "icon": "i-sparkles" }
     ],
     "assets": "static"
   }
