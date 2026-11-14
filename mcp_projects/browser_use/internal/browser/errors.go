@@ -59,6 +59,12 @@ const (
 	CodeFrameError   = "frame_error"
 	CodeRuntimeError = "runtime_error"
 
+	// CodeForbidden is the runtime's gate for capabilities that only the Go
+	// harness may use (frame relay, the input mask). Page scripts can reach
+	// window.__browserUse.invoke but carry no frame token, so they get this
+	// instead of a cross-origin read or an unlocked page.
+	CodeForbidden = "forbidden"
+
 	CodeScriptSyntax      = "script_syntax"
 	CodeScriptError       = "script_error"
 	CodeScriptTimeout     = "script_timeout"

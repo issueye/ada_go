@@ -53,6 +53,11 @@ type Manager struct {
 
 	downloadsDir string
 
+	// frameToken is the per-process secret embedded in every injected runtime.
+	// It gates iframe relay commands so page scripts cannot read or drive a
+	// cross-origin child frame (see runtime.js FRAME_TOKEN).
+	frameToken string
+
 	mu        sync.RWMutex
 	tabs      map[string]*Tab
 	order     []string
@@ -85,7 +90,8 @@ func New(win *mygo.Window, cfg config.Config, session *mygo.Session) *Manager {
 	}
 	m := &Manager{
 		win: win, cfg: cfg, session: session, downloadsDir: dir,
-		tabs: map[string]*Tab{}, stop: make(chan struct{}),
+		frameToken: runtime.NewToken(),
+		tabs:       map[string]*Tab{}, stop: make(chan struct{}),
 	}
 	go m.expireLoop()
 	return m
@@ -182,7 +188,7 @@ func (m *Manager) NewTab(ctx context.Context, rawURL string, opts TabOptions) (*
 	v, err := m.win.NewWebView(mygo.WebViewOptions{
 		URL: rawURL,
 		Page: mygo.PageOptions{
-			PreloadScript:    runtime.Source(),
+			PreloadScript:    runtime.SourceWithToken(m.frameToken),
 			PreloadAllFrames: true,
 			Session:          m.session,
 		},
@@ -197,10 +203,11 @@ func (m *Manager) NewTab(ctx context.Context, rawURL string, opts TabOptions) (*
 	m.pending--
 	m.nextID++
 	t := &Tab{
-		ID:    fmt.Sprintf("t%d", m.nextID),
-		View:  v,
-		Page:  v.Page(),
-		Owner: opts.Owner,
+		ID:         fmt.Sprintf("t%d", m.nextID),
+		View:       v,
+		Page:       v.Page(),
+		Owner:      opts.Owner,
+		frameToken: m.frameToken,
 	}
 	if t.Owner == "" {
 		t.Owner = OwnerAgent

@@ -1459,8 +1459,8 @@ export default function register(agent) {
         tab: { type: "string", description: "标签页 id（缺省用活动标签页）" },
         wait_until: {
           type: "string",
-          enum: ["load", "domcontentloaded", "network_idle", "none"],
-          description: "导航完成的判定，缺省 load",
+          enum: ["load", "none"],
+          description: "导航完成的判定：load 等加载事件，none 立即返回（SPA 就绪请用 wait for=network/selector），缺省 load",
         },
         timeout_ms: { type: "integer", minimum: 100, maximum: 110000, description: "缺省 30000" },
       },

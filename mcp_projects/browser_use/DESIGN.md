@@ -2,7 +2,7 @@
 
 > 基于 [mygo](https://github.com/egoist/mygo) 的桌面浏览器 + AI Agent 控制层  
 > 状态：设计评审 v0.1 · 2026-11-03  
-> 实现状态：0.3.0；M0 / M1 / M1.5 / MCP stdio+HTTP / cookies / files / iframe relay / session restore 已落地；0.2–0.3 追加 events、dialog policy、snapshot diff、screenshot clip/JPEG、upload_dirs、MCP HTTP token（见 [README.md](README.md)）；popup opener、整页截图、嵌套 iframe、审批待做
+> 实现状态：0.3.0；M0 / M1 / M1.5 / MCP stdio+HTTP / cookies / files / iframe relay / session restore 已落地；0.2–0.3 追加 events、dialog policy、snapshot diff、screenshot clip/JPEG/整页、upload_dirs、MCP HTTP token（见 [README.md](README.md)）；popup opener 待做
 > 目标平台：Windows 10/11（WebView2 156 已安装）优先，macOS / Linux 保持可移植
 
 ---
@@ -57,7 +57,7 @@
 | G2 | **Agent 可观察**：语义快照（带稳定 ref）、正文提取、截图（可标注 ref）、事件流 | 快照 golden 测试 |
 | G3 | **Agent 可操作**：click / type / press / select / scroll / hover / upload / download，带可操作性检查与等待 | 动作 e2e |
 | G4 | **三种接入**：MCP stdio（DSH / Claude / Cursor）、本地 HTTP、CLI（任何能跑 shell 的 agent） | 三端冒烟 |
-| G5 | **人类可控**：活动流、输入蒙板、暂停 / 接管、敏感动作审批、审计日志 | 手动 + 单测 |
+| G5 | **人类可控**：活动流、输入蒙板、暂停 / 接管、审计日志 | 手动 + 单测 |
 | G6 | **工程可控**：单二进制、无 cgo、可跨平台编译、可测试 | CI 三平台编译 |
 | G7 | **脚本化**：Agent 用 JS/TS 脚本描述多步流程（循环、条件、提取、断言），一次调用完成 | 脚本 e2e |
 
@@ -118,7 +118,7 @@
 - 原生支持 ES 模块、class、async/await、Promise、Proxy、BigInt，带 `eventloop`（timer/immediate）、`webapi`（fetch/URL）、`node`（沙箱 fs），可通过 `Options.MemoryLimit` 限内存、`Interrupt` 停死循环、`CompileTS` 直接跑 TypeScript。
 - 宿主函数可以用 `Loop.NewPromise()` 返回 promise，并由其他 goroutine 在浏览器动作完成后 settle；正好把“脚本里 `await page.click(...)`”映射到 Go 的异步动作。
 - 备选：Node 子进程（多一个运行时、IPC、打包体积）；goja/Sobek（异步/事件循环较弱）；V8 / QuickJS cgo（破坏 `CGO_ENABLED=0`）。moejs 的基准也比 Sobek/QuickJS 更快、更省内存。
-- **脚本在应用进程内运行**，不放在 MCP shim：脚本调用与 HTTP 工具调用走同一个执行器，天然复用租约、蒙板、审批、审计和错误码；少一层 HTTP 往返。
+- **脚本在应用进程内运行**，不放在 MCP shim：脚本调用与 HTTP 工具调用走同一个执行器，天然复用租约、蒙板、审计和错误码；少一层 HTTP 往返。
 - 脚本不是新的权限层级：它能做的事严格等于工具能做的事，只多了循环/条件/局部变量/一次返回。
 
 ---
@@ -143,7 +143,7 @@
 ├──────────────────────────────────────────────────────────────────────────────────────┤
 │ 浏览器核心（goroutine 安全）                                                          │
 │ TabManager │ ActionQueue │ RuntimeBridge │ Snapshotter │ Downloads │ EventBus │ Audit │
-│ 脚本引擎（moejs）：JS/TS 沙箱 ──▶ 同一工具执行器（租约/蒙板/审批/审计）               │
+│ 脚本引擎（moejs）：JS/TS 沙箱 ──▶ 同一工具执行器（租约/蒙板/审计）                  │
 ├──────────────────────────────────────────────────────────────────────────────────────┤
 │ 控制面                                                                                │
 │ HTTP 127.0.0.1:port（Bearer token） /v1/call · /v1/script · /v1/events · /v1/tools     │
@@ -160,7 +160,7 @@
 | 组件 | 职责 | 线程/并发 |
 |---|---|---|
 | `app` | mygo 生命周期、主窗口、菜单、单实例、深链、托盘（可选） | 主线程回调 |
-| `ui` | 标签栏、工具栏、地址栏、状态栏、活动抽屉、审批弹窗 | 主线程（`ui.View`） |
+| `ui` | 标签栏、工具栏、地址栏、状态栏、活动抽屉 | 主线程（`ui.View`） |
 | `browser.Manager` | 标签创建/销毁/切换、活动标签、所有权、事件订阅 | 互斥锁 + 主线程 marshal |
 | `browser.Tab` | 单标签状态、页面引用、等待器、串行动作队列 | 每标签一把锁 |
 | `browser.Control` | Agent 控制租约、空闲释放、`control` 工具、与 UI 的锁定状态同步 | Manager 锁 |
@@ -226,7 +226,7 @@ Agent          MCP shim           HTTP server        Tab queue          WebView 
 | `script.started` / `script.finished` | 脚本开始/结束（含 action 数、耗时） | UI 活动流 + 审计 |
 | `control.locked` / `control.released` | Agent 获取/释放标签租约 | 蒙板显隐 |
 | `control.takeover` / `control.resumed` | 人类接管/交还 | Agent 感知 |
-| `control.paused` / `control.approval` | 暂停/审批 | Agent 感知 |
+| `control.paused` / `control.resumed` | 暂停/恢复 | Agent 感知 |
 | `page.crashed` / `page.unresponsive` | 渲染进程 | 提示重载 |
 
 环形缓冲 1000 条，带单调递增 `cursor`；长轮询从 `after` 之后取。UI 另有一份 200 条的人读活动流。
@@ -608,7 +608,7 @@ HTTP 映射：鉴权/参数错误用 4xx；工具执行失败用 200 + `ok=false
     "action": {"type": "string", "enum": ["goto", "back", "forward", "reload", "stop"], "default": "goto"},
     "url": {"type": "string", "description": "goto 时的绝对 http(s) URL"},
     "tab": {"type": "string", "description": "标签 id；默认活动标签"},
-    "wait_until": {"type": "string", "enum": ["load", "domcontentloaded", "network_idle", "none"], "default": "load"},
+    "wait_until": {"type": "string", "enum": ["load", "none"], "default": "load"},
     "timeout_ms": {"type": "integer", "minimum": 100, "maximum": 120000, "default": 30000}
   },
   "required": ["action"],
@@ -712,7 +712,7 @@ HTTP 映射：鉴权/参数错误用 4xx；工具执行失败用 200 + `ok=false
 | `wait for=download` | — | 等 `download.finished`；返回文件路径 |
 | `wait for=function` | — | 执行 JS 表达式直到 truthy（M1） |
 
-`network_idle` 是**尽力而为**：mygo 没有网络事件 API；用 `performance.getEntriesByType('resource')` 的增量 + 500ms 静默判断，不保证覆盖 WebSocket/长轮询。文档和工具描述里明确标注。
+`wait_until` 只有 `load` 和 `none`：`domcontentloaded` / `network_idle` 曾出现在 schema 里，但实现一直等同于 `load`，已于 2026-11 移除并在参数校验里显式拒绝。判断 SPA 就绪请用 `wait for=network` / `wait for=selector`（页内 `netWaiters` 直接 resolve，不靠轮询）。
 
 ### 7.6 截图
 
@@ -731,7 +731,7 @@ GET /v1/events?after=42&timeout_ms=25000&types=download.started,tab.created
 → {"events":[...], "next": 57}
 ```
 
-MCP 侧对应 `events` 工具。Agent 通常不需要它；它的价值是“等下载/等弹窗/等人工审批结果”，避免高频轮询。
+MCP 侧对应 `events` 工具。Agent 通常不需要它；它的价值是“等下载/等弹窗/等人工接管”，避免高频轮询。
 
 ### 7.8 Agent 使用建议（MCP `instructions`）
 
@@ -846,7 +846,7 @@ Page API（全部返回 Promise；出错抛 `BrowserError`，带 `code`/`hint`�
 | `await browser.call(name, args)` | 任意工具（逃生舱；`script` 自身被禁止） |
 
 - `target` 可以是 `e12`、`css=#id`、`text=Sign in`、`role=button[name*="Save"]`，或对象 `{ref}`/`{selector}`/`{text}`/`{point:{x,y}}`。
-- 脚本内的动作仍走同一执行器：URL 策略、审批、上传白名单、租约、蒙板、审计全部生效；用户 Take over 会中断脚本。
+- 脚本内的动作仍走同一执行器：URL 策略、上传白名单、租约、蒙板、审计全部生效；用户 Take over 会中断脚本。
 - 默认脚本结束时释放它拿到的租约（`release_on_finish`），蒙板关闭；脚本中途 `browser.release()` 也可以提前交还。
 - 限制：单次 1 个脚本；默认 120s / 最长 300s；64MB 内存；32KB 输出；200 次工具调用；源码 256KB。嵌套 `script` 调用返回 `script_unsupported`。
 - 返回：
@@ -992,7 +992,7 @@ rt.SetGlobal("__bu_call", moejs.NativeFunc(func(_ *moejs.Realm, _ moejs.Value, a
     if err != nil { return moejs.Undefined(), err }
     p, settle := loop.NewPromise()
     go func() {
-        res, err := exec.Execute(ctx, clientID, name, raw) // 同一执行器：租约/蒙板/审批/审计
+        res, err := exec.Execute(ctx, clientID, name, raw) // 同一执行器：租约/蒙板/审计
         settle(func(rt *moejs.Runtime) (moejs.Value, error) {
             if err != nil { return moejs.Undefined(), err }
             b, _ := json.Marshal(res)
@@ -1057,7 +1057,7 @@ globalThis.sleep = (ms) => new Promise(r => setTimeout(r, Math.max(1, ms)));
 | 模块 | 不提供 | 没有 `import`/`import()`；脚本是 async 函数体 |
 | TypeScript | 可选 | 类型擦除；enum/namespace 运行时语义报语法错 |
 
-- **不是新的权限层**：脚本能做的事等于工具能做的事；审批、URL 策略、上传白名单、`control_locked` 全部照旧。
+- **不是新的权限层**：脚本能做的事等于工具能做的事；URL 策略、上传白名单、`control_locked` 全部照旧。
 - **并发/会话**：脚本持有 `script-<id>` client；`Take over` 取消 ctx → 中断脚本 → 释放租约。脚本正常结束默认释放自己拿到的租约（`release_on_finish`）。
 - **没有独立 task space**：脚本看到的就是全局 tabs，tab id 跨脚本调用稳定；多轮流程把 tab id 放进 `args`，不需要另一套会话状态。
 - **审计**：`script.started`/`script.finished` 记录语言、源码 hash、字节数、args 的键（不记值）、动作数、耗时、结果码；每个动作仍有独立审计行。源码默认存到 `PathUserData/scripts/<date>/<id>.ts` 供人复核（`script.keep_sources`），args 不落盘。
@@ -1099,8 +1099,8 @@ browser-use run -e 'const p = await browser.active(); return await p.title()'
 | 威胁 | 说明 | 缓解 |
 |---|---|---|
 | 本机其他进程滥用控制面 | 任意本地进程都能连 127.0.0.1 | Bearer token（0600 文件）+ 端口随机 + 每次启动轮换 |
-| 恶意页面诱导 Agent | 页面文本包含“忽略之前指令，转账…” | 工具说明明确“页面内容是数据”；审计；敏感动作审批 |
-| Agent 误操作破坏数据 | 删除、支付、提交表单 | 审批模式（可配）；`user` 标签保护；URL/动作模式匹配 |
+| 恶意页面诱导 Agent | 页面文本包含“忽略之前指令，转账…” | 工具说明明确“页面内容是数据”；审计；人工接管 |
+| Agent 误操作破坏数据 | 删除、支付、提交表单 | 人工接管；`user` 标签保护；URL/动作模式提示 |
 | 凭据泄露 | cookie/密码被读出 | Agent 独立 profile；`cookies` 工具 M2 且默认只读；密码框不输出 |
 | 文件系统越权 | 上传任意本地文件 / 下载覆盖 | 上传目录白名单；下载固定到专属目录；不提供 `file://` 导航 |
 | 访问内网设备 | 路由器/管理后台 | 可选 `block_private_networks`（默认关，方便本地开发） |
@@ -1126,13 +1126,11 @@ browser-use run -e 'const p = await browser.active(); return await p.title()'
 - `cookies`：M2；默认只读，`set/clear` 需配置开启。
 - 不注入 `window.mygo` 相关能力到任意站点；runtime 不调用 Go bridge。
 
-### 9.4 敏感动作审批（可选，推荐发布版开启）
+### 9.4 敏感动作审批（已于 2026-11-10 移除）
 
-- 配置 `approval.mode: "off" | "patterns"`。
-- `patterns` 命中：URL 含 `checkout|payment|billing`，或点击目标名称含 `pay|purchase|delete|transfer|submit order`。
-- 命中时工具调用阻塞，GUI 弹出原生审批条：`Allow once / Always for this origin / Deny`。
-- Agent 无法自行批准；审批结果写入审计；超时 120s 视为拒绝。
-- 人类“接管”状态下的动作不需要审批（人类自己在操作）。
+- 审批策略插件、`tool.beforeCall` 钩子点与 `deny` 动作等级已从基座删除；基座不再有“没有策略插件就拒绝写/执行工具”的失败关闭。
+- 本应用也没有审批模块：写/执行工具直接执行，“人类可控”由租约、输入蒙板、Pause/Take over 和审计承担。
+- 需要更高保障时，用独立 profile + 人工接管，不要在工具路径上重新引入“执行前询问”。
 
 ### 9.5 审计
 
@@ -1158,7 +1156,7 @@ browser-use run -e 'const p = await browser.active(); return await p.title()'
 - 只装 `browser`、`console`、`sleep`、`args`；没有 `fetch`、`require`、`import`、`node:fs`、`process`、`Deno`、`eval`/`Function`（`DisableDynamicCode`）。
 - 源码上限 256KB；编译在 worker goroutine，`CompileFunction` 支持 context 中断大源码。
 - 运行上限：120s（可到 300s）、64MB、200 次工具调用、32KB 控制台、64KB 结果；任一超限产生明确错误码。
-- 脚本动作走同一执行器：URL 白名单、审批、上传目录、租约、审计；不存在“脚本绕过审批”的路径。
+- 脚本动作走同一执行器：URL 白名单、上传目录、租约、审计；不存在“脚本绕过执行器”的路径。
 - `script` 工具不能从脚本里调用（context 标记），避免嵌套运行时/超时套娃。
 - 用户 Take over 会取消脚本 context 并 interrupt，脚本停止；已完成的动作保留在审计里。
 - 未来若要 `fetch`/`fs`：走 moejs `webapi`/`node` 包，加 host allowlist 和独立开关，默认不开。
@@ -1184,7 +1182,7 @@ browser-use run -e 'const p = await browser.active(); return await p.title()'
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-- 标签状态点：灰=空闲，蓝=Agent 正在操作，琥珀=等待人工（审批/接管），红=崩溃。
+- 标签状态点：灰=空闲，蓝=Agent 正在操作，琥珀=等待人工接管，红=崩溃。
 - 地址栏可编辑；Enter 导航当前标签；`+` 新建标签。锁定标签的地址栏/导航禁用（见 §10.2）。
 - 工具栏右侧：截图、快照（人类查看 Agent 看到的内容）、DevTools（仅开发）、菜单。
 - 状态栏显示 Agent 连接、最近动作、下载数、端口。
@@ -1211,7 +1209,7 @@ agent ──MCP shim 断开/崩溃────▶ idle（shim best-effort releas
 
 #### 范围
 
-- `scope=window`（默认）：蒙板覆盖**工具栏 + 活动标签的 WebView**；只留标签栏、状态栏和 `Take over`/审批控件。地址栏、前进/后退、刷新、菜单、截图按钮都在蒙板下，避免用户通过 chrome 改变 Agent 的页面。
+- `scope=window`（默认）：蒙板覆盖**工具栏 + 活动标签的 WebView**；只留标签栏、状态栏和 `Take over` 控件。地址栏、前进/后退、刷新、菜单、截图按钮都在蒙板下，避免用户通过 chrome 改变 Agent 的页面。
 - `scope=page`（轻量选项）：蒙板只覆盖活动标签的 WebView 内容区；标签栏、`+`、切换可用；锁定标签的地址栏、前进/后退、刷新、关闭仍被 Chrome 锁禁用。
 - 无论哪种 scope，**标签切换、新建标签**默认允许（`allow_tab_switch`），因为它们不改变 Agent 所在的页面；关闭锁定标签需要 Take over 或 `force`。
 - **后台标签**：Agent 在 t1 工作时用户切到 t2，t1 的蒙板不可见但租约仍在；t2 可正常操作；切回 t1 蒙板恢复。这样用户可以在别的标签查资料，又不会干扰 Agent。
@@ -1224,7 +1222,7 @@ agent ──MCP shim 断开/崩溃────▶ idle（shim best-effort releas
 - 空闲思考时显示 `Agent is working…` 的轻动画；动作完成短暂显示 `✓ 230ms`。
 - 鼠标在蒙板上是 `not-allowed`；点击蒙板空白处只弹一条 2s 提示（“页面输入已锁，点 Take over 接管”），**不直接接管**，避免误触。
 - 蒙板半透明，Agent 的元素高亮（页面 JS 画的框）仍可见。
-- 审批弹窗在蒙板之上（原生 UI 层级），仍可操作；审批期间蒙板保持。
+- 蒙板之上没有审批条：蒙板期间 Agent 的动作直接执行，人类用 `Take over` 立即收回控制。
 - 截图/录屏：`WebView.CapturePage` 只截页面，**不含蒙板**；Agent 看到的截图是干净页面。
 
 #### 三层拦截（为什么不是一层）
@@ -1347,7 +1345,7 @@ function agentDispatch(el, ev) {
 
 #### 不是什么
 
-- **蒙板不是安全边界**：持有 token 的本地进程仍可调用 API；它防的是误触与协作冲突。真正的安全靠 token、审批、审计、独立 profile。
+- **蒙板不是安全边界**：持有 token 的本地进程仍可调用 API；它防的是误触与协作冲突。真正的安全靠 token、审计、独立 profile。
 - **不阻止用户关闭窗口/退出应用**：这是最后的逃生口；退出时取消在途动作并写审计。
 
 ### 10.3 活动抽屉
@@ -1364,11 +1362,10 @@ function agentDispatch(el, ev) {
 - 人类在 WebView 里操作时，v1 不自动检测（mygo 没有页面内输入事件），需手动 Take over/Pause；M2 可考虑 preload 监听 `pointerdown`/`keydown` 自动进入“人类活跃”状态（需去抖，并跳过 Agent 合成事件）。
 - 蒙板空白处的点击只显示提示，不直接 Take over；`Esc` 聚焦到 Take over 按钮，避免误触交权。
 
-### 10.5 审批条
+### 10.5 审批条（已移除）
 
-- 底部滑出：`Agent wants to click "Pay now" on checkout.example.com. [Allow once] [Always for this site] [Deny]`
-- 显示在蒙板之上，页面仍锁定；倒计时 120s；拒绝后 Agent 收到 `denied`，可换方案。
-- “Always” 只对当前 origin + 当前会话生效。
+- 2026-11-10 起不提供审批条：没有阻塞式询问、没有 allow once/always/deny，也不记录审批结果。
+- 需要人介入时用 Pause / Take over；控制权状态仍通过 `control.*` 事件与状态栏呈现。
 
 ### 10.6 快捷键
 
@@ -1406,7 +1403,6 @@ browser_use/
 │   │   ├── app.go               # mygo.App、单实例、窗口、菜单
 │   │   ├── view.go              # 标签栏/工具栏/状态栏/活动抽屉
 │   │   ├── mask.go              # Agent 蒙板、Take over、输入锁开关
-│   │   ├── approval.go          # 审批弹窗
 │   │   └── shortcuts.go
 │   ├── browser/
 │   │   ├── manager.go           # TabManager
@@ -1596,7 +1592,7 @@ go test ./...
 | **M0 骨架** | GUI 窗口 + 标签栏/地址栏/关闭/切换；单 WebView 多标签；HTTP server + token + CLI `status/tabs/navigate`；runtime 注入；`snapshot`/`click`/`type`/`wait` 基础；**蒙板（原生覆盖 + 页面输入锁 + Take over）** | `go run .` 打开 example.com；CLI 能建标签、导航、快照、点链接、输入并提交；Agent 动作时页面点击/滚轮/键盘被锁，Take over 后恢复；`go test ./...` 绿 | 4–5 天 |
 | **M1 完整** | `read`/`screenshot`（标注）/`press`/`select`/`scroll`/`hover`/`eval`/`control`；租约与空闲释放；Chrome 锁；对话框覆盖；下载；错误码；审计；活动面板；配置 | 端到端剧本通过；快照 golden 稳定；错误码有 hint；截图 ref 可对齐；`control release` 后用户可操作 | 4–6 天 |
 | **M1.5 脚本** | moejs 引擎；`prelude.js` 的 `browser`/`Page` API；`script` 工具；CLI `run`；`/v1/script`；超时/内存/输出/动作数限制；TS；审计；租约/蒙板联动 | 一段脚本完成“导航→快照→点击→填表→等待→返回 JSON”；死循环被超时中断；64MB/32KB/200 动作限制生效；`console` 可见；`Take over` 能停脚本 | 3–5 天 |
-| **M2 集成** | MCP stdio + DSH 配置（含 `script` 工具）；HTTP MCP（可选）；跨域 iframe relay；popup window + opener；审批模式；MCP 断开时释放租约；`cookies`/`files`/`dialogs`/`events` | DSH 里 `mcp__browser__navigate`、`mcp__browser__script` 可用；OAuth 弹窗流程可用；暂停后动作被拒；关掉 MCP 后蒙板自动解除 | 4–6 天 |
+| **M2 集成** | MCP stdio + DSH 配置（含 `script` 工具）；HTTP MCP（可选）；跨域 iframe relay；popup window + opener；MCP 断开时释放租约；`cookies`/`files`/`dialogs`/`events` | DSH 里 `mcp__browser__navigate`、`mcp__browser__script` 可用；OAuth 弹窗流程可用；暂停后动作被拒；关掉 MCP 后蒙板自动解除 | 4–6 天 |
 | **M3 打磨** | 无边框标签栏（`TitleBarStyle`）、favicon、会话恢复、空闲标签丢弃、打包、三平台 e2e、文档 | Windows 安装包/绿色版可用；macOS/Linux 通过编译和基本 e2e | 4–6 天 |
 
 **MVP 定义**：M0+M1。M1.5 的 `script` 是 Agent 效率的关键（多步流程一次调用），建议紧跟 M1；M2 的 MCP 是 DSH 可用性的关键。
@@ -1684,10 +1680,10 @@ go test ./...
 | 脚本占满 CPU/内存 | GUI 卡顿/崩溃 | 120s 超时中断、64MB 内存、200 动作、32KB 输出；单脚本并发 |
 | 脚本 await 永久挂起 | 调用不返回 | eventloop 空闲即返回；pending promise 判 `script_hung`；外层超时 |
 | 脚本结果过大 | MCP 回复爆炸 | 64KB 结果上限；提示返回摘要 |
-| 脚本被页面诱导 | 跑危险动作 | 与工具同样的审批/审计；动作上限；人可 Take over |
+| 脚本被页面诱导 | 跑危险动作 | 与工具同样的审计与 URL 策略；动作上限；人可 Take over |
 | moejs 引擎 bug | 进程 panic | moejs 纯 Go、内存安全；panic recover；必要时降级到单步工具 |
 | mygo 限制 | 无 CDP、无文件选择器 API、Windows 无 SessionState | 记录为上游需求；设计绕行 |
-| Prompt injection | 页面诱导 Agent 执行危险操作 | 工具说明、审计、审批、独立 profile |
+| Prompt injection | 页面诱导 Agent 执行危险操作 | 工具说明、审计、人工接管、独立 profile |
 | 单实例/崩溃 | runtime.json 残留 | pid + health 双校验；stale 自动清理 |
 
 ---

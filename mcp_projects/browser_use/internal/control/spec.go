@@ -17,7 +17,7 @@ var Tools = []ToolSpec{
 	{
 		Name: "status", Phase: "M0",
 		Description: "App version, control state, active tab, tab count and downloads directory.",
-		Schema:      schema(`{"type":"object","properties":{},"additionalProperties":false}`),
+		Schema:      schema(`{"type":"object","properties":{"include_tabs":{"type":"boolean","default":false,"description":"include the full tab list"}},"additionalProperties":false}`),
 	},
 	{
 		Name: "tabs", Phase: "M0",
@@ -37,7 +37,7 @@ var Tools = []ToolSpec{
 			"action":{"type":"string","enum":["goto","back","forward","reload","stop"],"default":"goto"},
 			"url":{"type":"string"},
 			"tab":{"type":"string"},
-			"wait_until":{"type":"string","enum":["load","domcontentloaded","network_idle","none"],"default":"load"},
+			"wait_until":{"type":"string","enum":["load","none"],"default":"load","description":"load waits for the page load event; none returns immediately. SPA readiness needs wait for=network or wait for=selector."},
 			"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"default":30000}
 		},"required":["action"],"additionalProperties":false}`),
 	},

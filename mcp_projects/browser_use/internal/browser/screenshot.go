@@ -404,6 +404,17 @@ func (m *Manager) captureFullPage(ctx context.Context, t *Tab, origScroll map[st
 	if need > maxFullPageTiles {
 		need = maxFullPageTiles
 	}
+	// Put the page back on every exit path. Restoring only on success left the
+	// page scrolled with fixed/sticky elements hidden whenever a tile capture
+	// failed, which broke later snapshots until a reload.
+	defer func() {
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer cancel()
+		_, _ = t.invoke(rctx, "fullPage", map[string]any{"action": "restore"})
+		if origScroll != nil {
+			_, _ = t.invoke(rctx, "scroll", map[string]any{"xy": origScroll})
+		}
+	}()
 	var tiles []fullPageTile
 	fixedHid := 0
 	for i := 0; i < need; i++ {
@@ -435,14 +446,7 @@ func (m *Manager) captureFullPage(ctx context.Context, t *Tab, origScroll map[st
 		}
 		tiles = append(tiles, fullPageTile{img: img, yPix: int(math.Round(scrollY() * meta.DPR))})
 	}
-	// 恢复 fixed/sticky 与原滚动位置。
-	_, _ = t.invoke(ctx, "fullPage", map[string]any{"action": "restore"})
-	if origScroll != nil {
-		if _, err := t.invoke(ctx, "scroll", map[string]any{"xy": origScroll}); err != nil {
-			_ = err
-		}
-	}
-
+	// 恢复 fixed/sticky 与原滚动位置由上面的 defer 负责。
 	stitched := stitchTiles(tiles)
 	if stitched == nil {
 		return nil, nil, 0, 0, 0, 0, &Error{Code: CodeInternal, Message: "no full-page tiles captured"}
