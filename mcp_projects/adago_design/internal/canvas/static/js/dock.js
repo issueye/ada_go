@@ -4,7 +4,7 @@
 import { S, $ } from "./state.js";
 import {
   switchProject, SCOPE_ALL, focusNode, enterSolo, exitSolo, arrangeByProject,
-  reloadProjects, renderProjectTree,
+  reloadProjects, renderProjectTree, toggleTreeRow,
 } from "./projects.js";
 import {
   openProjectModal, toggleTreeMenu, closeTreeMenu, createProjectFromModal,

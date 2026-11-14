@@ -49,6 +49,14 @@ body{font-family:var(--ui-font);background:var(--ui-canvas);color:var(--ui-ink);
 /* ---------- 画布视口 ---------- */
 #viewport{position:fixed;inset:0;overflow:hidden;cursor:grab}
 #viewport.panning{cursor:grabbing}
+/* 空格 = 临时平移模式。光标只在画布区内变抓手（工具条/浮窗保持各自的光标），
+   拖动期间 body.panning 让整块画布都是「正在拖」的抓手。 */
+body.space-pan #viewport,body.space-pan #viewport *{cursor:grab!important}
+body.panning #viewport,body.panning #viewport *{cursor:grabbing!important}
+body.space-pan #viewport{user-select:none}
+/* 空格模式下 iframe 一律不吃事件：检查模式里它是 pointer-events:auto，
+   抓着空格在卡片正文上拖动会没有 pointermove（iframe 事件不冒泡）。 */
+body.space-pan .node__body iframe{pointer-events:none}
 #grid-layer{position:absolute;inset:calc(var(--ui-grid-bleed) * -1);
   background-image:radial-gradient(var(--ui-line) 1px, transparent 1px);
   background-size:var(--ui-space-12) var(--ui-space-12);

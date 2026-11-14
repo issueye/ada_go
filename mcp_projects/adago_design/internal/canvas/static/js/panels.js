@@ -43,7 +43,8 @@ function renderGroupLabels() {
     el.dataset.wy = String(Math.round(g.minY));
     el.innerHTML = `<span>${esc(projectName(pid))}</span><span class="group-label__count">${g.count}</span>`;
     el.title = "只看「" + projectName(pid) + "」";
-    el.addEventListener("click", () => switchProject(pid));
+    // 空格临时平移模式里，这一下点击是「抓手拖画布」的一部分：只平移，不切作用域
+    el.addEventListener("click", () => { if (!S.spacePan) switchProject(pid); });
     labelLayer.appendChild(el);
     applyLabelTransform(el);
   }

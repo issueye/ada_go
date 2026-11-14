@@ -213,7 +213,11 @@ bin\adago-design.exe mcp
 - 节点位置走 `transform: translate3d`（`left/top` 恒为 0），位移交给合成器，
   避免每帧 layout 与 iframe 表面重新光栅化
 - 拖动用 `pointerdown` + `setPointerCapture` + rAF 合帧；指针离开窗口也不丢
-- 预览 iframe 默认 `pointer-events:none`，卡片整块可拖可选中
+- 画布平移两种入口：**空白处拖动**（一直可用）与 **按住空格后任意位置拖动**
+  （卡片正文、iframe 上都行）；空格 + 滚轮同样缩放。空格模式在
+  `pointerdown` 捕获阶段接管，卡片不会被误选/误拖，光标变成抓手
+- 预览 iframe 默认 `pointer-events:none`，卡片整块可拖可选中；空格模式下
+  即便在检查模式（iframe 反向放开了事件）也会临时关掉，保证拖动不断线
 - 连线渲染按「脏边增量」更新（元素池化，只改 `d` 属性），空画布零开销
 - 拖动期间关闭面板 `backdrop-filter`，松开后用服务端回包同步 `updated_at`
   （避免轮询误判为远端修改而重载 iframe）
@@ -238,6 +242,9 @@ bin\adago-design.exe mcp
 › 📁 运营活动页          0
 ```
 
+- **展开**：点项目行左侧的 `›` 展开/收起该项目的设计稿子项（子项懒加载，收起再展开
+  走缓存）；`Space` / `→` 展开、`←` 收起、`Enter` 切到该项目。**点行本身**仍是「只看该项目」，
+  两个动作互不抢占 —— 之前 `›` 点不开是漏了 `toggleTreeRow` 的导入（现在是机器门禁）。
 - **全部视图**：一次看所有项目的稿子，按项目分行排布，每行左侧一个橙色标签
   （`项目名 + 数量`，点它只看该项目）。标签做反向缩放，画布缩到 20% 也看得清。
 - **单项目视图**：点项目行即过滤到该项目，标签隐藏；再点「全部」回来。
@@ -296,6 +303,14 @@ node --test internal/canvas/testdata/geometry.test.mjs   # 前端几何纯函数
 画布前端是 ES Modules（`internal/canvas/static/js/`，入口 `main.js`），无构建步骤：
 浏览器直接加载源码，因此静态资源必须带正确的 `Content-Type`（服务端已显式设置）。
 `geometry.test.mjs` 也由 `go test ./internal/canvas` 代理执行，PATH 中没有 node 时自动跳过。
+
+**模块图门禁**（`module_graph_test.go`，纯正则、无需 Node）把三类「浏览器才报错」的
+问题变成红测：① 具名 import 必须是对面真实导出；② `js/**` 每个模块都必须从 `main.js`
+可达（`keyboard.js` 这类只有副作用的模块要显式 `import "…"`，漏挂会静默失效）；
+③ 调用了跨模块导出名却没导入的兜底扫描（典型症状：项目树的 `›` 点不开、画布拖不动 /
+滚轮不缩放，控制台 `ReferenceError`，而 Go 测试与 `go vet` 全绿）。
+同一个文件里还有空格临时平移模式的契约检查（state 开关 / keyboard 按下松开 /
+nodes 捕获阶段接管 / CSS 光标规则）。
 
 - `internal/canvas`：Store CRUD/持久化/并发、HTTP API 全路径、截图任务闭环、
   **P0 加固**（备份轮换与降级恢复、写盘失败可见、列表剥 HTML、SSE 推送、

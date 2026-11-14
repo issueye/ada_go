@@ -13,6 +13,7 @@ export const S = {
   selected: null,
   drag: null,            // {id, el, sx, sy, ox, oy, nx, ny, raf, moved, pid}
   panning: null,         // {sx, sy, tx, ty, pid}
+  spacePan: false,       // 空格按住 = 临时平移模式（任意位置拖动都平移）
   catalogTheme: "light",
   online: true,
   project: "",          // 画布作用域："" = 全部，否则为项目 ID
@@ -29,6 +30,15 @@ export const S = {
 
 export const $ = (id) => document.getElementById(id);
 export const viewport = $("viewport"), world = $("world"), grid = $("grid-layer");
+
+// 空格平移模式：只切 body 上的一个 class，光标与「按哪都能拖」都由 CSS 与
+// nodes.js 的 pointerdown 统一读这一个开关 —— 状态只有一处。
+export function setSpacePan(on) {
+  const want = !!on;
+  if (S.spacePan === want) return;
+  S.spacePan = want;
+  document.body.classList.toggle("space-pan", want);
+}
 
 export const edgeSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
 edgeSvg.id = "edges";

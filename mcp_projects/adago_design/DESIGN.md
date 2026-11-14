@@ -239,6 +239,12 @@ style-src 'unsafe-inline'; img-src data:; font-src data:`）—— `canvas_add`
 
 - 交互：空白处拖拽平移；滚轮/触控板缩放（以光标为中心）；节点头部拖拽移动；
   点击选中 → 右侧检查器；Del 删除；`F` 适配全部节点；`0` 画布居中（见下）。
+  **空格 = 临时平移模式**（设计稿工具的通用手势）：按住空格后光标全画布变抓手，
+  在任意位置（含卡片正文、检查模式的 iframe 上）按住左键拖动都是平移画布，
+  空格 + 滚轮同样缩放；松开空格恢复。实现在 `js/keyboard.js`（按下/松开 + 失焦兜底）
+  → `state.setSpacePan()`（唯一开关，切 `body.space-pan`）→ `js/nodes.js` 在 **pointerdown
+  捕获阶段**接管平移（节点层的选中/拖动收不到事件），`canvas.css` 负责光标，并在空格模式
+  下把 `.node__body iframe` 的 `pointer-events` 关掉（否则卡片正文上拖不动）。
 - **画布控制组**（工具条最左）：
   - 工具条按钮**只显示图标**，名称与当前值走 `data-tip` 伪元素 tooltip（原生 `title`
     延迟约 1s 且样式不可控）；按钮同时写 `aria-label`，键盘聚焦也能看到提示。
@@ -320,10 +326,13 @@ style-src 'unsafe-inline'; img-src data:; font-src data:`）—— `canvas_add`
   现在函数入口显式拆成 `L/T/R/B`，只有兄弟节点才读 DOMRect。
 - 检查器面板带 `panelGen` 代际号：`ensureCatalog` 是异步的，hover 又高频，
   旧请求回来时若代际已变就丢弃结果，避免面板显示过期元素。
-- 代码按职责拆为 `static/js/` 下 12 个经典脚本（core/view/nodes/keyboard/edges/
-  sync/projects/panels/catalog/capture/dock/main，连续切块、执行顺序不变，
-  最大 327 行），检查模式独立在 `static/inspect.js`（全局契约与拆分理由见
-  IMPROVEMENTS §11）。
+- 代码按职责拆为 `static/js/` 下的 ES Modules（state/view/nodes/geometry/edges/keyboard/
+  sync/projects/panels/catalog/capture/dock/ui/net/bus/icons-bridge + 入口 main，最大 340 行），
+  检查模式独立在 `static/inspect.js`（全局契约与拆分理由见 IMPROVEMENTS §11）。
+  **模块图门禁**（`internal/canvas/module_graph_test.go`）：具名 import 必须是对面真实导出、
+  `js/**` 每个模块都必须从 `main.js` 可达（`keyboard.js` 这类纯副作用模块要显式 `import "…"`，
+  漏挂就会静默失效），以及「调用了跨模块导出名却没导入」的兜底扫描 —— 这三类错误浏览器只在
+  运行时抛 `ReferenceError`，Go 侧测试与 `go vet` 都看不见（项目树点不开、画布拖不动就是它）。
 
 #### 界面设计系统（画布工具蒙皮）
 

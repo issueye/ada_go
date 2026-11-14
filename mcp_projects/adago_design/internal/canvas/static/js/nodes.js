@@ -10,6 +10,7 @@ import { isAllScope, projectName, enterSolo, exitSolo, reloadProjects } from "./
 import { openProjectModal, scheduleLabels } from "./panels.js";
 import { togglePanel } from "./dock.js";
 import { scheduleEdges } from "./edges.js";
+import { applyTransform, zoomAt } from "./view.js";
 // ---------------- 节点渲染 ----------------
 // 位置用 transform 而不是 left/top：位移交给合成器，避免每帧 layout
 // 与 iframe 表面的重新光栅化。
@@ -52,8 +53,9 @@ function nodeEl(n) {
   }
 
   el.querySelector(".node__del").addEventListener("click", (e) => { e.stopPropagation(); removeNode(n.id); });
-  el.addEventListener("pointerdown", () => selectNode(n.id));
+  el.addEventListener("pointerdown", () => { if (!S.spacePan) selectNode(n.id); });
   el.addEventListener("dblclick", (e) => {
+    if (S.spacePan) return;                                      // 空格平移模式不触发聚焦
     if (e.target.closest(".node__del")) return;
     e.stopPropagation();
     enterSolo(n.id, n.project_id);
@@ -213,6 +215,7 @@ async function removeNode(id) {
 // ---------------- 节点拖动（指针捕获 + rAF 合帧 + transform） ----------------
 function startNodeDrag(e, id) {
   if (e.button !== 0) return;
+  if (S.spacePan || S.panning) return;                            // 空格 = 临时平移模式，不拖卡片
   if (e.target.closest(".node__del")) return;                    // 删除按钮不触发拖动
   if (document.body.classList.contains("mode-inspect")) return; // 检查模式下拖拽让位给元素拾取
   selectNode(id);
@@ -283,12 +286,43 @@ async function savePosition(id, x, y, ox, oy, el) {
 }
 
 // ---------------- 平移 ----------------
-viewport.addEventListener("pointerdown", (e) => {
-  if (e.target !== viewport && e.target !== grid && e.target !== world) return;
-  if (e.button !== 0) return;
+// 两种入口，同一套状态（S.panning）：
+//   1. 空白处（视口/网格/世界层）左键拖动 —— 一直可用；
+//   2. 按住空格（S.spacePan）后任意位置左键拖动 —— 卡片、iframe、空白都平移，
+//      且不触发卡片的选中/拖动。空格模式在捕获阶段接管 pointerdown，节点那层的
+//      监听根本收不到事件；iframe 则靠 CSS 在空格模式里关掉 pointer-events。
+function isBlankTarget(target) {
+  return target === viewport || target === grid || target === world;
+}
+
+function beginPan(e) {
   S.panning = { sx: e.clientX, sy: e.clientY, tx: S.tx, ty: S.ty, pid: e.pointerId };
   viewport.classList.add("panning");
+  document.body.classList.add("panning");
   try { viewport.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+}
+
+function endPan() {
+  if (!S.panning) return;
+  try { viewport.releasePointerCapture(S.panning.pid); } catch (_) { /* ignore */ }
+  viewport.classList.remove("panning");
+  document.body.classList.remove("panning");
+  S.panning = null;
+}
+
+// 空格 + 拖动：捕获阶段拦住一切（节点拖动、元素检查拾取、文本选择都让位）
+window.addEventListener("pointerdown", (e) => {
+  if (!S.spacePan || e.button !== 0 || S.panning) return;
+  if (!viewport.contains(e.target)) return;   // 浮窗/工具条里的点击不归平移
+  e.preventDefault();
+  e.stopPropagation();
+  beginPan(e);
+}, true);
+
+viewport.addEventListener("pointerdown", (e) => {
+  if (!isBlankTarget(e.target)) return;
+  if (e.button !== 0) return;
+  beginPan(e);
   if (S.selected) {
     const el = S.els.get(S.selected);
     if (el) el.classList.remove("selected");
@@ -308,22 +342,20 @@ window.addEventListener("pointermove", (e) => {
 
 window.addEventListener("pointerup", (e) => {
   if (S.drag) { onDragEnd(e); return; }
-  if (S.panning) {
-    try { viewport.releasePointerCapture(S.panning.pid); } catch (_) { /* ignore */ }
-    viewport.classList.remove("panning");
-    S.panning = null;
-    scheduleEdges("*");
-  }
+  if (S.panning) { endPan(); scheduleEdges("*"); }
 });
 
 window.addEventListener("pointercancel", () => {
   if (S.drag) onDragEnd({ pointerId: S.drag.pid, clientX: 0, clientY: 0 });
-  if (S.panning) { viewport.classList.remove("panning"); S.panning = null; }
+  endPan();
 });
 
+// 滚轮缩放（以光标为中心）。触控板捏合会带 ctrlKey，步长更细；
+// 空格按住时滚轮同样缩放 —— 需求里的「空格 + 滚轮」与既有「滚轮缩放」共用一条手势。
 viewport.addEventListener("wheel", (e) => {
   e.preventDefault();
-  const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  const step = e.ctrlKey ? 1.06 : 1.12;
+  const factor = e.deltaY < 0 ? step : 1 / step;
   zoomAt(e.clientX, e.clientY, factor);
 }, { passive: false });
 
