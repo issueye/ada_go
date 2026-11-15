@@ -464,9 +464,25 @@ func modelUsable(asm corecontracts.Assembly, providerID, modelID string) bool {
 	return false
 }
 
-// providerInfo 在配置信息上补充「环境变量/secrets 已提供密钥」的状态。
+// providerInfo 把供应商配置投影成 host.ProviderInfo：基础字段与模型清单、
+// 「环境变量/secrets 已提供密钥」的可用性补充，都在这一处。
 func (s *Session) providerInfo(c provider.Config) host.ProviderInfo {
-	info := providerInfoOf(c)
+	info := host.ProviderInfo{
+		ID: c.ID, DisplayName: c.Name, Protocol: string(c.Protocol),
+		BaseURL: c.BaseURL, Proxy: c.Proxy, Headers: cloneHeaders(c.Headers), Disabled: c.Disabled,
+		HasAPIKey:  strings.TrimSpace(c.APIKey) != "",
+		APIKeyHint: maskAPIKey(c.APIKey),
+		Models:     make([]host.ProviderModel, 0, len(c.Models)),
+	}
+	for _, m := range c.Models {
+		info.Models = append(info.Models, host.ProviderModel{
+			ID: m.ID, DisplayName: m.DisplayName,
+			ContextWindow: m.ContextWindow, MaxOutput: m.MaxOutput,
+			Input: m.Input, SupportsTools: m.SupportsTools,
+			SupportsThinking: m.SupportsThinking, ThinkingLevels: append([]string(nil), m.ThinkingLevels...),
+			Disabled: m.Disabled,
+		})
+	}
 	info.Available = true
 	if asm := s.Assembly(); asm != nil && asm.ProviderRegistry() != nil {
 		info.Available = asm.ProviderRegistry().ConfigAvailable(c.ID)
@@ -577,26 +593,6 @@ func normalizeProviderModels(in []host.ProviderModel) ([]provider.Model, error) 
 		})
 	}
 	return out, nil
-}
-
-func providerInfoOf(c provider.Config) host.ProviderInfo {
-	info := host.ProviderInfo{
-		ID: c.ID, DisplayName: c.Name, Protocol: string(c.Protocol),
-		BaseURL: c.BaseURL, Proxy: c.Proxy, Headers: cloneHeaders(c.Headers), Disabled: c.Disabled,
-		HasAPIKey:  strings.TrimSpace(c.APIKey) != "",
-		APIKeyHint: maskAPIKey(c.APIKey),
-		Models:     make([]host.ProviderModel, 0, len(c.Models)),
-	}
-	for _, m := range c.Models {
-		info.Models = append(info.Models, host.ProviderModel{
-			ID: m.ID, DisplayName: m.DisplayName,
-			ContextWindow: m.ContextWindow, MaxOutput: m.MaxOutput,
-			Input: m.Input, SupportsTools: m.SupportsTools,
-			SupportsThinking: m.SupportsThinking, ThinkingLevels: append([]string(nil), m.ThinkingLevels...),
-			Disabled: m.Disabled,
-		})
-	}
-	return info
 }
 
 func cloneHeaders(in map[string]string) map[string]string {
