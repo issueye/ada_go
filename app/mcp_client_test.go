@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -263,6 +264,10 @@ func TestMCPStdioHelper(t *testing.T) {
 	if os.Getenv("ADAG_MCP_STDIO_HELPER") != "1" {
 		return
 	}
+	// ADAG_MCP_STDIO_HELPER_EXIT_AFTER > 0 时，回答完第 N 条请求就退出：
+	// 用来验证 mcp-client 在 stdio 进程死亡后的重启与恢复。
+	exitAfter, _ := strconv.Atoi(os.Getenv("ADAG_MCP_STDIO_HELPER_EXIT_AFTER"))
+	answered := 0
 	sc := bufio.NewScanner(os.Stdin)
 	enc := json.NewEncoder(os.Stdout)
 	for sc.Scan() {
@@ -312,6 +317,10 @@ func TestMCPStdioHelper(t *testing.T) {
 			continue
 		}
 		_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
+		answered++
+		if exitAfter > 0 && answered >= exitAfter {
+			os.Exit(0)
+		}
 	}
 	os.Exit(0)
 }
@@ -355,6 +364,63 @@ func TestMCPClientStdio(t *testing.T) {
 	}
 }
 
+// TestMCPClientStdioRestartOnExit 钉住 stdio 进程死亡后的自动重启：
+// helper 回答 4 条请求后退出（宿主 ctx.process 有 30m 生命周期上限，
+// 长驻 stdio MCP server 必然撞上）。期望：
+//  1. 前两次 echo 正常（消耗 initialize/tools/list/echo/echo 四条预算）；
+//  2. 第三次 echo 撞上进程死亡 → 自动重启 + 重 initialize；tools/call 不自动
+//     重试（进程死亡时上一次调用是否已执行不可知），返回带「已重启」的错误文本；
+//  3. 第四次 echo 在新进程上成功——传输层已恢复。
+func TestMCPClientStdioRestartOnExit(t *testing.T) {
+	ws := tempDir(t)
+	scripts := mcpScriptsWithStdioHelper(t)
+	if err := os.MkdirAll(filepath.Join(ws, ".adago"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := fmt.Sprintf(`{
+	  "version": 1,
+	  "servers": [{
+	    "id": "local",
+	    "transport": "stdio",
+	    "command": %q,
+	    "args": ["-test.run=TestMCPStdioHelper"],
+	    "env": ["ADAG_MCP_STDIO_HELPER", "ADAG_MCP_STDIO_HELPER_EXIT_AFTER"],
+	    "timeoutMs": 5000
+	  }]
+	}`, os.Args[0])
+	if err := os.WriteFile(filepath.Join(ws, ".adago", "mcp.json"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hc := host.Context{Workspace: ws, Log: func(string, string, map[string]any) {}}
+	asm, err := adagapp.Assemble(context.Background(), testProduct(t, "mcp-client"), scripts, adagapp.Deps{
+		Context: hc,
+		HostEnv: map[string]string{
+			"ADAG_MCP_STDIO_HELPER":            "1",
+			"ADAG_MCP_STDIO_HELPER_EXIT_AFTER": "4",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	defer func() { _ = asm.Close(context.Background()) }()
+
+	if _, ok := asm.Tools.Lookup(context.Background(), "mcp_local_echo"); !ok {
+		t.Fatalf("缺少 mcp_local_echo，现有 %v", toolNames(asm))
+	}
+	for _, want := range []string{"a", "b"} {
+		if text, _ := callTool(t, asm, hc, "mcp_local_echo", map[string]any{"text": want}); text != "stdio:"+want {
+			t.Fatalf("echo %q = %q", want, text)
+		}
+	}
+	text, _ := callTool(t, asm, hc, "mcp_local_echo", map[string]any{"text": "c"})
+	if !strings.Contains(text, "已自动重启") || !strings.Contains(text, "请重试") {
+		t.Fatalf("进程死亡后的调用应返回重启提示: %q", text)
+	}
+	if text, _ := callTool(t, asm, hc, "mcp_local_echo", map[string]any{"text": "d"}); text != "stdio:d" {
+		t.Fatalf("重启后 echo = %q", text)
+	}
+}
+
 // mcpScriptsWithStdioHelper 返回官方插件脚本，并给 mcp-client 清单补上测试专用的
 // 环境变量白名单（真实清单不应包含测试变量）。
 func mcpScriptsWithStdioHelper(t *testing.T) []host.Script {
@@ -369,7 +435,7 @@ func mcpScriptsWithStdioHelper(t *testing.T) []host.Script {
 		}
 		m := *scripts[i].Manifest
 		b := *m.Backend
-		b.Env = append(append([]string(nil), b.Env...), "ADAG_MCP_STDIO_HELPER")
+		b.Env = append(append([]string(nil), b.Env...), "ADAG_MCP_STDIO_HELPER", "ADAG_MCP_STDIO_HELPER_EXIT_AFTER")
 		m.Backend = &b
 		scripts[i].Manifest = &m
 	}

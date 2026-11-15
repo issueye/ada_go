@@ -715,6 +715,9 @@ class McpClient {
   proc: ProcessHandle | null = null;
   buffer = "";
   stderr = "";
+  // 重启护栏：重启路径里的 initialize 会再走 request——新进程若立刻又死，
+  // 不能无限递归重启；一次失败就向上抛（execute 会把它变成 mcpError 文本）。
+  restarting = false;
   // 装配期发现期限：HTTP 请求本身也用它。只用 withTimeout 不够——先到点放弃
   // 而请求还挂着时，事件循环的 hold 会一直拖到宿主 fetch 超时，可能超过
   // backend.initTimeoutMs，把「单 server 降级」变回「插件装配失败」。
@@ -734,26 +737,31 @@ class McpClient {
       if (this.server.transport === "stdio") {
         await this.startStdio(ctx);
       }
-      const r = await this.request(ctx, "initialize", {
-        protocolVersion: PROTOCOL_VERSION,
-        capabilities: {},
-        clientInfo: { name: "ada-go-mcp-client", version: "0.4.0" },
-      });
-      this.session = r.session;
-      // 只做记录不阻断：老版本 server 可能回一个不同的协议版本，工具面通常仍可用。
-      const negotiated = typeof r.result?.protocolVersion === "string" ? r.result.protocolVersion : "";
-      if (negotiated && negotiated !== PROTOCOL_VERSION) {
-        ctx.log("warn", `mcp: server ${this.server.id} 协议版本 ${negotiated}（客户端 ${PROTOCOL_VERSION}），按兼容模式继续`, {
-          server: this.server.id,
-          protocolVersion: negotiated,
-        });
-      }
-      // 协议要求 initialize 成功后发 notifications/initialized；失败不阻断工具发现。
-      await this.notify(ctx, "notifications/initialized", {});
+      await this.handshake(ctx);
     } catch (e) {
       this.close();
       throw e;
     }
+  }
+
+  // handshake 是 initialize 请求 + initialized 通知（不含传输层启动，重启路径复用）。
+  private async handshake(ctx: AssemblyContext): Promise<void> {
+    const r = await this.request(ctx, "initialize", {
+      protocolVersion: PROTOCOL_VERSION,
+      capabilities: {},
+      clientInfo: { name: "ada-go-mcp-client", version: "0.4.0" },
+    });
+    this.session = r.session;
+    // 只做记录不阻断：老版本 server 可能回一个不同的协议版本，工具面通常仍可用。
+    const negotiated = typeof r.result?.protocolVersion === "string" ? r.result.protocolVersion : "";
+    if (negotiated && negotiated !== PROTOCOL_VERSION) {
+      ctx.log("warn", `mcp: server ${this.server.id} 协议版本 ${negotiated}（客户端 ${PROTOCOL_VERSION}），按兼容模式继续`, {
+        server: this.server.id,
+        protocolVersion: negotiated,
+      });
+    }
+    // 协议要求 initialize 成功后发 notifications/initialized；失败不阻断工具发现。
+    await this.notify(ctx, "notifications/initialized", {});
   }
 
   close(): void {
@@ -768,7 +776,30 @@ class McpClient {
   }
 
   async request(ctx: AssemblyContext, method: string, params: any): Promise<{ result: any; session: string }> {
-    if (this.proc) return this.stdioRequest(method, params);
+    if (this.proc) {
+      try {
+        return await this.stdioRequest(method, params);
+      } catch (e: any) {
+        // stdio 进程死亡（含宿主 ctx.process 的 30m 生命周期上限，cap_process.go）：
+        // 重启子进程并重新 initialize，恢复传输层。tools/call 不自动重试——进程死亡时
+        // 上一次调用是否已执行不可知，重放可能有副作用；错误文本明示「已重启，请重试」，
+        // 模型重试即可（新进程已就绪）。
+        if (this.restarting || e?.code !== "MCP_PROCESS_EXIT") throw e;
+        this.restarting = true;
+        try {
+          ctx.log("warn", `mcp: server ${this.server.id} 的 stdio 进程退出，重启并重新初始化`, { err: errorText(e) });
+          this.close();
+          await this.startStdio(ctx);
+          await this.handshake(ctx);
+          if (method === "initialize" || method === "tools/list") {
+            return await this.stdioRequest(method, params);
+          }
+          throw fail("MCP_PROCESS_EXIT", `mcp ${this.server.id}: stdio 进程退出，已自动重启并重新初始化；请重试本次调用`);
+        } finally {
+          this.restarting = false;
+        }
+      }
+    }
     try {
       return await postRpc(ctx, this.server, this.session, method, params, this.fetchTimeoutMs());
     } catch (e: any) {
@@ -826,7 +857,14 @@ class McpClient {
 
   private writeMessage(msg: any): void {
     if (!this.proc) throw fail("MCP_TRANSPORT", "stdio 进程不存在");
-    this.proc.write(JSON.stringify(msg) + "\n");
+    try {
+      this.proc.write(JSON.stringify(msg) + "\n");
+    } catch (e: any) {
+      // 管道断裂（进程已死）按进程退出处理：request 的重启路径会恢复传输层。
+      const err = new Error(`mcp ${this.server.id}: stdio 写入失败: ${errorText(e)}`);
+      (err as any).code = "MCP_PROCESS_EXIT";
+      throw err;
+    }
   }
 
   private nextLine(): string | null {
@@ -865,10 +903,9 @@ class McpClient {
         return { result: msg.result, session: "" };
       }
       if (processExited) {
-        throw fail(
-          "MCP_TRANSPORT",
-          `mcp ${this.server.id}: stdio 进程退出${this.stderr ? ": " + capText(this.stderr, 1000) : ""}`,
-        );
+        const e = new Error(`mcp ${this.server.id}: stdio 进程退出${this.stderr ? ": " + capText(this.stderr, 1000) : ""}`);
+        (e as any).code = "MCP_PROCESS_EXIT";
+        throw e;
       }
 
       const remain = deadline - Date.now();

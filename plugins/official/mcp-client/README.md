@@ -51,6 +51,7 @@ stdio 子进程默认继承宿主白名单里的 `PATH`/`HOME`/`USERPROFILE`/`Sy
 - 单 server 失败只跳过该 server；所有 server 失败时插件仍加载、贡献 0 工具。
 - 配置读取失败、JSON 损坏、配置项非法只记警告并降级，插件始终加载（官方插件装配失败会连累产品启动）。
 - HTTP 会话过期（服务端回 404）会重新 `initialize` 一次并重试该请求；其它错误不重试，避免重放副作用。
+- stdio 进程死亡（含宿主 `ctx.process` 的 30m 生命周期上限，长驻 server 必然撞上）会自动重启子进程并重新 `initialize`，恢复传输层；`tools/call` 不自动重试（进程死亡时上一次调用是否已执行不可知，重放可能有副作用），该次调用返回带「已自动重启，请重试」的错误文本，模型重试即可。
 - MCP 工具的 `inputSchema` 会转换成基座支持的 JSON Schema 子集；`oneOf/anyOf/$ref` 等无法无损表达时注册宽松兜底 Schema，并在 `details.schemaSimplified` 标记。
 - MCP 返回 `isError: true` 时按工具结果回给模型，不抛异常。
 - 传输/认证/超时错误按普通错误文本返回，避免一次 server 故障触发插件连续失败禁用。
