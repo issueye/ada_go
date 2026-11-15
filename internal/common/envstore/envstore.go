@@ -109,9 +109,9 @@ func workspaceAbs(workspace string) (string, error) {
 	return abs, nil
 }
 
-// WorkspaceReadPath 选择工作区 env.json：新目录优先；新文件不存在时回落到旧
+// workspaceReadPath 选择工作区 env.json：新目录优先；新文件不存在时回落到旧
 // .adag/env.json（返回 legacy=true）。两者都不存在时用新路径（读取为空）。
-func WorkspaceReadPath(workspace string) (path string, legacy bool, err error) {
+func workspaceReadPath(workspace string) (path string, legacy bool, err error) {
 	newPath, err := WorkspacePath(workspace)
 	if err != nil {
 		return "", false, err
@@ -277,7 +277,7 @@ func LoadForWorkspace(workspace string) (map[string]string, []string) {
 		layers = append(layers, layer{label: "全局", path: path})
 	}
 	if ws := strings.TrimSpace(workspace); ws != "" {
-		path, legacy, err := WorkspaceReadPath(ws)
+		path, legacy, err := workspaceReadPath(ws)
 		if err != nil {
 			warns = append(warns, "工作区环境变量不可用: "+err.Error())
 		} else {
@@ -350,44 +350,6 @@ func SaveFile(path string, vars map[string]string) error {
 	}
 	_ = os.Chmod(path, 0o600)
 	return nil
-}
-
-// Set 读取、设置一个变量并写回；返回写回后的完整集合。
-func Set(path, key, value string) (map[string]string, error) {
-	if err := ValidateKey(key); err != nil {
-		return nil, err
-	}
-	if err := ValidateValue(value); err != nil {
-		return nil, err
-	}
-	vars, _, err := LoadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	vars[key] = value
-	if err := SaveFile(path, vars); err != nil {
-		return nil, err
-	}
-	return vars, nil
-}
-
-// Unset 删除一个变量并写回；第二个返回值表示是否真的删除了。
-func Unset(path, key string) (map[string]string, bool, error) {
-	if err := ValidateKey(key); err != nil {
-		return nil, false, err
-	}
-	vars, _, err := LoadFile(path)
-	if err != nil {
-		return nil, false, err
-	}
-	if _, ok := vars[key]; !ok {
-		return vars, false, nil
-	}
-	delete(vars, key)
-	if err := SaveFile(path, vars); err != nil {
-		return nil, false, err
-	}
-	return vars, true, nil
 }
 
 // accept 校验并登记一条变量；返回的警告不含值。

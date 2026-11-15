@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 
@@ -113,18 +112,6 @@ func (s *Secrets) SetDeclared(pluginID string, names []string) {
 	for _, n := range names {
 		set[normalizeSecretName(n)] = true
 	}
-}
-
-// Names 返回已加载的密钥名（不含值）：doctor 与设置页用「已配置 + 尾号」呈现（07 §7.7.6）。
-func (s *Secrets) Names() []string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]string, 0, len(s.values))
-	for k := range s.values {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // Redact 把文本里出现的任何已知密钥值替换成 ***：日志与审计的最后一道兜底（09 §9.4）。

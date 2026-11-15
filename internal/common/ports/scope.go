@@ -27,7 +27,7 @@ type PathView struct {
 //   - Windows 折叠盘符与大小写、统一分隔符（身份键同规则，01 §4.2）。
 //
 // 生产实现：internal/common/adapters/scope（realpath + 平台规则，M1-F/M5）。
-// 测试替身：internal/testsupport 的内存 scope（合成 symlink 环与越界样本）。
+// 测试替身：internal/agent_core/conformance/testkit 的内存 scope（合成 symlink 环与越界样本）。
 type Scope interface {
 	// Resolve 把插件侧虚拟路径解析为受限视图；越界或指向工作区外时
 	// 返回 domain.CodePluginDenied（能力/信任不允许）错误，拒绝按真实落点判定（09 §9.2）。

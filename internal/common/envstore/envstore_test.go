@@ -168,7 +168,7 @@ func TestLoadForWorkspaceLegacyFallback(t *testing.T) {
 }
 
 // TestMigrateWorkspace：第一次写新目录前把旧 .adag/env.json 物化过去，
-// 之后 Set/Unset 只改新文件。
+// 之后写操作只改新文件。
 func TestMigrateWorkspace(t *testing.T) {
 	home := t.TempDir()
 	ws := t.TempDir()
@@ -193,8 +193,9 @@ func TestMigrateWorkspace(t *testing.T) {
 	if vars["A"] != "1" || vars["B"] != "2" {
 		t.Fatalf("迁移后内容不符: %v", vars)
 	}
-	if _, _, err := Unset(newPath, "A"); err != nil {
-		t.Fatalf("Unset: %v", err)
+	delete(vars, "A")
+	if err := SaveFile(newPath, vars); err != nil {
+		t.Fatalf("SaveFile: %v", err)
 	}
 	vars, _, _ = LoadFile(newPath)
 	if _, ok := vars["A"]; ok {
@@ -209,30 +210,6 @@ func TestMigrateWorkspace(t *testing.T) {
 		t.Fatalf("旧文件不应被改写: %v", oldVars)
 	}
 }
-func TestSetUnset(t *testing.T) {
-	path := filepath.Join(t.TempDir(), FileName)
-	if _, err := Set(path, "A", "1"); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
-	if _, err := Set(path, "B", "2"); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
-	vars, _, err := LoadFile(path)
-	if err != nil || vars["A"] != "1" || vars["B"] != "2" {
-		t.Fatalf("Set 后内容: %v %v", vars, err)
-	}
-	if _, changed, err := Unset(path, "A"); err != nil || !changed {
-		t.Fatalf("Unset: changed=%v err=%v", changed, err)
-	}
-	if _, changed, err := Unset(path, "MISSING"); err != nil || changed {
-		t.Fatalf("删除不存在的键: changed=%v err=%v", changed, err)
-	}
-	vars, _, _ = LoadFile(path)
-	if _, ok := vars["A"]; ok {
-		t.Fatal("A 应被删除")
-	}
-}
-
 func TestValidateAndParse(t *testing.T) {
 	for _, bad := range []string{"", "1ABC", "BAD-KEY", "A B", "A=B", "键", "ADAG_DEBUG"} {
 		if err := ValidateKey(bad); err == nil {

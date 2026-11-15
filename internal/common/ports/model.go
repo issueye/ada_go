@@ -17,7 +17,7 @@ import (
 //
 // 生产实现：internal/common/adapters 中由 provider 插件桥接的适配器（M1-E 起步，
 // 由“官方 Chat 插件”提供首个实现，03 §5.5；基座源码不出现插件 id）。
-// 测试替身：internal/testsupport/fakeprovider（脚本化模型流，development-plan M0.5/M1-A）。
+// 测试替身：internal/agent_core/conformance/testkit/fakeprovider（脚本化模型流，development-plan M0.5/M1-A）。
 type ModelClient interface {
 	// Stream 发起一次流式请求；ctx 取消贯穿到 HTTP 请求（INV-8）。
 	Stream(ctx context.Context, req Request) (Stream, error)

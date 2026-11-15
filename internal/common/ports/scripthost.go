@@ -71,7 +71,7 @@ type ScriptResult struct {
 //   - 连续 3 次失败 → 自动禁用插件、状态 degraded，可手动重载（06 §6.4/§6.9）；
 //   - 热重载双代：新代构建完成后原子替换，在途调用走旧代（06 §6.5、§6.9）。
 //
-// 测试替身：internal/testsupport 的脚本桩（按剧本返回 JSON/错误/超时，支撑
+// 测试替身：internal/agent_core/conformance/testkit 的脚本桩（按剧本返回 JSON/错误/超时，支撑
 // 10 §11.5 的插件失败矩阵）。
 type ScriptHost interface {
 	// Load 创建 Runtime、执行入口工厂并收集贡献（staging；校验与提交属于装配层）。

@@ -73,18 +73,6 @@ const (
 // interaction:<id> / notice:<id> / compaction:<id>。前端只做“替换目标 + 断序重同步”。
 type ItemKey string
 
-// PatchOp 是 evt.state.patch 的一个操作（08 §8.2/§8.3、07 §7.4 示例）。
-type PatchOp struct {
-	// Op 是 upsert 或 remove。
-	Op string `json:"op"`
-	// Key 是稳定的 ItemKey。
-	Key ItemKey `json:"key"`
-	// Fingerprint 是内容哈希；item 按 at 排序，避免流式导致的顺序抖动（08 §8.3）。
-	Fingerprint string `json:"fingerprint,omitempty"`
-	// Item 是变化后的 JSON；单字段超 32KB 由服务端截断并标 truncated（08 §8.3）。
-	Item json.RawMessage `json:"item,omitempty"`
-}
-
 // Event 是一条领域事件。序号语义（08 §8.1/§8.3、07 §7.4）：
 //   - 线程内 Seq 单调递增，由 Core 的唯一写协程分配（04 §5.7）；
 //   - 工作区级事件（evt.ready、evt.plugin.changed）用独立的 WorkspaceSeq；

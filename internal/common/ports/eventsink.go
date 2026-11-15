@@ -14,7 +14,7 @@ import (
 //   - Emit 不阻塞主循环：SSE 断开的客户端不影响轮次（07 §7.4）。
 //
 // 生产实现：internal/agent_core/coreproto 的事件发射器（01 §5.2，M1-A/M2）。
-// 测试替身：internal/testsupport 的事件记录器（development-plan M0.5；
+// 测试替身：internal/agent_core/conformance/testkit 的事件记录器（development-plan M0.5；
 // INV-6 事件序列 golden 测试靠它回放，02 §5.3）。
 type EventSink interface {
 	// Emit 投递一条领域事件；序号字段（Seq/WorkspaceSeq）由实现方在写协程内补齐后广播。

@@ -9,7 +9,7 @@ import "context"
 //   - 检查点 id：chk_01J…（08 §8.4 receipt.checkpoint、09 §9.2）。
 //
 // 生产实现：internal/common/adapters/idgen（crypto/rand + ULID，M1-A；INV-2）。
-// 测试替身：internal/testsupport 的确定性 id 源（golden 事件序列回放需要固定 id，02 §5.3 INV-6）。
+// 测试替身：internal/agent_core/conformance/testkit 的确定性 id 源（golden 事件序列回放需要固定 id，02 §5.3 INV-6）。
 type IDGen interface {
 	// NewThreadID 生成 th_<workspaceHash>_<ulid>。
 	NewThreadID(ctx context.Context, workspaceHash string) (string, error)

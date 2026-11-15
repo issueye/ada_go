@@ -11,7 +11,7 @@ import "context"
 //   - Gateway 不接触密钥（01 §4.1：不持有模型密钥）；供应商配置页只显示“已配置 + 尾号”（07 §7.7.6）。
 //
 // 生产实现：internal/common/adapters/secret（环境/文件，M1-B）。
-// 测试替身：internal/testsupport 的内存密钥环（INV-2；脱敏断言用）。
+// 测试替身：internal/agent_core/conformance/testkit 的内存密钥环（INV-2；脱敏断言用）。
 type SecretBroker interface {
 	// Lookup 按名字取密钥。found=false 表示清单未声明或配置缺失；
 	// 返回值绝不会被实现方写入日志（本接口以约定强制，而非运行时检查）。

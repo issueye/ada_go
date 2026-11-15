@@ -3,10 +3,7 @@
 
 package proto
 
-import (
-	"fmt"
-	"sort"
-)
+import "fmt"
 
 // 说明（来自协议源 conventions.notes）：
 //   - Gateway 作为 JSON-RPC 客户端、Core 作为服务端；所有 methods 的 direction 均为 gateway->core（8.1）。
@@ -60,7 +57,7 @@ const (
 	MethodSystemPing            = "system.ping"            // 健康检查
 	MethodSystemShutdown        = "system.shutdown"        // 优雅退出：刷盘、关运行时，带超时
 	MethodWorkspaceInfo         = "workspace.info"         // 查询工作区路径、产品、配置与数据目录
-	MethodWorkspaceUpdatePolicy = "workspace.updatePolicy" // 更新运行参数：资源上限、循环检测、当前模型等（审批策略由插件自己管理）
+	MethodWorkspaceUpdatePolicy = "workspace.updatePolicy" // 更新运行参数：资源上限、循环检测、当前模型等（不含审批规则）
 	MethodThreadCreate          = "thread.create"          // 创建线程
 	MethodThreadList            = "thread.list"            // 线程列表（分页、归档过滤；只列当前工作区）
 	MethodThreadGet             = "thread.get"             // 线程快照：items 窗口 + 运行状态（seq 断序时的全量重同步入口）
@@ -151,7 +148,7 @@ var Methods = []MethodMeta{
 	{Name: "system.ping", Group: "system", Summary: "健康检查", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: false, DefaultDisabled: false},
 	{Name: "system.shutdown", Group: "system", Summary: "优雅退出：刷盘、关运行时，带超时", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: false, DefaultDisabled: false},
 	{Name: "workspace.info", Group: "workspace", Summary: "查询工作区路径、产品、配置与数据目录", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
-	{Name: "workspace.updatePolicy", Group: "workspace", Summary: "更新运行参数：资源上限、循环检测、当前模型等（审批策略由插件自己管理）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
+	{Name: "workspace.updatePolicy", Group: "workspace", Summary: "更新运行参数：资源上限、循环检测、当前模型等（不含审批规则）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "thread.create", Group: "thread", Summary: "创建线程", Direction: "gateway->core", Since: "1.0", Idempotent: false, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "thread.list", Group: "thread", Summary: "线程列表（分页、归档过滤；只列当前工作区）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
 	{Name: "thread.get", Group: "thread", Summary: "线程快照：items 窗口 + 运行状态（seq 断序时的全量重同步入口）", Direction: "gateway->core", Since: "1.0", Idempotent: true, RequiresReadyInstance: true, DefaultDisabled: false},
@@ -297,40 +294,6 @@ func ErrorByName(name string) (ErrorMeta, bool) {
 		}
 	}
 	return ErrorMeta{}, false
-}
-
-// MethodsByGroup 按分组列出方法（分组名升序）。
-var MethodsByGroup = map[string][]string{
-	"action":      {"action.invoke"},
-	"change":      {"change.list", "change.revert"},
-	"debug":       {"debug.state"},
-	"interaction": {"interaction.list", "interaction.respond"},
-	"model":       {"model.list", "model.set"},
-	"plugin":      {"plugin.list", "plugin.reload", "plugin.setEnabled", "plugin.http", "plugin.httpStream"},
-	"provider":    {"provider.list"},
-	"skill":       {"skill.list"},
-	"system":      {"system.hello", "system.ping", "system.shutdown"},
-	"thread":      {"thread.create", "thread.list", "thread.get", "thread.entries", "thread.rename", "thread.archive", "thread.branch", "thread.delete"},
-	"tool":        {"tool.list"},
-	"turn":        {"turn.start", "turn.cancel", "turn.steer", "turn.get"},
-	"workspace":   {"workspace.info", "workspace.updatePolicy"},
-}
-
-// Groups 返回全部方法分组（升序）。
-func Groups() []string {
-	out := make([]string, 0, len(MethodsByGroup))
-	for g := range MethodsByGroup {
-		out = append(out, g)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// Counts 是协议数量；adag verify 拿它与设计文档的「核心数字」比对（design.md 文档约定）。
-type Counts struct{ Methods, Events, ErrorCodes, Groups int }
-
-func SpecCounts() Counts {
-	return Counts{Methods: len(Methods), Events: len(Events), ErrorCodes: len(ErrorCodes), Groups: len(MethodsByGroup)}
 }
 
 // String 便于日志与页面展示错误码。

@@ -13,7 +13,7 @@ import (
 //   - 基座不注册任何工具，空基座的 List 返回空（INV-11：禁用插件后能力必须消失，基座不补位）。
 //
 // 生产实现：internal/agent_core/plugins 装配期结算 + internal/common/toolkit 注册表（M1-A/M3）。
-// 测试替身：internal/testsupport 的静态目录（fake provider E2E 注入桩描述符，development-plan M1-A）。
+// 测试替身：internal/agent_core/conformance/testkit 的静态目录（fake provider E2E 注入桩描述符，development-plan M1-A）。
 type ToolCatalog interface {
 	// List 返回装配期冻结的全量描述符（稳定排序：注册序 + 名称），供模型请求与 tool.list 共用。
 	List(ctx context.Context) []domain.Descriptor

@@ -12,6 +12,6 @@
 //
 // 明确不造端口的东西（01 §5.2）：CancelToken 直接用 context.Context；
 // PromptSource 是 engine 内部函数；BlobStore 等真实需求出现再加。
-// Gateway↔Core 的 RPC 面属于 coreproto（M2），不是端口；握手协议版本校验用
-// internal/common/version.CheckCompatible（version 依赖 domain，ports 不依赖 version）。
+// Gateway↔Core 的 RPC 面属于 coreproto（M2），不是端口；握手协议版本由调用方
+// 比对 ProtocolVersion 常量（Gateway supervisor.awaitHandshake、Core coreproto.CheckHello）。
 package ports

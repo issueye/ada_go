@@ -73,7 +73,7 @@ type ContextWindow struct {
 // workspace_locked（04 §5.7，domain.CodeWorkspaceLocked）。Gateway 不打开 state.db。
 //
 // 生产实现：internal/common/adapters/sqlite（M1-B）。
-// 测试替身：internal/testsupport 的内存 store（保持 append-only 与 seq 语义，INV-2）。
+// 测试替身：internal/agent_core/conformance/testkit 的内存 store（保持 append-only 与 seq 语义，INV-2）。
 type SessionStore interface {
 	// CreateThread 新建线程；id 由 IDGen 生成（th_<workspaceHash>_<ulid>）。
 	CreateThread(ctx context.Context, workspace, title string) (Thread, error)

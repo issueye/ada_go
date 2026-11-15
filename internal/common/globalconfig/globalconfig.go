@@ -120,7 +120,7 @@ func Open(pluginID string) (*Store, error) {
 	return &Store{path: path}, nil
 }
 
-// Path 返回配置文件路径（诊断用）。`nfunc (s *Store) Path() string { return s.path }`n`n// Path 返回配置文件路径（诊断用）。
+// Path 返回配置文件路径（诊断用）。
 func (s *Store) Path() string { return s.path }
 
 // Get 读取一个 key；不存在返回 found=false，第二返回值为 nil。

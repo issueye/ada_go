@@ -1,15 +1,14 @@
 // Package version 汇总 ada-go 的版本与协议常量（握手版本见 01 §4.2/§3.1，
 // 插件 apiVersion 见 05 §6.2，system.hello 见 08 §8.2）。
 //
-// 依赖方向：只 import domain；gateway/core 装配与握手用 ProtocolVersion 校验，
+// 依赖方向：只 import 标准库；Gateway（supervisor.awaitHandshake）与 Core
+// （coreproto.CheckHello）各自用 ProtocolVersion 常量比对握手版本。
 // 插件清单 apiVersion 用 APIVersionMajor（05 §6.2：主版本不匹配直接拒绝加载，
 // 次版本兼容、宿主忽略未知字段）。ports 不依赖本包。
 package version
 
 import (
 	"fmt"
-
-	"github.com/adag/ada-go/internal/common/domain"
 )
 
 // ProtocolVersion 是 Gateway↔Core 的 wire 协议版本（system.hello 握手比对，08 §8.1/§8.2）。
@@ -55,16 +54,4 @@ var (
 func String() string {
 	return fmt.Sprintf("%s %s %s (proto=%d, api=%d.%d, rev=%s, built=%s)",
 		Product, Binary, Version, ProtocolVersion, APIVersionMajor, APIVersionMinor, Revision, BuildTime)
-}
-
-// CheckCompatible 是握手期的协议版本校验（system.hello：版本不匹配即拒）。
-// 不匹配返回 domain 错误（CodeProtocolError），调用方据此拒绝建立会话；
-// Core 版本不匹配时 Gateway 不重试、直接显示原因（01 §4.2 启动失败结构化错误）。
-func CheckCompatible(protocol int) error {
-	if protocol != ProtocolVersion {
-		return domain.NewError(domain.CodeProtocolError,
-			fmt.Sprintf("协议版本不匹配：对端 %d，本端 %d（%s）", protocol, ProtocolVersion, String())).
-			WithDiag(domain.NewDiagnostic(domain.DiagCore, 1))
-	}
-	return nil
 }

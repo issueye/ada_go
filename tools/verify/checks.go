@@ -622,7 +622,7 @@ func checkProducts(root string) error {
 		// 再加 plugin-helper、token-usage、通用图表 ui-charts、环境变量管理
 		// env-manager、定时任务 cron-manager 与输入框遥测岛 composer-telemetry。
 		if len(coding.Plugins) != 16 {
-			problems = append(problems, fmt.Sprintf("coding 的官方插件清单是 %d 项，期望 17 项", len(coding.Plugins)))
+			problems = append(problems, fmt.Sprintf("coding 的官方插件清单是 %d 项，期望 16 项", len(coding.Plugins)))
 		}
 		if !coding.Capabilities.Images || !coding.Capabilities.Skills {
 			problems = append(problems, "coding 应启用 skills 与 images（8.6 示例）")

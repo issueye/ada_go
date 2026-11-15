@@ -117,7 +117,7 @@ func (s *Scope) Resolve(_ context.Context, virtualPath string) (ports.PathView, 
 //
 // 命令能逃出路径沙箱是明确保留的口子（09 §9.2）：这里只保证 cwd 在范围内、
 // 命令名不含路径分隔符（防止 ./evil.sh 这种绕开 PATH 白名单的写法），
-// 「是否询问」由 role=tool-policy 的策略插件决定，基座不含规则。
+// 审批策略已整体移除（2026-11-10）：命令直接执行，基座不含询问规则。
 func (s *Scope) CheckExec(ctx context.Context, cwd, command string) (ports.PathView, error) {
 	if strings.TrimSpace(command) == "" {
 		return ports.PathView{}, domain.NewError(domain.CodeToolInvalidArgs, "命令名为空")

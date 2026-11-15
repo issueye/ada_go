@@ -1455,10 +1455,8 @@ func TestStaticBaselineAssetsServed(t *testing.T) {
 		{"/static/ui/pages.css", ""},
 		{"/static/app-local.css", ".shell"},
 		{"/static/api.js", ""},
-		{"/static/ada-select.js", ""},
 		{"/static/ada-modal.js", ""},
 		{"/static/file-picker.js", ""},
-		{"/static/chat-images.js", ""},
 		{"/static/theme.js", ""},
 		{"/static/themes.js", ""},
 	}

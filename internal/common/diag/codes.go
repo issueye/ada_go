@@ -115,15 +115,11 @@ var table = []Entry{
 	{5004, "storage_corrupt", Code{AreaStore, 2}, "WAL 或数据库损坏；运行 adag doctor，必要时用最近的备份恢复。"},
 }
 
-// entries 建立 name/appCode 两个索引（只读，初始化一次）。
-var (
-	byName    = make(map[string]Entry, len(table))
-	byAppCode = make(map[int]Entry, len(table))
-)
+// byAppCode 建立 appCode → 条目索引（只读，初始化一次）。
+var byAppCode = make(map[int]Entry, len(table))
 
 func init() {
 	for _, e := range table {
-		byName[e.Name] = e
 		byAppCode[e.AppCode] = e
 	}
 }
@@ -138,11 +134,5 @@ func Table() []Entry {
 // For 按应用错误码取诊断条目。
 func For(appCode int) (Entry, bool) {
 	e, ok := byAppCode[appCode]
-	return e, ok
-}
-
-// ForName 按应用错误码名称取诊断条目。
-func ForName(name string) (Entry, bool) {
-	e, ok := byName[name]
 	return e, ok
 }

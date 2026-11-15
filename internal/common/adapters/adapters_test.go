@@ -238,9 +238,6 @@ func TestSecretsDeclaredAndRedact(t *testing.T) {
 	if strings.Contains(got, "super-secret-value") {
 		t.Fatalf("脱敏失败：%s", got)
 	}
-	if len(s.Names()) != 1 || s.Names()[0] != "tok" {
-		t.Fatalf("Names 只给名字不给值：%v", s.Names())
-	}
 }
 
 // TestSecretsMissingFileIsNotError 保证离线首启动可用（附录 B：密钥可以完全没有）。

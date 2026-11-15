@@ -20,7 +20,7 @@ type StateKey struct {
 //   - 写操作进入 Core 单写者队列（04 §5.7），读走 WAL 读连接。
 //
 // 生产实现：internal/common/adapters/sqlite（plugin_state 表，M1-B）。
-// 测试替身：internal/testsupport 的内存 KV（INV-2）。
+// 测试替身：internal/agent_core/conformance/testkit 的内存 KV（INV-2）。
 type StateStore interface {
 	// Get 读取键值；found=false 表示不存在（对应 ctx.state.get 返回 null，05 §6.3）。
 	Get(ctx context.Context, key StateKey) (value json.RawMessage, found bool, err error)

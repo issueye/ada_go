@@ -48,7 +48,7 @@ type InteractionResolution struct {
 //   - 同一线程最多一个待处理交互（03 §5.6）；等待中的实例不被空闲回收（01 §4.2）。
 //
 // 生产实现：internal/agent_core/coreproto 事件 + Gateway 托盘 + 04 interactions 表（M1-A/M2）。
-// 测试替身：internal/testsupport 的脚本化 broker——按序注入 accepted/denied/timeout/unavailable
+// 测试替身：internal/agent_core/conformance/testkit 的脚本化 broker——按序注入 accepted/denied/timeout/unavailable
 // 以驱动失败方向测试（10 §11.5）。
 type InteractionBroker interface {
 	// Request 发起交互并阻塞等待解析；ctx 取消时解析为 cancelled（03 §5.6 取消段）。
