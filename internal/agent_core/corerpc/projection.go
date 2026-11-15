@@ -87,6 +87,19 @@ func projectEntry(e ports.Entry) (projectedItem, bool) {
 }
 
 func projectInteraction(r ports.InteractionRequest) (projectedItem, bool) {
+	payload, err := json.Marshal(interactionRow(r))
+	if err != nil {
+		return projectedItem{}, false
+	}
+	return projectedItem{key: "interaction:" + r.ID, typ: "interaction", at: r.CreatedAt,
+		payload: payload, fingerprint: fingerprintPayload(payload)}, true
+}
+
+// interactionRow 是交互请求的展示投影：thread.get 的 items 行与
+// interaction.list 的数组元素共用同一份字段（pending 状态在此固定）。
+// 注意 evt.interaction.requested 的事件载荷是另一份形状（coreproto.protoLike，
+// 键名 interactionId、无 status/createdAt），两者刻意不共用。
+func interactionRow(r ports.InteractionRequest) map[string]any {
 	m := map[string]any{
 		"id": r.ID, "threadId": r.ThreadID, "runId": r.RunID,
 		"pluginId": r.PluginID, "kind": string(r.Kind), "title": r.Title,
@@ -102,12 +115,7 @@ func projectInteraction(r ports.InteractionRequest) (projectedItem, bool) {
 	if !r.ExpiresAt.IsZero() {
 		m["expiresAt"] = r.ExpiresAt.UTC().Format(time.RFC3339Nano)
 	}
-	payload, err := json.Marshal(m)
-	if err != nil {
-		return projectedItem{}, false
-	}
-	return projectedItem{key: "interaction:" + r.ID, typ: "interaction", at: r.CreatedAt,
-		payload: payload, fingerprint: fingerprintPayload(payload)}, true
+	return m
 }
 
 func fingerprintPayload(raw []byte) string {
@@ -288,22 +296,7 @@ func entryJSON(e ports.Entry) map[string]any {
 func interactionsJSON(reqs []ports.InteractionRequest) []map[string]any {
 	out := make([]map[string]any, 0, len(reqs))
 	for _, r := range reqs {
-		m := map[string]any{
-			"id": r.ID, "threadId": r.ThreadID, "runId": r.RunID,
-			"pluginId": r.PluginID, "kind": string(r.Kind), "title": r.Title,
-			"body": r.Body, "status": string(domain.InteractionPending),
-			"createdAt": r.CreatedAt.UTC().Format(time.RFC3339Nano),
-		}
-		if r.CallID != "" {
-			m["callId"] = r.CallID
-		}
-		if len(r.Options) > 0 {
-			m["options"] = r.Options
-		}
-		if !r.ExpiresAt.IsZero() {
-			m["expiresAt"] = r.ExpiresAt.UTC().Format(time.RFC3339Nano)
-		}
-		out = append(out, m)
+		out = append(out, interactionRow(r))
 	}
 	return out
 }
