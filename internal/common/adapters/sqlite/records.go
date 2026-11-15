@@ -203,23 +203,17 @@ WHERE ended_at IS NULL AND status NOT IN ('completed','cancelled','error','inter
 	return marked, nil
 }
 
-// GetRun 读一次轮次（只读）。
-func (r *Reader) GetRun(ctx context.Context, runID string) (Run, error) {
+// scanRun 从一行 runs 查询结果扫出 Run。入参兼容 *sql.Row（GetRun）与
+// *sql.Rows（ListRuns/导出备份）：两者共用同一列投影，列映射只写这一份。
+func scanRun(row interface{ Scan(dest ...any) error }) (Run, error) {
 	var (
 		run                  Run
 		ended                sql.NullInt64
 		errorCode, usageText sql.NullString
 		startedAt            int64
 	)
-	err := r.read.QueryRowContext(ctx, `
-SELECT id, thread_id, status, started_at, ended_at, error_code, usage_json
-FROM runs WHERE id = ?`, runID).
-		Scan(&run.ID, &run.ThreadID, &run.Status, &startedAt, &ended, &errorCode, &usageText)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Run{}, &NotFoundError{Kind: "run", ID: runID}
-	}
-	if err != nil {
-		return Run{}, fmt.Errorf("sqlite: 读取轮次失败: %w", err)
+	if err := row.Scan(&run.ID, &run.ThreadID, &run.Status, &startedAt, &ended, &errorCode, &usageText); err != nil {
+		return Run{}, fmt.Errorf("sqlite: 扫描轮次行失败: %w", err)
 	}
 	run.StartedAt = fromMS(startedAt)
 	if ended.Valid {
@@ -228,6 +222,20 @@ FROM runs WHERE id = ?`, runID).
 	run.ErrorCode = errorCode.String
 	if usageText.String != "" {
 		run.UsageJSON = json.RawMessage(usageText.String)
+	}
+	return run, nil
+}
+
+// GetRun 读一次轮次（只读）。
+func (r *Reader) GetRun(ctx context.Context, runID string) (Run, error) {
+	run, err := scanRun(r.read.QueryRowContext(ctx, `
+SELECT id, thread_id, status, started_at, ended_at, error_code, usage_json
+FROM runs WHERE id = ?`, runID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Run{}, &NotFoundError{Kind: "run", ID: runID}
+	}
+	if err != nil {
+		return Run{}, err
 	}
 	return run, nil
 }
@@ -246,22 +254,9 @@ FROM runs WHERE thread_id = ? ORDER BY started_at DESC LIMIT ?`, threadID, limit
 	defer rows.Close()
 	var out []Run
 	for rows.Next() {
-		var (
-			run                  Run
-			ended                sql.NullInt64
-			errorCode, usageText sql.NullString
-			startedAt            int64
-		)
-		if err := rows.Scan(&run.ID, &run.ThreadID, &run.Status, &startedAt, &ended, &errorCode, &usageText); err != nil {
-			return nil, fmt.Errorf("sqlite: 读取轮次行失败: %w", err)
-		}
-		run.StartedAt = fromMS(startedAt)
-		if ended.Valid {
-			run.EndedAt = fromMS(ended.Int64)
-		}
-		run.ErrorCode = errorCode.String
-		if usageText.String != "" {
-			run.UsageJSON = json.RawMessage(usageText.String)
+		run, err := scanRun(rows)
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, run)
 	}

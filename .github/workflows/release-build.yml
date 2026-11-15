@@ -68,7 +68,7 @@ jobs:
           if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
           CGO_ENABLED=0 GOWORK=off GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
             go build -trimpath \
-              -ldflags "-X github.com/adag/ada-go/internal/version.Revision=$(git rev-parse --short HEAD) -X github.com/adag/ada-go/internal/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              -ldflags "-X github.com/adag/ada-go/internal/common/version.Revision=$(git rev-parse --short HEAD) -X github.com/adag/ada-go/internal/common/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
               -o bin/adag-${{ matrix.goos }}-${{ matrix.goarch }}${ext} ./cmd/adag
           ls -l bin/
 

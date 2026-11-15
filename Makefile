@@ -12,11 +12,11 @@ GO            ?= go
 NODE          ?= node
 BIN           ?= bin
 MODULE        := github.com/adag/ada-go
-VERSION_PKG   := $(MODULE)/internal/version
+VERSION_PKG   := $(MODULE)/internal/common/version
 REVISION      := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 BUILD_TIME    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 # 版本注入与 cmd/adag 的命令面约定一致（另一位工程师实现）：
-#   -X internal/version.Revision=... -X internal/version.BuildTime=...
+#   -X internal/common/version.Revision=... -X internal/common/version.BuildTime=...
 LDFLAGS       := -X $(VERSION_PKG).Revision=$(REVISION) -X $(VERSION_PKG).BuildTime=$(BUILD_TIME)
 
 MOEJS_TAG     ?= v0.1.0-alpha.11

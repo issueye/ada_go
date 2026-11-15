@@ -221,22 +221,9 @@ FROM runs WHERE thread_id = ? ORDER BY started_at ASC`, threadID)
 	defer rows.Close()
 	var out []Run
 	for rows.Next() {
-		var (
-			run                  Run
-			ended                sql.NullInt64
-			errorCode, usageText sql.NullString
-			startedAt            int64
-		)
-		if err := rows.Scan(&run.ID, &run.ThreadID, &run.Status, &startedAt, &ended, &errorCode, &usageText); err != nil {
-			return nil, fmt.Errorf("sqlite: 导出读轮次失败: %w", err)
-		}
-		run.StartedAt = fromMS(startedAt)
-		if ended.Valid {
-			run.EndedAt = fromMS(ended.Int64)
-		}
-		run.ErrorCode = errorCode.String
-		if usageText.String != "" {
-			run.UsageJSON = json.RawMessage(usageText.String)
+		run, err := scanRun(rows)
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, run)
 	}

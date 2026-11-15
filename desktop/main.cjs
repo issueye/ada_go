@@ -227,8 +227,8 @@ async function ensureGatewayBinary(customBin) {
   } catch { /* 非 git 检出：版本号留空 */ }
   const buildTime = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
   const ldflags = [
-    `-X github.com/adag/ada-go/internal/version.Revision=${revision || 'dev'}`,
-    `-X github.com/adag/ada-go/internal/version.BuildTime=${buildTime}`,
+    `-X github.com/adag/ada-go/internal/common/version.Revision=${revision || 'dev'}`,
+    `-X github.com/adag/ada-go/internal/common/version.BuildTime=${buildTime}`,
   ].join(' ')
 
   try { fs.mkdirSync(path.dirname(outPath), { recursive: true }) } catch { /* 目录已存在 */ }
