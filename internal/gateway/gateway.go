@@ -6,24 +6,18 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/adag/ada-go/internal/agent_core/coreapp"
-	"github.com/adag/ada-go/internal/common/domain"
 	pluginapi "github.com/adag/ada-go/internal/common/pluginapi"
 	"github.com/adag/ada-go/internal/gateway/contracts"
 	"github.com/adag/ada-go/internal/gateway/dispatch"
@@ -31,7 +25,6 @@ import (
 	"github.com/adag/ada-go/internal/gateway/processmgr"
 	"github.com/adag/ada-go/internal/gateway/relay"
 	"github.com/adag/ada-go/internal/gateway/security"
-	"github.com/adag/ada-go/internal/gateway/sse"
 	"github.com/adag/ada-go/internal/gateway/supervisor"
 	"github.com/adag/ada-go/internal/gateway/web"
 )
@@ -99,126 +92,6 @@ type Gateway struct {
 	// processEndpoint 是 /internal/processes/* 的内部端点（P4 插件进程桥的服务端）。
 	// 同时持有「哪个 Core 注册了哪些进程」的索引，供 Core 退出/重签令牌时清理。
 	processEndpoint *processmgr.Endpoint
-}
-
-// frontendGate 提供「某工作区里某前端插件是否启用」的短期缓存。
-// 渲染桥每个插槽贡献都会问一次；缓存避免一次页面渲染打十几次 plugin.list。
-type frontendGate struct {
-	sup          contracts.Supervisor
-	workspaceFor func(*http.Request) string
-	mu           sync.Mutex
-	byWorkspace  map[string]frontendEnabledEntry
-}
-
-type frontendEnabledEntry struct {
-	at       time.Time
-	set      map[string]bool
-	known    map[string]bool
-	allowAll bool // Core 暂时不可用：按启用渲染，避免整页插件区消失
-}
-
-const frontendEnabledTTL = 2 * time.Second
-
-func newFrontendGate(sup contracts.Supervisor, workspaceFor func(*http.Request) string) *frontendGate {
-	return &frontendGate{sup: sup, workspaceFor: workspaceFor, byWorkspace: map[string]frontendEnabledEntry{}}
-}
-
-// Enabled 实现 frontend.BridgeOptions.Enabled。
-func (g *frontendGate) Enabled(r *http.Request, pluginID string) bool {
-	workspace := ""
-	if g.workspaceFor != nil {
-		workspace = g.workspaceFor(r)
-	}
-	entry, err := g.snapshot(workspace)
-	if err != nil {
-		return true
-	}
-	return entry.enabledIn(pluginID)
-}
-
-// enabledIn 是启用判定的纯逻辑（便于单测）：
-//   - Core 明确列出的插件按启用状态；
-//   - 未出现在 plugin.list 里的插件视为「Core 不加载的前端-only 插件」
-//     （只贡献 Markdown 动态块的第三方包），安装即启用；要停用就移除目录；
-//   - Core 不可用时按启用渲染，避免整页插件区消失。
-func (e frontendEnabledEntry) enabledIn(pluginID string) bool {
-	if e.allowAll {
-		return true
-	}
-	if e.set[pluginID] {
-		return true
-	}
-	if e.known[pluginID] {
-		return false
-	}
-	return true
-}
-
-// Invalidate 丢弃一个工作区的缓存；workspace 为空时清空全部。
-func (g *frontendGate) Invalidate(workspace string) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if workspace == "" {
-		g.byWorkspace = map[string]frontendEnabledEntry{}
-		return
-	}
-	delete(g.byWorkspace, workspace)
-}
-
-func (g *frontendGate) snapshot(workspace string) (frontendEnabledEntry, error) {
-	g.mu.Lock()
-	if e, ok := g.byWorkspace[workspace]; ok && time.Since(e.at) < frontendEnabledTTL {
-		g.mu.Unlock()
-		return e, nil
-	}
-	g.mu.Unlock()
-
-	// 每个工作区最多每 2s 查一次；失败也缓存 allowAll，避免 Core 故障时
-	// 每个插槽都等满超时。
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	entry := frontendEnabledEntry{at: time.Now()}
-	core, err := g.sup.Acquire(ctx, workspace)
-	if err != nil {
-		entry.allowAll = true
-	} else {
-		raw, callErr := core.Call(ctx, "plugin.list", map[string]any{})
-		g.sup.Release(workspace)
-		if callErr != nil {
-			entry.allowAll = true
-		} else {
-			var res struct {
-				Plugins []struct {
-					ID      string `json:"id"`
-					Enabled bool   `json:"enabled"`
-					Status  string `json:"status"`
-				} `json:"plugins"`
-			}
-			if jsonErr := json.Unmarshal(raw, &res); jsonErr != nil {
-				entry.allowAll = true
-			} else {
-				entry.set = make(map[string]bool, len(res.Plugins))
-				entry.known = make(map[string]bool, len(res.Plugins))
-				for _, p := range res.Plugins {
-					if p.ID == "" {
-						continue
-					}
-					entry.known[p.ID] = true
-					if !p.Enabled {
-						continue
-					}
-					switch p.Status {
-					case "", "ready", "degraded":
-						entry.set[p.ID] = true
-					}
-				}
-			}
-		}
-	}
-	g.mu.Lock()
-	g.byWorkspace[workspace] = entry
-	g.mu.Unlock()
-	return entry, err
 }
 
 // New 装配 Gateway。调用方必须最终调用 Shutdown。
@@ -595,142 +468,6 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 	return procErr
 }
 
-// workspaceRequestResolver 允许 SSE 与前端插件桥在 web.Server 创建后
-// 复用同一套动态工作区解析（含 FilePicker 登记的工作区）。创建前先静态兜底。
-type workspaceRequestResolver struct {
-	mu      sync.RWMutex
-	resolve func(*http.Request) string
-}
-
-func newWorkspaceRequestResolver(resolve func(*http.Request) string) *workspaceRequestResolver {
-	return &workspaceRequestResolver{resolve: resolve}
-}
-
-func (r *workspaceRequestResolver) Resolve(req *http.Request) string {
-	r.mu.RLock()
-	resolve := r.resolve
-	r.mu.RUnlock()
-	if resolve == nil {
-		return ""
-	}
-	return resolve(req)
-}
-
-func (r *workspaceRequestResolver) Set(resolve func(*http.Request) string) {
-	r.mu.Lock()
-	r.resolve = resolve
-	r.mu.Unlock()
-}
-
-// eventHandler 为每条 SSE 连接取一个 Core 句柄，连接结束即 Release。
-// 每个连接一个 Hub 意味着断线后 Last-Event-ID 回放只在本次连接内有界；
-// 跨连接重同步由客户端调用 thread.get 完成。
-type eventHandler struct {
-	sup          contracts.Supervisor
-	workspaceFor func(*http.Request) string
-	opts         sse.Options
-}
-
-func (h *eventHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	workspace := ""
-	if h.workspaceFor != nil {
-		workspace = h.workspaceFor(r)
-	}
-	core, err := h.sup.Acquire(r.Context(), workspace)
-	if err != nil {
-		http.Error(w, "Core 不可用: "+err.Error(), http.StatusBadGateway)
-		return
-	}
-	defer h.sup.Release(workspace)
-	hub := sse.New(core, h.opts)
-	defer hub.Close()
-	hub.ServeHTTP(w, r)
-}
-
-// workspaceEventsHandler 是 GET /events/workspace：工作区级事件
-// （evt.ready / evt.plugin.changed，docs/08 §8.2）的 SSE 流。
-//
-// 线程级事件不进这条流（sse.Hub 按 threadId 分发并跳过无 threadId 的事件，
-// hub.go 的 run()）；反过来工作区事件也独立成流，seq 取 params.workspaceSeq。
-// 事件稀疏：不做合并窗口，15s 心跳；不做历史回放——断线重连的客户端以
-// GET /frontend-registry 全量重同步为准（dev-plan §8.3）。
-type workspaceEventsHandler struct {
-	sup          contracts.Supervisor
-	workspaceFor func(*http.Request) string
-}
-
-func (h *workspaceEventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	workspace := ""
-	if h.workspaceFor != nil {
-		workspace = h.workspaceFor(r)
-	}
-	core, err := h.sup.Acquire(r.Context(), workspace)
-	if err != nil {
-		http.Error(w, "Core 不可用: "+err.Error(), http.StatusBadGateway)
-		return
-	}
-	defer h.sup.Release(workspace)
-
-	events, cancel := core.Subscribe(64)
-	defer cancel()
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "连接不支持流式响应", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	if _, err := io.WriteString(w, "retry: 3000\n\n"); err != nil {
-		return
-	}
-	flusher.Flush()
-
-	heartbeat := time.NewTicker(15 * time.Second)
-	defer heartbeat.Stop()
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case evt, alive := <-events:
-			if !alive {
-				return
-			}
-			if !isWorkspaceEvent(evt.Method) {
-				continue
-			}
-			var buf bytes.Buffer
-			if seq := workspaceSeq(evt.Params); seq > 0 {
-				fmt.Fprintf(&buf, "id: %d\n", seq)
-			}
-			fmt.Fprintf(&buf, "event: %s\ndata: %s\n\n", evt.Method, evt.Params)
-			if _, err := w.Write(buf.Bytes()); err != nil {
-				return
-			}
-			flusher.Flush()
-		case <-heartbeat.C:
-			if _, err := io.WriteString(w, ": keepalive\n\n"); err != nil {
-				return
-			}
-			flusher.Flush()
-		}
-	}
-}
-
-func isWorkspaceEvent(method string) bool {
-	return method == string(domain.EvtReady) || method == string(domain.EvtPluginChanged)
-}
-
-func workspaceSeq(params json.RawMessage) int64 {
-	var meta struct {
-		WorkspaceSeq int64 `json:"workspaceSeq"`
-	}
-	_ = json.Unmarshal(params, &meta)
-	return meta.WorkspaceSeq
-}
-
 // normalizeWorkspaces 合并单/多工作区配置：Workspaces 非空时优先；
 // 每个路径取绝对路径，去重并保持顺序；至少保留一个。
 func normalizeWorkspaces(workspace string, workspaces []string) ([]string, error) {
@@ -777,83 +514,6 @@ func workspaceResolver(workspaces []string) func(*http.Request) string {
 	}
 }
 
-// workspacesFileData 是用户级工作区列表的落盘形状。
-type workspacesFileData struct {
-	Workspaces []string `json:"workspaces"`
-}
-
-// loadWorkspacesFile 读取用户上次打开过的工作区；不存在的目录直接跳过，
-// 避免移动/删除项目后启动列表里留下永远打不开的条目。
-func loadWorkspacesFile(path string) ([]string, error) {
-	raw, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var data workspacesFileData
-	if err := json.Unmarshal(raw, &data); err != nil {
-		return nil, fmt.Errorf("解析 %s 失败: %w", path, err)
-	}
-	out := make([]string, 0, len(data.Workspaces))
-	for _, candidate := range data.Workspaces {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			continue
-		}
-		abs, err := filepath.Abs(candidate)
-		if err != nil {
-			continue
-		}
-		info, err := os.Stat(abs)
-		if err != nil || !info.IsDir() {
-			continue
-		}
-		out = append(out, abs)
-	}
-	return out, nil
-}
-
-// saveWorkspacesFile 原子写入工作区列表（0600，同目录临时文件 + rename）。
-func saveWorkspacesFile(path string, workspaces []string) error {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return nil
-	}
-	raw, err := json.MarshalIndent(workspacesFileData{
-		Workspaces: append([]string(nil), workspaces...),
-	}, "", "  ")
-	if err != nil {
-		return fmt.Errorf("工作区列表无法序列化: %w", err)
-	}
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("创建工作区状态目录失败: %w", err)
-	}
-	tmp, err := os.CreateTemp(dir, ".workspaces-*.json")
-	if err != nil {
-		return fmt.Errorf("创建工作区状态临时文件失败: %w", err)
-	}
-	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }()
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("设置工作区状态权限失败: %w", err)
-	}
-	if _, err := tmp.Write(raw); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("写入工作区列表失败: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("关闭工作区状态文件失败: %w", err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("替换工作区列表失败: %w", err)
-	}
-	return nil
-}
-
 func randomToken() (string, error) {
 	var buf [24]byte
 	if _, err := rand.Read(buf[:]); err != nil {
@@ -864,3 +524,6 @@ func randomToken() (string, error) {
 
 // DefaultIdle 是 Gateway 默认的空闲回收时间（与 supervisor 默认一致）。
 const DefaultIdle = 15 * time.Minute
+
+// 拆分说明（纯搬移）：前端插件启用短缓存见 frontendgate.go，两条 SSE 接线见
+// sse_wiring.go，工作区列表持久化见 workspaces_file.go。
