@@ -17,6 +17,7 @@ import (
 
 	"github.com/adag/ada-go/internal/agent_core/coreproto"
 	"github.com/adag/ada-go/internal/common/domain"
+	"github.com/adag/ada-go/internal/common/proto"
 )
 
 // Options 是 Core RPC 服务的装配输入。
@@ -171,38 +172,38 @@ func (s *Server) Core() *coreproto.Server { return s.core }
 
 func (s *Server) register() error {
 	reg := map[string]coreproto.Handler{
-		"system.hello":           s.handleHello,
-		"system.ping":            s.handlePing,
-		"system.shutdown":        s.handleShutdown,
-		"workspace.info":         s.handleWorkspaceInfo,
-		"workspace.updatePolicy": s.handleWorkspaceUpdatePolicy,
-		"thread.create":          s.handleThreadCreate,
-		"thread.list":            s.handleThreadList,
-		"thread.get":             s.handleThreadGet,
-		"thread.entries":         s.handleThreadEntries,
-		"thread.rename":          s.handleThreadRename,
-		"thread.archive":         s.handleThreadArchive,
-		"thread.branch":          s.handleThreadBranch,
-		"thread.delete":          s.handleThreadDelete,
-		"turn.start":             s.handleTurnStart,
-		"turn.cancel":            s.handleTurnCancel,
-		"turn.get":               s.handleTurnGet,
-		"turn.steer":             s.handleTurnSteer,
-		"interaction.list":       s.handleInteractionList,
-		"interaction.respond":    s.handleInteractionRespond,
-		"model.list":             s.handleModelList,
-		"model.set":              s.handleModelSet,
-		"provider.list":          s.handleProviderList,
-		"tool.list":              s.handleToolList,
-		"plugin.list":            s.handlePluginList,
-		"plugin.reload":          s.handlePluginReload,
-		"plugin.setEnabled":      s.handlePluginSetEnabled,
-		"plugin.http":            s.handlePluginHTTP,
-		"plugin.httpStream":      s.handlePluginHTTPStream,
-		"action.invoke":          s.handleActionInvoke,
-		"skill.list":             s.handleSkillList,
-		"change.list":            s.handleChangeList,
-		"change.revert":          s.handleChangeRevert,
+		proto.MethodSystemHello:           s.handleHello,
+		proto.MethodSystemPing:            s.handlePing,
+		proto.MethodSystemShutdown:        s.handleShutdown,
+		proto.MethodWorkspaceInfo:         s.handleWorkspaceInfo,
+		proto.MethodWorkspaceUpdatePolicy: s.handleWorkspaceUpdatePolicy,
+		proto.MethodThreadCreate:          s.handleThreadCreate,
+		proto.MethodThreadList:            s.handleThreadList,
+		proto.MethodThreadGet:             s.handleThreadGet,
+		proto.MethodThreadEntries:         s.handleThreadEntries,
+		proto.MethodThreadRename:          s.handleThreadRename,
+		proto.MethodThreadArchive:         s.handleThreadArchive,
+		proto.MethodThreadBranch:          s.handleThreadBranch,
+		proto.MethodThreadDelete:          s.handleThreadDelete,
+		proto.MethodTurnStart:             s.handleTurnStart,
+		proto.MethodTurnCancel:            s.handleTurnCancel,
+		proto.MethodTurnGet:               s.handleTurnGet,
+		proto.MethodTurnSteer:             s.handleTurnSteer,
+		proto.MethodInteractionList:       s.handleInteractionList,
+		proto.MethodInteractionRespond:    s.handleInteractionRespond,
+		proto.MethodModelList:             s.handleModelList,
+		proto.MethodModelSet:              s.handleModelSet,
+		proto.MethodProviderList:          s.handleProviderList,
+		proto.MethodToolList:              s.handleToolList,
+		proto.MethodPluginList:            s.handlePluginList,
+		proto.MethodPluginReload:          s.handlePluginReload,
+		proto.MethodPluginSetEnabled:      s.handlePluginSetEnabled,
+		proto.MethodPluginHttp:            s.handlePluginHTTP,
+		proto.MethodPluginHttpStream:      s.handlePluginHTTPStream,
+		proto.MethodActionInvoke:          s.handleActionInvoke,
+		proto.MethodSkillList:             s.handleSkillList,
+		proto.MethodChangeList:            s.handleChangeList,
+		proto.MethodChangeRevert:          s.handleChangeRevert,
 	}
 	for name, h := range reg {
 		if err := s.core.Register(name, h); err != nil {

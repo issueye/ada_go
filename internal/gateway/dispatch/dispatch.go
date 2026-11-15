@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 
 	"github.com/adag/ada-go/internal/common/domain"
+	"github.com/adag/ada-go/internal/common/proto"
 	"github.com/adag/ada-go/internal/gateway/contracts"
 )
 
@@ -277,13 +278,13 @@ func (d *Dispatcher) deliver(ctx context.Context, client contracts.CoreClient, s
 		if mode == DeliveryStart {
 			return DeliveryStart, sendErr(CodeThreadBusy, "线程已有运行中轮次", nil)
 		}
-		if _, err := client.Call(ctx, "turn.steer", steerParams); err != nil {
+		if _, err := client.Call(ctx, proto.MethodTurnSteer, steerParams); err != nil {
 			if mode == DeliverySteer {
 				return DeliverySteer, err
 			}
 			// 轮次可能在 turn.get 与 turn.steer 之间结束：此时消息并没有进队，
 			// 退回 turn.start 比把一条本来能发的消息变成错误更合理。
-			if _, startErr := client.Call(ctx, "turn.start", startParams); startErr != nil {
+			if _, startErr := client.Call(ctx, proto.MethodTurnStart, startParams); startErr != nil {
 				return DeliveryStart, startErr
 			}
 			return DeliveryStart, nil
@@ -298,7 +299,7 @@ func (d *Dispatcher) deliver(ctx context.Context, client contracts.CoreClient, s
 	if mode == DeliverySteer {
 		return DeliverySteer, sendErr(CodeNotRunning, "线程没有运行中的轮次", nil)
 	}
-	if _, err := client.Call(ctx, "turn.start", startParams); err != nil {
+	if _, err := client.Call(ctx, proto.MethodTurnStart, startParams); err != nil {
 		return DeliveryStart, err
 	}
 	return DeliveryStart, nil
@@ -327,7 +328,7 @@ func createThread(ctx context.Context, client contracts.CoreClient, title string
 	if strings.TrimSpace(title) != "" {
 		params["title"] = title
 	}
-	raw, err := client.Call(ctx, "thread.create", params)
+	raw, err := client.Call(ctx, proto.MethodThreadCreate, params)
 	if err != nil {
 		return "", err
 	}
@@ -348,7 +349,7 @@ func createThread(ctx context.Context, client contracts.CoreClient, title string
 // turnStatus 读取线程当前轮次状态；读不到返回空串，让调用方按空闲处理
 // （此时 turn.start 会给出真正的错误，而不是把 Core 故障伪装成排队）。
 func turnStatus(ctx context.Context, client contracts.CoreClient, threadID string) string {
-	raw, err := client.Call(ctx, "turn.get", map[string]any{"threadId": threadID})
+	raw, err := client.Call(ctx, proto.MethodTurnGet, map[string]any{"threadId": threadID})
 	if err != nil {
 		return ""
 	}

@@ -88,23 +88,6 @@ const (
 	MethodDebugState            = "debug.state"            // 本机调试快照（默认关闭；关闭时不注册进 dispatch 表，等同 method_not_found）
 )
 
-// 事件名常量（JSON-RPC notification，无 id）。
-const (
-	EvtReady                = "evt.ready"                 // Core 就绪：产品、工具数、插件数
-	EvtStateSnapshot        = "evt.state.snapshot"        // 线程全量快照：items 窗口、seq、run、interactions
-	EvtStatePatch           = "evt.state.patch"           // 增量补丁：baseSeq + upsert/remove ops + 指纹；只发变化字段，超 32KB 截断标 truncated
-	EvtMessageDelta         = "evt.message.delta"         // 消息增量：消息 id、文本/思考增量、seq（40ms 窗口合并后发送）
-	EvtItemUpdated          = "evt.item.updated"          // 单条 item 结构变化（消息开始/结束、工具卡状态等）
-	EvtRunStatus            = "evt.run.status"            // 轮次状态：running / waiting_input / finishing / terminal；terminal 时恰好一个 TurnFinished
-	EvtInteractionRequested = "evt.interaction.requested" // 交互请求：交互 id、类型、标题、正文、选项、截止时间
-	EvtInteractionResolved  = "evt.interaction.resolved"  // 交互解析：accepted / denied / cancelled / timeout / unavailable；一次交互恰好解析一次
-	EvtNotice               = "evt.notice"                // 只给人的提示（永不进模型，INV-10）
-	EvtUsage                = "evt.usage"                 // token 与成本增量（turn.after 后发出；不进模型上下文）
-	EvtPluginChanged        = "evt.plugin.changed"        // 插件状态/贡献变化（工作区级；装载 workspaceSeq）
-	EvtPluginStream         = "evt.plugin.stream"         // 插件 route 的 SSE 数据帧与终止帧（streamId 关联；data 原样 JSON）
-	EvtError                = "evt.error"                 // 可恢复错误 + 诊断码（ADG-<AREA>-<NNN>；页面只显示码+人话+下一步）
-)
-
 // 应用错误码（设计 8.5）。JSON-RPC 标准码由传输层负责，不在这里。
 const (
 	CodeWorkspaceMissing = 1001 // 工作区目录不存在

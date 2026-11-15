@@ -65,20 +65,6 @@ func render(d *document) ([]byte, error) {
 	}
 	w(")\n\n")
 
-	// ---- 事件常量 ----
-	w("// 事件名常量（JSON-RPC notification，无 id）。\n")
-	w("const (\n")
-	used = map[string]bool{}
-	for _, e := range d.Events {
-		ident := eventIdent(e.Name)
-		if used[ident] {
-			return nil, fmt.Errorf("事件常量名冲突：%s（来自 %s）", ident, e.Name)
-		}
-		used[ident] = true
-		w("\t%s = %q // %s\n", ident, e.Name, e.Summary)
-	}
-	w(")\n\n")
-
 	// ---- 错误码常量 ----
 	w("// 应用错误码（设计 8.5）。JSON-RPC 标准码由传输层负责，不在这里。\n")
 	w("const (\n")
@@ -193,5 +179,4 @@ func titleCase(s string) string {
 }
 
 func methodIdent(name string) string { return ident("Method", name) }
-func eventIdent(name string) string  { return ident("Evt", strings.TrimPrefix(name, "evt.")) }
 func errorIdent(name string) string  { return ident("Code", name) }

@@ -10,6 +10,7 @@ import (
 	"github.com/adag/ada-go/internal/agent_core/corecontracts"
 	"github.com/adag/ada-go/internal/agent_core/coreproto"
 	"github.com/adag/ada-go/internal/agent_core/plugins/host"
+	"github.com/adag/ada-go/internal/common/domain"
 )
 
 // ---- 插件 HTTP API（route）----
@@ -202,7 +203,7 @@ func (s *Server) emitPluginStream(streamID, event string, data json.RawMessage, 
 	if errMsg != "" {
 		payload["error"] = errMsg
 	}
-	note, err := coreproto.NewEvent("evt.plugin.stream", payload)
+	note, err := coreproto.NewEvent(string(domain.EvtPluginStream), payload)
 	if err != nil {
 		return err
 	}
