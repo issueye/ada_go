@@ -1,6 +1,6 @@
 //go:build !windows
 
-package processmgr
+package prockill
 
 // Unix 进程树语义：被管进程以自己为进程组组长启动，停止时向整个组发 SIGKILL。
 // 这样 node 脚本派生的孙进程也会一起退出（09 §9.2、计划 P3「停止后无残留」）。

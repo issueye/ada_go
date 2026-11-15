@@ -17,6 +17,7 @@ import (
 
 	"github.com/adag/ada-go/internal/common/version"
 	"github.com/adag/ada-go/internal/gateway/contracts"
+	"github.com/adag/ada-go/internal/gateway/prockill"
 )
 
 // SpawnSpec 是一次 Core 子进程启动所需的完整参数。
@@ -261,7 +262,11 @@ func (p *execProcess) Kill() error {
 	if p.cmd.Process == nil {
 		return nil
 	}
-	return p.cmd.Process.Kill()
+	// 杀整棵进程树：Core 会派生插件长驻进程，只杀主进程会留孤儿
+	//（与 processmgr 的停止语义一致，09 §9.2）。树杀失败时 prockill
+	// 内部已回退单体 Kill，这里不再返回平台命令错误。
+	prockill.Kill(p.cmd.Process.Pid)
+	return nil
 }
 func (p *execProcess) Wait() error {
 	p.wait.Do(func() { p.err = p.cmd.Wait() })
@@ -320,6 +325,8 @@ func execSpawn(ctx context.Context, spec SpawnSpec) (Process, error) {
 		stderrOut = io.MultiWriter(stderr, os.Stderr)
 	}
 	cmd.Stderr = stderrOut
+	// Core 自成进程组（Unix）：Kill 时整组回收，插件派生的孙进程不留残留。
+	prockill.Configure(cmd)
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("启动 %s 失败: %w", spec.Binary, err)
 	}

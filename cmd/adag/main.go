@@ -53,8 +53,8 @@ const usage = `adag —— 本地优先的 Agent 系统（单二进制，两角�
   adag doctor     [--fake] [--data-dir <dir>] [--gateway-addr 127.0.0.1:52353]
                                                 无模型依赖的启动自检（含 Gateway 端口）
   adag verify     [检查名...]                    开发门禁：generated dispatch hooks slots
-                                                  capabilities manifest vnode products docs
-                                                  nodecompat ui boundary
+                                                  manifest vnode markdown-block products docs
+                                                  ui boundary
   adag export     --thread <id> [--format jsonl|markdown] [--out <file>]
                                                 只读导出会话（M1）
   adag backup     --to <file>                   在线一致性备份（M1）

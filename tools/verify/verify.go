@@ -8,8 +8,9 @@
 //	adag verify              # 全部检查
 //	adag verify dispatch     # 单跑一项
 //	adag verify boundary
-//	adag verify nodecompat
 //	adag verify ui
+//	（nodecompat/capabilities 已随能力位收敛删除；Node 语料由
+//	 internal/agent_core/conformance/nodecompat 的 go test 覆盖）
 package verify
 
 import (

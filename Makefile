@@ -41,7 +41,7 @@ help:
 	@echo "vet       go vet ./..."
 	@echo "lint      staticcheck ./...（配置 staticcheck.conf；@latest 钉版本由 M5 处理）"
 	@echo "gen       go generate ./...（生成物必须与源码同 PR 提交）"
-	@echo "verify    adag verify + verify nodecompat/ui/boundary（cmd/adag 属 M0.4）"
+	@echo "verify    adag verify + verify ui/boundary（cmd/adag 属 M0.4）"
 	@echo "doctor    adag doctor --fake（products/skeleton.agent.json 驱动空基座）"
 	@echo "gate      运行与 CI 完全相同的门禁 scripts/ci-gate.sh"
 	@echo "tidy      GOWORK=off go mod tidy（发布口径，11 §13.1）"
@@ -78,7 +78,6 @@ gen:
 
 verify:
 	$(GO) run ./cmd/adag verify
-	$(GO) run ./cmd/adag verify nodecompat
 	$(GO) run ./cmd/adag verify ui
 	$(GO) run ./cmd/adag verify boundary
 

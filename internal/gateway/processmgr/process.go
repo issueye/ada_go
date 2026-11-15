@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/adag/ada-go/internal/gateway/prockill"
 )
 
 // 默认值与上限（docs/proposals 的 P0 冻结项）。
@@ -253,7 +255,7 @@ func (p *execProcess) Kill() error {
 	if p == nil || p.cmd == nil || p.cmd.Process == nil {
 		return nil
 	}
-	killProcessTree(p.cmd.Process.Pid)
+	prockill.Kill(p.cmd.Process.Pid)
 	// 进程组/taskkill 已覆盖直接子进程；这里再兜底一次 Pid，避免平台命令
 	// 不存在时留下父进程。
 	_ = p.cmd.Process.Kill()
@@ -285,7 +287,7 @@ func execSpawn(ctx context.Context, spec StartSpec, stdout, stderr io.Writer) (P
 	if stderr != nil {
 		cmd.Stderr = stderr
 	}
-	configureProcessTree(cmd)
+	prockill.Configure(cmd)
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("启动 %s 失败: %w", spec.Command, err)
 	}

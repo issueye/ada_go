@@ -157,18 +157,18 @@ step_nodecompat() {
 }
 
 step_verify() {
-	# 命令面（另一位工程师按此实现，M0.4）：
-	#   go run ./cmd/adag verify [generated|dispatch|hooks|slots|capabilities|manifest|
-	#     vnode|products|docs|nodecompat|ui|boundary|all]
+	# 命令面（tools/verify Registry 的 11 项；nodecompat 语料由 step_nodecompat
+	# 以 go test 运行，不再是 verify 检查名——2026-11-10 能力位收敛时删除）：
+	#   go run ./cmd/adag verify [generated|dispatch|hooks|slots|manifest|vnode|
+	#     markdown-block|products|docs|ui|boundary|all]
 	if [ ! -d cmd/adag ]; then
 		skip verify "cmd/adag 尚未落地（M0.4，另一工程师实现中）；目录一旦出现本步自动生效"
 		return 0
 	fi
 	go run ./cmd/adag verify
-	go run ./cmd/adag verify nodecompat
 	go run ./cmd/adag verify ui
 	go run ./cmd/adag verify boundary
-	say "PASS  [verify] adag verify（全量）+ nodecompat + ui + boundary"
+	say "PASS  [verify] adag verify（全量）+ ui + boundary"
 }
 
 step_doctor() {

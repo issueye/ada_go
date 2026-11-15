@@ -1,6 +1,6 @@
 //go:build windows
 
-package processmgr
+package prockill
 
 // Windows 进程树语义：taskkill /T 连子进程一起杀。
 // 这不等同于 Job Object，但对直接派生的进程树足够；09 §9.2 的表述以本实现为准。
