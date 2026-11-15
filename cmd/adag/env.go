@@ -1,5 +1,5 @@
 // adag env —— 环境变量模块的命令行入口。存储与运行时注入（cli.loadManagedEnv）、
-// env-manager 管理页同源：global.config 的 env 命名空间——机器级
+// 环境变量管理页同源：global.config 的 env 命名空间——机器级
 // $ADAGO_HOME/config/env.json、工作区级 <workspace>/.adago/config/env.json
 // （工作区覆盖全局），变量放在 "vars" 键下。
 //
@@ -77,7 +77,7 @@ func envLegacyPath(workspace string) string {
 }
 
 // readLayerVars 读取一层的 vars；该层 globalconfig 尚无 vars 时回退旧 envstore
-//（legacy=true），与运行时注入的双层回退口径一致。
+// （legacy=true），与运行时注入的双层回退口径一致。
 func readLayerVars(s *globalconfig.Store, legacyPath string) (map[string]string, bool, []string, error) {
 	raw, found, err := s.Get("vars")
 	if err != nil {
@@ -106,7 +106,7 @@ func readLayerVars(s *globalconfig.Store, legacyPath string) (map[string]string,
 	return vars, true, warnings, nil
 }
 
-// writeLayerVars 把一层的 vars 写回 globalconfig（"vars" 键，与 env-manager 同形状）。
+// writeLayerVars 把一层的 vars 写回 globalconfig（"vars" 键，与运行时读写同形状）。
 func writeLayerVars(s *globalconfig.Store, vars map[string]string) error {
 	raw, err := json.Marshal(vars)
 	if err != nil {

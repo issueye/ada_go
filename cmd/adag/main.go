@@ -50,7 +50,7 @@ const usage = `adag —— 本地优先的 Agent 系统（单二进制，两角�
   adag env        <list|set|unset> [--workspace <dir>] [--json]
                                                 环境变量管理（$ADAGO_HOME/config/env.json
                                                 + 工作区 .adago/config/env.json，与
-                                                env-manager 管理页同源；旧 env.json 自动迁移）
+                                                环境变量管理页同源；旧 env.json 自动迁移）
   adag doctor     [--fake] [--data-dir <dir>] [--gateway-addr 127.0.0.1:52353]
                                                 无模型依赖的启动自检（含 Gateway 端口）
   adag verify     [检查名...]                    开发门禁：generated dispatch hooks slots
