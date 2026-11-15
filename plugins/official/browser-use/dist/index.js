@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:c455818cf3d6dc60) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:8ed9042e349c39cb) by plugins/official/build.mjs — do not edit
 // browser-use —— 官方插件：把 browser-use 桌面浏览器接入为模型可调用的工具。
 //
 // 传输方式（本插件不新开端口、不实现协议）：
@@ -233,9 +233,8 @@ function exeCandidates(ctx) {
   push(settings.exe);
   push(settings.path);
   push(envValue("BROWSER_USE_EXE"));
-  // 仓库内开发构建（相对路径按宿主进程的工作目录解析，通常就是工作区根）。
-  push("mcp_projects/browser_use/bin/browser-use.exe");
-  push(join("..", "browser_use", "bin", "browser-use.exe"));
+  // 相邻检出的开发构建（browser_use 已移出本仓库；相对路径按宿主进程的工作目录解析）。
+  push(join("..", "mcp_projects", "browser_use", "bin", "browser-use.exe"));
   // 常见安装位置与 PATH。
   const localAppData = envValue("LOCALAPPDATA");
   if (localAppData) push(join(localAppData, "Programs", "browser-use", "browser-use.exe"));
@@ -401,7 +400,7 @@ async function startApp(ctx, portOverride) {
       "处理办法（任一）：",
       "1) 先手动启动浏览器：<browser-use.exe 绝对路径> --serve；",
       "2) 在启动 ada-go 之前设置环境变量 BROWSER_USE_EXE=<browser-use.exe 绝对路径>，插件会自动启动它；",
-      "3) 本仓库的开发构建一般在 mcp_projects/browser_use/bin/browser-use.exe，确认已经 go build 出来。",
+      "3) 开发构建一般在仓库同级的 mcp_projects/browser_use/bin/browser-use.exe，确认已经 go build 出来。",
     ]
       .filter((line) => line !== "")
       .join("\n"),

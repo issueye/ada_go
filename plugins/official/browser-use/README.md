@@ -1,6 +1,6 @@
 # browser-use（官方插件）
 
-把 [browser-use](../../../mcp_projects/browser_use/README.md) 桌面浏览器接入 ada-go：模型可以用工具开标签页、按 ref 点按输入、跑多步脚本、抓页面接口、截图，并在需要时把控制权交还给用户。
+把 browser-use 桌面浏览器（独立项目，已移出本仓库，位于仓库同级的 `mcp_projects/browser_use`）接入 ada-go：模型可以用工具开标签页、按 ref 点按输入、跑多步脚本、抓页面接口、截图，并在需要时把控制权交还给用户。
 
 配套技能：`skills/browser-use/SKILL.md`（工作流与排错手册，随插件注入技能目录）。
 
@@ -54,8 +54,8 @@
 | 插件设置 | `exe` / `path` | 与 `BROWSER_USE_EXE` 等价，经 `ctx.settings` 透传（宿主注入设置时才有） |
 | 插件设置 | `start` / `port` | 与 `BROWSER_USE_START` / `BROWSER_USE_PORT` 等价 |
 
-没配也能用：插件依次尝试设置 → `BROWSER_USE_EXE` → 仓库内开发构建
-`mcp_projects/browser_use/bin/browser-use.exe` → `../browser_use/bin/browser-use.exe` →
+没配也能用：插件依次尝试设置 → `BROWSER_USE_EXE` → 相邻检出的开发构建
+`../mcp_projects/browser_use/bin/browser-use.exe` →
 `PATH` 上的 `browser-use`。**应用已经在跑时，只需要 runtime.json 可读，不需要可执行文件路径。**
 
 ### 进程检测与启动

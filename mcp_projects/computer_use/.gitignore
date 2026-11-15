@@ -1,5 +1,0 @@
-bin/
-*.exe
-*.log
-*.jsonl
-docs\*.tmp

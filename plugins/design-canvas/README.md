@@ -1,6 +1,6 @@
 # design-canvas —— 设计画布台账插件
 
-配合 [`adago_design`](../../mcp_projects/adago_design) 这个 **MCP** 使用：读取无限画布的
+配合 `adago_design` 这个 **MCP** 使用（独立项目，已移出本仓库，位于仓库同级 `mcp_projects/adago_design`）：读取无限画布的
 节点现状，生成线程级台账，并能在回答里渲染成只读卡片。
 
 ## 1. 它解决什么问题（以及为什么不是再包一层 MCP）
@@ -43,7 +43,7 @@ ada-go 里 **MCP 不是一个基座能力**，而是由官方 `mcp-client` 插�
        {
          "id": "adago_design",
          "transport": "stdio",
-         "command": "E:////codes////go_projects////ada_go////mcp_projects////adago_design////bin////adago-design.exe",
+         "command": "E:/codes/go_projects/mcp_projects/adago_design/bin/adago-design.exe",
          "args": ["mcp"],
          "enabled": true,
          "timeoutMs": 60000

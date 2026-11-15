@@ -1047,7 +1047,7 @@ ada 词根统一，四种写法各有边界，**不得混用**：
 - **门禁**：`go test ./...`、`go vet ./...`、staticcheck、`adag verify`（11 项，其中 ui 项校验 tokens 来源头、a_da 副本清单、模板无内联 style）；UI 变更加走 19.3.3 主题清单 / 本篇对应条款的自查。
 - **文档先行**（沿 design.md 约定）：改令牌、组件、交互模式前先改本篇与 07 §7.7，再改实现；`adag verify ui` 的基线断言同步更新。
 - **镜像纪律**：`tokens.css`、`app.css`、`theme.js` 等上游镜像文件不做本地修改；本地能力一律以新文件叠加（先例：`app.js` 的窄屏补丁、本次的 `themes.js`/`themes.css`）。
-- **自成一体模块的界面同样遵守本篇**：`mcp_projects/adago_design` 是独立 Go module（`GOWORK=off`），
+- **自成一体模块的界面同样遵守本篇**：`adago_design`（原 `mcp_projects/adago_design`，已移出本仓库）是独立 Go module（`GOWORK=off`），
   不能 import 宿主 `tokens.css`，因此它建了一份**同构的本地令牌层** `internal/canvas/static/tokens.css`
   （`--ui-*` 语义与 `--ph-*` 一一对齐：canvas/surface/elevated/subtle/line/ink/muted/faint/
   brand/on-brand/状态成对/focus/scrollbar/动效）。规则不变：单色品牌、缺省纸面（Black Swan）、
