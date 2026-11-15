@@ -14,8 +14,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -204,18 +202,18 @@ func (e *Endpoint) CleanupAll() int {
 }
 
 func (e *Endpoint) handle(w http.ResponseWriter, r *http.Request) {
-	if !loopbackRequest(r) {
-		writeProcessError(w, http.StatusForbidden, "forbidden", "内部端点只接受回环来源")
+	if !dispatch.LoopbackRequest(r) {
+		dispatch.WriteError(w, http.StatusForbidden, "forbidden", "内部端点只接受回环来源")
 		return
 	}
-	ident, ok := e.authenticate(r)
+	ident, ok := dispatch.Authenticate(r, e.tokens)
 	if !ok {
-		writeProcessError(w, http.StatusUnauthorized, "unauthorized", "缺少或无效的控制令牌")
+		dispatch.WriteError(w, http.StatusUnauthorized, "unauthorized", "缺少或无效的控制令牌")
 		return
 	}
 	if !ident.HasScope(dispatch.ScopeProcessControl) {
 		// 被管进程拿到的令牌只有发送范围：它不能反向注册/注销进程。
-		writeProcessError(w, http.StatusForbidden, "forbidden", "该控制令牌没有被授予进程范围")
+		dispatch.WriteError(w, http.StatusForbidden, "forbidden", "该控制令牌没有被授予进程范围")
 		return
 	}
 	op := strings.Trim(strings.TrimPrefix(r.URL.Path, "/internal/processes/"), "/")
@@ -223,7 +221,7 @@ func (e *Endpoint) handle(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		r.Body = http.MaxBytesReader(w, r.Body, e.maxBody)
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeProcessError(w, http.StatusBadRequest, "invalid_body", "请求体不是合法 JSON 或超过大小上限")
+			dispatch.WriteError(w, http.StatusBadRequest, "invalid_body", "请求体不是合法 JSON 或超过大小上限")
 			return
 		}
 	} else {
@@ -240,13 +238,13 @@ func (e *Endpoint) handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		code := CodeOf(err)
 		if code == "" {
-			writeProcessError(w, http.StatusBadGateway, "upstream_error", err.Error())
+			dispatch.WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
 		}
-		writeProcessError(w, processStatus(code), string(code), err.Error())
+		dispatch.WriteError(w, processStatus(code), string(code), err.Error())
 		return
 	}
-	writeProcessJSON(w, http.StatusOK, res)
+	dispatch.WriteJSON(w, http.StatusOK, res)
 }
 
 // dispatchOp 执行一次内部进程操作；status 只在单进程操作时非空。
@@ -493,28 +491,6 @@ func tokenKeyOf(ident dispatch.Identity) string {
 	return strings.TrimSpace(ident.Workspace) + "\x1f" + strings.TrimSpace(ident.CoreID)
 }
 
-// authenticate 取 Bearer 令牌并查表。
-func (e *Endpoint) authenticate(r *http.Request) (dispatch.Identity, bool) {
-	token := strings.TrimSpace(r.Header.Get(dispatch.ControlTokenHeader))
-	if token == "" {
-		return dispatch.Identity{}, false
-	}
-	if after, ok := strings.CutPrefix(token, "Bearer "); ok {
-		token = strings.TrimSpace(after)
-	}
-	return e.tokens.Lookup(token)
-}
-
-// loopbackRequest 只认回环来源（与 dispatch 端点的判据一致）。
-func loopbackRequest(r *http.Request) bool {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return false
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
-
 func processRefOf(ref Ref) *ProcessRef {
 	return &ProcessRef{Owner: ref.Owner, Name: ref.Name, Workspace: ref.Workspace}
 }
@@ -529,17 +505,6 @@ func processStatus(code ErrorCode) int {
 	default:
 		return http.StatusBadGateway
 	}
-}
-
-func writeProcessError(w http.ResponseWriter, status int, code, message string) {
-	writeProcessJSON(w, status, map[string]any{"error": ProcessError{Code: code, Message: message}})
-}
-
-func writeProcessJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
 }
 
 func copyEnv(env map[string]string) map[string]string {
@@ -559,6 +524,3 @@ func copyEnv(env map[string]string) map[string]string {
 	}
 	return out
 }
-
-// 编译期确保 fmt 仍被使用（错误文案由 newError 组装）。
-var _ = fmt.Sprintf

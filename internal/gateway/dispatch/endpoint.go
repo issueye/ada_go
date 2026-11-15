@@ -268,18 +268,18 @@ func (e *Endpoint) Register(mux *http.ServeMux) {
 }
 
 func (e *Endpoint) handleSend(w http.ResponseWriter, r *http.Request) {
-	if !loopbackRequest(r) {
-		writeControlError(w, http.StatusForbidden, "forbidden", "内部端点只接受回环来源")
+	if !LoopbackRequest(r) {
+		WriteError(w, http.StatusForbidden, "forbidden", "内部端点只接受回环来源")
 		return
 	}
-	ident, ok := e.authenticate(r)
+	ident, ok := Authenticate(r, e.tokens)
 	if !ok {
-		writeControlError(w, http.StatusUnauthorized, "unauthorized", "缺少或无效的控制令牌")
+		WriteError(w, http.StatusUnauthorized, "unauthorized", "缺少或无效的控制令牌")
 		return
 	}
 	if !ident.HasScope(ScopeDispatchSend) {
 		// 进程令牌只被授予它需要的范围：一个只能注册进程的令牌不能反过来发消息。
-		writeControlError(w, http.StatusForbidden, "forbidden", "该控制令牌没有被授予发送范围")
+		WriteError(w, http.StatusForbidden, "forbidden", "该控制令牌没有被授予发送范围")
 		return
 	}
 
@@ -287,7 +287,7 @@ func (e *Endpoint) handleSend(w http.ResponseWriter, r *http.Request) {
 	var body ControlRequest
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(&body); err != nil {
-		writeControlError(w, http.StatusBadRequest, "invalid_body", "请求体不是合法 JSON 或超过大小上限")
+		WriteError(w, http.StatusBadRequest, "invalid_body", "请求体不是合法 JSON 或超过大小上限")
 		return
 	}
 
@@ -310,41 +310,45 @@ func (e *Endpoint) handleSend(w http.ResponseWriter, r *http.Request) {
 		code := CodeOf(err)
 		if code == "" {
 			// 传输层失败（Core 不可用之类）：502，让调用方区分「没发出去」与「被拒绝」。
-			writeControlError(w, http.StatusBadGateway, "upstream_error", err.Error())
+			WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
 		}
-		writeControlError(w, controlStatus(code), code, err.Error())
+		WriteError(w, controlStatus(code), code, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, ControlResponse{Receipt: receipt})
+	WriteJSON(w, http.StatusOK, ControlResponse{Receipt: receipt})
 }
 
 func (e *Endpoint) handleWorkspaces(w http.ResponseWriter, r *http.Request) {
-	if !loopbackRequest(r) {
-		writeControlError(w, http.StatusForbidden, "forbidden", "内部端点只接受回环来源")
+	if !LoopbackRequest(r) {
+		WriteError(w, http.StatusForbidden, "forbidden", "内部端点只接受回环来源")
 		return
 	}
-	ident, ok := e.authenticate(r)
+	ident, ok := Authenticate(r, e.tokens)
 	if !ok {
-		writeControlError(w, http.StatusUnauthorized, "unauthorized", "缺少或无效的控制令牌")
+		WriteError(w, http.StatusUnauthorized, "unauthorized", "缺少或无效的控制令牌")
 		return
 	}
 	if !ident.HasScope(ScopeDispatchSend) {
-		writeControlError(w, http.StatusForbidden, "forbidden", "该控制令牌没有被授予发送范围")
+		WriteError(w, http.StatusForbidden, "forbidden", "该控制令牌没有被授予发送范围")
 		return
 	}
 	list := e.dispatcher.ListWorkspaces(r.Context(), senderOf(ident, ControlRequest{}))
 	if list == nil {
 		list = []Workspace{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	WriteJSON(w, http.StatusOK, map[string]any{
 		"default":    e.dispatcher.DefaultWorkspace(),
 		"workspaces": list,
 	})
 }
 
-// authenticate 取 Bearer 令牌并查表。
-func (e *Endpoint) authenticate(r *http.Request) (Identity, bool) {
+// Authenticate 取 Bearer 控制令牌并查表。
+//
+// 内部端点公共骨架（dispatch 与 processmgr 两条内部链共用）：回环校验、令牌
+// 认证与 no-store JSON 输出都从本包导出；新增内部端点必须走同一份实现，
+// 控制面语义（token 认进程、sender 盖章）只有一处定义。
+func Authenticate(r *http.Request, tokens *Tokens) (Identity, bool) {
 	token := strings.TrimSpace(r.Header.Get(ControlTokenHeader))
 	if token == "" {
 		return Identity{}, false
@@ -352,7 +356,7 @@ func (e *Endpoint) authenticate(r *http.Request) (Identity, bool) {
 	if after, ok := strings.CutPrefix(token, "Bearer "); ok {
 		token = strings.TrimSpace(after)
 	}
-	return e.tokens.Lookup(token)
+	return tokens.Lookup(token)
 }
 
 // senderOf 由服务端盖章：kind 固定为 plugin/system，id 由 pluginId 派生。
@@ -388,19 +392,19 @@ func controlStatus(code string) int {
 	}
 }
 
-func writeControlError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{"error": ControlError{Code: code, Message: message}})
+func WriteError(w http.ResponseWriter, status int, code, message string) {
+	WriteJSON(w, status, map[string]any{"error": ControlError{Code: code, Message: message}})
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
+func WriteJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// loopbackRequest 只认回环来源：网关只监听回环，但内部端点不该依赖这个前提。
-func loopbackRequest(r *http.Request) bool {
+// LoopbackRequest 只认回环来源：网关只监听回环，但内部端点不该依赖这个前提。
+func LoopbackRequest(r *http.Request) bool {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return false
