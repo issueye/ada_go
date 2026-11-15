@@ -1,7 +1,8 @@
 package main
 
-// adag env 命令的离线验收：写入/列出/删除、工作区覆盖全局、非法键拒绝与 JSON 输出。
-// 只碰 env.json 文件，不需要 Core。
+// adag env 命令的离线验收：写入/列出/删除、工作区覆盖全局、非法键拒绝、JSON 输出，
+// 以及旧 envstore 文件（~/.adago/env.json）在首次写入时的一次性迁移。
+// 存储与运行时同源：global.config 的 env 命名空间（<home>/config/env.json）。
 
 import (
 	"bytes"
@@ -12,6 +13,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/adag/ada-go/internal/common/envstore"
 )
 
 func TestEnvCommandRoundtrip(t *testing.T) {
@@ -30,10 +33,10 @@ func TestEnvCommandRoundtrip(t *testing.T) {
 	}
 
 	runEnv("set", "GLOBAL_A=1", "GLOBAL_B=two words")
-	globalPath := filepath.Join(home, envFileForTest)
+	globalPath := filepath.Join(home, "config", "env.json")
 	raw, err := os.ReadFile(globalPath)
 	if err != nil {
-		t.Fatalf("全局 env.json 未写入: %v", err)
+		t.Fatalf("全局 env 配置未写入: %v", err)
 	}
 	if !strings.Contains(string(raw), `"GLOBAL_A": "1"`) {
 		t.Fatalf("全局文件内容: %s", raw)
@@ -42,7 +45,7 @@ func TestEnvCommandRoundtrip(t *testing.T) {
 		if info, err := os.Stat(globalPath); err != nil {
 			t.Fatal(err)
 		} else if perm := info.Mode().Perm(); perm != 0o600 {
-			t.Fatalf("全局 env.json 权限 = %o，期望 600", perm)
+			t.Fatalf("全局 env 配置权限 = %o，期望 600", perm)
 		}
 	}
 
@@ -52,6 +55,10 @@ func TestEnvCommandRoundtrip(t *testing.T) {
 
 	// 工作区覆盖全局；只写工作区文件。
 	runEnv("set", "--workspace", ws, "GLOBAL_A=ws", "WORKSPACE_X=9")
+	wsPath := filepath.Join(ws, ".adago", "config", "env.json")
+	if _, err := os.Stat(wsPath); err != nil {
+		t.Fatalf("工作区 env 配置未写入: %v", err)
+	}
 	merged := runEnv("list", "--workspace", ws)
 	for _, want := range []string{"GLOBAL_A=ws", "GLOBAL_B=two words", "WORKSPACE_X=9"} {
 		if !strings.Contains(merged, want) {
@@ -114,4 +121,60 @@ func TestEnvCommandRoundtrip(t *testing.T) {
 	}
 }
 
-const envFileForTest = "env.json"
+// TestEnvLegacyMigration 验证旧 envstore 文件（~/.adago/env.json 与工作区
+// .adago/env.json）在首次写入时被并入 globalconfig，而不是被挤掉。
+func TestEnvLegacyMigration(t *testing.T) {
+	home := t.TempDir()
+	ws := t.TempDir()
+	t.Setenv("ADAGO_HOME", home)
+
+	// 旧全局文件与旧工作区文件各有一个变量。
+	legacyGlobal := filepath.Join(home, "env.json")
+	if err := envstore.SaveFile(legacyGlobal, map[string]string{"LEGACY_GLOBAL": "1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(ws, ".adago"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacyWS := filepath.Join(ws, ".adago", "env.json")
+	if err := envstore.SaveFile(legacyWS, map[string]string{"LEGACY_WS": "2"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	runEnv := func(args ...string) string {
+		t.Helper()
+		out.Reset()
+		if err := run(append([]string{"env"}, args...), &out, io.Discard); err != nil {
+			t.Fatalf("adag env %s: %v", strings.Join(args, " "), err)
+		}
+		return out.String()
+	}
+
+	// 未写入前 list 走旧文件回退：能看到两个旧变量（带迁移提示）。
+	merged := runEnv("list", "--workspace", ws)
+	for _, want := range []string{"LEGACY_GLOBAL=1", "LEGACY_WS=2", "旧 env.json"} {
+		if !strings.Contains(merged, want) {
+			t.Fatalf("回退列表缺少 %q:\n%s", want, merged)
+		}
+	}
+
+	// 首次 set 触发迁移：旧变量并入新文件，与新变量共存。
+	runEnv("set", "NEW=3")
+	if got := runEnv("list"); !strings.Contains(got, "LEGACY_GLOBAL=1") || !strings.Contains(got, "NEW=3") {
+		t.Fatalf("全局迁移丢失旧变量:\n%s", got)
+	}
+	raw, err := os.ReadFile(filepath.Join(home, "config", "env.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"LEGACY_GLOBAL": "1"`) {
+		t.Fatalf("迁移后的配置缺少旧变量: %s", raw)
+	}
+
+	// 工作区层同理。
+	runEnv("set", "--workspace", ws, "NEW_WS=4")
+	if got := runEnv("list", "--workspace", ws); !strings.Contains(got, "LEGACY_WS=2") || !strings.Contains(got, "NEW_WS=4") {
+		t.Fatalf("工作区迁移丢失旧变量:\n%s", got)
+	}
+}
