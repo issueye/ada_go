@@ -44,9 +44,9 @@ func (s *Server) handleTurnStart(ctx context.Context, raw json.RawMessage) (any,
 
 	key := p.ThreadID + "\x00" + p.IdempotencyKey
 	s.mu.Lock()
-	if runID, ok := s.idem[key]; ok {
+	if ent, ok := s.idem[key]; ok {
 		s.mu.Unlock()
-		return map[string]any{"runId": runID, "duplicate": true}, nil
+		return map[string]any{"runId": ent.runID, "duplicate": true}, nil
 	}
 	if cur := s.runs[p.ThreadID]; cur != nil && cur.status == "running" {
 		s.mu.Unlock()
@@ -60,7 +60,8 @@ func (s *Server) handleTurnStart(ctx context.Context, raw json.RawMessage) (any,
 	runCtx, cancel := context.WithCancel(s.root)
 	info := &runInfo{threadID: p.ThreadID, runID: runID, status: "running", startedAt: time.Now().UTC(), cancel: cancel}
 	s.runs[p.ThreadID] = info
-	s.idem[key] = runID
+	s.idem[key] = idemEntry{runID: runID, at: time.Now().UTC()}
+	pruneIdemLocked(s.idem, time.Now().UTC())
 	s.mu.Unlock()
 
 	// 等轮次登记完活跃状态再返回 turn.start：紧随其后的 turn.steer 不会被

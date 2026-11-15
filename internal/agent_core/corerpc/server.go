@@ -43,8 +43,8 @@ type Server struct {
 	pid     int
 
 	mu    sync.Mutex
-	runs  map[string]*runInfo // threadID -> 当前/最近一轮
-	idem  map[string]string   // threadID + idemKey -> runID
+	runs  map[string]*runInfo  // threadID -> 当前/最近一轮
+	idem  map[string]idemEntry // threadID + idemKey -> runID（带登记时刻，超期清理）
 	conns map[*client]struct{}
 	sub   func()
 
@@ -81,6 +81,30 @@ type runInfo struct {
 	cancel context.CancelFunc
 }
 
+// idemEntry 是幂等键的登记：runID + 登记时刻。终态后的保留期内重试仍返回
+// 同一 runId（客户端双击/重发重试语义），超期即视为新提交。
+type idemEntry struct {
+	runID string
+	at    time.Time
+}
+
+// idemRetention 是幂等键的保留时长；它同时给 idem map 一个有界上界——
+// 此前该 map 只增不减，长跑 Core 会随历史轮次数单调增长。
+var idemRetention = time.Hour
+
+// pruneIdemLocked 删除超过保留期的幂等键（调用方持有 s.mu）。
+// 只有 map 变大时才做 O(n) 扫描：turn.start 每次用户消息至多发生一次，成本可忽略。
+func pruneIdemLocked(m map[string]idemEntry, now time.Time) {
+	if len(m) < 512 {
+		return
+	}
+	for key, ent := range m {
+		if now.Sub(ent.at) > idemRetention {
+			delete(m, key)
+		}
+	}
+}
+
 // New 创建并注册方法实现；未注册的方法继续走 coreproto 的失败关闭桩。
 func New(opts Options) (*Server, error) {
 	if opts.Session == nil {
@@ -99,7 +123,7 @@ func New(opts Options) (*Server, error) {
 		sess:  opts.Session,
 		core:  coreproto.NewServer(p.ID, instanceID(p.ID, opts.Session.Workspace()), os.Getpid()),
 		token: opts.Token, readyAt: readyAt, onShut: opts.OnShutdown,
-		runs: map[string]*runInfo{}, idem: map[string]string{},
+		runs: map[string]*runInfo{}, idem: map[string]idemEntry{},
 		conns: map[*client]struct{}{}, streams: map[string]*pluginStream{},
 		root: rootCtx,
 	}

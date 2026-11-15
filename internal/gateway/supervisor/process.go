@@ -305,6 +305,16 @@ func execSpawn(ctx context.Context, spec SpawnSpec) (Process, error) {
 	}
 
 	cmd := exec.CommandContext(ctx, spec.Binary, args...)
+	// ctx 取消（Shutdown 路径）时杀整棵进程树而不是默认的单体 Kill：Core 派生的
+	// 插件长驻进程不留孤儿（与 Kill 的 prockill 语义一致，09 §9.2）。WaitDelay
+	// 让 Wait 在进程退出后有限等待被孙进程占住的管道（与 processmgr 同款）。
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			prockill.Kill(cmd.Process.Pid)
+		}
+		return nil
+	}
+	cmd.WaitDelay = time.Second
 	env := []string{"ADAG_CORE_TOKEN=" + spec.Token}
 	// 控制面地址/令牌同样只走环境变量：命令行会出现在进程列表里。
 	if spec.ControlURL != "" {

@@ -359,7 +359,8 @@ func (s *Supervisor) Shutdown(ctx context.Context) error {
 		s.entries = make(map[string]*entry)
 		s.mu.Unlock()
 
-		// 取消基座 context：生产 spawn 的 exec.CommandContext 会因此杀掉子进程。
+		// 取消基座 context：生产 spawn 的 exec.CommandContext 会因此按整棵进程树
+		// 杀掉 Core（cmd.Cancel → prockill，见 execSpawn），而不是单体 Kill。
 		s.cancel()
 
 		// 等待 janitor 退出，避免它与下面的关闭动作并发。
