@@ -75,6 +75,18 @@ test("侧栏工作区组：可折叠 button + 展开时才加载", () => {
 	assert.ok(js.includes("if (!g.loaded) await loadGroup"), "展开未加载的分组时必须触发 loadGroup");
 });
 
+test("会话行整块可点：主体是 button，点击走 openThreadIn", () => {
+	assert.ok(vue.includes('class="c-thread__open"'), "会话行主体必须是 .c-thread__open button");
+	assert.ok(
+		/@click="openThreadIn\(t, g\)"/.test(vue),
+		"会话行点击必须走 openThreadIn（当前/非当前工作区都能进会话）",
+	);
+	assert.ok(
+		vue.includes('</button>\n                <div class="c-thread__tools">'),
+		"更多/删除工具必须是会话按钮的兄弟节点，不能嵌在按钮里",
+	);
+});
+
 test("侧栏搜索过滤 v-for 源，而不是渲染后 hidden", () => {
 	assert.equal(vue.includes(':hidden="!threadHit(t)"'), false, "搜索不应再用渲染后 hidden");
 	assert.ok(vue.includes("hitThreads(g)"), "会话行应绑定 hitThreads(g)（过滤后的列表）");

@@ -416,10 +416,35 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 6px 0 8px;
+  padding: 0 6px 0 0;
   border-radius: var(--c-radius-sm);
   cursor: pointer;
   white-space: nowrap;
+}
+.c-thread:hover {
+  background: var(--ph-subtle);
+}
+/* 会话行主体是一枚按钮：标题区整块可点，键盘 Tab/Enter 也能进入会话；
+   右侧“更多/删除”是它的兄弟节点，不嵌在按钮里，避免交互控件嵌套。 */
+.c-thread__open {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 0 8px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.c-thread__open:focus-visible {
+  outline: 2px solid var(--ph-brand);
+  outline-offset: -2px;
 }
 .c-thread .ada-icon {
   color: var(--ph-faint);

@@ -53,10 +53,12 @@
                 :data-thread-row="t.id"
                 :data-thread-running="t.running ? '1' : '0'"
               >
-                <ui-icon name="i-chat" :size="14" />
-                <span class="c-thread__title" :title="t.title || t.id">{{ t.title || "新会话" }}</span>
-                <span v-if="t.running" class="c-thread__dot" title="运行中" aria-label="运行中"></span>
-                <span v-else-if="timeLabel(t)" class="c-thread__time" :title="'最后活动：' + timeLabel(t)">{{ timeLabel(t) }}</span>
+                <button class="c-thread__open" type="button" :title="t.title || t.id" :aria-label="'打开会话：' + (t.title || t.id)" @click="openThreadIn(t, g)">
+                  <ui-icon name="i-chat" :size="14" />
+                  <span class="c-thread__title" :title="t.title || t.id">{{ t.title || "新会话" }}</span>
+                  <span v-if="t.running" class="c-thread__dot" title="运行中" aria-label="运行中"></span>
+                  <span v-else-if="timeLabel(t)" class="c-thread__time" :title="'最后活动：' + timeLabel(t)">{{ timeLabel(t) }}</span>
+                </button>
                 <div class="c-thread__tools">
                   <button class="c-thread__tool" type="button" title="更多操作" aria-label="更多操作" @click.stop="openMenu(t, $event)"><ui-icon name="i-more" :size="14" /></button>
                   <button v-if="!t.running" class="c-thread__tool" type="button" title="删除会话" aria-label="删除会话" @click.stop="removeThread(t)"><ui-icon name="i-trash" :size="14" /></button>
