@@ -820,6 +820,13 @@
   background: color-mix(in srgb, var(--ph-subtle) 72%, var(--ph-surface));
   overflow: hidden;
 }
+/* 工具行与助手正文左对齐（头像 30 + 间距 12 = 42）。
+   SPA 的每行外面多包了一层 .ada-host，ui/components.css 里
+   `.ada-transcript > .ada-disclosure` 的 40px 缩进命不中，必须在
+   .ada-host 这一层补回来。 */
+.c-shell .ada-transcript > .ada-host > .ada-disclosure[data-kind="tool"] {
+  margin-left: 42px;
+}
 .c-shell .ada-transcript .ada-disclosure[data-kind="tool"] .ada-disclosure__summary {
   display: flex;
   align-items: center;

@@ -51,6 +51,7 @@ export const setup = (props) => {
 	const toolCount = computed(() => rows.value.filter((r) => r.kind === "tool").length);
 	const runTag = computed(() => {
 		if (run.errorLabel !== "") return { tone: "danger", label: "运行失败", icon: "i-alert" };
+		if (run.terminal === "cancelled") return { tone: "muted", label: "已停止", icon: "i-stop" };
 		if (run.status === "waiting_input") return { tone: "warn", label: "等待你的答复", icon: "i-clock" };
 		if (run.status === "running" || run.active) return { tone: "brand", label: "Agent 运行中", icon: "i-eq" };
 		return { tone: "muted", label: "空闲", icon: "i-check-circle" };
