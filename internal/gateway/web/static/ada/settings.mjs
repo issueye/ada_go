@@ -452,7 +452,11 @@ export const SettingsDialog = defineComponent({
 
     const themePane = () => {
       const modeCards = s.THEME_MODES.map((m) => h("button", {
-        class: "c-mode-card" + (m.id === "dark" ? " c-mode-card--dark" : "") + (m.id === "system" ? " c-mode-card--system" : "") + (s.mode === m.id ? " is-selected" : ""),
+        class: "c-mode-card"
+          + (m.id === "light" ? " c-mode-card--light" : "")
+          + (m.id === "dark" ? " c-mode-card--dark" : "")
+          + (m.id === "system" ? " c-mode-card--system" : "")
+          + (s.mode === m.id ? " is-selected" : ""),
         type: "button",
         key: m.id,
         "aria-pressed": s.mode === m.id ? "true" : "false",
@@ -639,7 +643,7 @@ export const SettingsDialog = defineComponent({
       h("div", { class: "c-modal__panel", role: "dialog", "aria-modal": "true", "aria-label": "设置" }, [
         h("div", { class: "c-modal__head" }, [
           h("h2", null, "设置"),
-          h("span", null, (s.bootstrap.brandName || "ada-go") + " · 偏好与连接"),
+          h("span", null, "偏好与连接"),
           h("button", { class: "c-modal__close", type: "button", "aria-label": "关闭设置", "on:click": close }, h(SettingsIcon, { name: "i-x", size: 16 })),
         ]),
         h("div", { class: "c-modal__body" }, [

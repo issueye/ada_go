@@ -1170,7 +1170,7 @@
   height: 64px;
   flex: none;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
   padding: 0 20px;
   border-bottom: 1px solid var(--ph-line);
@@ -1179,9 +1179,11 @@
   margin: 0;
   font-size: 17px;
   font-weight: 650;
+  line-height: 1.2;
 }
 .c-modal__head span {
   font-size: 11.5px;
+  line-height: 1.4;
   color: var(--ph-faint);
 }
 .c-modal__close {
