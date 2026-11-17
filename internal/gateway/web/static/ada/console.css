@@ -1409,6 +1409,8 @@ a.c-set-row:hover {
   box-shadow: 0 0 0 2px var(--ph-focus);
 }
 .c-mode-card__preview {
+  width: 100%;
+  box-sizing: border-box;
   height: 56px;
   border-radius: var(--c-radius-sm);
   border: 1px solid var(--ph-line);
