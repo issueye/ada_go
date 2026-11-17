@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -153,6 +155,52 @@ func TestProviderAdminConfigLifecycle(t *testing.T) {
 	}
 	if createdInfo.ID != "p_name_only" {
 		t.Fatalf("省略 id 时应以 name 作为供应商 ID，实际 %q", createdInfo.ID)
+	}
+}
+
+// /fetch-models 走 ctx.fetch；宿主返回的是 text 字符串属性，不是 res.text()。
+func TestProviderAdminFetchModelsUsesCtxFetchText(t *testing.T) {
+	ctx := context.Background()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[{"id":"m1"},{"id":"m2"}]}`)
+	}))
+	defer srv.Close()
+
+	dataDir := t.TempDir()
+	scripts, err := official.Scripts()
+	if err != nil {
+		t.Fatalf("official.Scripts: %v", err)
+	}
+	sess, err := cli.Open(ctx, cli.Config{
+		Workspace: t.TempDir(), DataDir: dataDir, Product: productPath(t),
+		Scripts: scripts, Assembler: app.Assembler{}, Fake: true, In: strings.NewReader(""), Out: io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("cli.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = sess.Close(context.Background()) })
+
+	save := json.RawMessage(`{"method":"POST","path":"/save","body":{
+	  "id":"p_fetch","name":"抓取测试","protocol":"openai_chat",
+	  "baseUrl":"` + srv.URL + `","apiKey":"sk-test","models":[]
+	}}`)
+	if _, err := sess.CallHTTPAPI(ctx, "provider-admin", "POST", "/save", save, ""); err != nil {
+		t.Fatalf("POST /save: %v", err)
+	}
+	fetchReq := json.RawMessage(`{"method":"POST","path":"/fetch-models","body":{"id":"p_fetch"}}`)
+	raw, err := sess.CallHTTPAPI(ctx, "provider-admin", "POST", "/fetch-models", fetchReq, "")
+	if err != nil {
+		t.Fatalf("POST /fetch-models: %v", err)
+	}
+	var models []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &models); err != nil {
+		t.Fatalf("fetch-models JSON: %v (%s)", err, raw)
+	}
+	if len(models) != 2 || models[0].ID != "m1" || models[1].ID != "m2" {
+		t.Fatalf("fetch-models = %+v", models)
 	}
 }
 

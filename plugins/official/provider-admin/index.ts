@@ -123,7 +123,9 @@ async function fetchProviderModels(ctx, id) {
   headers[authHeader] = authPrefix + cfg.apiKey;
   if (info.apiVersionHeader && info.apiVersion) headers[info.apiVersionHeader] = info.apiVersion;
   const res = await ctx.fetch(base + "/models", { method: "GET", headers });
-  const text = await res.text();
+  // ctx.fetch 的返回契约是宿主 HTTP 桥的最小 Response：text 是字符串属性，
+  // 不是函数（见 host/objects.go、host/fetchctx_test.go）。兼容旧函数形态。
+  const text = typeof res?.text === "function" ? await res.text() : String(res?.text ?? "");
   if (!res.ok) throw new Error("拉取模型列表失败（HTTP " + res.status + "）");
   let body = {};
   try { body = JSON.parse(text); } catch { throw new Error("模型列表不是合法 JSON"); }
