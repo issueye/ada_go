@@ -4,8 +4,8 @@
  * 规则（docs/19-ued.md §19.2.2 / §19.3）：
  * - 主题 = 明暗（html.light / html.dark，theme.js 负责）× 调色板
  *   （html[data-theme="<id>"]，本文件负责）两维正交；
- * - 不设 data-theme 属性 = 默认 Black Swan，tokens.css 原样生效，本文件
- *   **不得**在缺省态改变任何取值；
+ * - 不设 data-theme 属性 = tokens.css 的 Black Swan 基线；启动引导 themes.js 在
+ *   没有存储记录时把缺省落到 data-theme="azure"（2026-11-16 重设计的默认色板）；
  * - 选择器必须用 `html.light[data-theme="…"]` / `html.dark[data-theme="…"]`
  *   （特异性 0,2,1，恒胜基线的 0,1,1），只覆盖 `--ph-*`，不新增选择器形态；
  * - 每个色板必须补齐 tokens.css 的全部 `--ph-*` × 明暗两套 + color-scheme，
@@ -17,6 +17,96 @@
  * 色卡预览（--sw-*）与 `ui.go` 的 themePalettes 表人工同步，改名须两边一起。
  * ----------------------------------------------------------------------------
  */
+
+/* ── 蓝海 azure（默认色板，2026-11-16《AI Agent · 桌面客户端》设计稿）──────
+   冷灰纸面 × Element Plus 蓝（#1D4ED8）：白面卡片、发丝线、四级文本灰。
+   这是本机控制台的新默认外观；黑天鹅转为可选色板（见侧栏主题设置）。 */
+
+html.light[data-theme="azure"] {
+  --ph-canvas: #f2f3f5;
+  --ph-surface: #ffffff;
+  --ph-elevated: #ffffff;
+  --ph-line: #e4e7ed;
+  --ph-line-strong: #dcdfe6;
+  --ph-ink: #303133;
+  --ph-muted: #606266;
+  --ph-faint: #747a83;
+  --ph-brand: #1d4ed8;
+  --ph-brand-strong: #163fb3;
+  --ph-brand-soft: #edf2ff;
+  --ph-brand-ink: #163fb3;
+  --ph-on-brand: #ffffff;
+  --ph-subtle: #f5f7fa;
+  --ph-subtle-ink: #606266;
+  --ph-success-soft: #f0f9eb;
+  --ph-success-ink: #3f7d20;
+  --ph-warn-soft: #fdf6ec;
+  --ph-warn-ink: #8a5a12;
+  --ph-danger-soft: #fef0f0;
+  --ph-danger-ink: #b23f3f;
+  --ph-syn-keyword: #1d4ed8;
+  --ph-syn-string: #3f7d20;
+  --ph-syn-number: #b45309;
+  --ph-syn-comment: #747a83;
+  --ph-syn-function: #1f5fa8;
+  --ph-syn-type: #7048b6;
+  --ph-glass: rgba(255, 255, 255, 0.84);
+  --ph-focus: rgba(29, 78, 216, 0.28);
+  --ph-code-bg: #f5f7fa;
+  --ph-code-ink: #4b5563;
+  --ph-inline-code-bg: #f0f2f5;
+  --ph-inline-code-ink: #303133;
+  --ph-shadow: 0 1px 2px rgba(16, 24, 40, 0.04),
+    0 6px 20px rgba(16, 24, 40, 0.05);
+  --ph-scrollbar-size: 6px;
+  --ph-scrollbar: color-mix(in srgb, var(--ph-ink) 22%, transparent);
+  --ph-scrollbar-hover: color-mix(in srgb, var(--ph-ink) 36%, transparent);
+  --ph-scrollbar-active: color-mix(in srgb, var(--ph-ink) 50%, transparent);
+  color-scheme: light;
+}
+
+html.dark[data-theme="azure"] {
+  --ph-canvas: #14161b;
+  --ph-surface: #1b1d23;
+  --ph-elevated: #24272f;
+  --ph-line: #2d313a;
+  --ph-line-strong: #3b404b;
+  --ph-ink: #e7e9ee;
+  --ph-muted: #a9aeb8;
+  --ph-faint: #858b96;
+  --ph-brand: #4d7cff;
+  --ph-brand-strong: #7ea0ff;
+  --ph-brand-soft: #1d2742;
+  --ph-brand-ink: #a9c1ff;
+  --ph-on-brand: #ffffff;
+  --ph-subtle: #20232b;
+  --ph-subtle-ink: #a9aeb8;
+  --ph-success-soft: #1e2b1c;
+  --ph-success-ink: #8fd07a;
+  --ph-warn-soft: #2b2518;
+  --ph-warn-ink: #e6c07b;
+  --ph-danger-soft: #2e1d1e;
+  --ph-danger-ink: #f08c8c;
+  --ph-syn-keyword: #8fb0ff;
+  --ph-syn-string: #8fd07a;
+  --ph-syn-number: #e6c07b;
+  --ph-syn-comment: #858b96;
+  --ph-syn-function: #7fc4ff;
+  --ph-syn-type: #c4a9ff;
+  --ph-glass: rgba(20, 22, 27, 0.86);
+  --ph-focus: rgba(77, 124, 255, 0.36);
+  --ph-code-bg: #111318;
+  --ph-code-ink: #d7dae1;
+  --ph-inline-code-bg: #20232b;
+  --ph-inline-code-ink: #e7e9ee;
+  --ph-shadow: 0 1px 2px rgba(0, 0, 0, 0.4),
+    0 16px 40px -32px rgba(0, 0, 0, 0.9);
+  --ph-scrollbar-size: 6px;
+  --ph-scrollbar: color-mix(in srgb, var(--ph-ink) 26%, transparent);
+  --ph-scrollbar-hover: color-mix(in srgb, var(--ph-ink) 40%, transparent);
+  --ph-scrollbar-active: color-mix(in srgb, var(--ph-ink) 54%, transparent);
+  color-scheme: dark;
+}
 
 /* ── 苔绿 moss：暖纸底 × 苔绿品牌（承接 M2 时期的绿色身份） ───────────── */
 
@@ -285,6 +375,11 @@ html.dark[data-theme="dusk"] {
 /* ── 色板预览（主题面板色卡）：canvas / brand / ink 三段条。
    取值须与上方各色板及 ui.go 的 themePalettes 表一致（人工同步）。 ────── */
 
+.ada-swatch--azure {
+  --sw-canvas: #f2f3f5;
+  --sw-brand: #1d4ed8;
+  --sw-ink: #303133;
+}
 .ada-swatch--black-swan {
   --sw-canvas: #f6f3ec;
   --sw-brand: #16171a;

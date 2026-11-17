@@ -4,7 +4,7 @@
  * theme.js（上游镜像，不改）只管明暗：localStorage['a_da_theme'] 或跟随系统，
  * 切 html.dark / html.light。本文件在它之后叠加第二维：
  *   - 调色板：localStorage['a_da_theme_palette'] → html[data-theme="<id>"]；
- *     不设属性 = 默认 Black Swan（tokens.css 原样生效）。
+ *     没有存储记录时落在 azure（2026-11-16 重设计默认），不设属性即 tokens.css 基线。
  *   - 模式：localStorage['a_da_theme_mode']（light / dark / system），system
  *     跟随系统并监听变化；与旧键 a_da_theme 保持同步（theme.js 的启动逻辑
  *     仍消费旧键），首次读到旧键时迁移成 mode。
@@ -29,7 +29,9 @@
   var MODE_KEY = 'a_da_theme_mode';
   var PALETTE_KEY = 'a_da_theme_palette';
   var MODES = ['light', 'dark', 'system'];
-  var PALETTES = ['black-swan', 'moss', 'ocean', 'dusk'];
+  // azure 是 2026-11-16《AI Agent · 桌面客户端》设计稿的新默认色板；
+  // 没有存储记录时直接落在它上面（不再退回暖纸黑天鹅）。
+  var PALETTES = ['azure', 'black-swan', 'moss', 'ocean', 'dusk'];
 
   function read(key) {
     try {
@@ -67,7 +69,7 @@
   if (MODES.indexOf(mode) < 0) mode = 'system';
 
   var palette = read(PALETTE_KEY);
-  if (PALETTES.indexOf(palette) < 0) palette = 'black-swan';
+  if (PALETTES.indexOf(palette) < 0) palette = 'azure';
 
   function applyClasses(isDark) {
     root.classList.toggle('dark', isDark);

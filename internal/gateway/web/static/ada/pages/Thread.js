@@ -46,6 +46,15 @@ export const setup = (props) => {
 	const statusText = ref("");
 	const statusLevel = ref("info");
 	const statusRetry = ref(false);
+	// 设计稿的会话头：标题 / 运行状态标签 / 工具计数。
+	const threadTitle = ref(threadId === "" ? "" : "会话");
+	const toolCount = computed(() => rows.value.filter((r) => r.kind === "tool").length);
+	const runTag = computed(() => {
+		if (run.errorLabel !== "") return { tone: "danger", label: "运行失败", icon: "i-alert" };
+		if (run.status === "waiting_input") return { tone: "warn", label: "等待你的答复", icon: "i-clock" };
+		if (run.status === "running" || run.active) return { tone: "brand", label: "Agent 运行中", icon: "i-eq" };
+		return { tone: "muted", label: "空闲", icon: "i-check-circle" };
+	});
 	// 流式行是持续追加的对象：必须用 reactive（ref 是浅响应，嵌套变更不触发）。
 	const live = reactive({ active: false, messageId: "", thinking: "", text: "", nodes: null, renderedText: "" });
 	const liveActive = computed(() => live.active);
@@ -1187,7 +1196,10 @@ export const setup = (props) => {
 		try {
 			const data = await fetch("/partials/threads.json?limit=200");
 			const found = (data.threads ?? []).find((t) => t.id === threadId);
-			if (found?.title) shellState.title = found.title;
+			if (found?.title) {
+				shellState.title = found.title;
+				threadTitle.value = found.title;
+			}
 		} catch { /* 标题缺失只影响顶栏文案 */ }
 	}
 
@@ -1216,6 +1228,7 @@ export const setup = (props) => {
 
 	return {
 		threadId, productName, brandName, logoStyle, greeting,
+		threadTitle, toolCount, runTag,
 		rows, hasOlder, loadFailed, run, statusText, statusLevel, statusRetry, live, liveActive,
 		draft, thumbs, dragging, sending, workspaces, wsSelected, wsLabel, workspacePath,
 		imageInputID, filePickerReady, outbox,

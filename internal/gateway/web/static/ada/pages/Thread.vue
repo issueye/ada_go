@@ -2,6 +2,18 @@
   <div class="ada-corner-dock" id="chat-corner" aria-label="会话状态卡"><ui-slot name="chat.corner" :thread-id="threadId" /></div>
 
   <div class="ada-chat-viewport">
+    <div v-if="threadId !== ''" class="c-chat-head">
+      <div class="c-chat-head__title" :title="threadTitle">{{ threadTitle }}</div>
+      <span class="c-tag" :class="'c-tag--' + runTag.tone"><ui-icon :name="runTag.icon" :size="12" />{{ runTag.label }}</span>
+      <div class="c-chat-head__sub">
+        <span>{{ modelChipLabel }}</span>
+        <span class="c-sep"></span>
+        <span>{{ toolCount }} 个工具</span>
+      </div>
+      <div class="c-chat-head__actions">
+        <button class="c-tb-icon" type="button" title="刷新会话" aria-label="刷新会话" @click="refreshAll"><ui-icon name="i-refresh" :size="16" /></button>
+      </div>
+    </div>
     <div class="ada-scroll" id="chat-scroll" @scroll="onScroll">
       <div class="ada-wrap" :class="threadId === '' ? 'ada-wrap--newtask' : ''">
 
@@ -275,6 +287,7 @@
         </div>
       </div>
       <div id="composer-aux"><ui-slot name="composer.footer" :thread-id="threadId" /></div>
+      <div class="ada-composer__hint"><strong>Enter</strong> 发送 · <strong>Shift+Enter</strong> 换行 · Agent 工具 {{ toolCount }} 个</div>
     </form>
   </div>
 </template>

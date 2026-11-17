@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/adag/ada-go/internal/common/version"
 	"github.com/adag/ada-go/internal/gateway/contracts"
 	"github.com/adag/ada-go/internal/gateway/dispatch"
 )
@@ -313,6 +314,11 @@ func (s *Server) base(r *http.Request, title string) baseData {
 		WorkspaceIndex: index,
 		Workspaces:     s.workspaceOptions(),
 		Gateway:        gateway,
+		// 「设置 · 关于与更新」的版本信息（release 构建由 ldflags 注入）。
+		Version:         version.Version,
+		Revision:        version.Revision,
+		BuildTime:       version.BuildTime,
+		ProtocolVersion: version.ProtocolVersion,
 	}
 	raw, err := json.Marshal(boot)
 	if err != nil {

@@ -295,6 +295,7 @@ test("基座页面：每个页面都能在 DOM shim 上挂载（无渲染错误�
 		app.provide("imageViewer", imageViewerMock);
 		app.provide("threadMenu", threadMenuMock);
 		app.provide("bootstrap", bootstrapMock);
+		app.provide("settings", { open() {}, close() {}, state: { open: false, tab: "providers" } });
 		const caught = [];
 		app.config.errorHandler = (err) => { caught.push(`${err?.name}: ${err?.message}`); };
 		app.mount(host);

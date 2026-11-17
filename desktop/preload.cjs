@@ -40,11 +40,16 @@ const ICON_CLOSE =
 // 标题栏是窗口 chrome：必须压在所有应用模态层之上，否则弹窗打开时按钮点不动。
 // 样式由网关下发 /static/electron-controls.css（CSP style-src 'self' 禁止内联）；
 // 浏览器场景没有 .ada-electron-controls 元素，该文件是空操作。
+//
+// 顶栏选择器带旧类名兜底：2026-11-16 重设计后 SPA 顶栏是 .c-topbar（动作区
+// .c-tb-right），旧 SSR 的 .ada-topbar/.ada-topbar__actions 仍被识别。
+// SPA 顶栏由前端框架挂载，DOMContentLoaded 时可能还不存在 —— 找不到时
+// 短暂重试（最多 3s），挂载完成即注入。
 function installSsrWindowControls() {
   if (document.getElementById('ada-electron-window-controls')) return
-  const topbar = document.querySelector('.ada-topbar')
-  if (!topbar) return
-  const actions = topbar.querySelector('.ada-topbar__actions') || topbar
+  const topbar = document.querySelector('.c-topbar, .ada-topbar')
+  if (!topbar) return false
+  const actions = topbar.querySelector('.c-tb-right, .ada-topbar__actions') || topbar
 
   if (!document.getElementById('ada-electron-controls-style')) {
     const link = document.createElement('link')
@@ -90,12 +95,24 @@ function installSsrWindowControls() {
   }
   ipcRenderer.on('window:maximize-change', (_event, isMax) => applyMaximized(isMax === true))
   refreshMaximized()
+  return true
+}
+
+function installWhenTopbarReady() {
+  try { if (installSsrWindowControls() === true) return } catch { /* 注入失败按未注入重试 */ }
+  let tries = 0
+  const timer = setInterval(() => {
+    tries += 1
+    let done = false
+    try { done = installSsrWindowControls() === true } catch { /* 下一轮再试 */ }
+    if (done || tries >= 30) clearInterval(timer)
+  }, 100)
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', installSsrWindowControls, { once: true })
+  document.addEventListener('DOMContentLoaded', installWhenTopbarReady, { once: true })
 } else {
-  installSsrWindowControls()
+  installWhenTopbarReady()
 }
 // 整页表单提交后会换文档；preload 会重新执行，再兜一次 pageshow。
 window.addEventListener('pageshow', installSsrWindowControls)

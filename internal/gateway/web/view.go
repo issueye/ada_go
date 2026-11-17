@@ -48,6 +48,11 @@ type bootstrapData struct {
 	WorkspaceIndex int               `json:"workspaceIndex"`
 	Workspaces     []workspaceOption `json:"workspaces,omitempty"`
 	Gateway        string            `json:"gateway"`
+	// 版本投影供「设置 · 关于与更新」展示（2026-11-16 重设计）。
+	Version         string `json:"version,omitempty"`
+	Revision        string `json:"revision,omitempty"`
+	BuildTime       string `json:"buildTime,omitempty"`
+	ProtocolVersion int    `json:"protocolVersion,omitempty"`
 }
 
 // workspaceOption 是工作区选择器的一项。

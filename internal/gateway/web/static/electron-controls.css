@@ -1,12 +1,21 @@
 /* ada-go 桌面壳（Electron）的窗口控制样式（docs/desktop-shell.md）。
    由 preload 注入 <link> 引用——不内联，遵守 CSP style-src 'self'。
    浏览器场景没有 .ada-electron-controls 元素，本文件是空操作。 */
-  .ada-topbar { position: relative; z-index: 100; -webkit-app-region: drag; app-region: drag; }
+  .ada-topbar, .c-topbar {
+    position: relative; z-index: 130;
+    -webkit-app-region: drag; app-region: drag;
+  }
   .ada-topbar button, .ada-topbar a, .ada-topbar summary, .ada-topbar input,
   .ada-topbar select, .ada-topbar textarea, .ada-topbar [role="button"],
+  .c-topbar button, .c-topbar a, .c-topbar summary, .c-topbar input,
+  .c-topbar select, .c-topbar textarea, .c-topbar [role="button"],
   .ada-electron-controls {
     -webkit-app-region: no-drag; app-region: no-drag;
   }
+  /* 标题栏是窗口 chrome：整条压在应用模态层（c-modal z-index 120）之上；
+     设置弹窗在本壳内下移到顶栏之下，保证顶栏与窗口按钮始终可见可点。 */
+  .c-modal { inset: 48px 0 0 0; }
+  .c-modal__panel { height: min(720px, calc(100vh - 96px)); }
   .ada-electron-controls {
     display: flex; align-items: center; gap: 2px; margin-left: 6px;
     padding-left: 8px; border-left: 1px solid var(--ph-line, #3f3f46);

@@ -39,7 +39,6 @@ function els(tag) {
 }
 
 const staticClasses = (n) => n.props.filter((p) => p.s !== undefined).map((p) => p.s);
-
 test("侧栏不再分「当前 / 其它」两块各自滚动", () => {
 	for (const gone of ["data-ws-active", "data-ws-others", "ada-thread-list--split", "ada-ws-scroll--active", "ada-ws-scroll--others", "ada-ws-scroll--workArea"]) {
 		assert.equal(vue.includes(gone), false, `Sidebar.vue 仍残留 ${gone}（工作区应统一成一个列表）`);
@@ -48,7 +47,7 @@ test("侧栏不再分「当前 / 其它」两块各自滚动", () => {
 });
 
 test("侧栏工作区组：可折叠 button + 展开时才加载", () => {
-	const summary = els("button").filter((b) => staticClasses(b).includes("ada-ws__summary"));
+	const summary = els("button").filter((b) => staticClasses(b).some((s) => String(s).includes("ada-ws__summary")));
 	assert.equal(summary.length, 1, "工作区组头应恰好一个 .ada-ws__summary button");
 	const props = summary[0].props;
 	assert.ok(
@@ -82,7 +81,8 @@ test("侧栏搜索过滤 v-for 源，而不是渲染后 hidden", () => {
 	assert.ok(js.includes("function hitThreads"), "Sidebar.js 缺少 hitThreads");
 });
 
-test("侧栏「全部展开/收起」按钮与搜索按钮存在", () => {
-	assert.ok(vue.includes("toggleAll"), "缺少全部展开/收起按钮");
+test("侧栏「只看运行中」筛选与搜索按钮存在（设计稿改版后不再有全部展开按钮）", () => {
+	assert.ok(vue.includes("toggleOnlyRunning"), "缺少只看运行中的筛选按钮");
 	assert.ok(vue.includes("focusSearch"), "工作区头/窄轨缺少聚焦搜索入口");
+	assert.ok(js.includes("onlyRunning"), "Sidebar.js 缺少 onlyRunning 状态");
 });

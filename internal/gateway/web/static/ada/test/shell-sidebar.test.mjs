@@ -34,6 +34,7 @@ const stateJs = readFileSync(join(PAGES, "state.js"), "utf8");
 const themesJs = readFileSync(join(STATIC, "themes.js"), "utf8");
 const shellCss = readFileSync(join(ADA, "shell.css"), "utf8");
 const indexMjs = readFileSync(join(ADA, "index.mjs"), "utf8");
+const settingsMjs = readFileSync(join(ADA, "settings.mjs"), "utf8");
 
 const { plan } = compileTemplate(parseSFC(vue).template);
 
@@ -207,18 +208,24 @@ test(".ada-sidebar 的宽度在宽屏由变量决定（否则拖动写入会被�
 });
 
 // ---------------------------------------------------------------------------
-// 3. 主题面板：开合只为组件状态，themes.js 不再抢着写 hidden
+// 3. 设置弹窗：主题面板从侧栏移进弹窗，开合与状态只有一处真源
 // ---------------------------------------------------------------------------
 
-test("主题面板的展开态绑定 themeOpen，而不是静态 hidden", () => {
-	assert.doesNotMatch(vue, /<div class="ada-theme-pop"[^>]*\shidden[^>]>/i, "面板不能再渲染静态 hidden（重渲染会把展开态盖回去）");
-	assert.match(vue, /:hidden="!themeOpen"/, "面板的 hidden 必须绑定 themeOpen");
-	assert.match(vue, /@click="toggleThemePanel"/, "触发器必须调用 toggleThemePanel");
-	assert.match(vue, /:aria-expanded="themeOpen \? 'true' : 'false'"/, "触发器 aria-expanded 要跟展开态");
-	assert.match(sidebarJs, /const themeOpen = ref\(false\)/, "Sidebar.js 缺少 themeOpen 状态");
-	assert.match(sidebarJs, /function toggleThemePanel\(\)/, "Sidebar.js 缺少 toggleThemePanel");
-	assert.match(sidebarJs, /themeOpen, toggleThemePanel/, "themeOpen/toggleThemePanel 必须导出给模板");
-	assert.match(sidebarJs, /onDocClickTheme/, "缺少点面板外关闭");
+test("侧栏「设置」行打开设置弹窗，而不是侧栏内联主题面板", () => {
+	assert.match(vue, /@click="openSettings"/, "侧栏缺少设置入口");
+	assert.match(sidebarJs, /settings\.open\("providers"\)/, "设置入口应调用 settings.open()");
+	assert.match(indexMjs, /app\.provide\("settings", settingsService\)/, "ShellApp 必须注入 settings 服务");
+	assert.match(indexMjs, /createSettingsService\(\)/, "缺少设置服务实例");
+});
+
+test("主题控件移入设置弹窗：模式与色板都是组件渲染", () => {
+	assert.match(settingsMjs, /THEME_MODES\s*=\s*\[/, "设置模块缺少明暗模式列表");
+	assert.match(settingsMjs, /PALETTES\s*=\s*\[/, "设置模块缺少色板列表");
+	assert.match(settingsMjs, /function applyPalette\(palette\)/, "缺少色板应用逻辑");
+	assert.match(settingsMjs, /function chooseMode\(next\)/, "缺少模式切换逻辑");
+	assert.match(settingsMjs, /function choosePalette\(next\)/, "缺少色板切换逻辑");
+	// 主题的实际落点是 html 类名 + data-theme（themes.js 与组件同一口径）。
+	assert.match(settingsMjs, /root\.setAttribute\("data-theme"/, "色板必须落 data-theme");
 });
 
 test("themes.js 只应用主题（不碰面板开合）", () => {
@@ -227,11 +234,4 @@ test("themes.js 只应用主题（不碰面板开合）", () => {
 	assert.doesNotMatch(themesJs, /setPanel/, "themes.js 的 setPanel 应随组件化一起删除");
 	assert.match(themesJs, /data-theme-mode/, "仍要负责模式按钮的选中态镜像");
 	assert.match(themesJs, /data-theme-pick/, "仍要负责色板按钮的选中态镜像");
-});
-
-test("主题面板按钮：模式/色板都在模板里（插件页与任意路由都可用）", () => {
-	const modeBtns = els("button").filter((b) => b.props.some((p) => p.n === "data-theme-mode"));
-	const pickBtns = els("button").filter((b) => b.props.some((p) => p.n === "data-theme-pick"));
-	assert.equal(modeBtns.length, 1, "应有 1 个 v-for 输出三态模式按钮");
-	assert.equal(pickBtns.length, 1, "应有 1 个 v-for 输出色板按钮");
 });

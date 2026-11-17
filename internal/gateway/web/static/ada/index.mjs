@@ -17,6 +17,7 @@ import { renderVNodeJsonChildren } from "./vnodejson.mjs";
 import { loadSFC } from "./sfc.mjs";
 import { tokenize } from "./highlight.js";
 import { shellState } from "./pages/state.js";
+import { createSettingsService, SettingsDialog, applyPrefs, readPrefs, rememberRoute, lastRoute } from "./settings.mjs";
 
 // ---------------------------------------------------------------------------
 // 启动：bootstrap → 服务实例化 → provide → mount
@@ -39,6 +40,9 @@ function dismissToast(id) {
 	if (i >= 0) toastState.items.splice(i, 1);
 }
 const toastService = { show: pushToast, dismiss: dismissToast, state: toastState };
+
+// 设置弹窗服务（侧栏「设置」行与顶栏齿轮共用同一份打开状态）。
+const settingsService = createSettingsService();
 
 const bootstrap = readBootstrap();
 const adaFetch = makeFetcher(bootstrap, { onFlash: (kind, message) => pushToast(message, kind) });
@@ -667,6 +671,7 @@ const ShellApp = defineComponent({
 		// 抽屉（窄屏）挂在 .ada-sidebar 上（由 Sidebar.vue 绑定）。
 		const shellClass = [
 			"ada-shell",
+			"c-shell",
 			s.state.collapsed && !s.state.isNarrow ? "is-sidebar-collapsed" : "",
 		];
 		const backdropClass = s.state.sidebarOpen ? "ada-backdrop is-open" : "ada-backdrop";
@@ -676,13 +681,17 @@ const ShellApp = defineComponent({
 			? (s.state.sidebarOpen ? "关闭侧栏" : "打开侧栏")
 			: (s.state.collapsed ? "展开侧栏" : "收起侧栏");
 
+		const brandName = String(bootstrap.brandName ?? "ada-go");
+		const workspaceName = String(bootstrap.workspaceName ?? bootstrap.workspace ?? "");
+		const brandInitial = brandName.trim() !== "" ? [...brandName.trim()][0].toUpperCase() : "A";
+
 		return h("div", { class: shellClass }, [
-			h(Sidebar, {}),
-			h("div", { class: backdropClass, id: "chat-backdrop", "aria-hidden": "true", "on:click": () => { shellState.closeSidebar(); } }),
-			h("main", { id: "main", class: "ada-main" }, [
-				h("div", { class: "ada-topbar" }, [
+			// 设计稿是「整宽顶栏 + 顶栏下左栏右区」：品牌、工作区路径与连接状态
+			// 都在同一条 48px 顶栏里，侧栏从顶栏下方开始。
+			h("div", { class: "c-topbar" }, [
+				h("div", { class: "c-tb-left" }, [
 					h("button", {
-						class: "ada-icon-btn ada-menu-toggle",
+						class: "ada-menu-toggle c-menu",
 						type: "button",
 						"on:click": () => { shellState.toggleAppearance(); },
 						"aria-label": menuLabel,
@@ -691,19 +700,39 @@ const ShellApp = defineComponent({
 							: (s.state.collapsed ? "false" : "true"),
 						title: menuLabel,
 					}, h(UiIcon, { name: "i-menu", size: 16 })),
-					h("div", { class: "ada-topbar__title" }, [
-						h("h1", { title: s.state.title }, s.state.title),
-						bootstrap.productBadge
-							? h("span", { class: "ada-chip" }, bootstrap.productBadge)
-							: h("span", { class: "ada-chip" }, bootstrap.productName ?? ""),
-					]),
-					h("div", { class: "ada-topbar__actions" }, [
-						h(SlotOutlet, { name: "topbar.right" }),
-						h("div", { id: "topbar-actions" }, actions),
+					h("span", { class: "c-logo", "aria-hidden": "true" }, brandInitial),
+					h("div", { class: "c-brand" }, [
+						spanTitle(brandName),
+						h("span", null, "工作空间"),
 					]),
 				]),
-				view,
+				h("div", { class: "c-tb-center" }, [
+					h(UiIcon, { name: "i-folder", size: 14 }),
+					h("span", { title: bootstrap.workspace ?? "" }, workspaceName),
+					h("span", { class: "c-sep" }),
+					h("span", { class: "c-page-title", title: s.state.title }, s.state.title),
+				]),
+				h("div", { class: "c-tb-right" }, [
+					h("span", { class: "c-local" }, [h("span", { class: "c-dot" }), "本地服务已连接"]),
+					h(SlotOutlet, { name: "topbar.right" }),
+					h("div", { id: "topbar-actions" }, actions),
+					h("button", {
+						class: "c-tb-icon",
+						type: "button",
+						"aria-label": "设置",
+						title: "设置",
+						"on:click": () => settingsService.open("theme"),
+					}, h(UiIcon, { name: "i-wrench", size: 16 })),
+				]),
 			]),
+			h("div", { class: "c-body" }, [
+				h(Sidebar, {}),
+				h("div", { class: backdropClass, id: "chat-backdrop", "aria-hidden": "true", "on:click": () => { shellState.closeSidebar(); } }),
+				h("main", { id: "main", class: "ada-main" }, [
+					view,
+				]),
+			]),
+			h(SettingsDialog),
 			h(ConfirmDialog),
 			h(UiImageViewer),
 			h(UiToast),
@@ -711,6 +740,11 @@ const ShellApp = defineComponent({
 		]);
 	},
 });
+
+// 顶栏品牌文字的稳定包装（避免 h() 直接吃字符串数组时被当成多个子节点）。
+function spanTitle(text) {
+	return h("span", { class: "c-brand__name" }, String(text));
+}
 
 // 路由记录（匹配只比较身份；页面组件由上面的 defineAsyncComponent 装载）
 const OverviewRoute = { path: "/" };
@@ -737,6 +771,9 @@ const Routes = [
 // ---------------------------------------------------------------------------
 
 export function boot() {
+	// 本地偏好（密度/字号/减少动效/耗时显示）先落到根元素，避免首帧跳动。
+	applyPrefs(readPrefs());
+
 	// 路由：createRouter + 订阅（router 是自管理订阅，非响应式 —— 用 ref 镜像）
 	// 路由：createRouter + 订阅（router 是自管理订阅，非响应式 —— 用 ref 镜像）。
 	// 初值取 router 当前快照：router 创建时已按 location 解析过一次，若从
@@ -748,7 +785,15 @@ export function boot() {
 	router.subscribe((snap) => {
 		routeRef.value = snap;
 		shellState.routePath = snap.path;
+		// 记住最近一次会话页：通用偏好「恢复上次会话」用。
+		rememberRoute(snap.path);
 	});
+	// 恢复上次会话：偏好开启、从概览进入时回到上次的会话页。
+	const bootPrefs = readPrefs();
+	const saved = lastRoute();
+	if (bootPrefs.restoreSession !== false && saved !== "" && window.location.pathname === "/") {
+		router.push(saved);
+	}
 	registry.load();
 	registry.subscribeWorkspaceEvents();
 
@@ -766,6 +811,7 @@ export function boot() {
 	app.provide("fetch", adaFetch);
 	app.provide("confirmService", confirmService);
 	app.provide("toast", toastService);
+	app.provide("settings", settingsService);
 	app.provide("imageViewer", imageViewerService);
 	app.provide("threadMenu", threadMenuService);
 	app.provide("bootstrap", bootstrap);
@@ -802,3 +848,4 @@ export function boot() {
 if (typeof window !== "undefined" && document.getElementById("app") !== null) {
 	boot();
 }
+

@@ -18,6 +18,8 @@ export const setup = () => {
 	const registry = inject("registry");
 	const confirm = inject("confirmService");
 	const threadMenu = inject("threadMenu");
+	// 设置弹窗服务（ShellApp 根部提供）：侧栏底部「设置」行打开它。
+	const settings = inject("settings");
 
 	const groups = reactive([]);
 	const needle = ref("");
@@ -27,22 +29,10 @@ export const setup = () => {
 		return m ? decodeURIComponent(m[1]) : "";
 	});
 
-	// 主题面板初始态：themes.js 只在点击时同步 UI，这里按它的键名读初始值。
-	const MODES = ["light", "dark", "system"];
-	const PALETTES = ["black-swan", "moss", "ocean", "dusk"];
-	const themeModes = [
-		{ id: "light", label: "亮色", icon: "i-sun" },
-		{ id: "dark", label: "暗色", icon: "i-moon" },
-		{ id: "system", label: "跟随系统", icon: "i-monitor" },
-	];
-	const themePalettes = [
-		{ id: "black-swan", label: "黑天鹅" },
-		{ id: "moss", label: "苔绿" },
-		{ id: "ocean", label: "深海" },
-		{ id: "dusk", label: "暮色" },
-	];
-	function readLS(key) {
-		try { return window.localStorage.getItem(key); } catch { return null; }
+	// 只显示运行中的会话（列表头的漏斗按钮）。
+	const onlyRunning = ref(false);
+	function toggleOnlyRunning() {
+		onlyRunning.value = !onlyRunning.value;
 	}
 	// wsDOMID 把工作区路径映射成稳定的 DOM id（FNV-1a，HEAD wsDOMID 同形）。
 	function wsDOMID(key) {
@@ -58,20 +48,12 @@ export const setup = () => {
 		for (let i = 0; i < s.length; i++) out.push(s.charCodeAt(i) & 0xff);
 		return out;
 	}
-	// 主题面板的选中态镜像：themes.js 负责应用主题（事件委托），这里只把
-	// data-theme-mode / data-theme-pick 的点击同步回面板高亮。
-	function mirrorThemeClick(event) {
-		const target = event.target?.closest?.("[data-theme-mode], [data-theme-pick]");
-		if (!target) return;
-		if (target.getAttribute("data-theme-mode")) mode.value = target.getAttribute("data-theme-mode");
-		if (target.getAttribute("data-theme-pick")) palette.value = target.getAttribute("data-theme-pick");
-	}
-	const modeRaw = readLS("a_da_theme_mode");
-	const mode = ref(MODES.includes(modeRaw) ? modeRaw : "system");
-	const paletteRaw = readLS("a_da_theme_palette");
-	const palette = ref(PALETTES.includes(paletteRaw) ? paletteRaw : "black-swan");
-
 	const brandName = String(bootstrap.brandName ?? "ada-go");
+	const brandInitial = computed(() => {
+		const trimmed = brandName.trim();
+		const first = trimmed !== "" ? [...trimmed][0] : "A";
+		return first.toUpperCase();
+	});
 	const productBadge = String(bootstrap.productBadge ?? "");
 	const workspace = String(bootstrap.workspace ?? "");
 	const gatewayAddr = String(bootstrap.gateway ?? "").replace(/^[a-z]+:\/\//i, "").replace(/\/$/, "");
@@ -96,40 +78,11 @@ export const setup = () => {
 		});
 	}
 
-	// ── 主题面板开合 ─────────────────────────────────────────────────────
-	// 开合是组件状态（模板 :hidden 绑定 themeOpen）；themes.js 只负责应用主题
-	// 与持久化（它不再直接改 DOM，否则重渲染会把展开态盖回去）。
-	const themeOpen = ref(false);
-	function toggleThemePanel() {
-		themeOpen.value = !themeOpen.value;
-		if (!themeOpen.value) return;
-		// 展开态先落 DOM 再聚焦：选中项在 panel 里，下一轮 flush 后才存在。
-		window.setTimeout(() => {
-			const panel = document.getElementById("ada-theme-panel");
-			if (panel === null) return;
-			const target = panel.querySelector(".is-selected") || panel.querySelector("button");
-			if (target !== null && typeof target.focus === "function") {
-				try { target.focus(); } catch { /* 焦点失败不影响展开 */ }
-			}
-		}, 0);
-	}
-	function closeThemePanel(returnFocus) {
-		if (!themeOpen.value) return;
-		themeOpen.value = false;
-		if (returnFocus !== true) return;
-		const trigger = document.querySelector("[data-theme-panel-toggle]");
-		if (trigger !== null && typeof trigger.focus === "function") {
-			try { trigger.focus(); } catch { /* 触发器可能已随重渲染消失 */ }
-		}
-	}
-	// 点面板外关闭（触发器本身由 toggleThemePanel 处理，这里跳过它）。
-	function onDocClickTheme(event) {
-		if (!themeOpen.value) return;
-		const target = event.target;
-		if (target && typeof target.closest === "function") {
-			if (target.closest(".ada-theme-wrap") !== null) return;
-		}
-		closeThemePanel(false);
+	// ── 设置弹窗入口 ─────────────────────────────────────────────────────
+	// 主题面板已从侧栏移到设置弹窗的「主题设置」页（2026-11-16 重设计）。
+	function openSettings() {
+		shellState.closeSidebar();
+		settings.open("providers");
 	}
 
 	// 全部工作区都来自 bootstrap（服务端已按工作区列表投影）；当前工作区的会话
@@ -221,10 +174,15 @@ export const setup = () => {
 		return String(t.title ?? "").toLowerCase().includes(q);
 	}
 	// hitThreads 是模板里 v-for 的源：搜索时直接过滤，不做「渲染后 hidden」。
+	// 漏斗按钮（onlyRunning）与搜索词是同一层过滤。
 	function hitThreads(g) {
 		const list = g.threads ?? [];
-		if (needle.value.trim() === "") return list;
-		return list.filter(threadHit);
+		const q = needle.value.trim();
+		return list.filter((t) => {
+			if (onlyRunning.value && t.running !== true) return false;
+			if (q === "") return true;
+			return threadHit(t);
+		});
 	}
 	const searchLabel = computed(() => {
 		const q = needle.value.trim();
@@ -328,14 +286,9 @@ export const setup = () => {
 		event.preventDefault();
 		go("/threads");
 	}
-	// Esc 关抽屉 / 关主题面板（面板优先：它是浮层，Esc 应先收浮层）。
+	// Esc 关抽屉（主题面板已移入设置弹窗，弹窗自己的 Esc 由 ShellApp 处理）。
 	function onEscKey(event) {
 		if (event.key !== "Escape") return;
-		if (themeOpen.value) {
-			event.preventDefault();
-			closeThemePanel(true);
-			return;
-		}
 		if (shellState.sidebarOpen) shellState.closeSidebar();
 	}
 
@@ -344,25 +297,20 @@ export const setup = () => {
 		document.addEventListener("keydown", onKeydown);
 		document.addEventListener("keydown", onNewTaskKey);
 		document.addEventListener("keydown", onEscKey);
-		document.addEventListener("click", mirrorThemeClick);
-		document.addEventListener("click", onDocClickTheme);
 		resizerCleanup = bindSidebarResizer();
 	});
 	onUnmounted(() => {
 		document.removeEventListener("keydown", onKeydown);
 		document.removeEventListener("keydown", onNewTaskKey);
 		document.removeEventListener("keydown", onEscKey);
-		document.removeEventListener("click", mirrorThemeClick);
-		document.removeEventListener("click", onDocClickTheme);
 		if (typeof resizerCleanup === "function") resizerCleanup();
 		resizerCleanup = null;
 	});
 
 	return {
-		groups, needle, failed, activeThreadID, sidebarClass,
-		mode, palette, themeModes, themePalettes, themeOpen, toggleThemePanel,
-		brandName, productBadge, workspace, gatewayAddr, gatewayTitle, logoStyle, wsDOMID,
-		pluginNav, railThreads, railInitial,
+		groups, needle, failed, activeThreadID, sidebarClass, onlyRunning, toggleOnlyRunning,
+		brandName, brandInitial, productBadge, workspace, gatewayAddr, gatewayTitle, logoStyle, wsDOMID,
+		pluginNav, railThreads, railInitial, openSettings,
 		isActive, go, goRoot, load, toggleGroup, toggleAll, allOpen,
 		groupRunning, threadHit, hitThreads, searchLabel, focusSearch,
 		timeLabel, threadURL, openThread, openThreadIn, switchWorkspace, removeThread, openMenu,
