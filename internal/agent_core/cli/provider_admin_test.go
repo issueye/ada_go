@@ -136,6 +136,24 @@ func TestProviderAdminConfigLifecycle(t *testing.T) {
 	if strings.Contains(string(raw), "p_test") {
 		t.Fatalf("provider-config.json 仍包含已删除供应商: %s", raw)
 	}
+
+	// 新增表单没有单独的 id 输入：不带 id 时后端用 name 作为供应商 ID。
+	saveNoID := json.RawMessage(`{"method":"POST","path":"/save","body":{
+	  "name":"p_name_only","protocol":"openai_chat","baseUrl":"https://example.com/v1","models":[]
+	}}`)
+	created, err := sess.CallHTTPAPI(ctx, "provider-admin", "POST", "/save", saveNoID, "")
+	if err != nil {
+		t.Fatalf("POST /save 省略 id: %v", err)
+	}
+	var createdInfo struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(created, &createdInfo); err != nil {
+		t.Fatalf("save 响应 JSON: %v (%s)", err, created)
+	}
+	if createdInfo.ID != "p_name_only" {
+		t.Fatalf("省略 id 时应以 name 作为供应商 ID，实际 %q", createdInfo.ID)
+	}
 }
 
 // 供应商配置是机器级共享的：切换工作区（不同数据目录）仍看到同一套配置；

@@ -356,8 +356,15 @@ export const setup = () => {
 			showToast("供应商名称不能为空。", "error");
 			return;
 		}
+		// 新增时没有单独的 ID 输入：名称同时作为供应商 ID（创建后可在详情里复制）。
+		// 编辑时 ID 固定为原供应商，改名只改 displayName，不改变引用。
+		const id = String((editing && s ? s.id : providerForm.id) || name).trim();
+		if (!editing && providers.value.some((p) => p.id === id)) {
+			showToast("供应商 ID「" + id + "」已存在，请换一个名称。", "error");
+			return;
+		}
 		const body = {
-			id: editing && s ? s.id : providerForm.id,
+			id,
 			name,
 			protocol: String(providerForm.protocol || "").trim(),
 			baseUrl: String(providerForm.baseUrl || "").trim(),

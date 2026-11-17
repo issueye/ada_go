@@ -152,7 +152,9 @@ export default function (agent) {
   agent.route("POST", "/save", async (req, ctx) => {
     const body = bodyOf(req);
     const configs = await loadConfigs(ctx);
-    const id = String(body.id || "").trim();
+    // 新增时允许省略 id：以 name 作为供应商 ID（名称在列表与详情里始终可见、可复制）。
+    let id = String(body.id || "").trim();
+    if (!id) id = String(body.name || "").trim();
     if (!id) throw new Error("缺少供应商 id");
     const protocol = String(body.protocol || "").trim();
     if (!protocol) throw new Error("缺少协议格式 protocol");

@@ -180,7 +180,7 @@
         </div>
         <div class="pm-modal__body">
           <label class="pm-field">
-            <span class="pm-field__label">名称</span>
+            <span class="pm-field__label">名称{{ providerModalMode === 'add' ? '（同时作为供应商 ID）' : '' }}</span>
             <input class="pm-input" type="text" v-model="providerForm.name" placeholder="例如 unisound" />
           </label>
           <div class="pm-field">
@@ -207,7 +207,7 @@
           </label>
         </div>
         <div class="pm-modal__foot">
-          <span class="pm-modal__hint">保存后可在聊天中切换模型</span>
+          <span class="pm-modal__hint">保存后可在聊天中切换模型{{ providerModalMode === 'add' ? '；新建时名称同时作为供应商 ID' : '' }}</span>
           <span class="pm-modal__actions">
             <button class="ada-btn ada-btn--secondary ada-btn--sm" type="button" @click="closeProviderModal">取消</button>
             <button class="ada-btn ada-btn--primary ada-btn--sm" type="button" @click="saveProviderForm">{{ providerModalMode === 'edit' ? '保存' : '创建供应商' }}</button>
