@@ -342,7 +342,7 @@ func (t Targets) commit(c *Contribution, caps *CapabilitySet, hooks func(HookDef
 
 func hasFrontend(f FrontendContribution) bool {
 	return len(f.Slots)+len(f.Pages)+len(f.Nav)+len(f.Dashboard) > 0 ||
-		len(f.Actions) > 0 || len(f.Styles) > 0 || len(f.Scripts) > 0 || f.Assets != ""
+		len(f.Actions) > 0 || len(f.Styles) > 0 || f.Assets != ""
 }
 
 // rollback 把一个已提交插件的全部贡献从目录里摘掉（禁用/卸载路径，1.5.6）。
@@ -402,7 +402,6 @@ func (p *Instance) frontendContribution() FrontendContribution {
 	f.Nav = append([]pluginapi.NavContribution(nil), in.Nav...)
 	f.Dashboard = append([]pluginapi.DashboardContribution(nil), in.Dashboard...)
 	f.Styles = append([]string(nil), in.Styles...)
-	f.Scripts = append([]string(nil), in.Scripts...)
 	f.Assets = in.Assets
 	for name, binding := range in.Actions {
 		f.Actions[name] = binding

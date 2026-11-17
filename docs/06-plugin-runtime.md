@@ -14,9 +14,9 @@
 opts := moejs.Options{
     MemoryLimit: 64 << 20,
     Locale:      "en-US",
-    // 系统插件也需要代码生成；第三方默认关闭 eval/new Function。
-    DisableDynamicCode: caps.Trust != TrustBuiltin,
-    Importer:           &moejs.Importer{Resolve: moduleResolver(policy)},
+    // 能力位不决定「装什么」（2026-11-10 决策）：eval/new Function 对所有插件一致开放。
+    DisableDynamicCode: false,
+    Importer:           &moejs.Importer{Resolve: moduleResolver()},
 }
 rt := moejs.NewRuntime(opts)
 defer rt.Close()
@@ -25,7 +25,7 @@ defer rt.Close()
 // 不再按清单裁剪「装什么」（2026-11-10 决策）。
 host := NewHostBridge(pluginID, scope, state, globalConfig, events, secrets)
 // 宿主模块表 + 上下文成员由 host 封装；具体 API 见 12。
-mod, err := moejs.Link(entry, moduleResolver(policy))
+mod, err := moejs.Link(entry, moduleResolver())
 if err != nil { return err }
 if err := rt.Load(mod); err != nil { return err }
 
@@ -56,7 +56,7 @@ if _, err := ret.Await(ctx); err != nil { return err }
 
 **为什么不在脚本里给 `node:fs` 全量**：`node:fs` 的写成员受 Scope 约束；但 `ctx.fs` 的读成员按 2026-10-31 决定不限制目标路径，因此 agent 的 `read_file`/`list_files`/`search_files` 可以读宿主绝对路径，包括插件目录、配置目录与 `secrets.toml` 所在目录。密钥的**值**仍只经 `secret` broker 按名提供；磁盘上的密钥文件是否可读由操作系统权限与部署方式决定。写成员现在不再按能力裁剪：越出工作区根时调用抛越界错误。
 
-**前端渲染运行时**：Gateway 侧独立一套 Runtime，只执行 TSX 产物，不安装任何 stdlib；每个页面/插槽渲染 100ms/300ms 超时，超时重建。详见 [14 §14](14-ui-runtime.md)。
+**Markdown 动态块渲染 Runtime**：Gateway 侧独立一套 Runtime，只执行块 TSX（不安装 stdlib），按块预算 100ms/300ms 超时重建；页面与插槽由浏览器运行时渲染。详见 [14 §14](14-ui-runtime.md)。
 
 ## 6.5 装配期结算
 
@@ -147,7 +147,7 @@ if _, err := ret.Await(ctx); err != nil { return err }
 | 环境变量 | `env-manager` | env 命名空间、校验、管理页与覆盖语义；`global.config` 存值 |
 | 供应商管理 | `provider-admin` | 供应商/端点/API Key/模型清单 CRUD 与页面；配置存 `global.config`，列表/切换用 `model.admin`，`/models` 走 `ctx.fetch` |
 | 用量/遥测 | `token-usage` | 工作区/线程 Token 与成本页面、概览卡；`events.read` 聚合 |
-| 用量/遥测 | `composer-telemetry` | 输入框下方辅助区（运行中/工作区/缓存/上下文环）；`clientOnly` |
+| 用量/遥测 | `composer-telemetry` | 输入框下方辅助区（运行中/工作区/缓存/上下文环）；SFC UI |
 | 插件管理 | `plugin-helper` | 创建/检查/启停插件；`plugin.admin` 安装桥 |
 | 示例/图表 | `ui-charts`、`ui-hello` | 图表块（模型内容）；SFC 插件参考示例（运行时装载） |
 
@@ -199,4 +199,4 @@ if _, err := ret.Await(ctx); err != nil { return err }
 
 ---
 
-**相邻文档**：[← 插件模型与后端 API](05-plugins.md) · [索引](design.md) · [SSR 前端 →](07-ssr-frontend.md)
+**相邻文档**：[← 插件模型与后端 API](05-plugins.md) · [索引](design.md) · [前端（SPA）→](07-frontend.md)

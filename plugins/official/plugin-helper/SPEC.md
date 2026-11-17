@@ -11,7 +11,7 @@
   plugin.json          # 清单（必填）
   index.ts             # 后端入口：内容是宿主可直接执行的 ESM JavaScript
   README.md            # 建议
-  static/              # 前端静态资源（styles/scripts/assets 引用）
+  static/              # 前端静态资源（清单 frontend.assets 指向它：SFC .vue + 逻辑 ESM + CSS + 图标）
   skills/<name>/SKILL.md  # 随包技能（frontmatter: name=目录名 + description）
   dist/index.js        # 仅官方插件：构建期预编译产物（node plugins/official/build.mjs）
 ```
@@ -38,30 +38,33 @@
     "capabilities": [],          // 见 §5：只做清单校验，不决定装什么
     "secrets": ["some_key"]      // 声明后 ctx.secret(name) 才返回值
   },
-  "frontend": {                  // 可选；当前仅随包官方插件被渲染桥装配（§8）
-    "capabilities": ["backend.read"],
-    "client": "client.js",       // 浏览器 bundle（pluginbuild 产物，须提交）；hydrate 必需
-    "nav": [{ "label": "入口", "slug": "main" }],
-    "pages": [{ "slug": "main", "title": "标题", "template": "page.tsx" }],
+  "frontend": {                  // 可选；页面/插槽目前只装配随包官方插件（§8）
+    "capabilities": ["backend.read", "frontend.script"],
+    "nav": [{ "label": "入口", "slug": "main", "icon": "i-list" }],
+    "pages": [{ "slug": "main", "title": "标题", "component": "MainPage.vue" }],
     "slots": [
-      { "slot": "chat.corner", "template": "slot.tsx", "order": 10 },
-      // 岛屿：hydrate 需 frontend.client + frontend.script + builtin/verified；
-      // clientOnly 还需 hydrate:true，表示服务端不渲染、浏览器普通 mount（无 SSR 回退）。
-      { "slot": "composer.footer", "template": "footer.tsx", "order": 10, "hydrate": true, "clientOnly": true }
+      { "slot": "chat.corner", "component": "PlanCard.vue", "order": 10 }
     ],
+    "dashboard": [{ "component": "UsageWidget.vue", "order": 10 }],
     "blocks": [{ "name": "usage-card", "schema": "schemas/usage-card.json",
                  "template": "blocks/usage-card.tsx", "profile": "display" }],
     "actions": { "binding": { "action": "plan", "read": true, "backend": "tools-plan" } },
     "styles": ["main.css"],
-    "scripts": ["main.js"],      // 默认不加载；需 frontend.script 且 builtin/verified
     "assets": "static"
   }
 }
 ```
 
-插件根目录只收 `*.tsx`（模板不能放子目录）。`client.tsx` 用 `export const islands = {...}`
-按服务端注入的 `data-ada-entry`（`kind:name`，如 `slot:composer.footer`）选择组件，
-`default` 兜底；产物 `static/client.js` 由 `go run ./tools/pluginbuild -dir <插件> -entry client.tsx -out static/client.js` 生成并提交（`-check` 校验同步）。详见 §8.2。
+插件前端是**运行时装载的 SFC 单文件组件**，没有浏览器 bundle、脚本清单或构建步骤：
+
+- `slots` / `pages` / `dashboard` 的 `component` 是 `assets` 目录内的 `.vue` 相对路径；
+- 每个 `.vue` 必须有且只有一个 `<template>`，以及一个 `<script src="./Xxx.js">`；`src` 指向同目录的 ESM 静态文件，**禁止内联 `<script>`**（装载器在解析阶段直接拒绝）；
+- 逻辑 ESM 从 `/static/ada/ada-runtime.mjs` 导入运行时 API（`ref`/`computed`/`inject`/生命周期等），导出 `setup`；
+- `<style>` 必须声明 `scoped`，由浏览器运行时编译后经 CSSOM（`adoptedStyleSheets`）注入；全局样式放 `static/*.css` 并在清单 `styles` 声明；
+- 浏览器运行时 `/static/ada/` 负责拉取、解析、编译与挂载；服务端只提供 `/frontend-registry` JSON 与 `/ext/{id}/static/...` 资源，**没有页面直出回退**；
+- `blocks` 是另一条面：Markdown 动态块仍由网关编译 TSX 模板（组件从 `adag:components` 导入），与 SFC 页面/插槽无关，见 §8.3。
+
+替换一个插槽/页面的最小改动：改 `assets` 里的 `.vue` 或其 `.js`，重载插件后刷新页面即可；内容指纹（`?v=`）变化会让浏览器重新装载。
 
 信任级别：`builtin`（随包发布，只能启用/禁用）、`verified`（签名有效）、
 `third-party`（默认，受限）。
@@ -110,9 +113,9 @@ agent.route({ method: "POST", path: "/items", sse: false, handler(req, ctx) { ..
 
 - 只允许 GET/POST；`path` 以 `/` 开头，不含 `..` 与查询串；同 method+path
   重复登记在加载期报错；`/*` 前缀匹配。
-- 浏览器经 `/ext/{id}/api/*` 访问，统一用 `window.adaAPI(id, path, {method, body})`
-  （自动带 CSRF 与线程上下文）；请求体 ≤1MB，响应 ≤64KB，错误统一
-  `{"error":{"message":"…"}}`。
+- 浏览器经 `/ext/{id}/api/*` 访问；SFC 逻辑里用 `inject("ada")` 拿到的
+  `ada.api(path, {method, body})`（自动带 CSRF 与线程上下文）；请求体 ≤1MB，
+  响应 ≤64KB，错误统一 `{"error":{"message":"…"}}`。
 - `sse: true` 的路由只允许 GET，处理器用 `ctx.sse.send(data, event?)` 推帧。
 
 ### agent.registerAction(def) — 只给界面调用的动作
@@ -122,8 +125,8 @@ agent.route({ method: "POST", path: "/items", sse: false, handler(req, ctx) { ..
   timeoutMs?: 2000, execute(input, ctx) { return {...}; } }
 ```
 
-- 不进模型上下文、不经过任何执行前钩子，但必须由用户点击；`mode: "write"` 走 CSRF+确认。
-- `read: true` 的动作可在前端 SSR 预取（`props.data.backend[backendId][binding]`）。
+- 不进模型上下文、不经过任何执行前钩子，但必须由用户点击；`mode: "write"` 走 POST + CSRF + 确认。
+- 只读动作（清单 `read: true`）由动作桥以 `GET /ext/{id}/action/{binding}` 调用并直接返回 JSON；组件装载后自行调用 `ada.action(...)`。服务端没有预取，首屏数据由组件自己拉取。
 
 ### agent.registerPrompt(def) / agent.registerProvider(def) / agent.on(point, fn)
 
@@ -170,8 +173,8 @@ agent.on("turn.before", fn, { priority?: 0, action?: "observe" });      // 生�
 | `fs.read` / `fs.write` / `state` / `net.fetch` / `events.read` | ✅ | ✅ | ✅ |
 | `net.sse` / `exec` / `process` / `ui.ask` / `global.config` | ❌ | ✅ | ✅ |
 | `model.admin` / `plugin.admin` / `tool.discovery` / `turn.invoke` / `dispatch.send` / `process.supervise` | ❌ | ❌ | ✅ |
-| 前端 `backend.read`（数据投影） | ✅ | ✅ | ✅ |
-| 前端 `frontend.script`（自带 JS） | ❌ | ✅ | ✅ |
+| 前端 `backend.read`（允许把动作绑定标为只读） | ✅ | ✅ | ✅ |
+| 前端 `frontend.script`（前端可执行面：SFC 逻辑 ESM） | ❌ | ✅ | ✅ |
 
 **不声明也能用**：`ctx.fs`、`ctx.exec`、`ctx.ui`、`node:fs` 等由宿主统一装上；声明只是给安装确认、
 页面徽标与审计提供词汇。基座**不提供** `cron`/`env`/`usage`/`provider` 这类业务能力位：
@@ -221,51 +224,71 @@ JSON 用 `JSON.parse(res.text)`；响应 ≤16MB。
 5. **热重载**：插件页「重载」（`plugin.reload`）或修改后重启；双代切换，在途轮次不中断。
 6. **失败保护**：同一插件连续 3 次调用 reject 会被自动禁用，需手动重载恢复。
 
-## 8. 前端段：契约与当前边界
+## 8. 前端段：运行时装载的 SFC
 
-- 页面/插槽是 TSX 模板（`export default function (props)`），Gateway 渲染时编译成
-  VNode→HTML；TSX 只做纯计算，数据来自 `props`（只读动作预取 / `data.providers` /
-  `data.usage` / `data.interactions`），副作用走动作桥或 route。
-- 页面地址 `/ext/{id}/{slug}`；`nav` 进侧栏；`dashboard` 进概览页。
-- 浏览器脚本统一 `window.adaAPI(id, path, {method, body})`；样式放 `static/*.css`
-  并在清单 `styles` 声明；CSP 禁止内联 style/script，颜色只用 `--ph-*` 设计令牌。
-- **当前边界**：页面/插槽/样式/脚本仍只装配随包官方插件（`plugins/official/`）；
-  全局/工作区安装的插件（`~/.adago/plugins/`、`<ws>/.adago/plugins/`）只加载
-  后端段 **+ `frontend.blocks`**——其余 `frontend` 字段不会报错，但页面/插槽不会出现。
+清单 `frontend` 段声明全部前端贡献：`slots` / `pages` / `nav` / `dashboard` /
+`blocks` / `actions` / `styles` / `assets`。每个插槽、页面与概览卡都指向
+`assets` 目录里的 `.vue` 单文件组件（`component` 字段）。
 
-### 8.2 插槽岛屿（`hydrate` / `clientOnly`）
+- 页面地址 `/ext/{id}/{slug}`（SPA 客户端路由）；`nav` 进侧栏；`dashboard` 进概览页。
+- SFC 的 `<script>` 必须用 `src` 指向同目录 ESM 静态文件（如
+  `<script src="./MainPage.js">`），**禁止内联 script**；逻辑模块从
+  `/static/ada/ada-runtime.mjs` 导入运行时 API，`export const setup = (props) => ({...})`。
+- 浏览器运行时 `/static/ada/` 负责解析/编译/挂载，**零构建步骤**：没有 browser
+  bundle，也没有需要提交的构建产物。规则细节见 §8.1。
+- 服务端只提供不含业务 DOM 的 SPA 外壳、`/frontend-registry` JSON（插槽/页面/导航/
+  概览卡/动作声明，带内容指纹）与 `/ext/{id}/static/...` 资源；页面与插槽全部由
+  浏览器运行时渲染，**没有页面直出回退**，也没有无 JS 回退。
+- 只读动作（`read: true`）走 `GET /ext/{id}/action/{binding}` 并直接返回 JSON；
+  组件在装载后自行调用（`ada.action(...)` 或 `ada.api(...)`）。服务端没有预取。
+- 写动作走 `POST` + CSRF，且必须由用户点击并给出 `confirm` 文案；组件侧
+  `ada.action` 会先弹确认。
+- `backend.read` 只用于「允许把动作绑定标为只读」；`frontend.script` 是前端可执行
+  面的声明门禁（SFC 逻辑 ESM），third-party 不能声明。
+- 样式放 `static/*.css` 并在清单 `styles` 声明，或写在 SFC 的 `<style scoped>`
+  （运行时编译后走 CSSOM）；CSP 禁止内联 style/script，颜色只用 `--ph-*` 设计令牌。
+- 插件 SFC 页面的下拉用原生 `<select>` + `ada-input` 类即可（运行时没有 SFC 版 Select 组件）；`adag:components` 只服务 Markdown 动态块，且当前只实现 `Icon` / `TodoList` / `Markdown` 展示组件。
+- **当前装配范围**：页面/插槽/导航/概览卡/样式只装配随包官方插件
+  （`plugins/official/`）；全局/工作区安装的插件（`~/.adago/plugins/`、
+  `<ws>/.adago/plugins/`）只加载后端段 **+ `frontend.blocks`**——其余 `frontend`
+  字段不会报错，但页面/插槽不会出现。
 
-插槽贡献可以「进浏览器」，两级：
+### 8.1 SFC 约定（`slots` / `pages` / `dashboard`）
 
-| 声明 | 服务端 | 浏览器 |
-| --- | --- | --- |
-| 不声明（默认） | 执行 TSX，输出 SSR HTML | 不加载 |
-| `"hydrate": true` | 执行 TSX，输出 SSR HTML + `data-ada-*` 标记 | `plugin-islands.js` 用 `mount(el, {hydrate:true, rootElement:true})` 接管同一棵树 |
-| `"hydrate": true, "clientOnly": true` | **不执行 TSX**，只输出 `<div class="ada-island ada-island--client" data-ada-client-only="1" …>` 空壳 | 用普通 `mount(el)` 挂载；**没有 SSR 回退**（失败即空白） |
+| 项 | 规则 |
+| --- | --- |
+| `slots[].slot` | 12 个稳定插槽名之一，未知即装配失败 |
+| `slots[].component` / `pages[].component` / `dashboard[].component` | `assets` 内的 `.vue` 相对路径；文件不存在即装配失败 |
+| `pages[].slug` | `/ext/{id}/{slug}` 的路径段；`nav` 应指向本插件已声明的 slug |
+| `<template>` | 必填、只能一个；表达式与指令由运行时模板编译器处理，不求值代码 |
+| `<script>` | 必填、只能一个，且必须 `src="./X.js"`；内联 script 直接拒绝 |
+| `<style>` | 只能 `scoped`；全局样式请走清单 `styles` |
+| 逻辑模块 | ESM；从 `/static/ada/ada-runtime.mjs` 导入运行时 API；约定 `export const setup = ...` |
+| 装载失败 | 由贡献级错误边界捕获，该位置留 `data-ada-error` 占位，不影响页面其它部分 |
+| 生命周期 | 每个贡献独立 `effectScope`；插槽卸载或插件停用即卸载并摘除 scoped 样式 |
 
-- `hydrate` / `clientOnly` 都需要 `frontend.client`、`frontend.script` 能力，且 trust 为 builtin/verified。
-- 岛屿根元素必须是单个原生元素（`$C` 组件或纯文本根不会带标记）。
-- `data-ada-entry` 是 `kind:name`（`slot:composer.footer` / `page:usage`）；`client.tsx` 用
-  `export const islands = { "slot:composer.footer": X }` 映射，`default` 兜底。
-- 首帧数据只经 `props`（`props.app` / `props.data.thread` / 只读动作投影），CSRF 不进 `data-ada-props`。
-- clientOnly 岛的 DOM 不过 Go 的 VNode 白名单（白名单只约束 SSR），可以直接输出 `<svg>`；
-  但它同样受 CSP（`default-src 'self'`、无内联 script/style）与 512KB bundle 上限约束。
-- 现成例子：`plugins/official/composer-telemetry`（`composer.footer`，轮询 `GET /threads/{id}/state`）。
+### 8.2 新增一个插槽 / 页面
 
-新增一个插槽岛屿的顺序：
+1. 在 `assets` 目录写 `Foo.vue`：`<template>` + `<style scoped>`（可选）+
+   `<script src="./Foo.js">`；
+2. 同目录写 `Foo.js`：`import { ref, computed, inject, onMounted } from "/static/ada/ada-runtime.mjs"`，
+   `export const setup = () => { const ada = inject("ada"); /* ... */ return { ... }; }`；
+   会话内插槽可用 `ada.thread` 拿当前线程，独立页面没有线程上下文；
+3. 在 `plugin.json` 的 `frontend` 里登记 `slots`（`slot` + `component` + `order`）或
+   `pages`（`slug` + `component` + `title`），需要入口就同时登记 `nav`；
+4. 重载插件（或重启网关）后刷新页面；组件 URL 带内容指纹，文件变化会自动重新装载。
+   `adag verify` 校验清单与资源存在，不需要任何前端构建命令。
 
-1. `slot.tsx` / `footer.tsx`：`export default defineComponent({ render(h) { … } })`，放在插件根目录；
-2. `client.tsx`：`export const islands = { "slot:<插槽名>": 组件 }`（可多个 entry）+ `export default`；
-3. `plugin.json` 的 `frontend` 登记 `client` / `slots[].hydrate`（纯客户端再加 `clientOnly: true`）；
-4. `go run ./tools/pluginbuild -dir <插件> -entry client.tsx -out static/client.js`（产物须提交，
-   `app/client_bundles_test.go` 用 `-check` 防漂移）；
-5. 端到端测试：`adag verify` + 一条断言 `data-ada-plugin-island` / `data-ada-client-only` 的用例。
+现成例子：`plugins/official/tools-plan`（`chat.corner` 的 Todo 卡片，装载后调只读动作
+`slot_chat_corner` 并按线程 SSE 重取）、`plugins/official/token-usage`
+（`dashboard.widgets` 卡片 + 独立页面，装载后调 `GET /usage`）。
 
 ### 8.3 Markdown 动态块（`frontend.blocks`）
 
 插件可以把一块**只读 UI** 嵌进助手 Markdown：清单声明 renderer，配一份数据
-Schema 与 TSX 模板；宿主校验 `data` 后渲染成 VNode，浏览器与无 JS 的
-`/markdown` 共用同一份结果。方案与完整契约见 docs/15-extensions.md §16。
+Schema 与 TSX 模板；宿主校验 `data` 后把 TSX 编译成 VNode JSON，浏览器用同一份
+VNode 渲染（`POST /markdown.ast` 只提供 JSON，服务端不产出 HTML）。方案与完整
+契约见 docs/15-extensions.md §16。
 
 ```json
 "frontend": {
@@ -313,7 +336,7 @@ Schema 与 TSX 模板；宿主校验 `data` 后渲染成 VNode，浏览器与无
 | --- | --- |
 | 标签 | `div` `section` `p` `blockquote` `details` `summary` `pre` `h1`–`h6` `ul` `ol` `li` `span` `strong` `em` `code` `small` `a` `table` `thead` `tbody` `tr` `th` `td` `caption` `br` `hr` |
 | 不可用标签 | `img` `svg` `form` `input` `button` `select` `textarea` `iframe` `video` `style` `script` 等一律拒绝 |
-| 宿主组件 | `$C` 仅 `Icon`（`name`：`i-list` `i-copy` `i-chevron-up` `i-check-circle` `i-arrow-right` `i-circle`；`size` 8–32）与 `TodoList`（`steps:[{step\|text\|title,status}]`、`notes?`）。两者在 `/markdown`（Go）与浏览器 VNode 两条路径渲染同一套 DOM |
+| 宿主组件 | 模板从 `adag:components` 导入；`$C` 仅 `Icon`（`name`：`i-list` `i-copy` `i-chevron-up` `i-check-circle` `i-arrow-right` `i-circle`；`size` 8–32）与 `TodoList`（`steps:[{step\|text\|title,status}]`、`notes?`）。两者都由浏览器按 VNode 渲染同一套 DOM |
 | 属性 | `class` `id` `href` `title` `for` `name` `value` `type` `placeholder` `required` `disabled` `readonly` `checked` `open` `min` `max` `step` `minlength` `maxlength` `cols` `rows` `action` `method` `start` `scope` `colspan` `rowspan` `role`，以及 `aria-*` / `data-*` |
 | URL 属性 | 相对路径、`#锚点`、`http(s):`、`mailto:`；拒绝 `javascript:` / `data:text/html` |
 | 文本节点 | `{"t":"#text","v":"…"}`，由宿主转义 |

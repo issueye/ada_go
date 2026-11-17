@@ -945,7 +945,11 @@
   border-radius: var(--c-radius-lg);
   background: var(--ph-surface);
   box-shadow: var(--c-shadow-card);
-  overflow: hidden;
+  /* 不裁内容：模型选择器是绝对定位浮层（向上展开），overflow:hidden
+     会把浮层的顶部与右缘一起切掉（2026-11-17 走查：菜单只剩两条残行，
+     供应商名与「模型」分组标题都看不见）。卡片内容都在圆角内侧，
+     浮层靠 chip 右缘对齐（见下面的 .ada-model-picker__menu），不需要裁切。 */
+  overflow: visible;
 }
 .c-shell .ada-composer__card:focus-within {
   border-color: var(--ph-brand);
@@ -1008,6 +1012,14 @@
 .c-shell .ada-composer .ada-model-picker__trigger:hover {
   background: var(--ph-line);
   color: var(--ph-ink);
+}
+/* 模型菜单贴着 chip 右缘向左展开。app-local.css 的通用形态是 left:0 +
+   固定 360px（从 chip 左缘向右伸），在 800px 会话列里会横向越出输入卡；
+   右对齐后菜单始终落在会话列内，窄窗口也不会被视口裁掉。
+   （新建任务页的输入卡不在 .ada-composer 里，所以不按那条选择器收口。） */
+.c-shell .ada-model-picker__menu {
+  left: auto;
+  right: 0;
 }
 .c-shell .ada-send {
   width: 36px;

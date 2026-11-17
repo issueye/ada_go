@@ -27,7 +27,7 @@ function barClass(value, max) {
 }
 
 // 注意：本地辅助函数必须**当函数调用**（GroupRow({...})），不能写成 JSX 标签
-// <GroupRow />：宿主的 TSX 编译器只认 import 自 ssr:components 的宿主组件，
+// <GroupRow />：宿主的 TSX 编译器只认 import 自 adag:components 的宿主组件，
 // 其它 JSX 标签会报「组件函数缺少 __ada_component 名」。ui-charts 也遵循这个写法。
 function GroupRow(props) {
   const row = props.row || {};

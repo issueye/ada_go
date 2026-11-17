@@ -12,7 +12,7 @@
 | 信任级别 | `builtin`：随二进制发布，只能启用/禁用 |
 | 形态 | 前后端同包 |
 | 后端能力 | `fs.read`、`fs.write`、`state` |
-| 前端贡献 | 插槽 `chat.corner`（`slot.tsx`，order 10）+ `todo.css` |
+| 前端贡献 | 插槽 `chat.corner`（`static/PlanCard.vue`，order 10）+ `todo.css` |
 
 ## 工具与动作
 
@@ -55,9 +55,13 @@
 
 ## 前端 Todo 卡片
 
-- 数据只来自 `props.data.backend["tools-plan"].slot_chat_corner.plan`。
-- `total=0`（没有计划）或动作失败时返回 `null`，不画空卡，也不回退到示例数据。
-- 没有会话上下文（首页/概览页的插槽预取）时，`plan` 动作直接返回空计划，避免因“没有会话”把插件标记成降级。
+- `static/PlanCard.vue` 是运行时装载的 SFC；装载后调用只读动作
+  `ada.action("slot_chat_corner", { threadId })`（清单 `read: true`，宿主走 `GET`
+  动作桥并直接返回 JSON），再按线程 SSE（`evt.item.updated` / `evt.run.status` /
+  `resync`）重取，保证 `update_plan` 落账后卡片即时更新。
+- 没有计划（`total=0`）或动作失败时保持空态，不画空卡，也不回退到示例数据。
+- 没有会话上下文（非会话页的插槽调用）时组件不取数、不画卡，避免因“没有会话”把
+  插件标记成降级。
 - 卡片可折叠；全部完成时加 `is-done` 状态。
 
 ## 失败模式
@@ -69,11 +73,12 @@
 ## 构建
 
 - 后端：`index.ts` → `dist/index.js`，由 `node plugins/official/build.mjs` 生成。
-- 前端：`slot.tsx` 在渲染时编译；`static/todo.css` 原样嵌入。
+- 前端：`static/PlanCard.vue` 与同目录 `PlanCard.js` 由浏览器运行时装载，零构建；
+  `static/todo.css` 原样提供。改完重载插件（或重启网关）后刷新页面即可。
 - 不要手改 `dist/`。
 
 ## 相关文档
 
 - [插件模型与后端 API](../../../docs/05-plugins.md)
-- [SSR 前端](../../../docs/07-ssr-frontend.md)
+- [前端（SPA）](../../../docs/07-frontend.md)
 

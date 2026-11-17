@@ -7,8 +7,7 @@
     "skills": false,
     "images": false,
     "subagents": false,
-    "markdownBlocks": false,
-    "pluginIslands": false
+    "markdownBlocks": false
   },
   "identity": {
     "name": "ada-go",

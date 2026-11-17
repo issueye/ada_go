@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "author": "ada-go",
   "private": true,
-  "description": "ada-go desktop shell: Electron host that supervises `adag gateway` and loads the SSR UI",
+  "description": "ada-go desktop shell: Electron host that supervises `adag gateway` and loads the SPA UI",
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",

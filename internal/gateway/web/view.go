@@ -6,8 +6,8 @@ import (
 
 // ---- 模板视图 ----
 
-// baseData 是 shell/login/error 共用的最小外壳字段。整页 SSR 移除后，
-// 页面内容由 /static/ada 运行时装载；这里只保留身份/工作区/CSRF 与
+// baseData 是 shell/login/error 共用的最小外壳字段。页面内容由 /static/ada
+// 运行时装载；这里只保留身份/工作区/CSRF 与
 // bootstrap JSON 投影所需的数据。
 type baseData struct {
 	Title         string

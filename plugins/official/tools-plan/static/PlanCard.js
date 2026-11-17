@@ -2,8 +2,8 @@
 //
 // 数据：读动作桥 ada.action("slot_chat_corner", { threadId })（manifest read:true
 // → 宿主走 GET）；会话内 SSE（evt.item.updated / evt.run.status / resync）触发
-// 重取：计划由 update_plan 工具调用产生，工具结果落账即 item.updated。旧 SSR
-// 预取没有这个实时性（整页渲染时取一次），这里顺带补齐。
+// 重取：计划由 update_plan 工具调用产生，工具结果落账即 item.updated。装载时
+// 只取一次不够实时，这里按 SSE 事件重取补齐。
 //
 // 没有计划（total=0）或没有会话上下文时返回 null——不画空卡，也绝不回退到示例数据。
 import { ref, computed, inject, onMounted, onUnmounted } from "/static/ada/ada-runtime.mjs";

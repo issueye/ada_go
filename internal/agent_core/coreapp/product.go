@@ -35,7 +35,6 @@ type Capabilities struct {
 	Images         bool `json:"images"`
 	Subagents      bool `json:"subagents"`
 	MarkdownBlocks bool `json:"markdownBlocks"`
-	PluginIslands  bool `json:"pluginIslands"`
 }
 
 // Identity 是界面品牌与语言；刻意不含人格字段（8.6）。

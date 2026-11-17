@@ -63,22 +63,12 @@ func TestScriptsFromRepoDir(t *testing.T) {
 			fe[s.Manifest.ID] = true
 		}
 	}
-	// SSR 前端资产已删（dev-plan R4）；M 阶段 slots/pages 以 component（SFC）形态回归
-	// （proposals/spa-frontend-framework.md §7.1）。SSR 期字段（client/scripts/
-	// hydrate/clientOnly/template）在结构体层面已不存在，这里钉住：官方插件不允许
-	// client bundle 与 scripts 静态 JS（可执行代码只允许 SFC + ESM 形态）。
+	// 前端资产已删（dev-plan R4）；slots/pages 以 component（SFC）形态回归
+	// （proposals/spa-frontend-framework.md §7.1）。可执行代码只允许 SFC + ESM 形态：
+	// 清单层面已没有 client bundle / scripts 静态 JS 字段，这里只需钉住贡献存在。
 	for _, want := range []string{"tools-plan", "provider-admin", "token-usage", "ui-hello", "ui-charts", "mcp-client", "env-manager", "composer-telemetry"} {
 		if !fe[want] {
 			t.Fatalf("前端插件缺少 %q（现有：%v）", want, fe)
-		}
-	}
-	for _, s := range frontend {
-		if s.Manifest == nil || s.Manifest.Frontend == nil {
-			continue
-		}
-		f := s.Manifest.Frontend
-		if f.Client != "" || len(f.Scripts) != 0 {
-			t.Fatalf("%s 的 frontend 段仍声明 SSR 期可执行资产（client/scripts）: %+v", s.Manifest.ID, f)
 		}
 	}
 	if fe["plugin-helper"] {
@@ -118,7 +108,7 @@ func TestMCPSkillPackaged(t *testing.T) {
 
 // TestOfficialPluginBlocksAvoidNativeSelect：插件 TSX（随包只余 block 模板）
 // 不能用原生 <select>——原生弹层由系统绘制，样式与键盘行为都不受控。
-// （页面/脚本面已随 SSR 删除；SFC 时代的等价检查进 verify preflight，V 阶段落地。）
+// （页面/脚本面已删除；SFC 时代的等价检查进 verify preflight，V 阶段落地。）
 func TestOfficialPluginBlocksAvoidNativeSelect(t *testing.T) {
 	root, err := os.Getwd()
 	if err != nil {
@@ -132,7 +122,7 @@ func TestOfficialPluginBlocksAvoidNativeSelect(t *testing.T) {
 		name string
 		re   *regexp.Regexp
 	}{
-		// 只匹配小写原生标签；<Select> 是 ssr:components 的宿组件，不算原生下拉。
+		// 只匹配小写原生标签；<Select> 是 adag:components 的宿组件，不算原生下拉。
 		{"原生 <select> 标签", regexp.MustCompile(`<select[\s>]`)},
 		{"动态创建原生 select", regexp.MustCompile(`createElement\(\s*["']select["']`)},
 	}
@@ -144,7 +134,7 @@ func TestOfficialPluginBlocksAvoidNativeSelect(t *testing.T) {
 		for _, check := range checks {
 			if loc := check.re.FindIndex(raw); loc != nil {
 				line := 1 + strings.Count(string(raw[:loc[0]]), "\n")
-				t.Fatalf("%s:%d 使用了%s；请改用 ssr:components 的 Select 组件", path, line, check.name)
+				t.Fatalf("%s:%d 使用了%s；请改用 adag:components 的 Select 组件", path, line, check.name)
 			}
 		}
 	}

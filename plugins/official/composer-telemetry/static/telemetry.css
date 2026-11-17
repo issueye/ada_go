@@ -1,4 +1,4 @@
-/* composer-telemetry：输入框下方辅助区的纯客户端岛屿。
+/* composer-telemetry：输入框下方辅助区的 SFC 贡献。
  *
  * .ada-aux / .ada-aux__* / .ada-token-ring / .ada-context 的视觉全部来自基座
  * （ui/components.css 与 app-local.css），插件只负责两件基座样式没有的事：

@@ -119,7 +119,7 @@ func TestMarkdownBlockLimits(t *testing.T) {
 }
 
 // TestMarkdownTokenUsageBlockIntegration 走真实 Bridge × 官方插件 × token-usage block。
-// HTML 渲染已随 SSR 移除：这里钉住 /markdown.ast 输出块 VNode（客户端渲染同一份数据）。
+// 服务端不产出 HTML：这里钉住 /markdown.ast 输出块 VNode（客户端渲染同一份数据）。
 func TestMarkdownTokenUsageBlockIntegration(t *testing.T) {
 	scripts, err := official.FrontendScripts()
 	if err != nil {

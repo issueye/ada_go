@@ -34,7 +34,7 @@ func TestValidateBlockNodeProfile(t *testing.T) {
 }
 
 // TestBlockTodoListVNode 钉住 $C TodoList 的 VNode 形态能通过整树校验
-// （HTML 渲染已随 SSR 移除；块以校验后的 VNode JSON 交给客户端）。
+// （服务端不产出 HTML；块以校验后的 VNode JSON 交给客户端）。
 func TestBlockTodoListVNode(t *testing.T) {
 	raw := json.RawMessage(`{"t":"div","p":{"class":"adag-ui-block","data-adag-renderer":"demo/todo"},"c":[{"t":"$C","n":"TodoList","p":{"notes":"发布前检查","steps":[{"step":"写文档","status":"done"},{"text":"跑测试","status":"in_progress"},{"title":"发布","status":"pending"}]}}]}`)
 	var root frontend.Node

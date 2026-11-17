@@ -1,13 +1,13 @@
 package frontend
 
-// Bridge 是 web.PluginUI 的插件宿主桥（7.5、7.6）——整页 SSR 移除后的收缩版：
+// Bridge 是 web.PluginUI 的插件宿主桥（7.5、7.6）：
 //
 //	清单 frontend 段（blocks/actions/styles/assets）→ 静态资源 / 动作绑定 / 插件列表
 //	→ web 的 /ext 静态资源、动作桥与 extensions.json。
 //
-// Markdown 动态块仍由本桥渲染：数据 Schema → TSX（esbuild + moejs）→ VNode JSON
+// Markdown 动态块由本桥渲染：数据 Schema → TSX（esbuild + moejs）→ VNode JSON
 // → block profile 校验 → 包装节点交给 web（web/markdown_block.go）。
-// 插槽/页面的 HTML 渲染已删除：插件前端贡献由客户端运行时装载（dev-plan §2 R1）。
+// 插槽/页面由客户端运行时装载 SFC，服务端不再产出页面 HTML。
 
 import (
 	"bytes"
@@ -214,16 +214,6 @@ func newUnit(s pluginapi.Script) (*unit, error) {
 			return nil, fmt.Errorf("frontend: 插件 %s 的样式 %q 不在静态资源里", u.manifest.ID, style)
 		}
 	}
-	if client := strings.TrimSpace(u.manifest.Frontend.Client); client != "" {
-		if _, ok := s.StaticAssets[client]; !ok {
-			return nil, fmt.Errorf("frontend: 插件 %s 的 client %q 不在静态资源里", u.manifest.ID, client)
-		}
-	}
-	for _, script := range u.manifest.Frontend.Scripts {
-		if _, ok := s.StaticAssets[script]; !ok {
-			return nil, fmt.Errorf("frontend: 插件 %s 的脚本 %q 不在静态资源里", u.manifest.ID, script)
-		}
-	}
 	return u, nil
 }
 
@@ -323,7 +313,7 @@ func (b *Bridge) componentURL(pluginID, component string, u *unit) string {
 func (b *Bridge) MarkdownBlocksEnabled() bool { return b != nil && b.markdownBlocks }
 
 // RenderBlock 渲染一个 Markdown 动态块：数据 Schema → TSX → VNode → block profile 校验
-// → 包装成单个 div 节点的 VNode JSON（HTML 表达已随 SSR 删除，由客户端渲染）。
+// → 包装成单个 div 节点的 VNode JSON（前端渲染；服务端不产出 HTML）。
 // version 是封套声明的块数据版本（缺省 1），必须与插件清单一致。
 // 模板返回 null 时 raw 为字面量 null、err 为 nil：web 层据此跳过该块。
 func (b *Bridge) RenderBlock(r *http.Request, rendererID, blockID string, version int, data json.RawMessage) (json.RawMessage, error) {

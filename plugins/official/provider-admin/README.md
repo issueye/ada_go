@@ -18,12 +18,12 @@
 
 | 类型 | 内容 |
 | --- | --- |
-| 插槽 | `composer.left`（`slot.tsx`，order 10）：模型选择器旁的「模型设置」入口 |
-| 导航 / 页面 | 导航「供应商」→ 页面 `/ext/provider-admin/providers`（`providers-next.tsx`，SSR + hydrate） |
-| 样式 | `provider-admin.css`（`static/`） |
-| 浏览器 bundle | `static/client.js`（`pluginbuild` 从 `client.tsx` 生成） |
+| 插槽 | `composer.right`（`ProviderChip.vue`，order 10）：模型选择器旁的「模型设置」入口 |
+| 导航 / 页面 | 导航「供应商」→ 页面 `/ext/provider-admin/providers`（`Providers.vue`，SFC 运行时装载） |
+| 样式 | `provider-admin.css`（`static/`，清单 `styles` 声明） |
+| 数据 | 页面装载后经本插件 route 取数（`ada.api`），没有服务端预取 |
 
-P2-4b-2b：`providers` 页已替换为组件化实现，支持新增供应商、设为当前、启用/停用、删除、拉取/添加模型、模型新增/删除/编辑与供应商信息编辑。拉取模型会打开勾选弹窗，只添加选中的模型；模型的添加与编辑也通过弹窗完成；模型列表每行直接提供「删除」按钮（二次确认后保存），不必先打开编辑弹窗。模型推理等级是动态标签，输入模态是复选框。legacy `provider-admin.js` / `page.tsx` 保留在仓库作历史参考，但清单不再加载脚本。页面通过 `backend.read` 动作 `state` 预取 `/state`，SSR/无 JS 也能看到供应商目录；关闭 `pluginIslands` 或设 `ADAG_DISABLE_ISLANDS=1` 时只保留 SSR。禁用插件时入口、页面与 bundle 一起消失。
+P2-4b-2b：`providers` 页已替换为组件化实现，支持新增供应商、设为当前、启用/停用、删除、拉取/添加模型、模型新增/删除/编辑与供应商信息编辑。拉取模型会打开勾选弹窗，只添加选中的模型；模型的添加与编辑也通过弹窗完成；模型列表每行直接提供「删除」按钮（二次确认后保存），不必先打开编辑弹窗。模型推理等级是动态标签，输入模态是复选框。禁用插件时入口、页面与样式一起消失。
 
 P2-4b-3（0.4.0）：按设计稿重排页面结构与控件形态。
 
@@ -39,16 +39,13 @@ P2-4b-3（0.4.0）：按设计稿重排页面结构与控件形态。
 
 两个实现要点：
 
-- **SSR 预取键是绑定名**：`data.backend["provider-admin"]["page_providers"]`（旧代码读 `state`，导致首屏总是空占位、要等客户端再拉一次）。组件先读 `page_providers`，再兼容 `state`。
-- **VNode 白名单不含 `svg`**：图标不能用内联矢量，也不引入未登记组件；感叹号、加号、叉号、字标头像全部用文字 + CSS 实现，保证 SSR 与客户端一致。
-- **`methods` 名不要和 `data` 字段同名**：运行时是单个 Proxy，`get` 里 `data` 优先级高于 `methods`，同名会让方法被字段遮住（`this.x is not a function`），表现为「点了没反应」。所以提示方法的字段叫 `toast`、方法叫 `showToast`。
-
-## 构建
-
-```sh
-go run ./tools/pluginbuild -dir plugins/official/provider-admin -entry client.tsx -out static/client.js
-go run ./tools/pluginbuild -dir plugins/official/provider-admin -entry client.tsx -out static/client.js -check
-```
+- **数据在装载后自己取**：`Providers.js` 的 `setup()` 里 `inject("ada")`，用
+  `ada.api("/state", ...)` 调本插件 route；删除等写操作走 `POST` + CSRF，并由
+  `ada.confirm(...)` 先弹确认。清单里仍保留只读动作绑定 `page_providers`（`state`，
+  `read: true`），需要走动作桥时同样以 `GET` 返回 JSON。
+- **图标不用内联矢量**：感叹号、加号、叉号、字标头像全部用文字 + CSS 实现；
+  原 TSX 里的 `Button` / `Badge` / `Input` 等宿主组件改写成等价的 `ada-btn` /
+  `badge` 类名，避免第二套视觉语言。
 
 ## 后端路由
 
@@ -70,11 +67,12 @@ go run ./tools/pluginbuild -dir plugins/official/provider-admin -entry client.ts
 ## 构建
 
 - 后端：`index.ts` → `dist/index.js`，由 `node plugins/official/build.mjs` 生成。
-- 前端：`slot.tsx` / `page.tsx` 在渲染时由宿主编译；`static/` 原样嵌入。
-- 不要手改 `dist/` 或 `static/` 中的构建产物。
+- 前端：`static/*.vue` / `static/*.js` 由浏览器运行时直接装载，**零构建**；
+  改完重载插件（或重启网关）后刷新页面即可。
+- 不要手改 `dist/`。
 
 ## 相关文档
 
 - [模型适配与交互确认](../../../docs/03-model-and-approval.md)
-- [SSR 前端](../../../docs/07-ssr-frontend.md)
+- [前端（SPA）](../../../docs/07-frontend.md)
 - [插件模型与后端 API](../../../docs/05-plugins.md)

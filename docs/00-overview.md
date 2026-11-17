@@ -8,7 +8,7 @@
 
 ada-go 是一个**本地优先、单二进制、插件优先**的 AI Agent 系统。它由两个角色组成：
 
-- **Gateway**：唯一对外的 HTTP 进程。负责鉴权、工作区注册与监督、SSR 页面、SSE 流、静态资源、前端插件渲染。它不调用模型，也不执行工具。
+- **Gateway**：唯一对外的 HTTP 进程。负责鉴权、工作区注册与监督、SPA 外壳与 JSON 数据端点、SSE 流、静态资源、前端注册表与 Markdown 动态块。它不调用模型，也不执行工具。
 - **Agent Core**：每个工作区一个进程。负责唯一的 Agent 循环、模型流、工具、交互请求路由、会话、后端插件与 moejs 沙箱。它只暴露回环地址上的 JSON-RPC/WebSocket。
 
 三条不可动摇的架构约束：
@@ -19,7 +19,7 @@ ada-go 是一个**本地优先、单二进制、插件优先**的 AI Agent 系�
 
 所有后端插件都走同一 TS 引擎：包括系统 provider、工具、cron、env 与人格。系统插件在构建期预编译成 `dist/`，运行时从 `plugins/official`（Electron resources）加载；第三方插件在安装/加载时编译。两者使用同一 `AgentAPI`、同一 moejs 宿主、同一套桥与审计；差别只有信任级别与控制面钩子权限。
 
-前端是**单页面应用（SPA，2026-11-11 起）**：Go 只渲染 shell（bootstrap JSON），页面由自研运行时 `static/ada/` 在浏览器渲染；插件前端是运行时装载的 SFC 单文件组件（零构建、无 SSR，详见 [SPA 提案](../proposals/spa-frontend-framework.md)）。历史上是 Go `html/template` 整页 SSR + TSX 服务端渲染 + 交互岛（见 docs/07/14 的状态横幅）。界面与设计元语直接复用 a_da：Black Swan `--ph-*` token、`ada-*` 组件样式、DOM 结构、12 个插槽位置与交互规则；模型生成内容仍走服务端校验的 VNode JSON（display profile）。
+前端是**单页面应用（SPA，2026-11-11 起）**：Go 只渲染 shell（`#app` + bootstrap JSON）与登录/错误页，页面由自研运行时 `static/ada/` 在浏览器渲染；插件前端是运行时装载的 SFC 单文件组件（零构建，详见 [07](07-frontend.md)）。界面与设计元语直接复用 a_da：Black Swan `--ph-*` token、`ada-*` 组件样式、DOM 结构、12 个插槽位置与交互规则；模型生成内容仍走服务端校验的 VNode JSON（display profile）。
 
 核心数字：**2 个进程角色、1 条 RPC 契约、33 个 RPC 方法、14 个钩子点、12 个前端插槽、1 份协议源文件**。
 
@@ -31,7 +31,7 @@ ada-go 是一个**本地优先、单二进制、插件优先**的 AI Agent 系�
 
 - 用户在浏览器里与一个能在工作区内读文件、改文件、跑命令、查 Git 的 AI Agent 对话。
 - 会话可流式输出、可中断、可响应交互、可回滚、可在重启后继续。
-- 第三方开发者只写一个插件目录，就能同时获得：模型可调用的工具、会话里的卡片、独立页面、后端动作、动态路由、生命周期钩子、可选的客户端岛。
+- 第三方开发者只写一个插件目录，就能同时获得：模型可调用的工具、会话里的卡片、独立页面、后端动作、动态路由、生命周期钩子、可选的 SFC 前端页面。
 - 一个 Gateway 可以管理多个工作区；同一工作区的多个会话共享一个 Core。
 - 单个二进制、无 cgo、无 Node 运行时、可交叉编译；默认离线可用，只访问用户配置的模型服务。
 - 桌面壳（后续）只需要加载 Gateway 的网页，不需要第二套 UI。
@@ -69,7 +69,7 @@ MCP 不在基座内置；v2 以普通系统插件 `mcp-client` 接入，见 [15 
 - 复制一个插件目录并执行 `adag plugin reload`，模型的工具表和页面插槽在 1 秒内同时生效。
 - 插件脚本死循环、内存暴涨、抛异常，Core 不退出；该插件被标记失败，其余功能正常。
 - Gateway 重启后，所有会话、交互记录、插件状态仍在；正在运行的轮次被标记为 `interrupted`，可重试。
-- 没有 JS 的浏览器可以完成“新建会话 → 发消息 → 响应交互 → 看到最终答案”。
+- 登录页与错误页在无 JS 时可用；业务页面由 SPA 运行时渲染，明确要求浏览器启用 JS。
 - 协议漂移、能力名越界、未接线的钩子点、未使用的插槽，全部由 `adag verify` 拦截。
 - **不装任何插件时基座可以启动**：能打开站点、建线程、显示空态；没有工具、没有供应商、没有业务卡片，但不 panic、不白屏。
 - **删除测试通过**：禁用任一系统插件后，对应功能、数据入口与后台行为一起消失，基座不补位。
@@ -103,7 +103,7 @@ MCP 不在基座内置；v2 以普通系统插件 `mcp-client` 接入，见 [15 
 | 插件宿主 | 清单发现、TS 编译、moejs 运行时、模块与上下文注入、装配期结算、钩子分发、技能发现 |
 | 安全 | 路径 scope、交互请求桥、密钥 broker、进程树终止原语、信任分级、审计 |
 | 通用原语 | `ctx.fs`、`ctx.fetch`、`ctx.exec`、`ctx.process`、`ctx.state`、`ctx.config`、`ctx.events`、`ctx.ui`、`ctx.secret` |
-| UI 外壳 | 布局、12 个插槽、通用消息/工具/交互渲染、组件库、a_da 设计 token、SSE 客户端、无 JS 表单 |
+| UI 外壳 | 布局、12 个插槽、会话/工具/交互渲染、宿主 UI kit、a_da 设计 token、SPA 路由与 SFC 装载、SSE 客户端 |
 | 运维 | 配置 schema、日志、诊断码、`doctor`、`verify`、迁移与备份 |
 
 #### 1.5.2 基座绝不做的事
@@ -155,14 +155,14 @@ seam 清单与替换规则见 [06 §6.10](06-plugin-runtime.md#610-内核实现�
 
 #### 1.5.5 第三方前端同面
 
-第三方插件与系统插件使用**同一前端贡献面**：`slots`、`pages`、`nav`、`dashboard`、`blocks`、`actions`、`route`、`styles`、`scripts`、`assets`、`client`、`hydrate`、`clientOnly`。
+第三方插件与系统插件使用**同一前端贡献面**：`slots`、`pages`、`nav`、`dashboard`、`blocks`、`actions`、`styles`、`assets`；每个插槽/页面指向 `.vue` 单文件组件，逻辑是同目录的静态 ESM。后端 `route` 是数据接口，不属于前端贡献。
 
-- 前端脚本/客户端 bundle 需在清单声明 `frontend.script`；只读预取需要 `backend.read`。
+- 前端可执行面（SFC 逻辑 ESM）需在清单声明 `frontend.script`；只读动作绑定需要 `backend.read`。
 - 安装/首次启用时展示声明的能力与脚本风险，用户显式确认后才装配。
 - CSP 仍为 `script-src 'self'`；同源脚本是已知风险，后续可选 iframe/Worker 隔离，不作为 v1 前置。
 - 渲染仍只接受 VNode；插件拿不到 `template.HTML`，不能注入原始 HTML/内联脚本/内联样式。
 
-实现边界见 [07 §7.5](07-ssr-frontend.md#75-前端插件化) 与 [14](14-ui-runtime.md)。
+实现边界见 [07 §7.5](07-frontend.md#75-插件前端) 与 [14](14-ui-runtime.md)。
 
 #### 1.5.6 空基座与删除测试
 

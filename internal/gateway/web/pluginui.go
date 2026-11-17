@@ -1,8 +1,8 @@
 package web
 
-// 插件前端接线面（7.5、7.6）——整页 SSR 移除后的收缩版：
+// 插件前端接线面（7.5、7.6）：
 //
-//   - web 不再向插件宿主要任何 HTML：12 个插槽与插件页面由客户端运行时
+//   - web 不向插件宿主要任何 HTML：12 个插槽与插件页面由浏览器运行时
 //     经 /frontend-registry 装载（dev-plan §6，S 阶段接线）；
 //   - PluginUI 只是标记接口：组合根注入插件渲染桥，web 用类型断言按能力
 //     取用静态资源（StaticAssetProvider）、动作绑定（ActionResolver）、

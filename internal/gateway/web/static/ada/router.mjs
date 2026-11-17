@@ -28,7 +28,7 @@
  *     route:   {...}|null,      // 命中的路由记录（含 name/meta/beforeLeave）
  *   }
  *
- * 可注入项（测试 / SSR 用）：
+ * 可注入项（测试 / 无 DOM 环境用）：
  *   createRouter({ routes, history, onPop })
  *   - history: 需要 pushState/replaceState/back（go 可选），缺省 window.history；
  *   - onPop(cb): 注册 popstate 回调，缺省 window.addEventListener("popstate", cb)。
@@ -92,7 +92,7 @@ export function createRouter({ routes, history, onPop } = {}) {
   // 路由表（可变）：匹配按数组顺序，先注册先匹配；拷贝一份防外部改动
   let routeTable = Array.isArray(routes) ? routes.slice() : [];
 
-  // 未注入且无 window 时为 null，此时 push/replace/back 会抛错（SSR 只用 resolve）
+  // 未注入且无 window 时为 null，此时 push/replace/back 会抛错（无 DOM 环境只用 resolve）
   const historyImpl =
     history || (typeof window !== "undefined" && window.history ? window.history : null);
 
@@ -334,7 +334,7 @@ export function createRouter({ routes, history, onPop } = {}) {
     return node && typeof node.nodeType === "number" ? node : null;
   }
 
-  // popstate 注册：优先注入的 onPop，否则有 window 才挂监听（SSR/测试环境跳过）
+  // popstate 注册：优先注入的 onPop，否则有 window 才挂监听（无 DOM 测试环境跳过）
   if (typeof onPop === "function") {
     onPop(handlePop);
   } else if (typeof window !== "undefined") {

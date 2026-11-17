@@ -1,5 +1,5 @@
 /*
- * ada-go SSR 外壳的本地样式层。
+ * ada-go SPA 外壳的本地样式层。
  *
  * 颜色令牌的唯一真源是 tokens.css（Black Swan 默认主题）与 ui/themes.css
  * （衍生色板，规则见 docs/19-ued.md §19.3）。本文件**禁止重定义**任何既有

@@ -64,7 +64,7 @@ async function stateOf(ctx, threadId) {
 }
 
 export default function (agent) {
-  // 页面 SSR 预取：路由带 threadId 时同时给出当前会话；否则只有工作区。
+  // 只读动作 usage：路由带 threadId 时同时给出当前会话；否则只有工作区。
   agent.registerAction({
     name: "usage",
     mode: "read",

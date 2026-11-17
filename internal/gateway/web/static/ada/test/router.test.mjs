@@ -3,7 +3,7 @@
  * 运行：node --test internal/gateway/web/static/ada/test/router.test.mjs
  *
  * 全程不设 globalThis.window（末尾的滚动用例除外且用后即删），
- * 历史实现与 popstate 注册均注入假对象，验证 SSR 安全与守卫回滚。
+ * 历史实现与 popstate 注册均注入假对象，验证无 DOM 环境与守卫回滚。
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -310,7 +310,7 @@ test("无 window 环境：模块可导入、注入 history 可完整工作、参
   await pops[0]({ state: { url: "/thread/c" } });
   assert.deepEqual(router.current.value.params, { id: "c" });
 
-  // 不注入 history 也不抛错：创建与 resolve 可用（SSR 场景）
+  // 不注入 history 也不抛错：创建与 resolve 可用（无 DOM 场景）
   const bare = createRouter({ routes: [{ path: "/x", name: "x", component: ViewA }] });
   assert.deepEqual(bare.resolve("/x").params, {});
   assert.equal(bare.current.value.path, "/"); // 初始占位，无 match

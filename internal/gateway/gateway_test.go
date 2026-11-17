@@ -121,7 +121,7 @@ func TestGatewayHandlerHomeAndAuth(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Bearer 访问首页状态 = %d，期望 200；正文: %.800s", resp.StatusCode, body)
 	}
-	// SSR 移除后首页是 SPA shell：品牌进 bootstrap 投影，会话列表由客户端取数。
+	// 首页是 SPA shell：品牌进 bootstrap 投影，会话列表由客户端取数。
 	for _, want := range []string{`id="app"`, `id="ada-bootstrap"`, "ada-go"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("首页缺少 %q；正文片段: %.800s", want, body)
@@ -214,7 +214,7 @@ func TestGatewayTokenQueryLogin(t *testing.T) {
 	}
 }
 
-// Markdown AST 端点要经过鉴权中间件，并且复用服务端清洗管线（HTML 版已随 SSR 删除）。
+// Markdown AST 端点要经过鉴权中间件，并且复用服务端清洗管线（服务端不产出 HTML）。
 func TestGatewayMarkdownEndpoint(t *testing.T) {
 	srv := newFakeGateway(t, &fakeSupervisor{client: &fakeCoreClient{responses: map[string]json.RawMessage{}}})
 

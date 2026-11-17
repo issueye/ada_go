@@ -1,7 +1,7 @@
 package web_test
 
 // Web 宿主的垂直切片验收：假 Supervisor + 假 CoreClient 驱动主流程，
-// 不依赖真实 Core、SQLite 或网络。整页 SSR 移除后：
+// 不依赖真实 Core、SQLite 或网络。前端是 SPA：
 //   - 页面路径（GET）一律返回 SPA shell（history fallback）；
 //   - 数据走 JSON 端点（transcript/dashboard/extensions/state…）；
 //   - POST 表单端点保持 303 PRG；错误页是无 JS 安全页。
@@ -333,7 +333,7 @@ const entriesResend = `{
 // ---- SPA shell（history fallback）----
 
 // GET / 返回 SPA shell：#app 容器 + bootstrap JSON 投影 + 模块入口；
-// 不再引用已删除的 SSR 脚本，也没有内联脚本。
+// 不再引用已删除的旧前端脚本，也没有内联脚本。
 func TestHomeReturnsShell(t *testing.T) {
 	srv, _ := newServer(t, newFakeCore())
 
@@ -349,8 +349,8 @@ func TestHomeReturnsShell(t *testing.T) {
 	// bootstrap 投影带身份与 CSRF。
 	wantContains(t, body, `"productName":"测试产品"`)
 	wantContains(t, body, `"csrf":"csrf-token"`)
-	// SSR 时代的资源引用必须消失。
-	for _, absent := range []string{"ada-render.js", "ada-ui.js", "chat-live.js", "app.js", "islands.js", "plugin-islands.js", "ada-ui.css"} {
+	// 旧前端脚本的资源引用必须消失。
+	for _, absent := range []string{"ada-render.js", "ada-ui.js", "chat-live.js", "app.js", "ada-ui.css"} {
 		wantNotContains(t, body, absent)
 	}
 	// 只有外链脚本与 JSON 数据脚本，没有内联 JS。
@@ -738,7 +738,7 @@ func TestTranscriptJSONDataRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 没有任何行带服务端渲染的 HTML。
+	// 没有任何行带页面 HTML。
 	wantNotContains(t, string(raw), `"html"`)
 	// 用户消息原文不能以未转义 HTML 形态出现（JSON 字符串转义是浏览器的职责）。
 	wantNotContains(t, string(raw), `<script>`)
@@ -781,7 +781,7 @@ func TestTranscriptJSONDataRows(t *testing.T) {
 		t.Fatalf("text part = %+v", textPart)
 	}
 
-	// row2：工具行是 tool 对象（旧 SSR 模板 row→tool 的字段投影）。
+	// row2：工具行是 tool 对象（页面侧 row→tool 的字段投影）。
 	tool, _ := rows[2].(map[string]any)
 	if tool["key"] != "tool:call_1" || tool["kind"] != "tool" {
 		t.Fatalf("row2 = %+v", tool)
@@ -1620,7 +1620,7 @@ func TestPluginFilePreview(t *testing.T) {
 	if file.Markdown {
 		t.Fatal("index.ts 不应带 markdown 标记")
 	}
-	// 高亮/预览 HTML 已随 SSR 移除：JSON 不再携带 html/previewHtml 字段。
+	// 服务端不产出 HTML：JSON 不携带 html/previewHtml 字段。
 	wantNotContains(t, res.Body.String(), `"html"`)
 	wantNotContains(t, res.Body.String(), `"previewHtml"`)
 
@@ -1814,7 +1814,7 @@ func TestMarkdownHTMLEndpointRemoved(t *testing.T) {
 
 // ---- 12 插槽词汇表 ----------------------------------------------------------
 
-// 宿主模板已随 SSR 删除，但 12 个插槽名仍是冻结契约：
+// 页面由浏览器运行时渲染，但 12 个插槽名仍是冻结契约：
 // CheckSlotCoverage 守护词汇表自身的一致性（adag verify 的 checkSlots 复用它）。
 func TestCheckSlotCoverage(t *testing.T) {
 	if err := web.CheckSlotCoverage(); err != nil {

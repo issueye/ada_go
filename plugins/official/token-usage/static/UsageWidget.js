@@ -2,8 +2,7 @@
 //
 // 数据来自本插件 route GET /usage（经 ada.api 桥）；没有数据（整卡无任何用量
 // 记录）时渲染 null——概览页不留空卡（与旧 dashboard.tsx 语义一致）。
-// 旧实现依赖 SSR 预取（page_usage 动作投影），投影已随 SSR 移除，这里改为
-// 装载后经 route 取一次数。
+// 页面数据由动作桥按需取（没有服务端预取），这里在装载后取一次数。
 import { ref, computed, inject, onMounted } from "/static/ada/ada-runtime.mjs";
 
 function formatNumber(value) {

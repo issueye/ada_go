@@ -22,7 +22,7 @@ ada-go/
     gateway/               唯一对外 HTTP 进程的全部实现
       gateway.go           Gateway 装配、路由与生命周期
       contracts/ security/ supervisor/ relay/ sse/ dispatch/ processmgr/
-      web/                 SSR handlers、模板、静态资源、投影缓存、ui/
+      web/                 SPA shell、JSON 端点、静态资源、注册表、ui/
       frontend/            esbuild、VNode、插槽注册表（TSX 执行走 common/pluginapi）
     agent_core/            Agent Core：唯一引擎、插件宿主、会话运行时
       engine/              RunTurn、终止条件、Compactor seam
@@ -58,7 +58,7 @@ ada-go/
 约束：
 
 - `internal/` 下不出现循环依赖；`domain` 不 import 其他内部包（除标准库）。
-- `internal/` 不 import `plugins/official/` 下的代码或资源；`plugins/official/` 只使用 `agent:*` / `ssr:*` 虚拟模块与公开 TS 类型，不 import 基座 Go 包。基座源码不出现任何系统插件 id。
+- `internal/` 不 import `plugins/official/` 下的代码或资源；`plugins/official/` 只使用 `agent:*` / `adag:components` 虚拟模块与公开 TS 类型，不 import 基座 Go 包。基座源码不出现任何系统插件 id。
 - 基座不提供平行的 Go 插件注册 API；系统与第三方必须走同一个 TS 入口、同一个 moejs 宿主与同一套贡献校验。
 - Gateway 与 Core 不共享可变内存；共享的只有 `proto` DTO 与 `diag` 码。
 - 网关模板/静态资源通过 `embed.FS`；系统插件从磁盘 `plugins/official` 读取（Electron resources/仓库），不进入二进制。
@@ -83,9 +83,9 @@ go work init . ../moejs
 
 | 包 | 用途 | 说明 |
 |---|---|---|
-| `github.com/gin-gonic/gin` | HTTP 路由与中间件 | SSR、SSE、静态资源 |
+| `github.com/gin-gonic/gin` | HTTP 路由与中间件 | SPA 外壳、JSON 端点、SSE、静态资源 |
 | `github.com/MoeForge/moejs` | 纯 Go JS 运行时与沙箱 | 无 cgo；插件与 TSX 渲染；宿主只安装已声明能力 |
-| `github.com/evanw/esbuild/pkg/api` | TS/TSX 去类型、JSX 转换、打包 | 构建期编译系统插件；第三方安装/加载期编译；TSX 服务端渲染 |
+| `github.com/evanw/esbuild/pkg/api` | TS/TSX 去类型、JSX 转换、打包 | 构建期编译系统插件；第三方安装/加载期编译；Markdown 块 TSX 的服务端 VNode 渲染 |
 | `modernc.org/sqlite` | SQLite 驱动 | 纯 Go，保持交叉编译 |
 | `github.com/coder/websocket` | WebSocket | context 友好，Gateway ↔ Core |
 | `github.com/yuin/goldmark` | Markdown 渲染 | 关闭 unsafe |
@@ -93,7 +93,7 @@ go work init . ../moejs
 | `github.com/BurntSushi/toml` | 配置解析 | |
 | `github.com/oklog/ulid/v2` | 可排序 id | 线程、entry、run |
 | `github.com/gofrs/flock` | 单实例锁 / 全局配置锁 | 防止同一数据目录起两个 Gateway |
-| `golang.org/x/sync` | errgroup / semaphore | 预取、并发工具 |
+| `golang.org/x/sync` | errgroup / semaphore | 并发工具与批量操作 |
 
 所有依赖锁定在 `go.mod`/`go.sum`；CI 校验 `go mod verify` 与许可证清单。不引入需要 cgo 的依赖。
 
@@ -105,9 +105,9 @@ go work init . ../moejs
 |---|---|---|
 | M0 契约冻结 | 设计、`proto.json`、manifest/VNode Schema、工具描述符、事件模型、端口 | 完成 |
 | M1 无头内核 | `RunTurn`、TS 插件宿主、Node 兼容子集、SQLite、系统工具/策略、CLI | 完成；provider/工具按系统插件装配 |
-| M2 网关与 SSR | 工作区监督/回收、鉴权、SSE、对话页、交互托盘、无 JS 降级、a_da 复用 | 完成 |
+| M2 网关与 SPA | 工作区监督/回收、鉴权、SSE、shell、JSON 投影、a_da 复用 | 完成 |
 | M3 插件平台 | 第三方安装、能力安装、装配期结算、15 钩子、技能、双代重载、Node 矩阵 | 完成 |
-| M4 前端插件 | TSX→VNode、12 插槽、页面/动作/路由、组件库、岛屿 | 完成 |
+| M4 前端插件 | TSX→VNode、12 插槽、页面/动作/路由、组件库、SFC 运行时装载 | 完成 |
 | M5 加固发布 | 三家 provider、检查点回滚、子智能体、打包、审计、发布清单 | 完成（0.3.0） |
 | M6 基座收敛 | cron/env/provider-admin/usage/discovery 迁移为系统插件；`global.config`/`events.read`；第三方前端同面；文档收敛 | 进行中，见 §16 |
 
@@ -173,7 +173,7 @@ go work init . ../moejs
 4. **MCP 流式/动态密钥前缀**：见 [15 §18](15-extensions.md)；仍待后续。
 5. **多用户**：v1 单用户；多用户需重做工作区键、cookie、审计与密钥隔离。
 6. **前端插件缓存**：只读插槽是否按数据哈希缓存？先测命中率。
-7. **JIT**：暂不默认启用；SSR 规模变大再评估按平台开启。
+7. **JIT**：暂不默认启用；Markdown 块渲染规模变大再评估按平台开启。
 8. **iframe 隔离**：第三方同源脚本的可选隔离方案；不作为 v1 前置。
 
 ---

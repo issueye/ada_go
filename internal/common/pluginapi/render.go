@@ -3,16 +3,16 @@ package pluginapi
 // 本文件是 Markdown 动态块的 TSX → VNode 渲染器（设计 7.3、9.5）：
 //
 //	esbuild transform（--jsx=transform --jsx-factory=jsx --jsx-fragment=Fragment）
-//	→ moejs 一次性 Runtime（预置全局 jsx / Fragment 与虚拟模块 ssr:components）
+//	→ moejs 一次性 Runtime（预置全局 jsx / Fragment 与虚拟模块 adag:components）
 //	→ 调模板默认导出函数(props)
 //	→ VNode JSON（形态与 spec/vnode.schema.json 对齐，由 gateway/frontend 校验）
 //
-// 页面/插槽/岛屿渲染已随整页 SSR 移除（dev-plan R1）；这里只保留 block 链路
-// （RenderBlockTemplate + esbuild 编译缓存），Markdown 动态块是它的唯一消费者。
+// 这里只保留 Markdown 动态块的渲染链路（RenderBlockTemplate + esbuild 编译缓存）；
+// 页面/插槽/插件页面全部由浏览器运行时渲染，服务端不再产出页面 HTML。
 //
 // 边界（7.5「Render Runtime 不安装 Node 兼容层」）：
 //   - 渲染 Runtime 不装能力（无 fs/fetch/child_process/stdio），只有一个虚拟模块
-//     ssr:components（宿主组件桥，真正的 DOM 在客户端实现）；
+//     adag:components（宿主组件桥，真正的 DOM 在客户端实现）；
 //   - 模板是单文件 ESM：transform 不打包，相对 import 在链接期失败（6.10 的同款约束）；
 //   - 每次渲染一个新 Runtime：失败即丢弃，不跨请求复用脚本值（6.4 的 JSON 边界）；
 //   - 超时用 Runtime.Interrupt 投递（脚本不可 catch，INV-8），失败必须返回错误。
@@ -53,10 +53,10 @@ const (
 )
 
 // renderComponentsModule 是渲染 Runtime 的虚拟模块名：TSX 通过
-// `import { Icon, Todo } from "ssr:components"` 引用宿主组件（7.3）。
-const renderComponentsModule = "ssr:components"
+// `import { Icon, Todo } from "adag:components"` 引用宿主组件（7.3）。
+const renderComponentsModule = "adag:components"
 
-// renderPrelude 是渲染 Runtime 的工厂与 Fragment 预置（作为 ssr:components 的
+// renderPrelude 是渲染 Runtime 的工厂与 Fragment 预置（作为 adag:components 的
 // 模块体执行，先于模板顶层）。VNode 字段名与 spec/vnode.schema.json 一致：
 // 元素 {"t","p","c"}、组件 {"t":"$C","n","p","c"}、文本 {"t":"#text","v"}。
 const renderPrelude = `// adag 渲染运行时（宿主内置，非插件代码）。
@@ -91,25 +91,25 @@ globalThis.jsx = function jsx(tag, props) {
   if (typeof tag === "function") {
     const name = tag.__ada_component;
     if (typeof name !== "string" || name.length === 0) {
-      throw new TypeError("jsx: 组件函数缺少 __ada_component 名（只允许从 ssr:components 导入宿主组件）");
+      throw new TypeError("jsx: 组件函数缺少 __ada_component 名（只允许从 adag:components 导入宿主组件）");
     }
     return { t: "$C", n: name, p: __adaProps(props), c: out };
   }
   if (typeof tag !== "string" || tag.length === 0) {
-    throw new TypeError("jsx: 标签必须是字符串或 ssr:components 的宿主组件");
+    throw new TypeError("jsx: 标签必须是字符串或 adag:components 的宿主组件");
   }
   return { t: tag, p: __adaProps(props), c: out };
 };
 `
 
-// ComponentPair 声明 ssr:components 的一个导出：TSX 名 → Go 组件规范名
+// ComponentPair 声明 adag:components 的一个导出：TSX 名 → Go 组件规范名
 // （7.7.3：TodoList 在 TSX 侧叫 Todo）。
 type ComponentPair struct {
 	Export    string // TSX 侧的导入名
 	Canonical string // VNode {"t":"$C","n":…} 里的规范名
 }
 
-// ComponentModuleSource 生成 ssr:components 虚拟模块源码：工厂预置 + 组件导出。
+// ComponentModuleSource 生成 adag:components 虚拟模块源码：工厂预置 + 组件导出。
 // 组件清单的唯一真源在 internal/gateway/frontend（AllowedComponents），由装配方
 // 传入，host 不复制一份白名单。
 func ComponentModuleSource(pairs []ComponentPair) string {
@@ -136,14 +136,14 @@ func quoteJS(s string) string {
 type Renderer struct {
 	mu        sync.Mutex
 	cache     map[string]string // 源内容 SHA-256 → transform 后的 ESM
-	compMod   string            // ssr:components 模块源码
+	compMod   string            // adag:components 模块源码
 	blockTime time.Duration
 }
 
 // RendererOption 定制 Renderer。
 type RendererOption func(*Renderer)
 
-// WithComponentsModule 覆盖 ssr:components 的模块源码（通常是
+// WithComponentsModule 覆盖 adag:components 的模块源码（通常是
 // ComponentModuleSource 的产物）。空串表示只有工厂预置、没有组件导出。
 func WithComponentsModule(src string) RendererOption {
 	return func(r *Renderer) { r.compMod = src }
@@ -278,7 +278,7 @@ func (r *Renderer) renderError(stage string, err error) error {
 	return fmt.Errorf("pluginapi: 渲染%s失败: %w", stage, err)
 }
 
-// link 编译并链接入口（含 ssr:components 依赖）。相对/未知 import 在这里失败。
+// link 编译并链接入口（含 adag:components 依赖）。相对/未知 import 在这里失败。
 func (r *Renderer) link(entrySrc string) (*moejs.Module, error) {
 	entry, err := moejs.Compile("adag:render-entry", entrySrc)
 	if err != nil {

@@ -1,5 +1,5 @@
 // Package contracts 是 M2 三块并行开发的共享边界：
-// Core 生命周期（supervisor）、RPC 客户端/relay（relay）、SSR（web）。
+// Core 生命周期（supervisor）、RPC 客户端/relay（relay）、SPA 前端（web）。
 //
 // 这里只放接口与最小 DTO，不放实现：三块可以独立编译、独立测试，
 // 最后由组合根（cmd/adag）把真实实现接起来。

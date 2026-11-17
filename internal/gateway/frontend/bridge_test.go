@@ -1,7 +1,7 @@
 package frontend_test
 
 // 渲染桥的垂直切片测试：Markdown 动态块（数据 Schema → TSX → VNode JSON）。
-// 插槽/页面渲染已随 SSR 移除；块返回校验后的 VNode JSON，不再有 HTML。
+// 插槽/页面由浏览器运行时渲染；块返回校验后的 VNode JSON，没有 HTML。
 
 import (
 	"encoding/json"
@@ -101,7 +101,7 @@ func TestBridgeRenderBlockComponent(t *testing.T) {
 			}}},
 		},
 		Bundle: map[string]string{
-			"blocks/icon.tsx": `import { Icon } from "ssr:components";
+			"blocks/icon.tsx": `import { Icon } from "adag:components";
 export default function Block() { return <Icon name="i-list" />; }`,
 		},
 		Schemas: map[string][]byte{"schemas/icon.json": []byte(`{"type":"object"}`)},

@@ -365,7 +365,7 @@ func checkHooks(root string) error {
 	return nil
 }
 
-// checkSlots 检查 12 插槽词汇表（宿主模板已随 SSR 移除，只守护词汇表本身）。
+// checkSlots 检查 12 插槽词汇表（页面由浏览器运行时渲染，只守护词汇表本身）。
 func checkSlots(root string) error {
 	if err := web.CheckSlotCoverage(); err != nil {
 		return err

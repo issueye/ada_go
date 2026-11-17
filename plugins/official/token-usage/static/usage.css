@@ -283,7 +283,7 @@
   font-size: var(--ada-text-xs);
 }
 
-/* 计量条：SSR VNode 白名单不含 style，宽度用 10% 一档的类名表达。 */
+/* 计量条：VNode 白名单不含 style，宽度用 10% 一档的类名表达。 */
 .tu-meter {
   display: block;
   height: 8px;

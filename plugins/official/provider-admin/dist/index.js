@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:94c67f846692d114) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:546178dd5c6fbf71) by plugins/official/build.mjs — do not edit
 // provider-admin 后端：供应商配置的增删改查、模型拉取与当前模型切换。
 //
 // 数据面：
@@ -143,7 +143,7 @@ async function fetchProviderModels(ctx, id) {
 export default function (agent) {
   agent.route("GET", "/state", (_req, ctx) => ctx.providers.list());
 
-  // 只读动作 state：供页面 SSR 预取，首屏/无 JS 也能看到供应商目录。
+  // 只读动作 state：页面装载后经动作桥（GET）取供应商目录。
   agent.registerAction({
     name: "state",
     mode: "read",

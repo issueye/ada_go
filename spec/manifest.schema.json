@@ -287,8 +287,8 @@
     "frontend": {
       "type": "object",
       "additionalProperties": false,
-      "description": "前端贡献声明（插槽/页面/导航/仪表盘/动作绑定/静态资源），由 Gateway 的 Render Runtime 与 SSR 宿主消费（§7.2/§7.5）。Render Runtime 不安装任何 Node 兼容层，数据只经 props 与只读动作预取进入。未知字段由宿主忽略并记录，本 Schema 冻结为 false。",
-      "x-consumer": "gateway/web: 插槽注册表、/ext 页面路由、侧栏导航、概览卡片、动作桥入口与资源链接；gateway/render: TSX 模板编译与渲染",
+      "description": "前端贡献声明（插槽/页面/导航/仪表盘/动作绑定/静态资源），由 Gateway 注册表与浏览器运行时 `static/ada/` 消费（§7.2/§7.5）。插件前端是运行时装载的 SFC 单文件组件，服务端不渲染页面；数据经动作桥 / route / SSE 由插件自行获取。未知字段由宿主忽略并记录，本 Schema 冻结为 false。",
+      "x-consumer": "gateway/web: 插槽注册表、/ext 页面路由、侧栏导航、概览卡片、动作桥入口与资源链接；浏览器运行时: 装载 SFC、渲染插槽与页面",
       "properties": {
         "capabilities": {
           "type": "array",
@@ -299,13 +299,8 @@
             ]
           },
           "uniqueItems": true,
-          "description": "前端能力声明（§6.2）：只做清单校验，不再按信任级别裁剪贡献面。backend.read：声明后 SSR 渲染时预取只读动作结果注入 props.data.backend；frontend.script：声明后允许加载 scripts 静态 JS，仍受 CSP script-src self 约束（third-party 声明即装配失败，x-trust-rule T3；§6.9/§7.5）。",
-          "x-consumer": "gateway/render: 决定是否预取只读动作；gateway/web: 决定是否加载 scripts（受信任级别与 CSP script-src 'self' 双重约束）"
-        },
-        "client": {
-          "$ref": "#/$defs/assetPath",
-          "description": "插件浏览器 bundle 的静态资源名（如 client.js），由 assets 目录提供。声明后可在 slots/pages 上用 hydrate:true 接管首屏；需要 frontend.script 能力且 trust 为 builtin/verified（third-party 声明即装配失败，x-trust-rule T3；§7.5）。",
-          "x-consumer": "gateway/frontend: 校验静态资源存在；gateway/web: 生成 /ext/{id}/static/<client> 模块 URL 并在 hydrate 贡献上注入 data-ada-module"
+          "description": "前端能力声明（§6.2）：只做清单校验，不再按信任级别裁剪贡献面。backend.read：声明后允许把动作绑定标为只读（走 GET 动作桥）；frontend.script：声明后允许前端可执行面（SFC 的逻辑 ESM），仍受 CSP script-src self 约束（third-party 声明即装配失败，x-trust-rule T3；§6.9/§7.5）。",
+          "x-consumer": "gateway: 清单校验（只读动作绑定需要 backend.read；SFC 逻辑 ESM 属于 frontend.script 面）"
         },
         "slots": {
           "type": "array",
@@ -338,7 +333,7 @@
               },
               "component": {
                 "$ref": "#/$defs/assetPath",
-                "description": "SFC 单文件组件（assets 目录内 .vue 相对路径），由浏览器运行时装载（无 SSR，无构建步骤）。装载失败时该贡献位置标记 data-ada-error。",
+                "description": "SFC 单文件组件（assets 目录内 .vue 相对路径），由浏览器运行时装载并在本地编译（零构建步骤）。装载失败时该贡献位置标记 data-ada-error。",
                 "x-consumer": "gateway/frontend: 装配期校验资源存在并算内容指纹；浏览器 host.mjs: loadSFC 运行时编译"
               },
               "order": {
@@ -364,7 +359,7 @@
                 "type": "string",
                 "pattern": "^[a-z][a-z0-9-]{0,63}$",
                 "description": "页面路径段：/ext/{id}/{slug}（§7.5）。",
-                "x-consumer": "gateway/web: 注册 /ext/<插件id>/<slug> 路由并 SSR 该页"
+                "x-consumer": "gateway/web: 注册 /ext/<插件id>/<slug> 路由；页面由浏览器运行时渲染"
               },
               "title": {
                 "type": "string",
@@ -374,7 +369,7 @@
               },
               "component": {
                 "$ref": "#/$defs/assetPath",
-                "description": "SFC 单文件组件（assets 目录内 .vue 相对路径），由浏览器运行时装载（无 SSR，无构建步骤）。装载失败时该贡献位置标记 data-ada-error。",
+                "description": "SFC 单文件组件（assets 目录内 .vue 相对路径），由浏览器运行时装载并在本地编译（零构建步骤）。装载失败时该贡献位置标记 data-ada-error。",
                 "x-consumer": "gateway/frontend: 装配期校验资源存在并算内容指纹；浏览器 host.mjs: loadSFC 运行时编译"
               }
             }
@@ -492,7 +487,7 @@
             "properties": {
               "component": {
                 "$ref": "#/$defs/assetPath",
-                "description": "SFC 单文件组件（assets 目录内 .vue 相对路径），由浏览器运行时装载（无 SSR，无构建步骤）。装载失败时该贡献位置标记 data-ada-error。",
+                "description": "SFC 单文件组件（assets 目录内 .vue 相对路径），由浏览器运行时装载并在本地编译（零构建步骤）。装载失败时该贡献位置标记 data-ada-error。",
                 "x-consumer": "gateway/frontend: 装配期校验资源存在并算内容指纹；浏览器 host.mjs: loadSFC 运行时编译"
               },
               "order": {
@@ -525,8 +520,8 @@
               },
               "read": {
                 "type": "boolean",
-                "description": "true=读动作：SSR 时预取（最多 16 个、并发 4、单个 300ms、结果缓存 8s），结果进入 props.data.backend.<插件id>.<绑定名>；false=写动作：必须用户点击、走 CSRF+确认、结果不回填页面（303/刷新呈现）（§6.3/§7.5）。",
-                "x-consumer": "gateway/render: 决定 SSR 预取与 props.data.backend 注入；gateway/web: 写动作渲染确认交互"
+                "description": "true=只读动作：动作桥以 GET 调用并直接返回 JSON（不得改状态）；false=写动作：POST + CSRF，界面上必须由用户点击确认（§6.3/§7.6）。",
+                "x-consumer": "gateway/web: 动作桥按 GET/POST 分流；浏览器运行时: 按 read 选择调用方式并做写动作确认"
               },
               "backend": {
                 "$ref": "#/$defs/pluginId",
@@ -549,7 +544,7 @@
               }
             }
           },
-          "description": "动作绑定：binding 名 → 后端动作。读/写语义与预取见 §7.5；动作不进模型上下文、不受任何执行前审批约束，但写动作必须用户点击确认且受能力与 scope 约束（§7.6）。",
+          "description": "动作绑定：binding 名 → 后端动作。读/写语义见 §7.6：读动作走 GET、写动作走 POST 且必须用户点击确认；动作不进模型上下文、不受任何执行前审批约束，但受能力与 scope 约束（§7.6）。",
           "x-consumer": "gateway/web: 为每个绑定渲染控件与动作桥入口 POST /ext/{id}/action/{binding}；coreapp: 装配期校验绑定目标存在"
         },
         "styles": {
@@ -560,15 +555,6 @@
           "uniqueItems": true,
           "description": "插件 CSS 外部文件列表（允许外部文件；CSP style-src 'self'，不使用内联样式，§9.3）。链接顺序排在基座层（app.css → tokens.css → components/layout/widgets/shell/pages.css）之后；业务 CSS 只引用 --ph-* 令牌、不写死色值（§7.7.2）。",
           "x-consumer": "gateway/web: 在页面链接基座样式层之后注入 <link>（带内容哈希、可缓存）"
-        },
-        "scripts": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/assetPath"
-          },
-          "uniqueItems": true,
-          "description": "插件 JS 文件列表。默认不加载：需要 frontend.script 能力且 trust 为 builtin/verified（third-party 声明即装配失败，x-trust-rule T3）；同源运行仍是风险点，v1 建议优先 HTMX/表单（§7.5）。受 CSP script-src 'self' 限制、不使用内联脚本（§9.3）。",
-          "x-consumer": "gateway/web: 按能力+信任决定 <script> 加载；CSP 与 no-store 响应头由基座统一施加"
         },
         "assets": {
           "type": "string",
@@ -648,7 +634,7 @@
       }
     },
     {
-      "x-trust-rule": "T3：third-party（含省略 trust 走默认值）禁止 exec、process、net.sse、ui.ask、subagent.invoke（§6.2/§6.9「默认禁止 exec」）与前端 frontend.script / frontend.client / hydrate（§6.9「禁止前端脚本」、§7.5「需要 frontend.script 能力且信任级别为 builtin/verified」、docs/20）。声明即装配失败。",
+      "x-trust-rule": "T3：third-party（含省略 trust 走默认值）禁止 exec、process、net.sse、ui.ask、subagent.invoke（§6.2/§6.9「默认禁止 exec」）与前端 frontend.script（§6.9「禁止前端脚本」、§7.5「需要 frontend.script 能力且信任级别为 builtin/verified」、docs/20）。声明即装配失败。",
       "if": {
         "required": [
           "trust"
@@ -687,7 +673,7 @@
             "x-consumer": "gateway/web: 信任规则 T3 条件（收敛 frontend.capabilities 可声明集合）",
             "properties": {
               "capabilities": {
-                "x-consumer": "gateway/web: 信任规则 T3（third-party 禁止 frontend.script，脚本不加载，声明即装配失败）",
+                "x-consumer": "gateway/web: 信任规则 T3（third-party 禁止 frontend.script，脚本面不加载，声明即装配失败）",
                 "items": {
                   "enum": [
                     "backend.read"

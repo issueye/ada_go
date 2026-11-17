@@ -1,7 +1,6 @@
 // tools-ask 前端段（thread.tray 的提问卡片）逻辑。
 //
-// 待答交互来自线程级 SSE（与旧 SSR 的 data.interactions 投影同一来源——Core 的
-// 交互登记）：evt.interaction.requested 进队、evt.interaction.resolved 出队、
+// 待答交互来自线程级 SSE（与 Core 的交互登记投影同源）：evt.interaction.requested 进队、evt.interaction.resolved 出队、
 // evt.run.status 终态清空。连接建立前已登记的交互不会被 SSE 补发（Last-Event-ID
 // 只在同一条连接的断线重连里生效），所以「页面刷新时仍有待答项」的场景托盘为空——
 // 这是 SPA 化的已知降级，见迁移报告。

@@ -15,7 +15,7 @@ import (
 	"unicode/utf8"
 )
 
-// pluginSummaryDTO 对应 Core plugin.list 的一行（只声明 SSR 用到的字段）。
+// pluginSummaryDTO 对应 Core plugin.list 的一行（只声明页面用到的字段）。
 type pluginSummaryDTO struct {
 	ID            string          `json:"id"`
 	Name          string          `json:"name"`
@@ -169,7 +169,7 @@ func (s *Server) readPluginFile(p pluginRow, rel string) (pluginFileView, error)
 		return meta, nil
 	}
 	meta.Content = string(data)
-	// Markdown 文件只标记能力：预览渲染由前端做（源码高亮同理，SSR 已移除）。
+	// Markdown 文件只标记能力：预览渲染由前端做（源码高亮同理，服务端不产出 HTML）。
 	if isMarkdownFile(meta.Path) {
 		meta.Markdown = true
 	}

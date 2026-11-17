@@ -428,7 +428,7 @@ function collectProcesses() {
   if (coreState.childPid) {
     const alive = isPidAlive(coreState.childPid)
     processes.push({
-      name: 'adag gateway', role: '统一网关（Core 监督/SSR/SSE）', pid: coreState.childPid,
+      name: 'adag gateway', role: '统一网关（Core 监督/SPA/SSE）', pid: coreState.childPid,
       port: coreState.port, alive, status: alive ? 'running' : 'stopped', url: coreState.url || null,
     })
   } else if (coreState.alive) {
@@ -455,10 +455,10 @@ async function restartGatewaySupervisor() {
 }
 
 // ── 窗口 ────────────────────────────────────────────────────────────────
-const SSR_WINDOW_MIN_WIDTH = 450
+const SPA_WINDOW_MIN_WIDTH = 450
 const WINDOW_MIN_HEIGHT = 620
 
-function resolveInitialWindowSize(minWidth = SSR_WINDOW_MIN_WIDTH) {
+function resolveInitialWindowSize(minWidth = SPA_WINDOW_MIN_WIDTH) {
   const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi)
   const { width: areaWidth, height: areaHeight } = screen.getPrimaryDisplay().workAreaSize
   const preferredWidth = Math.round(clamp(areaWidth * 0.72, 1120, 1360))
@@ -552,9 +552,9 @@ async function loadPreparingPage(win, detail) {
   }
 }
 
-// SSR 界面：等网关就绪后 `/?token=` 登录——网关校验后换发 HttpOnly 会话 cookie
-// 并 303 去掉 query，令牌不留在地址栏/历史记录（与 a_da 的 SSR guard 同语义）。
-async function loadSsrUi(win) {
+// SPA 界面：等网关就绪后 `/?token=` 登录——网关校验后换发 HttpOnly 会话 cookie
+// 并 303 去掉 query，令牌不留在地址栏/历史记录（与 a_da 的登录 guard 同语义）。
+async function loadSpaUi(win) {
   if (!coreState.alive) {
     await loadPreparingPage(win, '正在准备 adag gateway（缺二进制或源码有更新时会自动构建）…')
   }
@@ -571,12 +571,12 @@ async function loadSsrUi(win) {
   const url = new URL(coreState.endpoint || `http://127.0.0.1:${coreState.port}`)
   url.pathname = '/'; url.hash = ''; url.search = ''
   if (coreState.token) url.searchParams.set('token', coreState.token)
-  appendLauncherLog(`加载 SSR 页面: ${url.origin}${url.pathname}`)
+  appendLauncherLog(`加载 SPA 页面: ${url.origin}${url.pathname}`)
   try {
     await win.loadURL(url.toString())
   } catch (err) {
     const reason = err?.message || String(err)
-    appendLauncherLog(`[警告] SSR 页面加载失败: ${reason}`)
+    appendLauncherLog(`[警告] SPA 页面加载失败: ${reason}`)
     await loadGatewayErrorPage(win, reason)
   }
 }
@@ -599,7 +599,7 @@ async function createMainWindow() {
     icon: resolveAppPath('icon.ico') || resolveAppPath('build', 'app.ico') || undefined,
     width: initial.width,
     height: initial.height,
-    minWidth: SSR_WINDOW_MIN_WIDTH,
+    minWidth: SPA_WINDOW_MIN_WIDTH,
     minHeight: WINDOW_MIN_HEIGHT,
     center: true,
     frame: false, // 无边框；preload 在 .ada-topbar 注入拖拽区与窗口控制（同 a_da）。
@@ -663,7 +663,7 @@ async function createMainWindow() {
     }
   })
 
-  await loadSsrUi(mainWindow)
+  await loadSpaUi(mainWindow)
   mainWindow.on('closed', () => { mainWindow = null })
   return mainWindow
 }
@@ -747,7 +747,7 @@ async function restartGatewayFromTray() {
     appendLauncherLog('[托盘] 收到「重新唤醒网关」请求')
     const report = await restartGatewaySupervisor()
     appendLauncherLog(`[托盘] 重新唤醒网关结束: alive=${report.core_alive} port=${report.core_port}`)
-    if (mainWindow) await loadSsrUi(mainWindow)
+    if (mainWindow) await loadSpaUi(mainWindow)
   } catch (err) {
     const message = err?.message ?? String(err)
     appendLauncherLog(`[托盘] 重新唤醒网关失败: ${message}`)
@@ -867,7 +867,7 @@ async function refreshToLatest(reason = '重复启动') {
     if (mainWindow) {
       const target = sameOriginPageUrl(previousUrl)
       if (target) await mainWindow.loadURL(target)
-      else await loadSsrUi(mainWindow)
+      else await loadSpaUi(mainWindow)
     }
   } catch (err) {
     appendLauncherLog(`[热更新] 刷新失败: ${err?.message ?? String(err)}`)

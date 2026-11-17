@@ -108,9 +108,9 @@ type Config struct {
 	// LoginPath 是登录页路径，默认 /login。
 	LoginPath string
 	// PluginUI 是插件前端宿主（nil 时 /ext 静态资源与动作桥 404、无动态块）。
-	// 整页 SSR 移除后它不再产出任何 HTML：插件贡献由客户端运行时经
-	// /frontend-registry 装载；宿主只经扩展接口提供静态资源、动作绑定、
-	// 插件列表与 Markdown 动态块（见 pluginui.go / markdown_block.go）。
+	// 它不产出任何 HTML：插件贡献由客户端运行时经 /frontend-registry 装载；
+	// 宿主只经扩展接口提供静态资源、动作绑定、插件列表与 Markdown 动态块
+	// （见 pluginui.go / markdown_block.go）。
 	PluginUI PluginUI
 }
 

@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:ee16f8ec6ab9a13e) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:ba0c0900a69e3450) by plugins/official/build.mjs — do not edit
 // token-usage 后端：用量页与卡片的数据面。
 //
 // 基座只持久化每轮原始用量行，并通过 ctx.events.usage 暴露；本插件自己
@@ -65,7 +65,7 @@ async function stateOf(ctx, threadId) {
 }
 
 export default function (agent) {
-  // 页面 SSR 预取：路由带 threadId 时同时给出当前会话；否则只有工作区。
+  // 只读动作 usage：路由带 threadId 时同时给出当前会话；否则只有工作区。
   agent.registerAction({
     name: "usage",
     mode: "read",

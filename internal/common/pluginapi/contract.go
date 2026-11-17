@@ -202,7 +202,8 @@ func (p HookPoint) AllowsAction(a HookAction, builtin bool) bool {
 type Capability string
 
 const (
-	// CapFSRead / CapFSWrite 安装受限 fs（根固定工作区；只读时写成员访问即抛 ERR_ACCESS_DENIED）。
+	// CapFSRead / CapFSWrite 是 fs 功能边界的声明名。能力位不决定安装（2026-11-10 决策）：
+	// 宿主对所有插件装同一套受限 fs——写限工作区根、读不限路径（2026-10-31 决策）。
 	CapFSRead  Capability = "fs.read"
 	CapFSWrite Capability = "fs.write"
 	// CapNetFetch 是出网能力（当前不限目标主机，host 策略待插件化）；provider 流式协议走 CapNetSSE。
@@ -244,9 +245,9 @@ const (
 	// 它不开放 stdin/stdout 句柄、不授予任意可执行文件：entry 由宿主解析到插件目录内，
 	// owner 由宿主按清单盖章，环境剥掉宿主凭据（09 §9.2、06 §6.10）。
 	CapProcessSupervise Capability = "process.supervise"
-	// CapBackendRead 是前端能力：预取只读后端动作结果。
+	// CapBackendRead 是前端能力：允许把动作绑定标为只读（走 GET 动作桥）。
 	CapBackendRead Capability = "backend.read"
-	// CapFrontendScript 是前端能力：加载插件自带 JS（默认关闭，仍受 CSP 限制）。
+	// CapFrontendScript 是前端能力：允许插件前端可执行面（SFC 逻辑 ESM，受 CSP 限制）。
 	CapFrontendScript Capability = "frontend.script"
 )
 

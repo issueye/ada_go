@@ -1,8 +1,8 @@
 package web
 
 // 内嵌静态资源的基线测试：保留的脚本全部满足 CSP
-// （不能出现 eval() / new Function()）。SSR 渲染器所需的静态读取出口
-// （web.StaticAsset）已随 SSR 移除。
+// （不能出现 eval() / new Function()）。服务端静态读取出口（web.StaticAsset）
+// 已随整页渲染路径一起移除。
 
 import (
 	"io/fs"

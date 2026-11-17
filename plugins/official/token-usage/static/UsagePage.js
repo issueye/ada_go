@@ -2,8 +2,7 @@
 //
 // 数据来自本插件 route GET /usage（经 ada.api 桥）：events.read 读取的每轮原始
 // 计数在插件内聚合为 { workspace, thread }。页面不带 threadId 上下文，thread
-// 一般为 null，「当前会话」视图如实渲染空态（与旧 SSR 页面在 /ext 路由上的行为
-// 一致：page_usage 动作同样没有 threadId）。
+// 一般为 null，「当前会话」视图如实渲染空态（page_usage 动作同样没有 threadId）。
 //
 // 仍是同一套口径：时间范围分段 → 工作区/当前会话切换；趋势图 → 三条占比计量条；
 // 计量条沿用 usage.css 的 10% 分档类（tu-meter__fill--p*），不用内联样式。

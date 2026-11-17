@@ -1,13 +1,15 @@
 // Package host 是插件的 moejs 宿主：每个插件一个 Runtime、一条专用 goroutine，
-// 只安装清单声明过的能力，运行期通过 ports.ScriptHost 与引擎打交道。
+// 对所有插件安装同一套 ctx.* 桥与 node 模块，运行期通过 ports.ScriptHost 与引擎打交道。
 //
-// 边界（设计 1.5.2、6.4）：
-//   - 引擎不知道 moejs，插件不知道宿主句柄：中间只有本文件定义的 Contribution 与 HostCall。
-//   - 官方插件与第三方插件走同一条加载路径，差别只有 trust 与随包发布。
-//   - 没有声明的能力在脚本里根本不存在；声明了但成员越权是「调用即抛 ERR_ACCESS_DENIED」。
+// 边界（设计 1.5.2、6.4；2026-11-10 决策）：
+//   - 引擎不知道 moejs，插件不知道宿主句柄：中间只有本文件定义的 Contribution 与 Context。
+//   - 官方插件与第三方插件走同一条加载路径、同一套桥与模块，差别只有 trust 与随包发布。
+//   - 能力位只做清单合法性校验（已知名字、最低信任级别），不决定「装什么」；
+//     仍然执行的是功能边界：fs 写限工作区根、exec 无 shell、密钥按名授予、超时与审计。
+//     ctx.fs 读不限制目标路径（2026-10-31 决策）。
 //
 // 与上游的对应关系（实测见 docs/11-structure-roadmap.md D-7、tools/moejspike）：
-// 模块白名单与能力位映射由本包的 resolver 负责；node:fs 用上游实现 + 宿主包装；
+// 虚拟模块表（随包 Bundle + 宿主 node 模块）由本包的 resolver 负责；node:fs 用上游实现 + 宿主包装；
 // node:child_process 由宿主提供（上游 alpha.11 没有这个模块）。
 package host
 
@@ -35,10 +37,9 @@ const (
 	DefaultActionTimeout = 5 * time.Second
 
 	// MemoryLimit 是每插件 Runtime 的脚本堆上限（64MB）。
+	// moejs alpha.11 没有独立的栈/调用深度选项（见 docs/11-structure-roadmap.md D-7），
+	// 这两项用引擎默认值，宿主不再声明同名常量。
 	MemoryLimit = 64 << 20
-	// MaxCallDepth 与 StackSize 对应 moejs 的构造期边界。
-	MaxCallDepth = 2000
-	StackSize    = 1 << 16
 
 	// MaxResultBytes 是单次调用的可序列化结果上限（1MB，05 §6.3）。
 	MaxResultBytes = 1 << 20

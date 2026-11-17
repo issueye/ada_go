@@ -209,7 +209,7 @@ Node 代码大量依赖 `err.code` 分支，因此错误形状是兼容契约的
 - **内存**：插件 Runtime 64MB（脚本堆）。宿主为一次调用分配的 Go 侧缓冲另计，单次不超过 16MB；所有 Buffer 在调用结束释放。Runtime 超内存即重建，插件标记 `degraded`。
 - **CPU**：脚本调用 5s、工具 120s、钩子 200ms（最大 2s）、provider 15s/90s/30min；宿主长调用暂停脚本计时；取消不可被 `catch`。
 - **失败方向**：宿主表里没有的 `node:*` 模块在链接期失败（`ERR_MODULE_NOT_FOUND`）；`.node` 原生扩展拒绝（`ERR_NATIVE_ADDON_UNSUPPORTED`）；成员越界调用即抛错。任何情况下都不回退到“全量 Node”，也不存在「声明了能力就多装一点」的路径。
-- **前端**：Gateway 的 Render Runtime 不安装 `stdlib`，没有 `process`、`Buffer`、`fs`、`fetch`；TSX 只做纯渲染（见 [7](07-ssr-frontend.md)）。
+- **前端**：Markdown 动态块的渲染 Runtime 不安装 `stdlib`，没有 `process`、`Buffer`、`fs`、`fetch`；块 TSX 只做纯渲染（见 [7](07-frontend.md)）。页面与插槽由浏览器运行时渲染。
 
 ---
 

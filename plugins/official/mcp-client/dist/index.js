@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:a6cbc73bd01b47e4) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:80671ad752406de9) by plugins/official/build.mjs — do not edit
 // mcp-client —— 官方插件：把 MCP server 的工具接入为普通工具（v2 设计见 docs/18）。
 //
 // 范围：
@@ -73,8 +73,8 @@
                     
                                    
                                                                                                                
-                                                 
-                                                              
+                                                       
+                           
                        
                  
                            

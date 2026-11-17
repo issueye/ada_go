@@ -4,8 +4,8 @@ package web
 //
 // 只在 Markdown 顶层识别 ```adag-ui fence；其余文本仍走原有
 // goldmark + bluemonday + markdownVNodes 管线。块由前端插件桥渲染成
-// **校验后的 VNode JSON**（经 VNode block profile 校验；HTML 渲染已随 SSR
-// 移除，由客户端 ui-markdown 消费），Markdown 只负责把结果放回原位置。
+// **校验后的 VNode JSON**（经 VNode block profile 校验；服务端只给数据，
+// 由客户端 ui-markdown 消费），Markdown 只负责把结果放回原位置。
 
 import (
 	"bytes"

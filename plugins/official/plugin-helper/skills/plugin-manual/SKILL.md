@@ -49,31 +49,31 @@ description: 插件手册：创建、检查、修改、移除 ada-go 插件，�
 ## 2. 前端段（页面 / 插槽 / 动态块）
 
 清单里的 `frontend` 段提供：`pages`（`/ext/{id}/{slug}` 独立页面）、`slots`
-（会话区/输入框等插槽的 TSX 卡片）、`blocks`（Markdown 动态块，见 §3）、
+（会话区/输入框等插槽的 SFC 卡片）、`blocks`（Markdown 动态块，见 §3）、
 `nav`（侧栏导航项）、`dashboard`（概览卡）、`actions`（读/写后端动作绑定）、
-`styles`/`scripts`/`assets`（静态资源）。
+`styles` 与 `assets`（静态资源目录）。
 
-渲染契约（参考 `plugins/official/provider-admin`、`token-usage`、`tools-plan`）：
+插件前端是**浏览器运行时装载的 SFC 单文件组件**（零构建；参考
+`plugins/official/provider-admin`、`token-usage`、`tools-plan`）：
 
-- 页面/插槽是 TSX 模板（`page.tsx` / `slot.tsx`）：`export default function (props)`，
-  Gateway 渲染时编译成 VNode→HTML；TSX 只做纯计算，数据一律来自 `props`
-  （只读动作预取 `props.data.backend[backendId][binding]`、`data.providers`、
-  `data.usage`、`data.interactions`），副作用走动作桥或 `agent.route`。
-- 浏览器脚本统一用 `window.adaAPI(pluginId, path, { method, body })` 调插件 route
-  （自动带 CSRF 与线程上下文）；不要手写 `/ext/...` URL。
-- 需要确认再执行的操作（删除/覆盖等）用 `window.adaConfirm(message, onConfirm)`
-  （共享 ConfirmDialog）；不要用 `window.confirm` / `alert` / `prompt`（原生对话框
-  不可样式化、会阻塞脚本，官方插件脚本有门禁测试）。
-- 样式放 `static/*.css` 并在清单 `styles` 里声明；CSP 禁止内联 style/script，
-  颜色只用 `--ph-*` 设计令牌。
-- 插件自带 JS（清单 `scripts`）默认不加载：需要 `frontend.script` 能力且仅
-  builtin/verified 可用；第三方优先用表单/HTMX。
-- 岛屿（可选，仅 builtin/verified）：`frontend.client` + `slots[].hydrate: true` 让该插槽在
-  浏览器用同一份组件 hydrate；再加 `slots[].clientOnly: true` 表示**服务端不渲染**、只发空壳，
-  由浏览器普通 mount（没有 SSR 回退，失败即空白）。`client.tsx` 用
-  `export const islands = { "slot:<插槽名>": 组件 }` 映射，产物 `static/client.js` 由
-  `go run ./tools/pluginbuild -dir <插件> -entry client.tsx -out static/client.js` 生成并提交。
-  现成例子：`plugins/official/composer-telemetry`（输入框下方辅助区，轮询 `GET /threads/{id}/state`）。
+- 每个插槽/页面/概览卡的 `component` 是 `assets` 目录里的 `.vue`；`.vue` 必须有
+  `<template>` 与 `<script src="./Xxx.js">`，`src` 指向同目录 ESM 静态文件——
+  **禁止内联 `<script>`**。逻辑模块从 `/static/ada/ada-runtime.mjs` 导入
+  `ref`/`computed`/`inject`/`onMounted` 等，导出 `setup`。
+- 浏览器 `/static/ada/` 负责拉取、解析、编译与挂载；服务端只给不含业务 DOM 的
+  SPA 外壳、`/frontend-registry` JSON 与 `/ext/...` 资源，**没有页面直出回退**，
+  也没有无 JS 回退。插槽装载失败只在该位置留 `data-ada-error` 占位，不影响其余部分。
+- 数据在组件装载后自己取：`inject("ada")` 拿服务对象，`ada.api(path, opts)` 调插件
+  route（自动带 CSRF 与线程上下文），`ada.action(name, input)` 调动作桥。只读动作
+  （清单 `read: true`）走 `GET /ext/{id}/action/{binding}` 直接返回 JSON，服务端没有
+  预取；写动作走 `POST` + CSRF，`ada.action` 会先弹确认。
+- 需要确认再执行的操作（删除/覆盖等）用 `ada.confirm(message)`（共享确认框）；
+  不要用 `window.confirm` / `alert` / `prompt`（原生对话框不可样式化、会阻塞脚本）。
+- 样式放 `static/*.css` 并在清单 `styles` 里声明，或写 SFC 的 `<style scoped>`
+  （运行时编译后走 CSSOM）；CSP 禁止内联 style/script，颜色只用 `--ph-*` 设计令牌。
+- 页面模板的下拉直接用原生 `<select>` + `ada-input` 类；`adag:components` 只服务 Markdown 动态块（`Icon`/`TodoList`），不是 SFC 组件库。
+- `frontend.script` 是前端可执行面的声明门禁（SFC 逻辑 ESM），第三方不能声明；
+  `backend.read` 只用于允许把动作绑定标为只读。
 
 **当前边界（必须如实告诉用户）**：
 
@@ -86,8 +86,8 @@ description: 插件手册：创建、检查、修改、移除 ada-go 插件，�
   要在插件页启停仍需声明 `backend`。
 - 用户要的插件只需要工具/自动化 → 用 `create_plugin`，不要加 frontend 段；
 - 用户明确要独立页面或会话卡片 → 说明安装型插件暂不支持，带 UI 的部分作为官方
-  插件在 `plugins/official/<id>/` 开发（`plugin.json` frontend 段 + TSX + `static/`，
-  改完重启应用），或等后续版本支持。
+  插件在 `plugins/official/<id>/` 开发（`plugin.json` frontend 段 + SFC `.vue`/`.js`
+  + `static/`，重载插件后刷新即可），或等后续版本支持。
 
 ## 3. Markdown 动态块（adag-ui）
 
@@ -191,15 +191,17 @@ description: 插件手册：创建、检查、修改、移除 ada-go 插件，�
 ### 3.7 自己新增一个 block
 
 1. `schemas/<name>.json`：数据 Schema（字段少而稳，`additionalProperties: false`）；
-2. `blocks/<name>.tsx`：`export default function ({ block }) { return <section>…</section>; }`；
+2. `blocks/<name>.tsx`：`import { Icon, Todo } from "adag:components"`，
+   `export default function ({ block }) { return <section>…</section>; }`；本地辅助
+   组件必须当函数调用（`Fn({...})`），不能写成 JSX 标签；
 3. `plugin.json` 的 `frontend.blocks` 登记 `name/schema/template/profile`；
 4. 官方插件跑 `node plugins/official/build.mjs`，再跑 `adag verify`；
 5. 在插件 README/技能里给出 **renderer id + 一段 data 示例**，供模型引用。
 
 块内只能用 display profile：标签限于 `div section p blockquote details summary pre
 h1–h6 ul ol li span strong em code small a table thead tbody tr th td caption br hr`；
-组件只有 `Icon` 与 `TodoList`；禁止 `img/svg/form/input/button/select/textarea/iframe`
-与 `on*`、`style`、原始 HTML。完整白名单与 props 形状见 SPEC §8.1。
+组件只有从 `adag:components` 导入的 `Icon` 与 `Todo`；禁止 `img/svg/form/input/button/select/textarea/iframe`
+与 `on*`、`style`、原始 HTML。完整白名单与 props 形状见 SPEC §8.3。
 
 ## 4. 检查插件（check_plugin）
 
@@ -278,8 +280,12 @@ h1–h6 ul ol li span strong em code small a table thead tbody tr th td caption 
 - 声称插件已可用——没有「重载 + 启用」之前它不在工具目录里；
 - 试图绕过 `create_plugin` 直接把文件写进 `~/.adago/plugins`（agent 的 fs
   以工作区为根，够不到全局插件根），或覆盖已存在的插件目录；
-- 给安装型插件写 `pages`/`slots` 并声称页面会生效——渲染桥只装配随包官方插件的
-  这些段（`frontend.blocks` 例外，见 §2）；
+- 给安装型插件写 `pages`/`slots` 并声称页面会生效——运行时注册表只装配随包官方插件
+  的这些段（`frontend.blocks` 例外，见 §2）；
+- 在 `.vue` 里写内联 `<script>`，或把逻辑塞进模板表达式——SFC 只认
+  `<script src="./X.js">` 指向的静态 ESM；
+- 在 Markdown 动态块里做下拉/表单交互（块只做展示，交互走页面或动作桥）；
+- 指望页面/插槽有页面直出回退或无 JS 回退——页面只由浏览器运行时渲染；
 - 编造动态块 renderer（如 `ui-charts/pie`、`charts/line`）；真实饼图/折线要等
   SVG 白名单，当前用 `bar`/`column`/`stacked`/`spark` 表达；
 - 在块 `data` 里塞整段正文、密钥、超过 12 条 items 或超过 48 个 spark 点；

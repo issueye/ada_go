@@ -4,7 +4,7 @@ package pluginapi
 //
 // 覆盖：文本/嵌套/组件/Fragment/条件与列表、编译缓存、块档超时中断、
 // 结果上限、失败必须报错（语法错误、缺默认导出、未知 import、Promise 返回）。
-// 页面/插槽渲染已随 SSR 移除；RenderBlockTemplate（Markdown 动态块）是唯一出口。
+// 页面/插槽由浏览器运行时渲染；RenderBlockTemplate（Markdown 动态块）是服务端唯一渲染出口。
 
 import (
 	"encoding/json"
@@ -61,7 +61,7 @@ func TestRenderBlockTextAndNesting(t *testing.T) {
 func TestRenderBlockComponentsAndFragment(t *testing.T) {
 	r := testRenderer()
 	got := mustRender(t, r, `
-		import { Icon, Todo } from "ssr:components";
+		import { Icon, Todo } from "adag:components";
 		export default function (props) {
 			return (
 				<div class="wrap">
@@ -143,7 +143,7 @@ func TestRenderBlockFailures(t *testing.T) {
 		{"语法错误", `export default function () { return <p>`, "TSX 编译失败"},
 		{"缺默认导出", `export function Slot() { return <p>x</p>; }`, "export default"},
 		{"未知 import", "import x from './side';\nexport default function () { return <p>{x}</p>; }", "链接失败"},
-		{"未知组件", "import { Nope } from \"ssr:components\";\nexport default function () { return <Nope />; }", "链接失败"},
+		{"未知组件", "import { Nope } from \"adag:components\";\nexport default function () { return <Nope />; }", "链接失败"},
 		{"函数组件不在白名单", `const F = () => <p>x</p>;
 export default function () { return <F />; }`, "__ada_component"},
 		{"返回 Promise", `export default async function () { return <p>x</p>; }`, "Promise"},

@@ -68,7 +68,7 @@ func LoadBlockScript(dir string) (pluginapi.Script, error) {
 	clone := *m
 	fe := *m.Frontend
 	fe.Slots, fe.Pages, fe.Nav, fe.Dashboard = nil, nil, nil, nil
-	fe.Actions, fe.Styles, fe.Scripts, fe.Assets = nil, nil, nil, ""
+	fe.Actions, fe.Styles, fe.Assets = nil, nil, ""
 	clone.Frontend = &fe
 
 	return pluginapi.Script{

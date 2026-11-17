@@ -26,7 +26,7 @@
 - 复用现有 goldmark + bluemonday + VNode + Render Runtime，不引入 MDX、客户端模板执行或第二套渲染引擎；
 - 产品开关：`capabilities.markdownBlocks` 是总开关；false 时 `adag-ui` fence 按普通代码块降级；
 - 模型/工具输出只是数据，不能执行脚本、注入原始 HTML 或伪造宿主 UI；
-- 无 JS 时仍能通过 `/markdown` HTML 端点看到块内容。
+- 浏览器 `ui-markdown` 渲染同一份 VNode；没有 HTML 端点。
 
 #### 16.1.2 非目标
 
@@ -41,7 +41,7 @@
 |---|---|---|
 | Markdown 解析/清洗 | `internal/gateway/web/ui.go` 的 `renderMarkdown`（goldmark + bluemonday） | 只增加 fenced block 处理，不改清洗边界 |
 | Markdown → VNode | `internal/gateway/web/markdown_vnode.go` | 增加 fence 分段与块 VNode 合并、`$C` 组件节点 |
-| 浏览器 Markdown 渲染 | `internal/gateway/web/static/ada-ui.js` 的 `Markdown` 组件 | 继续接收 VNode AST；补 `$C` 节点透传 |
+| 浏览器 Markdown 渲染 | `internal/gateway/web/static/ada/vnodejson.mjs` 的 VNodeJson / `ui-markdown` | 继续接收 VNode AST；`$C` 节点由 display profile 组件渲染 |
 | VNode 契约 | `spec/vnode.schema.json` | 复用元素/组件/文本节点、限额与校验器 |
 | 前端插件 | `plugin.json` 的 `frontend`、`internal/gateway/frontend` Render Runtime | 新增 `frontend.blocks`，复用同一 TSX→VNode 运行时 |
 | 插件清单 | `spec/manifest.schema.json` | 增加 `frontend.blocks` 字段与消费者 |
@@ -58,7 +58,7 @@ Markdown
   → 用插件数据 Schema 校验 data → Render Runtime 执行 TSX
   → VNode Schema + block profile + 限额校验
   → 按原顺序合并文本 VNode 与块 VNode
-  → ui-markdown（浏览器）/ VNode→HTML（无 JS/HTML 端点）
+  → ui-markdown（浏览器）
 ```
 
 职责边界：
@@ -260,10 +260,10 @@ export default function UsageCard(props: BlockProps) {
 - `props` 只包含块数据、静态 `app` 信息与插件身份；
 - 不注入线程实时状态、文件、密钥、网络或任意查询；
 - 需要实时数据的场景使用插件页面/动作桥，不在 Markdown 块里做查询；
-- 渲染器必须是纯函数式 SSR：无状态、无副作用、无 Node API；
+- 渲染器必须是纯函数式：无状态、无副作用、无 Node API；
 - 输出只能是 VNode，不能再包含 `adag-ui` 块。
 
-### 16.9 服务端渲染管线
+### 16.9 服务端 VNode 渲染管线
 
 #### 16.9.1 解析与占位（MVP）
 
@@ -273,7 +273,7 @@ MVP 在 Markdown **顶层**按 ` ```adag-ui ` fence 分段，不修改 goldmark 
    ` ```adag-ui ` 开块，其他 fenced code block 内的行一律跳过；
 2. 每个文本段继续走现有 `renderMarkdown` → bluemonday → `markdownVNodes`；
 3. 每个块段解析封套、校验 `data`、调用 Render Runtime 得到块 VNode；
-4. 按原顺序拼接文本段与块 VNode（HTML 端点拼接 `renderMarkdown` 输出与块 HTML）；
+4. 按原顺序拼接文本段与块 VNode（`/markdown.ast` 直接返回 VNode JSON）；
 5. 失败时只替换该块为降级节点，不影响其余文本。
 
 边界：fence 需位于列 0；缩进代码块（4 空格）、块引用/列表内的 fence 与
@@ -305,13 +305,12 @@ Render Runtime 调用成功后，宿主必须执行：
 }
 ```
 
-#### 16.9.3 浏览器与无 JS
+#### 16.9.3 浏览器渲染
 
-- `POST /markdown.ast`：返回 VNode 中动态块是标准 `$C`/HTML 节点；
-- 现有 `ui-markdown` 把 nodes 交给 `h()`；`ada-render` 已支持 `$C` 节点；
-- `internal/gateway/web/markdown_vnode.go` 目前只产出元素/文本节点，需要补 `n` 字段，并在转换器中生成 `$C`；
-- `POST /markdown`（HTML 端点）复用同一份块渲染结果，再用 VNode→HTML 输出，保证无 JS 页面也能看到块；
-- 两条路径必须共用同一份缓存/渲染结果，避免行为分叉。
+- `POST /markdown.ast`：返回 VNode，动态块是标准 `$C` / HTML 节点；
+- `ui-markdown` 把 nodes 交给 `renderVNodeJsonChildren`；`vnodejson.mjs` 支持 `$C` 节点；
+- `internal/gateway/web/markdown_vnode.go` 产出元素/文本节点，块渲染器产出 `$C`；
+- 浏览器是唯一渲染现场：没有 HTML 端点，也不存在无 JS 页面路径。
 
 ### 16.10 VNode block profile（安全关键）
 
@@ -357,7 +356,7 @@ Markdown 可能由模型生成，不能等同于插件页面/插槽。动态块�
 #### 16.11.2 缓存
 
 - Key：`(renderer, blockID, pluginVersion, workspace, route, sha256(raw data))`；
-- Value：校验后的 VNode JSON（或 HTML 片段）；
+- Value：校验后的 VNode JSON；
 - 存储：Gateway 进程内 bounded cache（当前 512 项，满时清空；后续可换 LRU）；
 - 失效：插件 reload / enable / disable / 版本变化；
 - 不缓存含实时投影的块；v1 的 block props 只放静态数据，保证可缓存。
@@ -407,7 +406,7 @@ Markdown 可能由模型生成，不能等同于插件页面/插槽。动态块�
 | `internal/common/pluginapi` manifest | 解析 `frontend.blocks`，加载 schema/template 路径 |
 | `internal/gateway/frontend` | block 注册表 + Render Runtime 调用 |
 | `internal/gateway/web` | fence 分段、块 VNode 合并、`markdownVNode` 支持 `$C`/`n` |
-| `internal/gateway/web/static/ada-ui.js` | 确认/补齐 `Markdown` 组件对 `$C` 节点的透传 |
+| `internal/gateway/web/static/ada/vnodejson.mjs` | `$C` 节点由 display profile 组件渲染 |
 | `tools/verify` | manifest 字段、Schema 文件存在、block VNode profile、fixture |
 | `docs/07`、`docs/14`、`docs/15` | 语法、Schema、限额、安全模型交叉引用 |
 
@@ -476,7 +475,7 @@ Markdown：
 
 ### 16.17 相关文档
 
-- [SSR 前端](07-ssr-frontend.md)
+- [前端（SPA）](07-frontend.md)
 - [前端运行时、组件与 UED](14-ui-runtime.md)
 - [插件模型与后端 API](05-plugins.md)
 ## 18. MCP 插件化接入
@@ -523,7 +522,7 @@ Markdown：
 
 ```text
 Browser
-  │ SSR / SSE / 插件页面
+  │ SPA / SSE / 插件页面
   ▼
 Gateway ── JSON-RPC ──► Core
                           │

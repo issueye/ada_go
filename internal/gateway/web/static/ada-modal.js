@@ -5,7 +5,7 @@
  * 开合、模态栈、焦点圈、Esc、点遮罩、页面滚动锁定都在元素内部实现；
  * 业务侧只用 `data-modal-open="<id>"` / `data-modal-close` 或 openModal/closeModal。
  *
- * 刻意不挂 shadow root：SSR + htmx 的页面里样式与 class 都在同一棵树，要的是行为封装。
+ * 刻意不挂 shadow root：样式与 class 都在同一棵树，要的是行为封装。
  */
 (() => {
   'use strict';
@@ -86,7 +86,7 @@
   function openModal(id) {
     const element = modalById(id);
     if (!element) {
-      console.error('[ssr-h] 找不到弹窗组件:', id);
+      console.error('[ada-go] 找不到弹窗组件:', id);
       return;
     }
     element.open();

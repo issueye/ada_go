@@ -1,5 +1,5 @@
 // Package gateway 是 M2 的组合根：把工作区监督者、Core RPC relay、
-// 安全中间件、SSE 与 SSR 前端接成一个 HTTP 服务。
+// 安全中间件、SSE 与 SPA 前端接成一个 HTTP 服务。
 //
 // 依赖方向：gateway 知道 supervisor/relay/security/sse/web；这些子包互不感知，
 // 只通过 contracts 与 http.Handler 接口协作。
@@ -59,7 +59,7 @@ type Config struct {
 	AllowedOrigins []string
 	// Supervisor 是可选的监督者注入点：非空时跳过真实 Core 进程装配，
 	// 生命周期也由调用方负责（Gateway.Shutdown 不会关闭它）。测试用于
-	// 在不 spawn Core 的情况下验证鉴权、SSR 与错误页。
+	// 在不 spawn Core 的情况下验证鉴权、SPA 外壳与错误页。
 	Supervisor contracts.Supervisor
 	// FrontendScripts 是带 frontend 段的插件加载单元（7.5；含统一插件包）：
 	// 非空时组合根构建插件宿主桥（/ext 静态资源、动作桥、Markdown 动态块）。

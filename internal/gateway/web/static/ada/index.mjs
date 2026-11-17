@@ -262,7 +262,7 @@ const UiEmpty = defineComponent({
 	},
 });
 
-// ui-code：源码预览的客户端高亮（HEAD 的 chroma 服务端渲染的替代）。
+// ui-code：源码预览的客户端高亮（替代旧页面的服务端高亮）。
 // props: text（源码原文）、lang（语言名或扩展名；未知/缺省按纯文本）。
 // token 的 class 直接对齐 chroma（.chroma .k/.s/.c/.m/.nf/…，配色规则在
 // app-local.css），所以容器要带 class="chroma"（由调用方给）。这里只拼

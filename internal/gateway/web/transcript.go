@@ -71,7 +71,7 @@ type transcriptPartState struct {
 	Data  string          `json:"data,omitempty"`
 }
 
-// toolRowState 是工具行 JSON 的 tool 对象（旧 SSR 模板 row→tool 的字段投影）。
+// toolRowState 是工具行 JSON 的 tool 对象（页面侧 row→tool 的字段投影）。
 type toolRowState struct {
 	CallID      string `json:"callId,omitempty"`
 	Name        string `json:"name"`
@@ -96,7 +96,7 @@ type toolRowState struct {
 //	user:      {key, kind:"user", at, parts[], canEdit?, editKey?, editText?, threadId?, csrf?}；
 //	           parts[i] = {type:"text", text} | {type:"thinking", text} | {type:"image", mime, data}
 //	           编辑上下文只在 canEdit=true 的行出现（threadId 用于表单地址，
-//	           csrf 供「编辑并重发」表单的双提交校验，语义与旧 SSR 行内表单一致）
+//	           csrf 供「编辑并重发」表单的双提交校验，与页面行内表单语义一致）
 //	tool:      {key, kind:"tool", at, tool:{callId, name, status, statusLabel, durationMs,
 //	           truncated, args, argsHint, output, details, reason}}（图标/色调由客户端派生）
 //	notice:    {key, kind:"notice", at, level, text}（level: info | warn | error）

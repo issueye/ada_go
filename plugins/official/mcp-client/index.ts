@@ -72,8 +72,8 @@ interface ToolDef {
 interface AgentAPI {
   registerTool(def: ToolDef): void;
   route(method: "GET" | "POST", path: string, handler: (req: RouteRequest, ctx: ToolContext) => unknown): void;
-  // registerAction 给渲染桥的 SSR 预取用（7.5）：只读动作的结果会落在
-  // props.data.backend["mcp-client"].page_servers，首屏不依赖浏览器脚本。
+  // registerAction 供动作桥使用（7.5）：页面装载后按 read=true 走 GET；
+  // 首屏数据由 SFC 自己取，服务端不做预取。
   registerAction(def: {
     name: string;
     mode: "read" | "write";

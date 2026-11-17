@@ -1,6 +1,6 @@
 package main
 
-// adag gateway —— M2 的 HTTP 外壳：鉴权、SSR、SSE 与 Core 进程监督。
+// adag gateway —— M2 的 HTTP 外壳：鉴权、SPA 前端、SSE 与 Core 进程监督。
 
 import (
 	"context"

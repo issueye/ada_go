@@ -3,7 +3,7 @@
 // 两条职责：
 //  1. contextBridge 暴露 window.electronAPI（网关发现 / 窗口控制 / 配置 / 进程管理）；
 //  2. 无边框窗口控制：把 .ada-topbar 变成拖拽区，并在右侧动作区追加
-//     最小化/最大化/关闭按钮（ada-go SSR 与 a_da 用同一套 .ada-* DOM，注入逻辑原样）。
+//     最小化/最大化/关闭按钮（ada-go 与 a_da 用同一套 .ada-* DOM，注入逻辑原样）。
 
 const { contextBridge, ipcRenderer } = require('electron')
 
@@ -42,10 +42,10 @@ const ICON_CLOSE =
 // 浏览器场景没有 .ada-electron-controls 元素，该文件是空操作。
 //
 // 顶栏选择器带旧类名兜底：2026-11-16 重设计后 SPA 顶栏是 .c-topbar（动作区
-// .c-tb-right），旧 SSR 的 .ada-topbar/.ada-topbar__actions 仍被识别。
+// .c-tb-right），旧页面时代的 .ada-topbar/.ada-topbar__actions 仍被识别。
 // SPA 顶栏由前端框架挂载，DOMContentLoaded 时可能还不存在 —— 找不到时
 // 短暂重试（最多 3s），挂载完成即注入。
-function installSsrWindowControls() {
+function installWindowControls() {
   if (document.getElementById('ada-electron-window-controls')) return
   const topbar = document.querySelector('.c-topbar, .ada-topbar')
   if (!topbar) return false
@@ -99,12 +99,12 @@ function installSsrWindowControls() {
 }
 
 function installWhenTopbarReady() {
-  try { if (installSsrWindowControls() === true) return } catch { /* 注入失败按未注入重试 */ }
+  try { if (installWindowControls() === true) return } catch { /* 注入失败按未注入重试 */ }
   let tries = 0
   const timer = setInterval(() => {
     tries += 1
     let done = false
-    try { done = installSsrWindowControls() === true } catch { /* 下一轮再试 */ }
+    try { done = installWindowControls() === true } catch { /* 下一轮再试 */ }
     if (done || tries >= 30) clearInterval(timer)
   }, 100)
 }
@@ -115,4 +115,4 @@ if (document.readyState === 'loading') {
   installWhenTopbarReady()
 }
 // 整页表单提交后会换文档；preload 会重新执行，再兜一次 pageshow。
-window.addEventListener('pageshow', installSsrWindowControls)
+window.addEventListener('pageshow', installWindowControls)

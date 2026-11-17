@@ -2,7 +2,7 @@
 //
 // 走查报告的三件事都源于「DOM/CSS 已经换了一套，行为代码还留在上一套」：
 //  1. 拖动没有效果：拖拽条改成 SPA 模板里的 [data-sidebar-resizer]，旧 app.js 的
-//     bindSidebarResizer 随 SSR 一起删了，没人再给 --ada-sidebar-width 赋值；
+//     bindSidebarResizer 随旧页面一起删了，没人再给 --ada-sidebar-width 赋值；
 //     另外 ui/pages.css 的断点直接写 width，会覆盖根变量。
 //  2. 收缩没有效果：顶栏按钮调了不存在的 toggleSidebar()，.ada-shell 从没拿到
 //     is-sidebar-collapsed。

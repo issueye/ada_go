@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/adag/ada-go/spec/vnode.schema.json",
   "title": "ada-go 插件前端 VNode（M0 契约冻结，唯一手写源）",
-  "description": "插件 TSX 在服务端（Gateway Render Runtime）渲染产出的受限 VNode JSON，Go 渲染器把它转成 HTML；所有文本与属性值一律由 Go 侧转义，插件永远拿不到 template.HTML（§7.3）。节点形态共三种：元素 {\"t\":\"<标签>\",\"p\":{...},\"c\":[...]}；宿主组件 {\"t\":\"$C\",\"n\":\"<组件名>\",\"p\":{...},\"c\":[...]}；文本 {\"t\":\"#text\",\"v\":\"<字符串>\"}（文本节点形态为本 Schema 约定：不用裸字符串作子节点，保证子节点数组元素同构、校验确定）。Slot/Page 返回 null 表示该插槽留空，由桥接层处理，不产生 VNode。本 Schema 是结构白名单契约层；Go 渲染器还要再实现（Schema 无法表达的）运行期限制：深度 ≤64、节点总数 ≤2000、单字符串 ≤32KB、序列化总输出 ≤256KB、URL 归一化后再查 javascript: 等 scheme（见 x-limits 与 §9.5）。任何校验失败：该插槽渲染为空并记录错误，不影响页面其余部分；页面显示错误面板（开发模式带堆栈）。",
+  "description": "插件 TSX 在服务端（Gateway Render Runtime）渲染产出的受限 VNode JSON，浏览器运行时按 display profile 渲染成 DOM；所有文本与属性值由宿主校验、由客户端转义渲染，插件永远拿不到原始 HTML。节点形态共三种：元素 {\"t\":\"<标签>\",\"p\":{...},\"c\":[...]}；宿主组件 {\"t\":\"$C\",\"n\":\"<组件名>\",\"p\":{...},\"c\":[...]}；文本 {\"t\":\"#text\",\"v\":\"<字符串>\"}（文本节点形态为本 Schema 约定：不用裸字符串作子节点，保证子节点数组元素同构、校验确定）。Slot/Page 返回 null 表示该插槽留空，由桥接层处理，不产生 VNode。本 Schema 是结构白名单契约层；宿主还要再实现（Schema 无法表达的）运行期限制：深度 ≤64、节点总数 ≤2000、单字符串 ≤32KB、序列化总输出 ≤256KB、URL 归一化后再查 javascript: 等 scheme（见 x-limits 与 §9.5）。任何校验失败：该插槽渲染为空并记录错误，不影响页面其余部分；页面显示错误面板（开发模式带堆栈）。",
   "x-limits": {
     "maxDepth": 64,
     "maxNodes": 2000,
     "maxStringBytes": 32768,
     "maxOutputBytes": 262144,
-    "note": "JSON Schema 不表达树深度/节点总数/总字节数；由 Go 渲染器在解码时强制（§7.3 校验、§9.5 前端 Render Runtime 行）。单字符串 32KB 在本 Schema 以 maxByteLength 尽力声明，Go 侧以 UTF-8 字节数复核。"
+    "note": "JSON Schema 不表达树深度/节点总数/总字节数；由宿主在解码时强制（§7.3 校验、§9.5 前端 Render Runtime 行）。单字符串 32KB 在本 Schema 以 maxByteLength 尽力声明，Go 侧以 UTF-8 字节数复核。"
   },
   "x-blockTags": [
     "div",
@@ -191,7 +191,7 @@
       }
     },
     "text": {
-      "description": "文本节点：v 为纯文本，Go 渲染器负责转义（插件永远拿不到 template.HTML，§7.3）。单字符串上限 32KB（UTF-8 字节，Go 侧复核）。",
+      "description": "文本节点：v 为纯文本，由客户端渲染为文本节点（不拼 HTML；插件永远拿不到原始 HTML，§7.3）。单字符串上限 32KB（UTF-8 字节，Go 侧复核）。",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -263,7 +263,7 @@
             "radio",
             "hidden"
           ],
-          "description": "button/input 的类型；submit 按钮配合原生 form 提交（无 JS 降级，§7.8）。"
+          "description": "button/input 的类型；submit 按钮由客户端提交逻辑处理，不依赖额外 JS。"
         },
         "placeholder": {
           "type": "string",
@@ -283,7 +283,7 @@
         },
         "open": {
           "type": "boolean",
-          "description": "details 展开态（展开/收起用 <details>/<summary>，无 JS 也能用，§7.7.5）。"
+          "description": "details 展开态（展开/收起用 <details>/<summary>，无需额外交互 JS）。"
         },
         "hidden": {
           "type": "boolean",
@@ -331,7 +331,7 @@
         },
         "action": {
           "$ref": "#/$defs/safeUrl",
-          "description": "form 提交目标；渐进增强要求真实表单 + 303（§7.8），只允许站内相对路径（Go 侧复核）。"
+          "description": "form 提交目标；允许站内相对路径（303 回执，Go 侧复核）。"
         },
         "method": {
           "type": "string",
@@ -387,7 +387,7 @@
       }
     },
     "componentProps": {
-      "description": "组件 props：各组件的合法键由 Go 组件库的 PropsSchema 在渲染期逐个校验（本 Schema 只守安全底线）。安全底线：属性名禁止 on*（事件处理函数一律拒绝——没有 hooks、没有状态、没有副作用、没有事件处理函数，§7.3）、禁止 style、禁止 dangerouslySetInnerHTML；禁止 javascript: URL 值（Go 侧对值复核）。",
+      "description": "组件 props：各组件的合法键由客户端宿主组件在渲染期逐个校验（本 Schema 只守安全底线）。安全底线：属性名禁止 on*（事件处理函数一律拒绝——没有 hooks、没有状态、没有副作用、没有事件处理函数，§7.3）、禁止 style、禁止 dangerouslySetInnerHTML；禁止 javascript: URL 值（宿主对值复核）。",
       "type": "object",
       "propertyNames": {
         "allOf": [
@@ -428,7 +428,7 @@
           }
         }
       ],
-      "description": "Schema 层挡字面 javascript:/data:/vbscript:；Go 渲染器再实现归一化（去前导空白与控制字符、实体解码、大小写折叠）后的 scheme 检查——§7.3「禁止 javascript: URL」的完整语义由宿主执行。"
+      "description": "Schema 层挡字面 javascript:/data:/vbscript:；宿主再实现归一化（去前导空白与控制字符、实体解码、大小写折叠）后的 scheme 检查——§7.3「禁止 javascript: URL」的完整语义由宿主执行。"
     }
   }
 }

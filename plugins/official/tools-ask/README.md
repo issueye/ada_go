@@ -12,7 +12,7 @@
 | 信任级别 | `builtin`：随二进制发布，只能启用/禁用 |
 | 形态 | 前后端同包 |
 | 后端能力 | `ui.ask` |
-| 前端贡献 | 插槽 `thread.tray`（`slot.tsx`，order 10）+ `ask-user.css` |
+| 前端贡献 | 插槽 `thread.tray`（`static/AskTray.vue`，order 10）+ `ask-user.css` |
 
 ## 工具：`ask_user`
 
@@ -39,19 +39,26 @@
 
 ## 前端提问卡片
 
-- 数据来自 `props.data.interactions`（线程待答交互的只读投影）。
-- 提交仍走基座交互路由 `/threads/{id}/interaction/{requestId}`，交互的持久化、幂等与超时由基座负责，插件只决定怎么展示。
-- 没有待答项时返回 `null`，由基座默认托盘接手。
+- `static/AskTray.vue` 是运行时装载的 SFC；装载后按会话线程 SSE
+  （`/events/{threadId}`）维护待答队列：`evt.interaction.requested` 进队、
+  `evt.interaction.resolved` 出队、`evt.run.status` 终态清空。没有服务端预取。
+- 提交仍走基座交互路由 `/threads/{id}/interaction/{requestId}`（CSRF 双提交），
+  交互的持久化、幂等与超时由基座负责，插件只决定怎么展示。
+- 没有待答项时不画卡；插件启用时 `thread.tray` 插槽已有贡献，基座托盘让位，
+  这块展示由本插件独占。
 - `kind=form`（多题分步表单）让位给基座托盘渲染，插件不重复实现翻页。
+- 已知降级（SPA 取舍）：SSE 连接建立前已登记的交互不会被补发，因此页面刷新时
+  仍有待答项的会话会看到空托盘；交互登记本身不受影响，刷新后新产生的交互照常出现。
 
 ## 构建
 
 - 后端：`index.ts` → `dist/index.js`，由 `node plugins/official/build.mjs` 生成。
-- 前端：`slot.tsx` 在渲染时编译；`static/ask-user.css` 原样嵌入。
+- 前端：`static/AskTray.vue` 与同目录 `AskTray.js` 由浏览器运行时装载，零构建；
+  `static/ask-user.css` 原样提供。改完重载插件（或重启网关）后刷新页面即可。
 - 不要手改 `dist/`。
 
 ## 相关文档
 
 - [模型适配与交互确认](../../../docs/03-model-and-approval.md)
 - [插件模型与后端 API](../../../docs/05-plugins.md)
-- [SSR 前端](../../../docs/07-ssr-frontend.md)
+- [前端（SPA）](../../../docs/07-frontend.md)

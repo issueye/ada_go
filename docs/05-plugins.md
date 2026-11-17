@@ -88,7 +88,7 @@ iii
 - iapiVersioni 主版本不匹配直接拒绝加载；次版本兼容，宿主忽略未知字段并记录。
 - iidi 必须匹配 i^[a-z][a-z0-9-]{1,63}$i，且等于目录名。
 - itrusti：ibuiltini（系统插件，随 resources 发布，只能启用/禁用）、iverifiedi（签名有效）、ithird-partyi（默认）。**来源决定信任上限**：磁盘插件最高 ithird-partyi；ibuiltini 只接受随包/官方目录；iverifiedi 必须经配置公钥验签，失败降级为 ithird-partyi 并记 warning。来源上限与 Ed25519 验签已落地：磁盘 iverifiedi 必须用已配置公钥验签，失败降级 ithird-partyi；ibuiltini 仍只接受随包/官方目录。
-- 前端可选 iclienti 与贡献级 ihydratei：iclienti 是 iassetsi 目录内的浏览器 bundle，islots[].hydratei / ipages[].hydratei 声明该贡献在浏览器接管；缺省不启用，旧插件行为不变。声明 iclienti/ihydratei/iclientOnlyi 需要 ifrontend.scripti 能力；**第三方与系统插件同面**，不再按 trust 拒绝（风险控制见 §6.2.4 与 [09](09-security-operations.md)）。
+- 前端贡献的 `slots` / `pages` 指向 `assets` 目录内的 `.vue` 单文件组件；SFC 的逻辑是同目录的静态 ESM（`<script src>`），由浏览器运行时装载。声明前端可执行面需要 `frontend.script` 能力；**第三方与系统插件同面**，不再按 trust 拒绝（风险控制见 §6.2.4 与 [09](09-security-operations.md)）。
 - 动作绑定的 ibackendi 可以指向另一个插件的后端动作；目标插件/动作必须存在，跨插件只传 JSON 结果，不共享内存。
 - 清单的每个字段都必须有真实消费者；iadag verifyi 逐字段核对，否则构建失败。
 
@@ -117,10 +117,10 @@ iii
 | isubagent.invokei | 后端 | builtin | ictx.subagent.invokei | v1.5；v1 不装配 |
 | imodel.admini | 后端 | builtin | ictx.model.list/selecti | **只读模型目录 + 切换当前模型**；供应商配置 CRUD 走 iglobal.configi，不在本能力里 |
 | iplugin.admini | 后端 | builtin | ictx.pluginAdmin.install/check/removei | 写全局插件根；宿主校验 id/相对路径/大小，拒绝覆盖 |
-| ibackend.readi | 前端 | third-party | SSR 预取 iprops.data.backend.<id>.<binding>i | Gateway 渲染桥：≤16 个、并发 4、单个 300ms、缓存 8s |
-| ifrontend.scripti | 前端 | third-party | i/ext/{id}/static/*i、hydrate、client bundle | CSP + nosniff + 安装确认；同源脚本风险见 [09](09-security-operations.md) |
+| ibackend.readi | 前端 | third-party | 只读动作绑定（`GET /ext/{id}/action/{binding}`） | 清单校验：`read:true` 需 `backend.read`；动作桥校验 CSRF/Origin 与结果上限 |
+| ifrontend.scripti | 前端 | third-party | SFC 逻辑 ESM（`/ext/{id}/static/*.js`） | CSP + nosniff + 安装确认；同源脚本风险见 [09](09-security-operations.md) |
 
-发现式工具宿主桥是 itool.discoveryi（ictx.catalogi 目录只读投影 + ictx.tool.invokei 按名执行内层工具，沿用同一套超时与循环检测）。通用轮次触发桥 iturn.invokei（ictx.turn.invokei）已落地：宿主建线程/生成 runId/后台执行，插件只提交提示词并拿受理回执；新增桥必须同时提交消费者、审计与契约测试。内部发送桥 idispatch.sendi（ictx.dispatch.sendi）同样已落地：它把消息交给**网关调度层**（[07 §7.9](07-ssr-frontend.md#79-消息发送路径调度层)），可跨工作区，且与界面发送共用同一份投递规则；令牌由网关签给本 Core 进程并只经环境变量传递，插件既拿不到地址也拿不到凭据，sender 由宿主盖章。进程监督桥 iprocess.supervisei（ictx.processesi）也已落地：它把插件的长驻进程交给**网关 ProcessManager**（[06 §6.10](06-plugin-runtime.md)），跨会话存活、崩溃按策略退避重启、按引用计数回收；entry 由宿主解析到插件目录内并拒绝越界，owner 由宿主盖章，没有 stdin/stdout 句柄。
+发现式工具宿主桥是 itool.discoveryi（ictx.catalogi 目录只读投影 + ictx.tool.invokei 按名执行内层工具，沿用同一套超时与循环检测）。通用轮次触发桥 iturn.invokei（ictx.turn.invokei）已落地：宿主建线程/生成 runId/后台执行，插件只提交提示词并拿受理回执；新增桥必须同时提交消费者、审计与契约测试。内部发送桥 idispatch.sendi（ictx.dispatch.sendi）同样已落地：它把消息交给**网关调度层**（[07 §7.9](07-frontend.md#79-消息发送路径调度层)），可跨工作区，且与界面发送共用同一份投递规则；令牌由网关签给本 Core 进程并只经环境变量传递，插件既拿不到地址也拿不到凭据，sender 由宿主盖章。进程监督桥 iprocess.supervisei（ictx.processesi）也已落地：它把插件的长驻进程交给**网关 ProcessManager**（[06 §6.10](06-plugin-runtime.md)），跨会话存活、崩溃按策略退避重启、按引用计数回收；entry 由宿主解析到插件目录内并拒绝越界，owner 由宿主盖章，没有 stdin/stdout 句柄。
 定时任务的调度已迁到单例进程：icron-manageri 装配期用 ictx.processesi 注册 ischeduleri（global、node、on_enable），由它解析 cron 并经 ictx.dispatch.sendi 同一条调度层投递；iagent.everyi 循环已从插件删除。
 ienv.admini 已不存在：env 的变量读写/校验/管理页由 ienv-manageri 系统插件经 iglobal.configi 实现，基座只保留“向子进程注入已配置环境”的通用执行点。icron.admini 已删除：cron 的任务模型/调度/历史由 icron-manageri 经 iglobal.configi + iagent.everyi 通用定时器 + iturn.invokei 实现；基座不再读 icron.jsoni、不调度、不暴露 i/api/cron/firei。
 
@@ -144,15 +144,14 @@ ienv.admini 已不存在：env 的变量读写/校验/管理页由 ienv-manageri
 - idashboardi：概览页卡片；
 - iblocksi：Markdown iadag-uii 动态块；
 - iactionsi：读/写后端动作绑定；写动作必须有 iconfirmi；
-- iclienti / ihydratei / iclientOnlyi：客户端 bundle 与服务端/客户端接管；
-- istylesi / iscriptsi / iassetsi：静态资源；
-- ibackend.readi：SSR 只读预取。
+- istylesi / iassetsi：静态资源（全局 CSS 与 SFC 组件文件）；
+- ibackend.readi：允许把动作绑定标为只读（走 GET 动作桥）。
 
 规则：
 
 - 前端能力只由 ifrontend.capabilitiesi 声明，不按 itrusti 剥掉页面/插槽/脚本；ithird-partyi 不被特殊裁剪为“只有 blocks”。
-- ifrontend.scripti 是脚本/客户端 bundle 的声明门禁；安装时展示“该插件可在浏览器同源执行 JS”，用户确认后才装配。
-- 第三方前端仍受 CSP、VNode 白名单、CSRF、动作确认与审计约束；详见 [07 §7.5](07-ssr-frontend.md#75-前端插件化) 与 [09 §9.3](09-security-operations.md)。
+- ifrontend.scripti 是前端可执行面（SFC 逻辑 ESM）的声明门禁；安装时展示“该插件可在浏览器同源执行 JS”，用户确认后才装配。
+- 第三方前端仍受 CSP、VNode 白名单、CSRF、动作确认与审计约束；详见 [07 §7.5](07-frontend.md#75-插件前端) 与 [09 §9.3](09-security-operations.md)。
 
 #### 6.2.4 系统插件不是基座
 
@@ -343,7 +342,7 @@ iconfigi 是**机器级、插件命名空间隔离**的持久化：key 只在本
 动作（Action）与工具（Tool）是两条通道，不能混用：
 
 - **工具**给模型调用，进入工具目录，受 scope 与超时约束（执行前没有审批钩子）。
-- **动作**只给界面调用（iPOST /ext/{id}/action/{name}i），不进入模型上下文。读动作可以在 SSR 时预取；写动作必须用户点击，并支持 iconfirmi 文案。
+- **动作**只给界面调用（iGET/POST /ext/{id}/action/{name}i），不进入模型上下文。读动作走 GET、直接返回 JSON；写动作必须用户点击，并支持 iconfirmi 文案。
 - **动态路由**（iroutei）给插件自己的 HTTP API 用：iGET/POST /ext/{id}/api/*i，查询串与 JSON 请求体由宿主传入；返回 JSON，响应大小上限 64KB。isse: truei 的路由只允许 GET，处理器用 ictx.sse.send(data, event?)i 推帧。
 - **钩子**只用于生命周期观察；控制面动作（ireplacei/iaborti）仅 builtin 系统插件可用。itool.beforeCalli 点位已随审批策略删除（2026-11-10 决策），执行前没有可阻塞的钩子。需要替换内核机制的，不走钩子，走 [06 §6.10](06-plugin-runtime.md#610-内核实现与替换-seam) 的 seam。
 
@@ -354,7 +353,7 @@ iconfigi 是**机器级、插件命名空间隔离**的持久化：key 只在本
 | icron-manageri | iglobal.configi、iprocessi/iexeci、通用轮次触发桥（builtin） | cron 表达式解析、任务模型、调度循环、运行历史、到期触发 |
 | ienv-manageri | iglobal.configi、ipagei/iactioni、iprocessi 注入点 | env 命名空间格式、校验、管理页、作用域覆盖 |
 | iprovider-admini | iglobal.configi、imodel.admini、inet.fetchi | 供应商 CRUD（ictx.configi）、i/modelsi 拉取（ictx.fetchi）、密钥尾号展示 |
-| itoken-usagei / icomposer-telemetryi | ievents.readi、ibackend.readi、iclientOnlyi | 聚合口径、页面/卡片、轮询节奏、上下文环 |
+| itoken-usagei / icomposer-telemetryi | ievents.readi、ibackend.readi、SFC UI | 聚合口径、页面/卡片、轮询节奏、上下文环 |
 | itool-discoveryi | itool.discoveryi（builtin） | 目录只读投影、按名执行、结果上浮 |
 | imcp-clienti | inet.fetchi、iprocessi、istatei | MCP transport、工具映射、连接生命周期 |
 

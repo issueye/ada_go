@@ -5,7 +5,6 @@ go 1.26.0
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/MoeForge/moejs v0.1.0-alpha.11
-	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/coder/websocket v1.8.15
 	github.com/evanw/esbuild v0.28.2
 	github.com/gin-gonic/gin v1.12.0
@@ -25,7 +24,6 @@ require (
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.12 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect

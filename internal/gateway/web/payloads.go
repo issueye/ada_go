@@ -140,7 +140,7 @@ type pluginFileDTO struct {
 }
 
 // pluginFileView 是 GET /extensions/{id}/file 返回的单个文件内容。
-// 高亮/预览 HTML 已随 SSR 删除：前端拿原文自行渲染（或走 /markdown.ast）。
+// 服务端不产出高亮/预览 HTML：前端拿原文自行渲染（或走 /markdown.ast）。
 type pluginFileView struct {
 	Path      string `json:"path"`
 	Size      int64  `json:"size"`

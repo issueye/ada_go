@@ -1,4 +1,4 @@
-// generated from index.ts (sha256:decd2641f0fbe93d) by plugins/official/build.mjs — do not edit
+// generated from index.ts (sha256:3d921cce273a1e03) by plugins/official/build.mjs — do not edit
 // env-manager 后端：环境变量管理页的数据面。
 //
 // 数据面：
@@ -97,7 +97,7 @@ export default function (agent) {
     };
   });
 
-  // 只读动作 state：供页面 SSR 预取，首屏/无 JS 也能看到两层变量与服务程序目录。
+  // 只读动作 state：页面装载后经动作桥（GET）取两层变量与服务程序目录。
   agent.registerAction({
     name: "state",
     mode: "read",

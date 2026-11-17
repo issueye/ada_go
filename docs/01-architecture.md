@@ -28,18 +28,18 @@
 
 ada-go 的取舍：保留双层消息、统一流、树形会话、steering、content/details 分离；用**进程隔离 + moejs 沙箱 + 显式终止条件 + 循环检测 + 钩子超时**补上短板。
 
-### 2.2 a_da（Rust 微内核 + 网关 + SSR）
+### 2.2 a_da（Rust 微内核 + 网关 + Web 前端）
 
 值得借鉴：
 
 - **微内核 + 端口**：领域层零 IO、零产品名词，唯一多轮循环；产品只是声明（`agent.spec.json`）。
 - **网关进程模型**：一工作区一进程；身份键归一化；空闲回收、LRU 上限、有连接不回收；工作区不存在拒绝拉起。
-- **一个进程一个端口 = 整站**：同一端口托管 SSR 页面、SSE、静态资源、`/api`、`/rpc`。
-- **SSR + HTMX + 表单 303**：核心动作不依赖前端框架；SSE 只做增量；`hx-swap-oob` 做局部同步。
-- **前端 TSX 插件**：插件清单声明插槽/页面/动作/路由；TSX 在服务端执行成 VNode，再交给宿主组件库；没有 hydration。
-- **一套成熟的设计系统**：Black Swan `--ph-*` token、`ada-*` 组件样式、DOM 结构、插槽位置与交互规则已经落地；ada-go 直接复用，只换服务端实现（见 [7.7](07-ssr-frontend.md#77-ui-与设计元语直接复用-a_da)）。
+- **一个进程一个端口 = 整站**：同一端口托管页面、SSE、静态资源、`/api`、`/rpc`。
+- **服务端直出 + HTMX + 表单 303**：核心动作不依赖前端框架；SSE 只做增量；`hx-swap-oob` 做局部同步。
+- **前端 TSX 插件**：插件清单声明插槽/页面/动作/路由；TSX 在服务端执行成 VNode，再交给宿主组件库（ada-go 已改为浏览器运行时装载 SFC）。
+- **一套成熟的设计系统**：Black Swan `--ph-*` token、`ada-*` 组件样式、DOM 结构、插槽位置与交互规则已经落地；ada-go 直接复用，只换渲染实现（见 [7.7](07-frontend.md#77-ui-与设计元语复用-a_da)）。
 - **装配期结算**：插件贡献一次性并入目录；运行期动态注册只收集不生效。
-- **前后端动作分离**：动作是“界面触发的后端调用”，不是模型工具；读动作可预取，写动作点击才执行。
+- **前后端动作分离**：动作是“界面触发的后端调用”，不是模型工具；读动作走 GET、写动作点击才执行。
 
 必须避免：
 
@@ -91,15 +91,15 @@ ada-go 的取舍：保留双层消息、统一流、树形会话、steering、co
 
 ```
 ┌──────────────────────────── 浏览器 / Electron 壳 ────────────────────────────┐
-│  HTML + CSS + 少量原生 JS（HTMX / EventSource）                               │
+│  SPA 外壳 + 自研运行时 static/ada（ESM / SFC / 响应式 / 路由）                 │
 └───────────────────────────────────┬──────────────────────────────────────────┘
                                     │ HTTP / SSE（一个端口）
 ┌───────────────────────────────────▼──────────────────────────────────────────┐
 │ Gateway (adag gateway)                                                       │
-│  auth · workspace registry · supervisor · relay · SSR · frontend plugins     │
+│  auth · workspace registry · supervisor · relay · SPA shell · frontend reg   │
 │  ┌──────────────┐  ┌──────────────┐  ┌────────────────┐  ┌────────────────┐  │
-│  │ Gin router   │  │ SSE hub      │  │ template/comp  │  │ moejs render │  │
-│  │ / /threads   │  │ per thread   │  │ 12 slots       │  │ (TSX → VNode)  │  │
+│  │ Gin router   │  │ SSE hub      │  │ JSON 投影      │  │ frontend bridge│  │
+│  │ / /threads   │  │ per thread   │  │ 12 slots        │  │ (TSX → VNode)  │  │
 │  └──────────────┘  └──────────────┘  └────────────────┘  └────────────────┘  │
 └───────────────────────────────────┬──────────────────────────────────────────┘
                                     │ JSON-RPC 2.0 over WebSocket（回环 + 一次性 token）
@@ -120,7 +120,7 @@ ada-go 的取舍：保留双层消息、统一流、树形会话、steering、co
 - 单二进制 `adag`，子命令 `gateway`、`core`、`plugin`、`doctor`、`verify`、`export`、`backup`。
 - Gateway 是唯一的公开监听者；Core 只监听 `127.0.0.1` 的临时端口，握手时用一次性 token。
 - 一个 Gateway 默认绑定一个工作区，也可以注册多个工作区；线程 id 形如 `th_<workspaceHash>_<ulid>`，自带工作区前缀，URL 不需要额外前缀。
-- 侧栏直接铺开**全部工作区与会话**：当前工作区默认展开、会话由服务端渲染；其它工作区折叠，展开时按需查询该工作区的 Core（`GET /partials/workspace-threads` 懒加载），不维护全局线程索引。切换在工作区组头就地完成，不再跳单独的工作区管理页。FilePicker 打开的工作区写入用户级 `~/.adago/workspaces.json`，重启 Gateway 后仍保留；显式 `--data-dir` 的隔离运行不共享该列表。
+- 侧栏直接铺开**全部工作区与会话**：当前工作区默认展开、会话列表由客户端渲染；其它工作区折叠，展开时按需查询该工作区的 Core（`GET /partials/workspace-threads` 懒加载），不维护全局线程索引。切换在工作区组头就地完成，不再跳单独的工作区管理页。FilePicker 打开的工作区写入用户级 `~/.adago/workspaces.json`，重启 Gateway 后仍保留；显式 `--data-dir` 的隔离运行不共享该列表。
 - 打包时模板与网关静态资源通过 `go:embed` 进二进制；系统插件（builtin）放进 Electron `resources/plugins/official`，第三方插件在工作区/用户目录。系统插件仍按插件装配，可禁用；禁用后基座不补位。
 
 ### 3.2 为什么 Gateway 与 Core 分进程
@@ -129,7 +129,7 @@ ada-go 的取舍：保留双层消息、统一流、树形会话、steering、co
 - **资源边界**：Core 的 SQLite 写入、moejs 内存、命令进程树可以按工作区限制与回收。
 - **生命周期匹配**：工作区是天然的隔离单位；同一工作区的多个线程共享工具目录、插件状态、命令环境。
 - **未来可远程**：契约是 JSON-RPC，Core 可以跑在容器或远端，Gateway 不需要改。
-- **SSR 与 Agent 解耦**：Gateway 可以独立重启、独立扩缩；SSR 不直接触碰模型密钥与工具权限。
+- **前端与 Agent 解耦**：Gateway 可以独立重启、独立扩缩；前端不直接触碰模型密钥与工具权限。
 
 不选“每会话一进程”：进程太多，插件初始化与 SQLite 连接成本高，且同一工作区的文件变更需要共享锁。
 
@@ -162,7 +162,7 @@ gateway
    ├── dispatch（唯一发送路径）
    ├── processmgr（Gateway 名下的非 agent 进程）
    ├── auth
-   └── web（SSR + 前端插件 + SSE）
+   └── web（SPA 外壳 + 前端注册表 + SSE）
              └── cmd/adag gateway
 ```
 
@@ -176,14 +176,14 @@ gateway
 
 ### 3.4 一次对话的时序
 
-1. 浏览器 `POST /threads/{id}/messages`（无 JS 表单）或 JS `fetch`。
+1. 浏览器 `POST /threads/{id}/send`（客户端 fetch；POST→303 仍由端点保留）。
 2. Gateway 校验会话 cookie、CSRF、Origin；把请求转成 `turn.start` 发给对应 Core。
 3. Core 获取线程写锁，追加用户消息 entry，开始 `RunTurn`。
 4. Core 流式调用模型，边收边发事件：`evt.message.delta`、`evt.item.updated`、`evt.run.status`。
-5. Gateway 把事件投影进内存中的 `ThreadView`，向该线程的 SSE 客户端广播；结构变化时用 Go 模板渲染 HTML 片段一并推送。
+5. Gateway 把事件投影进内存中的 `ThreadView`，向该线程的 SSE 客户端广播 JSON 投影（`patch` / `delta` / `snapshot`）。
 6. 模型产生工具调用：Core 校验 schema/scope 后**直接执行**（执行前没有审批钩子）→ 结构化回执 → 作为工具结果回给模型。
-7. 工具实现需要用户输入时，调 `ctx.ui` 经交互桥发 `evt.interaction.requested`；Gateway 渲染输入框上方的通用交互托盘；用户 `POST /interactions/{id}`；Gateway 转 `interaction.respond`；Core 把答案（或 `timeout`/`unavailable`）返回给该工具，由它自己决定是继续还是返回 `denied` 回执。
-8. 本轮结束：Core 恰好发一次 `TurnFinished`（`evt.run.status` 的终态），Gateway 重新渲染 transcript 尾部与状态条。
+7. 工具实现需要用户输入时，调 `ctx.ui` 经交互桥发 `evt.interaction.requested`；浏览器运行时渲染输入框上方的通用交互托盘；用户提交后 Gateway 转 `interaction.respond`；Core 把答案（或 `timeout`/`unavailable`）返回给该工具，由它自己决定是继续还是返回 `denied` 回执。
+8. 本轮结束：Core 恰好发一次 `TurnFinished`（`evt.run.status` 的终态），客户端按事件更新 transcript 尾部与状态条。
 9. 用户关闭页面不影响轮次；Core 继续跑，Gateway 无客户端时仍保留投影，空闲回收由 Registry 负责。
 
 ---
@@ -194,11 +194,11 @@ gateway
 
 做：
 
-- HTTP 路由、SSR、SSE、静态资源、前端插件加载与渲染。
+- HTTP 路由、SPA 外壳、SSE、静态资源、前端插件注册表与 Markdown 动态块渲染。
 - 鉴权、CSRF、Origin/Host 检查、CSP、安全响应头。
 - 工作区注册表、Core 监督、空闲回收、崩溃重启、请求路由。
 - 把 Core 事件投影成页面需要的视图，缓存并广播。
-- 预取前端插件的只读动作，代理写动作与插件路由。
+- 代理插件动作（读动作 GET、写动作 POST）与插件路由。
 - 记录访问日志、SSE 连接数、Core 重启次数等指标。
 
 不做：
@@ -281,7 +281,7 @@ Core 的 WebSocket 使用独立的一次性 token（环境变量传入，不出�
 | GET | `/` | 最近线程或空态 |
 | GET | `/threads` | 线程列表 |
 | POST | `/threads` | 新建线程（表单 303） |
-| GET | `/threads/{id}` | 对话页（SSR） |
+| GET | `/threads/{id}` | 对话页（SPA，客户端渲染） |
 | GET | `/threads/{id}/entries` | 历史分页（JSON，滚动加载） |
 | POST | `/threads/{id}/messages` | 发消息（表单或 fetch） |
 | GET | `/threads/{id}/stream` | SSE 增量流 |
@@ -302,16 +302,16 @@ Core 的 WebSocket 使用独立的一次性 token（环境变量传入，不出�
 
 约定：
 
-- 所有修改型表单在无 JS 时 `POST → 303` 回原页面；有 JS 时拦截为 `fetch`，不整页刷新。
+- 修改型表单一律 `POST → 303` 回原页面；客户端用 `fetch` 消费，不整页刷新。页面路径本身由 SPA 接管，没有无 JS 回退。
 - 插件页面与动作都走 Gateway 鉴权；插件拿不到 token，也拿不到 Core 地址。
 - 静态资源用 `go:embed`，按内容哈希命名；插件静态资源单独目录、`ETag`、`X-Content-Type-Options: nosniff`。
-- 路由表集中声明，SSR 的导航与 `adag doctor` 共用同一份定义。
+- 路由表集中声明，侧栏导航与 `adag doctor` 共用同一份定义。
 
 ---
 
 ### 4.5 桌面壳（Electron）
 
-桌面壳是薄宿主：拉起 `adag gateway`，解析 stdout 的 JSON 握手行，再用无边框窗口加载 Gateway 的 SSR 界面。会话、审批、插件、技能等业务能力全部来自 Gateway + Core；Electron 只做窗口、生命周期、托盘与外部链接交给系统浏览器，不含业务逻辑。
+桌面壳是薄宿主：拉起 `adag gateway`，解析 stdout 的 JSON 握手行，再用无边框窗口加载 Gateway 的 SPA 界面。会话、审批、插件、技能等业务能力全部来自 Gateway + Core；Electron 只做窗口、生命周期、托盘与外部链接交给系统浏览器，不含业务逻辑。
 
 - 单实例锁；窗口 `contextIsolation: true`、`nodeIntegration: false`、`webSecurity: true`；CSP 仍由 Gateway 下发。
 - 网关只绑回环；一次性 token 经环境变量注入（不进命令行），`?token=` 登录 303 后即失效。

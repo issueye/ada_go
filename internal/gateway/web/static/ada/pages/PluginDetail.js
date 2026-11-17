@@ -1,5 +1,5 @@
 // PluginDetail.js —— 插件详情页：清单/文件树/文件预览（Markdown 走 /markdown.ast，
-// 源码走客户端高亮 ../highlight.js；HEAD 的服务端 chroma 已随 SSR 移除）。
+// 源码走客户端高亮 ../highlight.js；服务端不产出高亮 HTML）。
 import { ref, reactive, computed, watch, onMounted, onUnmounted, inject } from "/static/ada/ada-runtime.mjs";
 import { shellState } from "./state.js";
 import { normalizeLang } from "../highlight.js";

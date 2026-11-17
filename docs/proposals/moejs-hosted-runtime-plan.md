@@ -315,7 +315,7 @@ B1 的代价只是「给 processmgr 多一个 runtime 分支」。
 
 | 风险 | 影响 | 缓解 |
 |---|---|---|
-| 网关进程内跑插件 JS | 网关内存/CPU 被占用，理论上影响 SSR | 独立 Runtime + 64MB 上限 + tick 内只做读配置/判定/投递；`agent.every` 有 10s 期限 |
+| 网关进程内跑插件 JS | 网关内存/CPU 被占用，理论上影响 Gateway | 独立 Runtime + 64MB 上限 + tick 内只做读配置/判定/投递；`agent.every` 有 10s 期限 |
 | `ctx.config` 的 `set` 是整键覆盖 | 若仍用同一键会覆盖 | §5.6：历史独立成 `runs` 键，写入方分离 |
 | 归属提升被滥用 | 第三方插件试图把自己变成常驻 | 只对 builtin 生效；非 builtin 一律 core-owned |
 | hosted 与 OS 进程语义混淆 | 运维看不出差异 | `Status` 增 `Kind`；日志前缀区分；`list` 输出带 kind |

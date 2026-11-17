@@ -1,8 +1,8 @@
-// Package web 是 Gateway 的 Web 宿主。整页 SSR 移除后，这里只剩
-// shell/login/error 三个模板、JSON 数据端点与插件静态资源/动作桥。
+// Package web 是 Gateway 的 Web 宿主：shell/login/error 三个模板、JSON 数据端点、
+// 静态资源与插件动作桥；页面由浏览器运行时 `static/ada/` 渲染。
 //
 // 插槽集合是稳定的兼容承诺（设计 7.2）：12 个名字由 internal/common/pluginapi
-// 声明（冻结契约）。宿主模板的概念已随 SSR 删除；本文件保留的只是
+// 声明（冻结契约）。宿主模板已移除；本文件保留的只是
 // 「词汇表消费侧」的一致性校验，供 adag verify 复用。
 package web
 

@@ -4,7 +4,7 @@
 // 及 spec/vnode.schema.json 逐字一致（adag verify 做比对）。词汇表是冻结契约：
 // 修改这里必须同步 Go 侧与 schema，并过 verify。
 //
-// 与 SSR 时代的差异只有两点（见 proposals/spa-frontend-framework.md §5.7）：
+// 与旧版页面渲染管线的差异只有两点（见 proposals/spa-frontend-framework.md §5.7）：
 //   1. 事件绑定（@event → on* DOM 监听）对插件 SFC 放开——插件代码本就是同源脚本；
 //      模型内容（display profile）不经本文件，仍走服务端校验的 VNode JSON。
 //   2. :style 仅接受对象/数组绑定，运行时走 CSSOM（style.setProperty），

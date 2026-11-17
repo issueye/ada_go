@@ -37,7 +37,7 @@ const usage = `adag —— 本地优先的 Agent 系统（单二进制，两角�
 
 用法：
   adag gateway    [--addr 127.0.0.1:52353] [--debug]
-                                                Gateway：鉴权 + SSR + SSE（M2）
+                                                Gateway：鉴权 + SPA 前端 + SSE（M2）
   adag core       --workspace <dir> [--product <file>] [--self-check] [--debug]
                                                 Agent Core：JSON-RPC over 回环 WebSocket（M2）
   adag chat       [--workspace <dir>] [--fake] [--debug]
@@ -153,7 +153,7 @@ func notImplemented(cmd, milestone string) error {
 		cmd, milestone, entry.Diag.String())
 }
 
-// cmdGateway 启动 M2 的 HTTP 外壳（鉴权、SSR、SSE 与 Core 监督）。
+// cmdGateway 启动 M2 的 HTTP 外壳（鉴权、SPA 前端、SSE 与 Core 监督）。
 func cmdGateway(args []string, stdout io.Writer) error {
 	return runGateway(args, stdout)
 }
@@ -417,7 +417,7 @@ func cmdDoctor(args []string, stdout io.Writer) error {
 	if firstErr != nil {
 		return fmt.Errorf("doctor 发现问题（首个：%w）；诊断码见 internal/common/diag", firstErr)
 	}
-	fmt.Fprintln(stdout, "doctor: 自检通过（M5 发布口径：Core RPC、Gateway 鉴权/SSR/SSE、插件平台、技能与审计已接通）。")
+	fmt.Fprintln(stdout, "doctor: 自检通过（M5 发布口径：Core RPC、Gateway 鉴权/SPA/SSE、插件平台、技能与审计已接通）。")
 	fmt.Fprintln(stdout, "       渲染回归与可访问性基线不在本次自检内（见 docs/09-security-operations.md 已知限制）。")
 	return nil
 }

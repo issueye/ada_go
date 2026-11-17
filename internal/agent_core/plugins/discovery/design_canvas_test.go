@@ -124,8 +124,8 @@ func TestDesignCanvasSamplePlugin(t *testing.T) {
 	if len(m.Frontend.Pages) != 0 || len(m.Frontend.Slots) != 0 {
 		t.Error("安装型插件不应声明 pages/slots：渲染桥只装配随包官方插件")
 	}
-	if len(m.Frontend.Styles) != 0 || len(m.Frontend.Scripts) != 0 {
-		t.Error("安装型插件不应声明 styles/scripts：不会被装配，块要复用宿主令牌类")
+	if len(m.Frontend.Styles) != 0 {
+		t.Error("安装型插件不应声明 styles：不会被装配，块要复用宿主令牌类")
 	}
 	if len(m.Frontend.Blocks) != 1 {
 		t.Fatalf("应声明 1 个动态块，实际 %d", len(m.Frontend.Blocks))

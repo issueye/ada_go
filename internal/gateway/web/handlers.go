@@ -232,7 +232,7 @@ func (s *Server) transcriptPayload(r *http.Request, threadID, runStatus string, 
 				Key: key, Kind: "assistant", At: item.At, Parts: parts,
 			})
 		case "user":
-			// 纯数据行：旧 SSR 模板 row/parts_user 用到的字段等价输出。
+			// 纯数据行：与页面侧 row/parts_user 结构等价的字段输出。
 			parts := make([]transcriptPartState, 0, len(item.Parts))
 			for _, part := range item.Parts {
 				switch part.Type {
@@ -1259,7 +1259,7 @@ func numericLabel(value string) bool {
 	return true
 }
 
-// handleOverviewJSON 是概览岛的轮询接口；数据投影与 SSR 时代同源。
+// handleOverviewJSON 是概览页的轮询接口；数据投影与页面渲染同源。
 func (s *Server) handleOverviewJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")

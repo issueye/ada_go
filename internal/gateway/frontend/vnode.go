@@ -11,7 +11,7 @@ import (
 )
 
 // 渲染限制（设计 7.3、6.4、9.5）。数值与 spec/vnode.schema.json 的 x-limit 必须一致，
-// adag verify vnode 会逐条比对。（插槽/页面渲染超时预算已随 SSR 移除；
+// adag verify vnode 会逐条比对。（插槽/页面由浏览器运行时渲染，服务端没有渲染超时预算；
 // Markdown 动态块的预算在 web.MarkdownBlockRenderTimeoutMS。）
 const (
 	MaxDepth       = 64

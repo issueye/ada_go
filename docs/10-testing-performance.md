@@ -17,8 +17,8 @@
 - **内核 seam**：`Compactor`、`SessionStore`、`ToolRunner`、`ModelClient`、`PromptSource` 的替换实现必须通过与默认实现相同的契约测试；安全不变量不可替换。
 - **通用原语**：`global.config` 的命名空间隔离、0600、原子写、跨进程锁、限额；`events.read` 的只读、游标、线程/工作区范围与字段脱敏。
 - **Node 兼容**：同一语料在 Node 20 LTS 与 moejs 下双跑；模块 `node:`/裸名同一实例、ESM/CJS 互操作；`fs` 根与写成员越界、错误码、16MB/10k 上限；`process.env` 白名单；`child_process` 无 shell、超时、输出上限与进程树；定时器顺序/取消/256 上限；Buffer/TextDecoder/structuredClone；`.node` 拒绝；真实包冒烟。清单与偏差见 [6.14](12-node-compat.md#614-兼容性验证)。
-- **前端**：VNode 校验、转义、标签/属性白名单、golden HTML、SSE 合并与断序快照、无 JS 表单链路。
-- **UI 设计系统**：token 名/值与 a_da 基线逐项一致（`adag verify ui`）；CSS 无硬编码十六进制色、奇数尺寸与 `dark:` 变体；组件 class/DOM 基线快照；Light/Dark 对比度 ≥4.5:1（大字/图标 ≥3:1）；1600/1280/1024/860/760/500 宽度无横向溢出；≤760px 抽屉与汉堡；`prefers-reduced-motion`、键盘焦点回归、`<details>`/真实链接无 JS 可操作；对话流、工具卡、三类托盘、任务卡、空状态、错误页的 golden HTML 与截图对照 a_da 基线。详见 [7.7.7](07-ssr-frontend.md#777-验收)。
+- **前端**：VNode 校验、转义、标签/属性白名单、display profile、SSE 合并与断序快照、SPA 页面装载与 SFC 编译缓存。
+- **UI 设计系统**：token 名/值与 a_da 基线逐项一致（`adag verify ui`）；CSS 无硬编码十六进制色、奇数尺寸与 `dark:` 变体；组件 class/DOM 基线快照；Light/Dark 对比度 ≥4.5:1（大字/图标 ≥3:1）；1600/1280/1024/860/760/500 宽度无横向溢出；≤760px 抽屉与汉堡；`prefers-reduced-motion`、键盘焦点回归；对话流、工具卡、三类托盘、任务卡、空状态、错误页的截图对照 a_da 基线。详见 [7.7](07-frontend.md#77-ui-与设计元语复用-a_da) 与 [14 §19](14-ui-runtime.md)。
 - **E2E**：`adag gateway --fake-provider` + httptest/浏览器（chromedp）：新建线程、流式、交互请求与响应、插件页面、重载插件、Gateway 重启恢复。
 - **边界**：零插件启动、禁用系统插件后对应能力消失、`internal/` 不依赖 `plugins/official/`、基座源码无系统插件 id、不存在 Go 插件注册 API。
 - **模糊测试**：协议 JSON、VNode、路径 scope、Markdown 清洗。
@@ -74,13 +74,13 @@ adag doctor --fake                          # 无模型依赖的启动自检
 | 连续 3 次相同工具 + 相同参数 + 相同回执 | 返回 `loop_detected` 错误回执，轮次继续；第 5 次以 `error` 结束；`repeatable` 工具不受影响 |
 | 产品未配置墙钟/token 上限 | 长轮次不被“预算”杀掉，只有模型、错误或用户能结束 |
 | 运行中用户取消 | 在模型、工具、插件脚本任一阶段都得到 `TurnFinished(cancelled)`，部分消息保留 |
-| SSE 断线 10s 后重连 | 连续则补发，断裂则快照，无重复消息 |
+| SSE 断线 10s 后重连 | 连续则补发，断裂发 `resync` 并重拉 transcript，无重复消息 |
 | Gateway 重启 | 线程/交互/插件状态保留，运行轮标记 interrupted |
 | 前端插件输出 `onClick` | 校验拒绝，该插槽为空，页面其余正常 |
 | UI 复用了旧 token 或多写一个十六进制色 | `adag verify ui` 失败并给出文件与行号 |
 | 760px 宽度打开对话页 | 侧栏收为抽屉；汉堡唤出、遮罩/Esc 关闭；主区无横向溢出 |
-| 禁用 JS 打开对话页与任务卡 | 正文、交互记录、`<details>` 任务卡与页签链接仍可读可操作 |
-| 无 JS 发消息 | 303 回页面，轮询后看到结果 |
+| 浏览器加载 SPA 页面 | shell + bootstrap + `index.mjs` 正常装载；注册表里的插件插槽/页面按 SFC 渲染 |
+| 登录页 / 错误页无 JS | 原生表单与 303 可用；业务页面明确要求 JS，不承诺无 JS 回退 |
 
 ---
 

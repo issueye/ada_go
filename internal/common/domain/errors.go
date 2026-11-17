@@ -192,7 +192,7 @@ const (
 	DiagAuth   DiagArea = "AUTH"   // 鉴权/CSRF/Origin。
 	DiagModel  DiagArea = "MODEL"  // 模型流与 provider 桥。
 	DiagStore  DiagArea = "STORE"  // SQLite/锁/备份。
-	DiagUI     DiagArea = "UI"     // SSR/SSE/投影。
+	DiagUI     DiagArea = "UI"     // SPA 前端/SSE/投影。
 	DiagConfig DiagArea = "CFG"    // 配置与产品声明。
 )
 

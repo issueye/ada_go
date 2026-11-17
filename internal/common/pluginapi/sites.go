@@ -120,16 +120,16 @@ var installSites = map[Capability]InstallSite{
 		Milestone:     "M5",
 	},
 	CapBackendRead: {
-		Capability: CapBackendRead, HostInstall: "Gateway 侧预取只读后端动作结果（最多 16 个、并发 4、单个 300ms、缓存 8s）",
-		ScriptSurface: "props.data.backend.<插件 id>.<binding>",
-		EnforcedBy:    "只读动作白名单 + CSRF/Origin + 结果上限（7.5）",
+		Capability: CapBackendRead, HostInstall: "动作绑定标为只读时走 GET 动作桥，直接返回 JSON（服务端不做预取）",
+		ScriptSurface: "GET /ext/{id}/action/{binding}",
+		EnforcedBy:    "只读动作白名单 + CSRF/Origin + 结果上限（7.6）",
 		Milestone:     "M4",
 	},
 	CapFrontendScript: {
-		Capability: CapFrontendScript, HostInstall: "Gateway 侧允许加载插件自带 JS（默认关闭，仍受 CSP 限制）",
-		ScriptSurface: "/ext/{id}/static/* 与 /static/*",
-		EnforcedBy:    "CSP 无内联脚本 + 信任级别 builtin/verified + nosniff（09 §9.3、7.5）",
-		Milestone:     "M4（v1 默认不加载第三方 JS）",
+		Capability: CapFrontendScript, HostInstall: "允许插件前端可执行面（SFC 逻辑 ESM，third-party 声明即装配失败）",
+		ScriptSurface: "SFC <script src> 指向的 /ext/{id}/static/*.js（原生 ESM）",
+		EnforcedBy:    "CSP 无内联脚本 + 信任级别 builtin/verified + 内联 script 装配期拒绝（09 §9.3、7.5）",
+		Milestone:     "M4（运行时装载 SFC）",
 	},
 }
 

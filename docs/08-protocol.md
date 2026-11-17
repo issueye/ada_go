@@ -227,7 +227,7 @@ JSON-RPC 标准错误码用于传输层；业务错误用 4 位应用码：
 | 字段 | 消费者 |
 |---|---|
 | `plugins` | 系统插件（builtin）的启用清单；第三方插件由发现目录与用户启用状态决定，装配时合并 |
-| `capabilities.skills/images/subagents/markdownBlocks/pluginIslands` | 技能装配、图片输入门、子智能体装配、Markdown 动态块总开关、客户端岛开关（这是**产品功能开关**，与插件安装能力位无关） |
+| `capabilities.skills/images/subagents/markdownBlocks` | 技能装配、图片输入门、子智能体装配、Markdown 动态块总开关（这是**产品功能开关**，与插件安装能力位无关） |
 | `identity.name/locale` | 界面品牌与语言；**不含人格**，人格来自 `persona-*` 插件 |
 | `policies` | 引擎并发、单工具超时、可选的墙钟/token 上限、循环检测阈值；**不含审批规则**（审批策略已移除，没有任何插件的策略设置参与工具执行） |
 
@@ -235,4 +235,4 @@ JSON-RPC 标准错误码用于传输层；业务错误用 4 位应用码：
 
 ---
 
-**相邻文档**：[← SSR 前端](07-ssr-frontend.md) · [索引](design.md) · [安全与运维 →](09-security-operations.md)
+**相邻文档**：[← 前端（SPA）](07-frontend.md) · [索引](design.md) · [安全与运维 →](09-security-operations.md)

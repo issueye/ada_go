@@ -6,7 +6,7 @@
 
 ## 附录 A：插件示例
 
-示例由两个插件组成：`tools-plan`（后端，builtin，TS）负责维护计划；`task-plan`（前端，third-party，TSX）只负责把计划渲染成悬浮卡。两者通过清单里的只读动作绑定连接，互不 import。系统插件 `tools-plan` 把同一思路收进了自己的前端段（真实动作数据，无示例回退）；这里刻意用第三方版本，展示最小权限路径。第三方前端与系统插件同面：可以声明插槽、页面与脚本，但需要 `frontend.script` 能力并经过安装确认。
+示例由两个插件组成：`tools-plan`（后端，builtin，TS）负责维护计划；`task-plan`（前端，third-party，SFC）只负责把计划渲染成悬浮卡。两者通过清单里的只读动作绑定连接，互不 import。系统插件 `tools-plan` 把同一思路收进了自己的前端段（真实动作数据，无示例回退）；这里刻意用第三方版本，展示最小权限路径。第三方前端与系统插件同面：可以声明插槽、页面与 `.vue` 组件，逻辑由同目录静态 ESM 提供。
 
 ### A.1 `task-plan/plugin.json`（只有前端）
 
@@ -20,7 +20,7 @@
   "trust": "third-party",
   "frontend": {
     "capabilities": ["backend.read"],
-    "slots": [{ "slot": "chat.corner", "template": "slot.tsx", "order": 10 }],
+    "slots": [{ "slot": "chat.corner", "component": "PlanCard.vue", "order": 10 }],
     "styles": ["task-plan.css"],
     "assets": "static",
     "actions": {
@@ -111,31 +111,45 @@ export default function (agent: AgentAPI) {
 
 示例只展示计划部分；随包发布的 `tools-plan` 还会注册 `finish`，并补充参数校验、错误文案与状态清理，从略。
 
-### A.3 `task-plan/slot.tsx`（前端插槽）
+### A.3 `task-plan/PlanCard.vue`（前端插槽）
 
-```tsx
-import { Icon, Todo } from "ssr:components";
-
-export function Slot(props: SlotProps) {
-  const plan = props.data.backend["task-plan"]?.plan as any;
-  if (!plan || !plan.total) return null;
-
-  return (
-    <details class="tp-card" data-state="collapsed">
-      <summary class="tp-card__summary">
-        <Icon name="i-list" size={12} />
-        <span class="tp-card__title">任务规划</span>
-        <span class="tp-card__count">{plan.done + "/" + plan.total}</span>
-      </summary>
-      <div class="tp-card__body">
-        <Todo steps={plan.steps} notes={plan.notes} />
-      </div>
-    </details>
-  );
-}
+```html
+<template>
+  <details v-if="visible" class="tp-card">
+    <summary class="tp-card__summary">
+      <span class="ada-icon" data-icon="i-list" aria-hidden="true">≡</span>
+      <span class="tp-card__title">任务规划</span>
+      <span class="tp-card__count">{{ done }}/{{ total }}</span>
+    </summary>
+    <div class="tp-card__body">
+      <ol class="ada-todo__list">
+        <li v-for="(step, i) in steps" :key="i" :class="stepClass(step)">{{ step.step }}</li>
+      </ol>
+    </div>
+  </details>
+</template>
+<script src="./PlanCard.js"></script>
 ```
 
-前端拿到的全部业务数据都来自 `props.data.backend["task-plan"].plan`（由 `tools-plan` 的只读动作返回）；基座不知道 `plan`、`steps` 或 `total` 这些字段，只负责鉴权、预取、VNode 校验与转义。
+```js
+// PlanCard.js —— 同目录静态 ESM，装载后经动作桥取数
+import { ref, computed, inject, onMounted } from "/static/ada/ada-runtime.mjs";
+
+export const setup = () => {
+  const ada = inject("ada");
+  const plan = ref(null);
+  const steps = computed(() => plan.value?.steps ?? []);
+  const done = computed(() => plan.value?.done ?? 0);
+  const total = computed(() => plan.value?.total ?? 0);
+  const visible = computed(() => total.value > 0);
+  const stepClass = (step) => "is-" + step.status;
+  onMounted(async () => { plan.value = await ada.action("plan", { threadId: ada.thread?.id }); });
+  return { plan, steps, done, total, visible, stepClass };
+};
+```
+
+前端拿到的业务数据来自 `tools-plan` 注册的只读动作 `plan`（`read: true` → GET 动作桥）；
+基座不知道 `plan`、`steps` 或 `total` 这些字段，只负责鉴权、资源装载、VNode 校验与转义。
 
 ---
 
@@ -226,7 +240,7 @@ plugin_route_kb = 64
 ## 附录 D：术语
 
 - **Core**：Agent 内核进程，负责一轮对话的全部执行。
-- **Gateway**：HTTP 入口进程，负责鉴权、SSR、SSE、工作区监督。
+- **Gateway**：HTTP 入口进程，负责鉴权、SPA 外壳与 JSON 数据端点、SSE、工作区监督。
 - **贡献**：插件在装配期登记的工具、提示词、动作、路由、钩子、插槽、页面。
 - **快照/补丁**：Core 事件的两种形态；快照用于首次加载与断序，补丁用于增量。
 - **回执**：工具执行的结构化结果，分 `content`（模型）与 `details`（界面）。
@@ -238,7 +252,7 @@ plugin_route_kb = 64
 - **Node 兼容层**：以 `node:*` 名字暴露给插件的 API 子集；不是 Node 运行时，无原生扩展、libuv 与运行时 npm 解析。
 - **原生库**：用 Go 实现、按 Node 模块名暴露的内置模块；所有 IO 经宿主回调，不直接触达系统。
 - **设计令牌（`--ph-*`）**：a_da 的 Black Swan 颜色与语义变量，定义在 `design/tokens.css`；ada-go 原样复用，组件只引用变量、不写死色值。
-- **`ada-*` 组件库**：a_da 的服务端渲染组件 DOM/class 约定；ada-go 用 Go 组件输出同一结构，插件插槽与页面共享同一套样式。
+- **`ada-*` 组件库**：a_da 的组件 DOM/class 约定；ada-go 的基座组件与插件 SFC 输出同一结构，共享同一套样式。
 
 ---
 

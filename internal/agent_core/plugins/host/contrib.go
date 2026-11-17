@@ -162,7 +162,6 @@ type FrontendContribution struct {
 	Dashboard []pluginapi.DashboardContribution
 	Actions   map[string]pluginapi.ActionBinding
 	Styles    []string
-	Scripts   []string
 	Assets    string
 }
 
@@ -247,9 +246,8 @@ func (c *Contribution) Validate(caps *CapabilitySet) error {
 		return fmt.Errorf("host: %s 是 %s，不能注册 provider（05 §6.3）", c.PluginID, c.Trust)
 	}
 	for _, p := range c.Providers {
-		if !true {
-			return fmt.Errorf("host: provider %q 需要 net.sse 能力（03 §5.5）", p.ID)
-		}
+		// 没有 net.sse 能力校验：能力位不决定「装什么」（2026-11-10 决策），
+		// provider 的出网桥对所有插件一致安装，信任级别校验见上方。
 		if len(p.Models) == 0 {
 			return fmt.Errorf("host: provider %q 没有声明任何模型", p.ID)
 		}

@@ -42,21 +42,18 @@ type Backend struct {
 	ConfigNamespace string `json:"configNamespace,omitempty"`
 }
 
-// Frontend 是前端清单段（7.5）。
+// Frontend 是前端清单段（7.5）。插件前端是运行时装载的 SFC 单文件组件：
+// 逻辑代码必须是同目录的 ESM 静态文件，没有浏览器 bundle 或脚本清单字段。
 type Frontend struct {
-	Capabilities []Capability `json:"capabilities"`
-	// Client 是浏览器 bundle 的静态资源名（assets 目录内）；声明后 slots/pages
-	// 可用 hydrate:true 在客户端接管。仅 builtin/verified 且需 frontend.script。
-	Client    string                   `json:"client,omitempty"`
-	Slots     []SlotContribution       `json:"slots"`
-	Pages     []PageContribution       `json:"pages"`
-	Blocks    []BlockContribution      `json:"blocks"`
-	Nav       []NavContribution        `json:"nav"`
-	Dashboard []DashboardContribution  `json:"dashboard"`
-	Actions   map[string]ActionBinding `json:"actions"`
-	Styles    []string                 `json:"styles"`
-	Scripts   []string                 `json:"scripts"`
-	Assets    string                   `json:"assets"`
+	Capabilities []Capability             `json:"capabilities"`
+	Slots        []SlotContribution       `json:"slots"`
+	Pages        []PageContribution       `json:"pages"`
+	Blocks       []BlockContribution      `json:"blocks"`
+	Nav          []NavContribution        `json:"nav"`
+	Dashboard    []DashboardContribution  `json:"dashboard"`
+	Actions      map[string]ActionBinding `json:"actions"`
+	Styles       []string                 `json:"styles"`
+	Assets       string                   `json:"assets"`
 }
 
 // BlockContribution 是 Markdown 内联动态块的渲染器（adag-ui fence）。
@@ -73,7 +70,7 @@ type BlockContribution struct {
 }
 
 // SlotContribution 把一个 SFC 组件挂到某个稳定插槽。
-// Component 是 assets 目录内的 .vue 相对路径，由浏览器运行时装载（无 SSR）。
+// Component 是 assets 目录内的 .vue 相对路径，由浏览器运行时装载。
 type SlotContribution struct {
 	Slot      string `json:"slot"`
 	Component string `json:"component"`
@@ -239,24 +236,6 @@ func (m *Manifest) validateFrontend() error {
 	}
 	if err := ValidateCapabilityList(f.Capabilities, m.Trust, false); err != nil {
 		return fmt.Errorf("pluginapi: %s: %w", m.ID, err)
-	}
-	if len(f.Scripts) > 0 && !hasCap(f.Capabilities, CapFrontendScript) {
-		return fmt.Errorf("pluginapi: %s 声明了 scripts 但没有 frontend.script 能力（7.5）", m.ID)
-	}
-	if m.Trust != TrustBuiltin && m.Trust != TrustVerified && len(f.Scripts) > 0 {
-		return fmt.Errorf("pluginapi: %s 是 %s，不加载插件 JS（7.5、6.9）", m.ID, m.Trust)
-	}
-	client := strings.TrimSpace(f.Client)
-	if client != "" {
-		if !validEntryPath(client) || !strings.HasSuffix(client, ".js") {
-			return fmt.Errorf("pluginapi: %s 的 frontend.client %q 必须是 assets 内的 .js 相对路径", m.ID, client)
-		}
-		if !hasCap(f.Capabilities, CapFrontendScript) {
-			return fmt.Errorf("pluginapi: %s 声明了 frontend.client 但没有 frontend.script 能力（7.5）", m.ID)
-		}
-		if m.Trust != TrustBuiltin && m.Trust != TrustVerified {
-			return fmt.Errorf("pluginapi: %s 是 %s，不允许前端 client bundle（7.5、6.9）", m.ID, m.Trust)
-		}
 	}
 	seenSlot := make(map[string]bool, len(f.Slots))
 	for _, s := range f.Slots {

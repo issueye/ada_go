@@ -59,7 +59,7 @@ ada-go 的插件不是"什么都能做的脚本"，而是**在固定注册面和
 | 副作用 | 只读 | `access: "read"`（不弹审批） |
 | | 写用户数据 / 改外部状态 | `access: "write"`（过 `policy-default` 询问） |
 | | 出网访问非回环 | `access: "network"` |
-| 装配位置 | `plugins/official/` | 可声明 `pages`/`slots`/`styles`/`scripts` |
+| 装配位置 | `plugins/official/` | 可声明 `pages`/`slots`/`dashboard`/`styles`（组件是 `assets` 里的 `.vue`） |
 | | `~/.adago/plugins/<id>/` | **只有 backend + `frontend.blocks` 会装配** |
 | UI | 不需要 | 不写 `frontend` |
 | | 展示 | `frontend.blocks` + `schemas/*.json` + `*.tsx` |
@@ -148,9 +148,9 @@ export default function register(agent) {
 ### 2.3 前端段：先判断能不能装配
 
 ```
-要页面/插槽？ → 只能放 plugins/official/（随包）
+要页面/插槽？ → 只能放 plugins/official/（随包）；组件是 assets 里的 .vue + 同目录 ESM
 要对话里的卡片？ → frontend.blocks，安装型插件也可以
-要自己的 CSS/JS？ → 只有官方插件会被装配；安装型插件的 blocks 必须复用宿主令牌类
+要自己的 CSS？ → 只有官方插件会被装配；安装型插件的 blocks 必须复用宿主令牌类
 ```
 
 ### 2.4 动态块五步
@@ -178,7 +178,7 @@ export default function register(agent) {
 function GroupRow(props) { return <li>…</li>; }
 
 // ❌ <GroupRow row={row} />      → 「组件函数缺少 __ada_component 名」
-// ✅ {GroupRow({ row: row })}    → 宿主编译器只认 import 自 ssr:components 的宿主组件
+// ✅ {GroupRow({ row: row })}    → 宿主编译器只认 import 自 adag:components 的宿主组件
 ```
 
 这条错误在运行期只会表现为"整块降级成 fallback"，用户看到的是
@@ -192,9 +192,9 @@ function GroupRow(props) { return <li>…</li>; }
 "capabilities": ["net.fetch", "state"]
 ```
 
-能力是**安装期授予**的：声明了才有 `ctx.fetch` / `ctx.state`；
-没声明就是属性不存在（不是"调用时再报错"）。反过来，声明了不用的能力
-会在评审时被判为权限过宽。
+能力位只做**清单声明校验**（2026-11-10 决策）：`ctx.*` 桥与 `node:*` 模块一律装上，
+声明不决定宿主装什么；声明越界（未知名字／低于最低信任级别）仍会让装配失败。
+反过来，声明了不用的能力会在评审时被判为权限过宽。
 
 ### 2.6 本案例的实现选择
 
@@ -250,7 +250,7 @@ Copy-Item -Recurse plugins\design-canvas "$env:USERPROFILE\.adago\plugins\design
 | 块 | 在回答里贴一段 `adg-ui` 封套 | 渲染成卡；故意少一个必填字段应降级成 `fallback` |
 
 **不起 Gateway 也能验块**：宿主的渲染桥是纯 Go 的，直接构造一个 `host.Script`
-就能跑「Schema 校验 → TSX 编译 → VNode → HTML」：
+就能跑「Schema 校验 → TSX 编译 → VNode JSON」（浏览器按这份 JSON 渲染，服务端不产出 HTML）：
 
 ```go
 scripts := []host.Script{{
@@ -262,7 +262,7 @@ scripts := []host.Script{{
     Schemas: map[string][]byte{"schemas/canvas-ledger.json": schemaSrc},
 }}
 b, _ := frontend.NewBridge(frontend.BridgeOptions{Scripts: scripts, MarkdownBlocks: true})
-_, html, err := b.RenderBlock(req, "design-canvas/canvas-ledger", "b1", 1, data)
+_, vnode, err := b.RenderBlock(req, "design-canvas/canvas-ledger", "b1", 1, data)
 ```
 
 本仓库把这条固化成 `internal/gateway/frontend/design_canvas_block_test.go`，
@@ -288,7 +288,7 @@ _, html, err := b.RenderBlock(req, "design-canvas/canvas-ledger", "b1", 1, data)
 | 静态 | `node --check`（拷成 `.mjs`）＋ 去注释后扫反模式 ＋ `json.tool` | 通过；无 `inputSchema` / 全局 `fetch` / `import` |
 | 装配 | 拷到 `~/.adago/plugins/` 后 `adag plugin list` | `design-canvas 0.1.0 third-party true global c203faca…` |
 | 契约 | `go test ./internal/agent_core/plugins/discovery -run DesignCanvas` | PASS：清单/能力/入口/块/技能 frontmatter 全部符合 |
-| 块渲染 | `go test ./internal/gateway/frontend -run DesignCanvasLedgerBlock` | PASS：Schema→TSX→VNode→HTML，档位 class 与表格正确；多余字段被拒 |
+| 块渲染 | `go test ./internal/gateway/frontend -run DesignCanvasLedgerBlock` | PASS：Schema→TSX→VNode JSON，档位 class 与表格正确；多余字段被拒 |
 | 冒烟 | 用假 `agent`/`ctx` 在 Node 里直跑入口（`node --check` + 断言注册面/台账/降级） | PASS；并发现 `canvasUrl` 误带 `/api/nodes` 路径，已拆成 base（展示）与 endpoint（报错定位） |
 | 降级 | 停掉画布再调工具 | `details.error=unreachable`，文本给出「先启动 adago_design」的建议，插件未被禁用 |
 

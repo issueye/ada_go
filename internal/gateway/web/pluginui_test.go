@@ -1,6 +1,6 @@
 package web_test
 
-// 插件前端接线测试（SSR 移除后的收缩版）：
+// 插件前端接线测试：
 //   - /ext 静态资源 allowlist 与 512KB 限额（冻结契约）；
 //   - 动作桥（ActionEnvelope）；
 //   - PluginLister → /partials/extensions.json 的前端插件合并。
