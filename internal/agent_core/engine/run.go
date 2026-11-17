@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -307,6 +308,14 @@ func (r *run) streamOnce(system string, messages []domain.Message) (domain.Messa
 	stream, err := r.deps.Model.Stream(r.ctx, req)
 	if err != nil {
 		if ctxErr := r.ctx.Err(); ctxErr != nil {
+			return domain.Message{}, nil, "", TerminalCancelled, false
+		}
+		// provider 桥可能先把插件调用的取消（2002 turn_aborted）返回给引擎：
+		// 例如插件运行时在请求途中被关闭/重载。取消不是供应商配置错误，
+		// 不能再包装成 5001 provider_error（否则界面会误导用户去查配置）。
+		var de *domain.Error
+		if errors.As(err, &de) && de.Code == domain.CodeTurnAborted {
+			r.emitErrorCode(domain.CodeTurnAborted, "轮次在模型请求中被取消")
 			return domain.Message{}, nil, "", TerminalCancelled, false
 		}
 		r.emitErrorCode(domain.CodeProviderError, "模型请求失败: "+err.Error())

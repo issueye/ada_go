@@ -329,6 +329,39 @@ func TestRunCancelKeepsPartial(t *testing.T) {
 	}
 }
 
+// cancelOnStream 模拟 provider 桥在 Node/Runtime 层先把调用取消：
+// Stream 返回带 2002 的业务错误，而 run 的 ctx 仍然存活。
+type cancelOnStream struct{}
+
+func (cancelOnStream) Stream(context.Context, ports.Request) (ports.Stream, error) {
+	return nil, domain.NewError(domain.CodeTurnAborted,
+		"插件 provider-openai-chat 的 provider 调用被取消: context canceled")
+}
+
+// TestProviderCancelIsNotProviderError 钉住取消分类：插件/运行时取消不能
+// 被包装成 5001 provider_error（否则界面提示「检查供应商配置」，误导用户）。
+func TestProviderCancelIsNotProviderError(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, testkit.NewScriptedModel(testkit.TextTurn("不会被调用")))
+	h.deps.Model = cancelOnStream{}
+	th, _ := h.store.CreateThread(context.Background(), h.workspace, "provider-cancel")
+
+	if got := h.run(t, context.Background(), th.ID, "hi"); got != domain.TerminalCancelled {
+		t.Fatalf("终态 = %q，期望 cancelled", got)
+	}
+	errs := h.events.Filter(domain.EvtError)
+	if len(errs) != 1 {
+		t.Fatalf("error 事件数 = %d，期望 1：%s", len(errs), h.events.Text())
+	}
+	payload := string(errs[0].Payload)
+	if !strings.Contains(payload, "2002") || strings.Contains(payload, "5001") {
+		t.Fatalf("应发 turn_aborted(2002) 而不是 provider_error(5001)：%s", payload)
+	}
+	if err := h.events.ExactlyOneTerminal(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestStreamWithoutFinishIsProtocolError 钉住 03 §5.5「EOF 不等于完成」。
 func TestStreamWithoutFinishIsProtocolError(t *testing.T) {
 	t.Parallel()
